@@ -1,0 +1,17 @@
+services:
+  lyra:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      LYRA_ADDR: 0.0.0.0:8080
+      LYRA_BASE_URL: https://api.waozi.xyz
+      LYRA_DB: /data/lyra.db
+    volumes:
+      - lyra-data:/data
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  lyra-data:

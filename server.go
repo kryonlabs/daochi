@@ -14,6 +14,7 @@ import (
 )
 
 var userIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
 
 type Server struct {
 	cfg        Config
@@ -37,6 +38,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/sync/challenge", s.handleChallenge)
+	mux.HandleFunc("POST /api/v1/sync/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
@@ -67,7 +69,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
-	body, req, err := readSyncRequest(w, r, s.cfg.MaxBodyBytes)
+	_, req, err := readSyncRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -76,19 +78,85 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	publicKey, err := s.authenticate(r.Context(), req.UserIDHash, req.PublicKey, r.Header.Get("X-Inbe-Signature"), r.Method, r.URL.Path, body)
+	if !validClientID(req.ClientID) {
+		writeError(w, http.StatusBadRequest, "invalid client_id")
+		return
+	}
+	tokenUser, err := s.authenticateToken(r)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
+	if tokenUser != req.UserIDHash {
+		writeError(w, http.StatusUnauthorized, "token user mismatch")
+		return
+	}
 	normalizeMeditationDurations(req.MeditationLogs)
-	result, err := s.store.ApplySync(r.Context(), req, publicKey)
+	result, err := s.store.ApplySync(r.Context(), req, nil)
 	if err != nil {
 		slog.Error("apply sync", "user", req.UserIDHash, "error", err)
 		writeError(w, http.StatusInternalServerError, "sync failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "applied": result})
+	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, req.SinceServerVersion)
+	if err != nil {
+		slog.Error("load sync changes", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "changes failed")
+		return
+	}
+	if err := s.store.RecordClientSync(r.Context(), req.UserIDHash, req.ClientID, req.SinceServerVersion, serverVersion); err != nil {
+		slog.Error("record sync client", "user", req.UserIDHash, "client", req.ClientID, "error", err)
+		writeError(w, http.StatusInternalServerError, "client state failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, SyncResponse{
+		Status:        "ok",
+		Applied:       result,
+		ServerVersion: serverVersion,
+		Changes:       changes,
+	})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	body, req, err := readLoginRequest(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !validClientID(req.ClientID) {
+		writeError(w, http.StatusBadRequest, "invalid client_id")
+		return
+	}
+	publicKey, err := s.authenticateSignature(r.Context(), req.UserIDHash, req.PublicKey, r.Header.Get("X-Inbe-Signature"), r.Method, r.URL.Path, body)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if err := s.store.RegisterUser(r.Context(), req.UserIDHash, publicKey); err != nil {
+		slog.Error("register sync user", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "login failed")
+		return
+	}
+	if err := s.store.RecordClientLogin(r.Context(), req.UserIDHash, req.ClientID); err != nil {
+		slog.Error("record login client", "user", req.UserIDHash, "client", req.ClientID, "error", err)
+		writeError(w, http.StatusInternalServerError, "login failed")
+		return
+	}
+	token, err := issueAuthToken(s.cfg.TokenSecret, req.UserIDHash, s.cfg.TokenTTL)
+	if err != nil {
+		slog.Error("issue auth token", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "login failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Status:    "ok",
+		AuthToken: token,
+		ExpiresIn: int64(s.cfg.TokenTTL.Seconds()),
+	})
 }
 
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +169,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err = s.authenticate(r.Context(), req.UserIDHash, "", r.Header.Get("X-Inbe-Signature"), r.Method, r.URL.Path, body)
+	_, err = s.authenticateSignature(r.Context(), req.UserIDHash, "", r.Header.Get("X-Inbe-Signature"), r.Method, r.URL.Path, body)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -153,7 +221,7 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (s *Server) authenticate(ctx context.Context, userID, publicKeyText, signatureText, method, path string, signedPayload []byte) ([]byte, error) {
+func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyText, signatureText, method, path string, signedPayload []byte) ([]byte, error) {
 	userID = strings.ToLower(strings.TrimSpace(userID))
 	if !validUserID(userID) {
 		return nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
@@ -200,6 +268,19 @@ func (s *Server) authenticate(ctx context.Context, userID, publicKeyText, signat
 	return publicKey, nil
 }
 
+func (s *Server) authenticateToken(r *http.Request) (string, error) {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	token, ok := strings.CutPrefix(header, "Bearer ")
+	if !ok || strings.TrimSpace(token) == "" {
+		return "", authError{status: http.StatusUnauthorized, message: "bearer token required"}
+	}
+	userID, err := verifyAuthToken(s.cfg.TokenSecret, strings.TrimSpace(token))
+	if err != nil {
+		return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
+	}
+	return userID, nil
+}
+
 func applyHeaderUser(r *http.Request, bodyUser *string) error {
 	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Inbe-User")))
 	if headerUser == "" {
@@ -226,6 +307,22 @@ func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]b
 		return nil, req, errors.New("invalid json")
 	}
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	return body, req, nil
+}
+
+func readLoginRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, LoginRequest, error) {
+	var req LoginRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return nil, req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, req, errors.New("invalid json")
+	}
+	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.PublicKey = strings.TrimSpace(req.PublicKey)
+	req.ClientID = strings.TrimSpace(req.ClientID)
 	return body, req, nil
 }
 
@@ -284,6 +381,10 @@ func normalizeMeditationDurations(logs []MeditationLog) {
 
 func validUserID(value string) bool {
 	return userIDPattern.MatchString(value)
+}
+
+func validClientID(value string) bool {
+	return clientIDPattern.MatchString(value)
 }
 
 type exportedSyncKey struct {
@@ -354,7 +455,7 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Access-Control-Allow-Origin", "https://inbe.waozi.xyz")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Inbe-User, X-Inbe-Signature")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Inbe-User, X-Inbe-Signature")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

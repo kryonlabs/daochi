@@ -60,9 +60,18 @@ Runtime configuration:
 LYRA_ADDR=127.0.0.1:8080
 LYRA_BASE_URL=https://api.waozi.xyz
 LYRA_DB=/var/lib/lyra/lyra.db
+LYRA_TOKEN_SECRET_HEX=<stable 64+ hex chars shared by every server instance>
 LYRA_CHALLENGE_TTL_SECONDS=60
 LYRA_MAX_BODY_BYTES=1048576
 ```
+
+Generate a token secret once and keep it stable across restarts and every deployed instance:
+
+```sh
+openssl rand -hex 32
+```
+
+If `LYRA_TOKEN_SECRET_HEX` is missing, Lyra generates a random in-memory secret at startup. That is only suitable for single-process local development: existing bearer tokens become invalid after restart, and multi-instance deployments will reject tokens issued by another instance.
 
 ## Reverse Proxy
 

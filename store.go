@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -46,12 +47,30 @@ CREATE TABLE IF NOT EXISTS server_users (
 	last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS server_sync_state (
+	user_id_hash TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	server_version INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS server_clients (
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	client_id TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	last_login_at TEXT,
+	last_sync_at TEXT,
+	last_since_server_version INTEGER NOT NULL DEFAULT 0,
+	last_seen_server_version INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(user_id_hash, client_id)
+);
+
 CREATE TABLE IF NOT EXISTS server_meditation_logs (
 	id TEXT PRIMARY KEY,
 	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
 	session_id TEXT NOT NULL,
 	duration_seconds INTEGER NOT NULL DEFAULT 0,
 	completed_at TEXT NOT NULL,
+	server_version INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -75,6 +94,7 @@ CREATE TABLE IF NOT EXISTS server_habits (
 	sort_order INTEGER NOT NULL DEFAULT 0,
 	deleted_at INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL,
+	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, id)
 );
 
@@ -83,7 +103,9 @@ CREATE TABLE IF NOT EXISTS server_habit_days (
 	habit_id TEXT NOT NULL,
 	local_date INTEGER NOT NULL,
 	completed INTEGER NOT NULL DEFAULT 0,
+	count INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL,
+	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, habit_id, local_date)
 );
 
@@ -98,6 +120,7 @@ CREATE TABLE IF NOT EXISTS server_sessions (
 	rounds_hash TEXT NOT NULL DEFAULT '',
 	deleted_at INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL,
+	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, id)
 );
 
@@ -111,7 +134,22 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 	FOREIGN KEY(user_id_hash, session_id) REFERENCES server_sessions(user_id_hash, id) ON DELETE CASCADE
 );
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE server_meditation_logs ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_habits ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_habit_days ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_habit_days ADD COLUMN count INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE server_habit_days SET count=CASE WHEN completed!=0 THEN 1 ELSE 0 END WHERE count=0`,
+		`ALTER TABLE server_sessions ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) PublicKey(ctx context.Context, userID string) ([]byte, bool, error) {
@@ -133,16 +171,24 @@ func (s *Store) ApplySync(ctx context.Context, req SyncRequest, publicKey []byte
 	}
 	defer tx.Rollback()
 
-	if err := upsertUser(ctx, tx, req.UserIDHash, publicKey); err != nil {
+	if publicKey != nil {
+		if err := upsertUser(ctx, tx, req.UserIDHash, publicKey); err != nil {
+			return SyncResult{}, err
+		}
+	} else if err := touchUser(ctx, tx, req.UserIDHash); err != nil {
 		return SyncResult{}, err
 	}
 
 	result := SyncResult{}
 	for _, item := range req.MeditationLogs {
+		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
+		if err != nil {
+			return SyncResult{}, err
+		}
 		res, err := tx.ExecContext(ctx, `
-INSERT INTO server_meditation_logs(id,user_id_hash,session_id,duration_seconds,completed_at)
-VALUES(?1,?2,?3,?4,?5)
-ON CONFLICT(id) DO NOTHING`, item.ID, req.UserIDHash, item.SessionID, item.DurationSeconds, normalizeTime(item.CompletedAt, item.Timestamp))
+INSERT INTO server_meditation_logs(id,user_id_hash,session_id,duration_seconds,completed_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6)
+ON CONFLICT(id) DO NOTHING`, item.ID, req.UserIDHash, item.SessionID, item.DurationSeconds, normalizeTime(item.CompletedAt, item.Timestamp), version)
 		if err != nil {
 			return SyncResult{}, err
 		}
@@ -162,9 +208,13 @@ WHERE excluded.updated_at >= server_preferences.updated_at`, req.UserIDHash, pre
 		result.Preferences++
 	}
 	for _, habit := range req.Habits {
-		_, err := tx.ExecContext(ctx, `
-INSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,sort_order,deleted_at,updated_at)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
+		if err != nil {
+			return SyncResult{}, err
+		}
+		res, err := tx.ExecContext(ctx, `
+INSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,sort_order,deleted_at,updated_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
 ON CONFLICT(user_id_hash,id) DO UPDATE SET
 	name=excluded.name,
 	color_r=excluded.color_r,
@@ -174,34 +224,43 @@ ON CONFLICT(user_id_hash,id) DO UPDATE SET
 	sync_activity=excluded.sync_activity,
 	sort_order=excluded.sort_order,
 	deleted_at=excluded.deleted_at,
-	updated_at=excluded.updated_at
+	updated_at=excluded.updated_at,
+	server_version=excluded.server_version
 WHERE excluded.updated_at >= server_habits.updated_at`,
 			req.UserIDHash, habit.ID, habit.Name, habit.ColorR, habit.ColorG, habit.ColorB,
-			habit.SyncMode, habit.SyncActivity, habit.SortOrder, habit.DeletedAt, normalizeTime(habit.UpdatedAt, ""))
+			habit.SyncMode, habit.SyncActivity, habit.SortOrder, habit.DeletedAt, normalizeTime(habit.UpdatedAt, ""), version)
 		if err != nil {
 			return SyncResult{}, err
 		}
-		result.Habits++
+		result.Habits += rowsAffected(res)
 	}
 	for _, day := range req.HabitDays {
-		_, err := tx.ExecContext(ctx, `
-INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,updated_at)
-VALUES(?1,?2,?3,?4,?5)
-ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
-	completed=excluded.completed,
-	updated_at=excluded.updated_at
-WHERE excluded.updated_at >= server_habit_days.updated_at`,
-			req.UserIDHash, day.HabitID, day.LocalDate, boolInt(day.Completed), normalizeTime(day.UpdatedAt, ""))
+		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
 		if err != nil {
 			return SyncResult{}, err
 		}
-		result.HabitDays++
-	}
-	for _, session := range req.Sessions {
-		if err := upsertSession(ctx, tx, req.UserIDHash, session); err != nil {
+		res, err := tx.ExecContext(ctx, `
+INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7)
+ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
+	completed=excluded.completed,
+	count=excluded.count,
+	updated_at=excluded.updated_at,
+	server_version=excluded.server_version
+WHERE excluded.updated_at > server_habit_days.updated_at
+OR (excluded.updated_at = server_habit_days.updated_at AND excluded.count > server_habit_days.count)`,
+			req.UserIDHash, day.HabitID, day.LocalDate, boolInt(day.Completed), normalizedHabitDayCount(day), normalizeTime(day.UpdatedAt, ""), version)
+		if err != nil {
 			return SyncResult{}, err
 		}
-		result.Sessions++
+		result.HabitDays += rowsAffected(res)
+	}
+	for _, session := range req.Sessions {
+		applied, err := upsertSession(ctx, tx, req.UserIDHash, session)
+		if err != nil {
+			return SyncResult{}, err
+		}
+		result.Sessions += applied
 	}
 	if err := tx.Commit(); err != nil {
 		return SyncResult{}, err
@@ -209,23 +268,262 @@ WHERE excluded.updated_at >= server_habit_days.updated_at`,
 	return result, nil
 }
 
+func (s *Store) RegisterUser(ctx context.Context, userID string, publicKey []byte) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := upsertUser(ctx, tx, userID, publicKey); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) RecordClientLogin(ctx context.Context, userID, clientID string) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_login_at)
+VALUES(?1,?2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
+	last_seen_at=CURRENT_TIMESTAMP,
+	last_login_at=CURRENT_TIMESTAMP`, userID, clientID)
+	return err
+}
+
+func (s *Store) RecordClientSync(ctx context.Context, userID, clientID string, sinceVersion, serverVersion int64) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_sync_at,last_since_server_version,last_seen_server_version)
+VALUES(?1,?2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?3,?4)
+ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
+	last_seen_at=CURRENT_TIMESTAMP,
+	last_sync_at=CURRENT_TIMESTAMP,
+	last_since_server_version=excluded.last_since_server_version,
+	last_seen_server_version=excluded.last_seen_server_version`, userID, clientID, sinceVersion, serverVersion)
+	return err
+}
+
 func (s *Store) DeleteAccount(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM server_users WHERE user_id_hash=?1`, userID)
 	return err
 }
 
+func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion int64) (SyncChanges, int64, error) {
+	var changes SyncChanges
+	var err error
+
+	changes.Preferences = []Preference{}
+	changes.Habits, err = s.snapshotHabits(ctx, userID, sinceVersion)
+	if err != nil {
+		return changes, 0, err
+	}
+	changes.HabitDays, err = s.snapshotHabitDays(ctx, userID, sinceVersion)
+	if err != nil {
+		return changes, 0, err
+	}
+	changes.Sessions, err = s.snapshotSessions(ctx, userID, sinceVersion)
+	if err != nil {
+		return changes, 0, err
+	}
+	changes.MeditationLogs, err = s.snapshotMeditationLogs(ctx, userID, sinceVersion)
+	if err != nil {
+		return changes, 0, err
+	}
+	version, err := s.currentUserVersion(ctx, userID)
+	if err != nil {
+		return changes, 0, err
+	}
+	return changes, version, nil
+}
+
+func (s *Store) snapshotPreferences(ctx context.Context, userID string) ([]Preference, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT pref_key,pref_value,updated_at
+FROM server_preferences
+WHERE user_id_hash=?1
+ORDER BY pref_key`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []Preference{}
+	for rows.Next() {
+		var item Preference
+		if err := rows.Scan(&item.Key, &item.Value, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) snapshotHabits(ctx context.Context, userID string, sinceVersion int64) ([]Habit, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,sort_order,deleted_at,updated_at
+FROM server_habits
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,sort_order,id`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []Habit{}
+	for rows.Next() {
+		var item Habit
+		if err := rows.Scan(&item.ID, &item.Name, &item.ColorR, &item.ColorG, &item.ColorB,
+			&item.SyncMode, &item.SyncActivity, &item.SortOrder, &item.DeletedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) snapshotHabitDays(ctx context.Context, userID string, sinceVersion int64) ([]HabitDay, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT habit_id,local_date,completed,count,updated_at
+FROM server_habit_days
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,habit_id,local_date`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []HabitDay{}
+	for rows.Next() {
+		var item HabitDay
+		var completed int
+		if err := rows.Scan(&item.HabitID, &item.LocalDate, &completed, &item.Count, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.Completed = completed != 0
+		if item.Count <= 0 && item.Completed {
+			item.Count = 1
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) snapshotSessions(ctx context.Context, userID string, sinceVersion int64) ([]Session, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at
+FROM server_sessions
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,started_at,id`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []Session{}
+	for rows.Next() {
+		var item Session
+		if err := rows.Scan(&item.ID, &item.StartedAt, &item.LocalDate, &item.Topic,
+			&item.Activity, &item.Source, &item.RoundsHash, &item.DeletedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	for i := range items {
+		rounds, err := s.snapshotSessionRounds(ctx, userID, items[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		items[i].Rounds = rounds
+	}
+	return items, nil
+}
+
+func (s *Store) snapshotSessionRounds(ctx context.Context, userID, sessionID string) ([]SessionRound, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT round_index,breaths,hold_seconds
+FROM server_session_rounds
+WHERE user_id_hash=?1 AND session_id=?2
+ORDER BY round_index`, userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []SessionRound{}
+	for rows.Next() {
+		var item SessionRound
+		if err := rows.Scan(&item.RoundIndex, &item.Breaths, &item.HoldSeconds); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) snapshotMeditationLogs(ctx context.Context, userID string, sinceVersion int64) ([]MeditationLog, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,session_id,duration_seconds,completed_at
+FROM server_meditation_logs
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,completed_at,id`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []MeditationLog{}
+	for rows.Next() {
+		var item MeditationLog
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.DurationSeconds, &item.CompletedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func upsertUser(ctx context.Context, tx *sql.Tx, userID string, publicKey []byte) error {
-	_, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_users(user_id_hash,public_key)
 VALUES(?1,?2)
-ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP`, userID, publicKey)
+ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP`, userID, publicKey); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
+INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)
+VALUES(?1,0)`, userID)
 	return err
 }
 
-func upsertSession(ctx context.Context, tx *sql.Tx, userID string, session Session) error {
-	_, err := tx.ExecContext(ctx, `
-INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+func touchUser(ctx context.Context, tx *sql.Tx, userID string) error {
+	res, err := tx.ExecContext(ctx, `
+UPDATE server_users
+SET last_seen_at=CURRENT_TIMESTAMP
+WHERE user_id_hash=?1`, userID)
+	if err != nil {
+		return err
+	}
+	if rowsAffected(res) == 0 {
+		return errors.New("sync user not found")
+	}
+	_, err = tx.ExecContext(ctx, `
+INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)
+VALUES(?1,0)`, userID)
+	return err
+}
+
+func upsertSession(ctx context.Context, tx *sql.Tx, userID string, session Session) (int, error) {
+	version, err := nextUserVersion(ctx, tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `
+INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
 ON CONFLICT(user_id_hash,id) DO UPDATE SET
 	started_at=excluded.started_at,
 	local_date=excluded.local_date,
@@ -234,28 +532,62 @@ ON CONFLICT(user_id_hash,id) DO UPDATE SET
 	source=excluded.source,
 	rounds_hash=excluded.rounds_hash,
 	deleted_at=excluded.deleted_at,
-	updated_at=excluded.updated_at
+	updated_at=excluded.updated_at,
+	server_version=excluded.server_version
 WHERE excluded.updated_at >= server_sessions.updated_at`,
 		userID, session.ID, normalizeTime(session.StartedAt, ""), session.LocalDate, session.Topic,
-		session.Activity, session.Source, session.RoundsHash, session.DeletedAt, normalizeTime(session.UpdatedAt, ""))
+		session.Activity, session.Source, session.RoundsHash, session.DeletedAt, normalizeTime(session.UpdatedAt, ""), version)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if len(session.Rounds) == 0 {
-		return nil
+	applied := rowsAffected(res)
+	if applied == 0 || len(session.Rounds) == 0 {
+		return applied, nil
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_session_rounds WHERE user_id_hash=?1 AND session_id=?2`, userID, session.ID); err != nil {
-		return err
+		return 0, err
 	}
 	for _, round := range session.Rounds {
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO server_session_rounds(user_id_hash,session_id,round_index,breaths,hold_seconds)
 VALUES(?1,?2,?3,?4,?5)`, userID, session.ID, round.RoundIndex, round.Breaths, round.HoldSeconds)
 		if err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return applied, nil
+}
+
+func nextUserVersion(ctx context.Context, tx *sql.Tx, userID string) (int64, error) {
+	if _, err := tx.ExecContext(ctx, `
+INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)
+VALUES(?1,0)`, userID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE server_sync_state
+SET server_version=server_version+1
+WHERE user_id_hash=?1`, userID); err != nil {
+		return 0, err
+	}
+	var version int64
+	err := tx.QueryRowContext(ctx, `
+SELECT server_version
+FROM server_sync_state
+WHERE user_id_hash=?1`, userID).Scan(&version)
+	return version, err
+}
+
+func (s *Store) currentUserVersion(ctx context.Context, userID string) (int64, error) {
+	var version int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT server_version
+FROM server_sync_state
+WHERE user_id_hash=?1`, userID).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return version, err
 }
 
 func validateUserIDForPublicKey(userID string, publicKey []byte) error {
@@ -287,6 +619,16 @@ func normalizeTime(primary, fallback string) string {
 		return t.UTC().Format(time.RFC3339Nano)
 	}
 	return value
+}
+
+func normalizedHabitDayCount(day HabitDay) int {
+	if day.Count > 0 {
+		return day.Count
+	}
+	if day.Completed {
+		return 1
+	}
+	return 0
 }
 
 func boolInt(v bool) int {

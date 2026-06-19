@@ -35,7 +35,7 @@ a{color:#254da8}
 <p>Stateless post-quantum sync relay for Inner Breeze. The server stores public keys and mirrored app data, never client private keys.</p>
 <p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a></p>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies a signed JSON snapshot containing preferences, habits, habit days, sessions, and rounds.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies signed local changes and returns remote changes newer than <code>since_server_version</code>.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Deletes all remote data for the signed sync account.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying an exported <code>inbe-sync.key</code>.</p></section>
 <h2>Signed Message</h2>
@@ -92,7 +92,7 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/sync": map[string]any{
 				"post": map[string]any{
-					"summary":     "Apply signed sync snapshot",
+					"summary":     "Apply signed sync changes",
 					"description": "Body is signed through X-Inbe-Signature over the exact raw request body bytes.",
 					"parameters":  signedHeaderParameters(),
 					"requestBody": map[string]any{
@@ -102,7 +102,7 @@ func openAPISpec() map[string]any {
 						},
 					},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Snapshot applied"},
+						"200": map[string]any{"description": "Changes applied"},
 						"400": map[string]any{"description": "Invalid request or missing challenge"},
 						"401": map[string]any{"description": "Signature rejected"},
 					},
@@ -203,6 +203,7 @@ func openAPISpec() map[string]any {
 						"habit_id":   map[string]any{"type": "string"},
 						"local_date": map[string]any{"type": "integer"},
 						"completed":  map[string]any{"type": "boolean"},
+						"count":      map[string]any{"type": "integer"},
 						"updated_at": map[string]any{"type": "string", "format": "date-time"},
 					},
 				},

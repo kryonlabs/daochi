@@ -6,14 +6,43 @@ type ChallengeResponse struct {
 	ExpiresIn  int64  `json:"expires_in_seconds"`
 }
 
+type LoginRequest struct {
+	UserIDHash string `json:"user_id_hash"`
+	ClientID   string `json:"client_id"`
+	PublicKey  string `json:"public_key,omitempty"`
+}
+
+type LoginResponse struct {
+	Status    string `json:"status"`
+	AuthToken string `json:"auth_token"`
+	ExpiresIn int64  `json:"expires_in_seconds"`
+}
+
 type SyncRequest struct {
-	UserIDHash     string          `json:"user_id_hash"`
-	PublicKey      string          `json:"public_key,omitempty"`
-	MeditationLogs []MeditationLog `json:"meditation_logs,omitempty"`
-	Preferences    []Preference    `json:"preferences,omitempty"`
-	Habits         []Habit         `json:"habits,omitempty"`
-	HabitDays      []HabitDay      `json:"habit_days,omitempty"`
-	Sessions       []Session       `json:"sessions,omitempty"`
+	UserIDHash         string          `json:"user_id_hash"`
+	ClientID           string          `json:"client_id"`
+	SinceServerVersion int64           `json:"since_server_version,omitempty"`
+	Bootstrap          bool            `json:"bootstrap,omitempty"`
+	MeditationLogs     []MeditationLog `json:"meditation_logs,omitempty"`
+	Preferences        []Preference    `json:"preferences,omitempty"`
+	Habits             []Habit         `json:"habits,omitempty"`
+	HabitDays          []HabitDay      `json:"habit_days,omitempty"`
+	Sessions           []Session       `json:"sessions,omitempty"`
+}
+
+type SyncChanges struct {
+	Preferences    []Preference    `json:"preferences"`
+	Habits         []Habit         `json:"habits"`
+	HabitDays      []HabitDay      `json:"habit_days"`
+	Sessions       []Session       `json:"sessions"`
+	MeditationLogs []MeditationLog `json:"meditation_logs"`
+}
+
+type SyncResponse struct {
+	Status        string      `json:"status"`
+	Applied       SyncResult  `json:"applied"`
+	ServerVersion int64       `json:"server_version"`
+	Changes       SyncChanges `json:"changes"`
 }
 
 type DeleteRequest struct {
@@ -57,6 +86,7 @@ type HabitDay struct {
 	HabitID   string `json:"habit_id"`
 	LocalDate int    `json:"local_date"`
 	Completed bool   `json:"completed"`
+	Count     int    `json:"count,omitempty"`
 	UpdatedAt string `json:"updated_at"`
 }
 

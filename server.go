@@ -39,6 +39,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/sync/challenge", s.handleChallenge)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
+	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
 	return s.withCommonHeaders(mux)
 }
 
@@ -107,6 +108,45 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
 		slog.Error("delete account", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "delete failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Request) {
+	req, err := readDeleteWithKeyRequest(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	publicKey, found, err := s.store.PublicKey(r.Context(), req.UserIDHash)
+	if err != nil {
+		slog.Error("load account key", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "delete failed")
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "sync account not found")
+		return
+	}
+	exportedKey, err := parseExportedSyncKey(req.ExportedKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if exportedKey.PublicID != "" && exportedKey.PublicID != req.UserIDHash {
+		writeError(w, http.StatusBadRequest, "exported key public_id does not match user_id_hash")
+		return
+	}
+	message := []byte("inbe-delete-account-v1\n" + req.UserIDHash + "\n")
+	signature, err := signWithPrivateKey(message, exportedKey.PrivateKey)
+	if err != nil || !s.verifier.Verify(publicKey, message, signature) {
+		writeError(w, http.StatusUnauthorized, "exported key does not match sync account")
+		return
+	}
+	if err := s.store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
+		slog.Error("delete account with key", "user", req.UserIDHash, "error", err)
 		writeError(w, http.StatusInternalServerError, "delete failed")
 		return
 	}
@@ -202,6 +242,26 @@ func readDeleteRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([
 	return body, req, nil
 }
 
+func readDeleteWithKeyRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (DeleteWithKeyRequest, error) {
+	var req DeleteWithKeyRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, errors.New("invalid json")
+	}
+	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.ExportedKey = strings.TrimSpace(req.ExportedKey)
+	if !validUserID(req.UserIDHash) {
+		return req, errors.New("invalid user_id_hash")
+	}
+	if req.ExportedKey == "" {
+		return req, errors.New("exported_key required")
+	}
+	return req, nil
+}
+
 func readJSONBody(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, error) {
 	defer r.Body.Close()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
@@ -224,6 +284,49 @@ func normalizeMeditationDurations(logs []MeditationLog) {
 
 func validUserID(value string) bool {
 	return userIDPattern.MatchString(value)
+}
+
+type exportedSyncKey struct {
+	PublicID   string
+	PrivateKey []byte
+}
+
+func parseExportedSyncKey(text string) (exportedSyncKey, error) {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "inbe-sync-key-v1" {
+		return exportedSyncKey{}, errors.New("invalid sync key file")
+	}
+	algorithmOK := false
+	publicID := ""
+	privateKeyText := ""
+	for _, line := range lines[1:] {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "algorithm":
+			algorithmOK = strings.TrimSpace(value) == "ML-DSA-44"
+		case "public_id":
+			publicID = strings.ToLower(strings.TrimSpace(value))
+		case "private_key":
+			privateKeyText = strings.TrimSpace(value)
+		}
+	}
+	if !algorithmOK {
+		return exportedSyncKey{}, errors.New("sync key algorithm must be ML-DSA-44")
+	}
+	if publicID != "" && !validUserID(publicID) {
+		return exportedSyncKey{}, errors.New("invalid public_id")
+	}
+	privateKey, err := decodeBinaryField(privateKeyText)
+	if err != nil {
+		return exportedSyncKey{}, errors.New("invalid private_key")
+	}
+	if len(privateKey) != mlDSA44PrivateKeySize {
+		return exportedSyncKey{}, errors.New("wrong private_key size")
+	}
+	return exportedSyncKey{PublicID: publicID, PrivateKey: privateKey}, nil
 }
 
 type authError struct {
@@ -249,6 +352,13 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Access-Control-Allow-Origin", "https://inbe.waozi.xyz")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Inbe-User, X-Inbe-Signature")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

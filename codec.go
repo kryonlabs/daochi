@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	mlDSA44PublicKeySize = 1312
-	mlDSA44SignatureSize = 2420
+	mlDSA44PublicKeySize  = 1312
+	mlDSA44PrivateKeySize = 2560
+	mlDSA44SignatureSize  = 2420
 )
 
 func decodeBinaryField(value string) ([]byte, error) {

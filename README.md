@@ -7,6 +7,7 @@ Lyra is the stateless sync relay for Inbe. It stores public keys and mirrored ap
 - `GET /api/v1/sync/challenge?user_id=<sha256-public-key-hex>`
 - `POST /api/v1/sync`
 - `DELETE /api/v1/account`
+- `POST /api/v1/account/delete-with-key`
 - `GET /openapi.json`
 - `GET /healthz`
 - `GET /`
@@ -34,6 +35,8 @@ Signed `POST /api/v1/sync` and `DELETE /api/v1/account` requests must include:
 - `Content-Type: application/json`
 
 The JSON body still includes `user_id_hash`, and first sync includes `public_key`. The server accepts `public_key` and `X-Inbe-Signature` as either base64 or lowercase/uppercase hex. This matches the current C client account storage, which keeps ML-DSA-44 keys as hex strings.
+
+The website deletion endpoint `POST /api/v1/account/delete-with-key` accepts `user_id_hash` plus the full exported `inbe-sync.key` text. Current key exports include `public_id`, and Lyra rejects a request if that public ID does not match `user_id_hash`. Lyra signs a fixed deletion proof with that private key, verifies it against the registered public key, deletes the account, and does not store the uploaded key.
 
 ## Build
 

@@ -37,6 +37,7 @@ a{color:#254da8}
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies a signed JSON snapshot containing preferences, habits, habit days, sessions, and rounds.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Deletes all remote data for the signed sync account.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying an exported <code>inbe-sync.key</code>.</p></section>
 <h2>Signed Message</h2>
 <pre>inbe-sync-v1
 &lt;HTTP_METHOD&gt;
@@ -125,6 +126,24 @@ func openAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/account/delete-with-key": map[string]any{
+				"post": map[string]any{
+					"summary":     "Delete remote account using exported key",
+					"description": "Accepts the exported inbe-sync.key text, verifies it matches the registered public key, then deletes server-side mirrored data.",
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/DeleteWithKeyRequest"}},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Remote data deleted"},
+						"400": map[string]any{"description": "Invalid request or exported key"},
+						"401": map[string]any{"description": "Exported key does not match sync account"},
+						"404": map[string]any{"description": "Sync account not found"},
+					},
+				},
+			},
 		},
 		"components": map[string]any{
 			"schemas": map[string]any{
@@ -145,6 +164,14 @@ func openAPISpec() map[string]any {
 					"required": []string{"user_id_hash"},
 					"properties": map[string]any{
 						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+					},
+				},
+				"DeleteWithKeyRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"user_id_hash", "exported_key"},
+					"properties": map[string]any{
+						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+						"exported_key": map[string]any{"type": "string", "description": "Full text of the exported inbe-sync.key file."},
 					},
 				},
 				"Preference": map[string]any{

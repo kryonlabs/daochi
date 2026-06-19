@@ -20,6 +20,11 @@ type DeleteRequest struct {
 	UserIDHash string `json:"user_id_hash"`
 }
 
+type DeleteWithKeyRequest struct {
+	UserIDHash  string `json:"user_id_hash"`
+	ExportedKey string `json:"exported_key,omitempty"`
+}
+
 type MeditationLog struct {
 	ID              string `json:"id"`
 	SessionID       string `json:"session_id"`

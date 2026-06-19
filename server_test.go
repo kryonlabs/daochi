@@ -120,6 +120,87 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	assertCount(t, store, "server_session_rounds", 0)
 }
 
+func TestParseExportedSyncKey(t *testing.T) {
+	privateKey := bytes.Repeat([]byte{0x64}, mlDSA44PrivateKeySize)
+	publicID := strings.Repeat("a", 64)
+	keyText := "inbe-sync-key-v1\nalgorithm=ML-DSA-44\npublic_id=" + publicID + "\nprivate_key=" + hex.EncodeToString(privateKey) + "\n"
+	parsed, err := parseExportedSyncKey(keyText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.PublicID != publicID {
+		t.Fatalf("public id = %q", parsed.PublicID)
+	}
+	if !bytes.Equal(parsed.PrivateKey, privateKey) {
+		t.Fatal("parsed private key mismatch")
+	}
+}
+
+func TestDeleteWithKeyCORSPreflight(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/account/delete-with-key", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d", res.Code)
+	}
+	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "https://inbe.waozi.xyz" {
+		t.Fatalf("allow-origin = %q", got)
+	}
+}
+
+func TestDeleteWithExportedKeyDeletesAccount(t *testing.T) {
+	publicKey, privateKey, err := generateMLDSA44Keypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(filepath.Join(t.TempDir(), "lyra-delete-key-test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	verifier, err := NewVerifier()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Config{
+		Addr:         "127.0.0.1:0",
+		BaseURL:      "http://127.0.0.1:0",
+		DBPath:       "test.db",
+		ChallengeTTL: time.Minute,
+		MaxBodyBytes: 1 << 20,
+	}, store, verifier)
+	handler := server.Routes()
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	_, err = store.ApplySync(t.Context(), SyncRequest{
+		UserIDHash: userID,
+		Preferences: []Preference{{
+			Key:       "theme",
+			Value:     "dark",
+			UpdatedAt: "2026-06-19T00:00:00Z",
+		}},
+	}, publicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyText := "inbe-sync-key-v1\nalgorithm=ML-DSA-44\npublic_id=" + userID + "\nprivate_key=" + hex.EncodeToString(privateKey) + "\n"
+	body, err := json.Marshal(DeleteWithKeyRequest{UserIDHash: userID, ExportedKey: keyText})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/delete-with-key", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("delete-with-key status = %d body=%s", res.Code, res.Body.String())
+	}
+	assertCount(t, store, "server_users", 0)
+	assertCount(t, store, "server_preferences", 0)
+}
+
 func issueChallenge(t *testing.T, handler http.Handler, userID string) string {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync/challenge?user_id="+userID, nil)

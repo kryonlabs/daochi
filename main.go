@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log"
 	"log/slog"
@@ -23,6 +24,13 @@ func localHTTPURL(addr string) string {
 
 func main() {
 	cfg := loadConfig()
+	if len(os.Args) > 1 && os.Args[1] == "inspect" {
+		if err := runInspect(context.Background(), os.Args[2:], InspectOptions{DBPath: cfg.DBPath}); err != nil {
+			log.Fatalf("inspect: %v", err)
+		}
+		return
+	}
+
 	store, err := OpenStore(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("open store: %v", err)

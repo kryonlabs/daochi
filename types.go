@@ -9,7 +9,6 @@ type ChallengeResponse struct {
 type SyncRequest struct {
 	UserIDHash     string          `json:"user_id_hash"`
 	PublicKey      string          `json:"public_key,omitempty"`
-	Signature      string          `json:"signature"`
 	MeditationLogs []MeditationLog `json:"meditation_logs,omitempty"`
 	Preferences    []Preference    `json:"preferences,omitempty"`
 	Habits         []Habit         `json:"habits,omitempty"`
@@ -19,7 +18,6 @@ type SyncRequest struct {
 
 type DeleteRequest struct {
 	UserIDHash string `json:"user_id_hash"`
-	Signature  string `json:"signature"`
 }
 
 type MeditationLog struct {

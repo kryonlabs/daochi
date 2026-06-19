@@ -1,10 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -34,6 +33,8 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", s.handleDocs)
+	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/sync/challenge", s.handleChallenge)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
@@ -59,7 +60,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, ChallengeResponse{
 		UserIDHash: userID,
-		Nonce:      base64.StdEncoding.EncodeToString(nonce),
+		Nonce:      hex.EncodeToString(nonce),
 		ExpiresIn:  int64(s.cfg.ChallengeTTL.Seconds()),
 	})
 }
@@ -70,12 +71,11 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	payload, err := signedPayload(body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid signed payload")
+	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	publicKey, signature, nonce, err := s.authenticate(r.Context(), req.UserIDHash, req.PublicKey, req.Signature, r.Method, r.URL.Path, payload)
+	publicKey, err := s.authenticate(r.Context(), req.UserIDHash, req.PublicKey, r.Header.Get("X-Inbe-Signature"), r.Method, r.URL.Path, body)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -87,8 +87,6 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "sync failed")
 		return
 	}
-	_ = signature
-	_ = nonce
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "applied": result})
 }
 
@@ -98,12 +96,11 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	payload, err := signedPayload(body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid signed payload")
+	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, _, _, err = s.authenticate(r.Context(), req.UserIDHash, "", req.Signature, r.Method, r.URL.Path, payload)
+	_, err = s.authenticate(r.Context(), req.UserIDHash, "", r.Header.Get("X-Inbe-Signature"), r.Method, r.URL.Path, body)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -116,51 +113,67 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (s *Server) authenticate(ctx context.Context, userID, publicKeyText, signatureText, method, path string, signedPayload []byte) ([]byte, []byte, []byte, error) {
+func (s *Server) authenticate(ctx context.Context, userID, publicKeyText, signatureText, method, path string, signedPayload []byte) ([]byte, error) {
 	userID = strings.ToLower(strings.TrimSpace(userID))
 	if !validUserID(userID) {
-		return nil, nil, nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
+		return nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
 	}
 	nonce, ok := s.challenges.Consume(userID)
 	if !ok {
-		return nil, nil, nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
+		return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
 	}
 	publicKey, found, err := s.store.PublicKey(ctx, userID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if !found {
 		if publicKeyText == "" {
-			return nil, nil, nil, authError{status: http.StatusBadRequest, message: "public_key required for first sync"}
+			return nil, authError{status: http.StatusBadRequest, message: "public_key required for first sync"}
 		}
 		publicKey, err = decodeBinaryField(publicKeyText)
 		if err != nil {
-			return nil, nil, nil, authError{status: http.StatusBadRequest, message: "invalid public_key"}
+			return nil, authError{status: http.StatusBadRequest, message: "invalid public_key"}
 		}
 		if len(publicKey) != mlDSA44PublicKeySize {
-			return nil, nil, nil, authError{status: http.StatusBadRequest, message: "wrong public_key size"}
+			return nil, authError{status: http.StatusBadRequest, message: "wrong public_key size"}
 		}
 		if err := validateUserIDForPublicKey(userID, publicKey); err != nil {
-			return nil, nil, nil, authError{status: http.StatusBadRequest, message: "public_key does not match user_id_hash"}
+			return nil, authError{status: http.StatusBadRequest, message: "public_key does not match user_id_hash"}
 		}
 	} else if publicKeyText != "" {
 		supplied, err := decodeBinaryField(publicKeyText)
 		if err != nil || subtle.ConstantTimeCompare(supplied, publicKey) != 1 {
-			return nil, nil, nil, authError{status: http.StatusBadRequest, message: "public_key does not match registered user"}
+			return nil, authError{status: http.StatusBadRequest, message: "public_key does not match registered user"}
 		}
 	}
 	signature, err := decodeBinaryField(signatureText)
 	if err != nil {
-		return nil, nil, nil, authError{status: http.StatusBadRequest, message: "invalid signature"}
+		return nil, authError{status: http.StatusBadRequest, message: "invalid signature"}
 	}
 	if len(signature) != mlDSA44SignatureSize {
-		return nil, nil, nil, authError{status: http.StatusBadRequest, message: "wrong signature size"}
+		return nil, authError{status: http.StatusBadRequest, message: "wrong signature size"}
 	}
 	message := canonicalMessage(nonce, method, path, signedPayload)
 	if !s.verifier.Verify(publicKey, message, signature) {
-		return nil, nil, nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
+		return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
 	}
-	return publicKey, signature, nonce, nil
+	return publicKey, nil
+}
+
+func applyHeaderUser(r *http.Request, bodyUser *string) error {
+	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Inbe-User")))
+	if headerUser == "" {
+		return errors.New("missing X-Inbe-User")
+	}
+	if *bodyUser == "" {
+		*bodyUser = headerUser
+		return nil
+	}
+	*bodyUser = strings.ToLower(strings.TrimSpace(*bodyUser))
+	if *bodyUser != headerUser {
+		return errors.New("X-Inbe-User does not match user_id_hash")
+	}
+	return nil
 }
 
 func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, SyncRequest, error) {
@@ -198,11 +211,7 @@ func readJSONBody(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte
 	if !json.Valid(body) {
 		return nil, errors.New("invalid json")
 	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, body); err != nil {
-		return nil, errors.New("invalid json")
-	}
-	return compact.Bytes(), nil
+	return body, nil
 }
 
 func normalizeMeditationDurations(logs []MeditationLog) {

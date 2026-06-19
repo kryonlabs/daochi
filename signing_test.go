@@ -1,20 +1,20 @@
 package main
 
 import (
-	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 )
 
-func TestSignedPayloadRemovesSignature(t *testing.T) {
-	got, err := signedPayload([]byte(`{"signature":"abc","user_id_hash":"u","preferences":[{"key":"theme","value":"dark"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(got, []byte("signature")) {
-		t.Fatalf("signed payload still contains signature: %s", got)
-	}
-	want := []byte(`{"preferences":[{"key":"theme","value":"dark"}],"user_id_hash":"u"}`)
-	if !bytes.Equal(got, want) {
-		t.Fatalf("payload mismatch\n got: %s\nwant: %s", got, want)
+func TestCanonicalMessageSignsRawBodyHash(t *testing.T) {
+	nonce := []byte("01234567890123456789012345678901")
+	body := []byte(`{"user_id_hash":"u","preferences":[{"key":"theme","value":"dark"}]}`)
+	bodyHash := sha256.Sum256(body)
+	got := string(canonicalMessage(nonce, "post", "/api/v1/sync", body))
+	want := "inbe-sync-v1\nPOST\n/api/v1/sync\n" +
+		hex.EncodeToString(bodyHash[:]) + "\n" +
+		hex.EncodeToString(nonce) + "\n"
+	if got != want {
+		t.Fatalf("message mismatch\n got: %q\nwant: %q", got, want)
 	}
 }

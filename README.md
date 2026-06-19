@@ -7,7 +7,9 @@ Lyra is the stateless sync relay for Inbe. It stores public keys and mirrored ap
 - `GET /api/v1/sync/challenge?user_id=<sha256-public-key-hex>`
 - `POST /api/v1/sync`
 - `DELETE /api/v1/account`
+- `GET /openapi.json`
 - `GET /healthz`
+- `GET /`
 
 `api.waozi.xyz` should terminate TLS at a reverse proxy and forward to `LYRA_ADDR`, for example `127.0.0.1:8080`.
 
@@ -19,13 +21,19 @@ Clients must sign this exact byte string with ML-DSA-44:
 inbe-sync-v1
 <HTTP_METHOD>
 <HTTP_PATH>
-<sha256 hex of canonical signed payload>
+<sha256 hex of exact raw request body bytes>
 <challenge nonce hex>
 ```
 
-The canonical signed payload is the request JSON object with the top-level `signature` field removed, encoded as deterministic JSON with lexicographically sorted object keys and no insignificant whitespace. The challenge is single-use and expires after 60 seconds by default.
+The challenge response returns `nonce` as lowercase hex. The challenge is single-use and expires after 60 seconds by default.
 
-The server accepts `public_key` and `signature` as either base64 or lowercase/uppercase hex. This matches the current C client account storage, which keeps ML-DSA-44 keys as hex strings.
+Signed `POST /api/v1/sync` and `DELETE /api/v1/account` requests must include:
+
+- `X-Inbe-User: <sha256-public-key-hex>`
+- `X-Inbe-Signature: <ML-DSA-44 signature>`
+- `Content-Type: application/json`
+
+The JSON body still includes `user_id_hash`, and first sync includes `public_key`. The server accepts `public_key` and `X-Inbe-Signature` as either base64 or lowercase/uppercase hex. This matches the current C client account storage, which keeps ML-DSA-44 keys as hex strings.
 
 ## Build
 

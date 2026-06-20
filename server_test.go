@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -84,9 +88,9 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	userID := hex.EncodeToString(userHash[:])
 	signature := hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize))
 
-	token, loginNonce := loginWithKey(t, handler, userID, hex.EncodeToString(publicKey), signature)
+	token, loginNonce := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
 	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","preferences":[{"key":"theme","value":"dark","updated_at":"2026-06-19T00:00:00Z"}],"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":0,"updated_at":"2026-06-19T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":60}]}]}`)
-	res := syncWithBody(t, handler, userID, token, body)
+	res := syncWithBody(t, handler, "", userID, token, body)
 	if res.Code != http.StatusOK {
 		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
 	}
@@ -114,7 +118,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	assertCount(t, store, "server_sessions", 1)
 	assertCount(t, store, "server_session_rounds", 1)
 
-	nonce := issueChallenge(t, handler, userID)
+	nonce := issueChallenge(t, handler, "", userID)
 	deleteBody := []byte(`{"user_id_hash":"` + userID + `"}`)
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/account", bytes.NewReader(deleteBody))
 	deleteReq.Header.Set("Content-Type", "application/json")
@@ -145,9 +149,9 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	userID := hex.EncodeToString(userHash[:])
 	signature := hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize))
 
-	token, _ := loginWithKey(t, handler, userID, hex.EncodeToString(publicKey), signature)
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
 	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}]}`)
-	res := syncWithBody(t, handler, userID, token, body)
+	res := syncWithBody(t, handler, "", userID, token, body)
 	var first SyncResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil {
 		t.Fatal(err)
@@ -160,7 +164,7 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	}
 
 	emptyBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","since_server_version":` + strconv.FormatInt(first.ServerVersion, 10) + `}`)
-	res = syncWithBody(t, handler, userID, token, emptyBody)
+	res = syncWithBody(t, handler, "", userID, token, emptyBody)
 	var payload SyncResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
@@ -170,7 +174,7 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	}
 
 	updateBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","since_server_version":` + strconv.FormatInt(first.ServerVersion, 10) + `,"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":7,"updated_at":"2026-06-19T00:01:00Z"}]}`)
-	res = syncWithBody(t, handler, userID, token, updateBody)
+	res = syncWithBody(t, handler, "", userID, token, updateBody)
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +182,38 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 		!payload.Changes.HabitDays[0].Completed ||
 		payload.Changes.HabitDays[0].Count != 7 {
 		t.Fatalf("expected only changed habit day: %#v", payload.Changes)
+	}
+}
+
+func TestSyncWebSocketReceivesChangeEvents(t *testing.T) {
+	server, _, _ := testServer(t)
+	ts := httptest.NewServer(server.Routes())
+	t.Cleanup(ts.Close)
+
+	publicKey := bytes.Repeat([]byte{0x42}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, ts.Client(), ts.URL, userID, hex.EncodeToString(publicKey), signature)
+	reader, conn := openSyncWebSocket(t, ts.URL, token)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	ready := readTestWebSocketEvent(t, reader)
+	if ready.Type != "sync_ready" || ready.UserIDHash != userID {
+		t.Fatalf("ready event = %#v", ready)
+	}
+
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	res := syncWithBody(t, ts.Client(), ts.URL, userID, token, body)
+	var syncResponse SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &syncResponse); err != nil {
+		t.Fatal(err)
+	}
+	changed := readTestWebSocketEvent(t, reader)
+	if changed.Type != "sync_changed" || changed.UserIDHash != userID ||
+		changed.ServerVersion != syncResponse.ServerVersion {
+		t.Fatalf("changed event = %#v, sync response version = %d", changed, syncResponse.ServerVersion)
 	}
 }
 
@@ -262,11 +298,10 @@ func TestDeleteWithExportedKeyDeletesAccount(t *testing.T) {
 	assertCount(t, store, "server_preferences", 0)
 }
 
-func issueChallenge(t *testing.T, handler http.Handler, userID string) string {
+func issueChallenge(t *testing.T, target any, baseURL, userID string) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync/challenge?user_id="+userID, nil)
-	res := httptest.NewRecorder()
-	handler.ServeHTTP(res, req)
+	req := newTestRequest(t, http.MethodGet, baseURL, "/api/v1/sync/challenge?user_id="+userID, nil)
+	res := serveTestRequest(t, target, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("challenge status = %d body=%s", res.Code, res.Body.String())
 	}
@@ -280,16 +315,15 @@ func issueChallenge(t *testing.T, handler http.Handler, userID string) string {
 	return payload.Nonce
 }
 
-func loginWithKey(t *testing.T, handler http.Handler, userID, publicKeyHex, signature string) (string, string) {
+func loginWithKey(t *testing.T, target any, baseURL, userID, publicKeyHex, signature string) (string, string) {
 	t.Helper()
-	nonce := issueChallenge(t, handler, userID)
+	nonce := issueChallenge(t, target, baseURL, userID)
 	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + publicKeyHex + `"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync/login", bytes.NewReader(body))
+	req := newTestRequest(t, http.MethodPost, baseURL, "/api/v1/sync/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Inbe-User", userID)
 	req.Header.Set("X-Inbe-Signature", signature)
-	res := httptest.NewRecorder()
-	handler.ServeHTTP(res, req)
+	res := serveTestRequest(t, target, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("login status = %d body=%s", res.Code, res.Body.String())
 	}
@@ -303,18 +337,109 @@ func loginWithKey(t *testing.T, handler http.Handler, userID, publicKeyHex, sign
 	return payload.AuthToken, nonce
 }
 
-func syncWithBody(t *testing.T, handler http.Handler, userID, token string, body []byte) *httptest.ResponseRecorder {
+func syncWithBody(t *testing.T, target any, baseURL, userID, token string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(body))
+	req := newTestRequest(t, http.MethodPost, baseURL, "/api/v1/sync", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Inbe-User", userID)
 	req.Header.Set("Authorization", "Bearer "+token)
-	res := httptest.NewRecorder()
-	handler.ServeHTTP(res, req)
+	res := serveTestRequest(t, target, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
 	}
 	return res
+}
+
+func newTestRequest(t *testing.T, method, baseURL, path string, body io.Reader) *http.Request {
+	t.Helper()
+	if baseURL == "" {
+		return httptest.NewRequest(method, path, body)
+	}
+	req, err := http.NewRequest(method, baseURL+path, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
+func serveTestRequest(t *testing.T, target any, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+	res := httptest.NewRecorder()
+	switch v := target.(type) {
+	case http.Handler:
+		v.ServeHTTP(res, req)
+	case *http.Client:
+		httpRes, err := v.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer httpRes.Body.Close()
+		res.Code = httpRes.StatusCode
+		res.HeaderMap = httpRes.Header
+		if _, err := io.Copy(res.Body, httpRes.Body); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatalf("unsupported test target %T", target)
+	}
+	return res
+}
+
+func openSyncWebSocket(t *testing.T, baseURL, token string) (*bufio.Reader, net.Conn) {
+	t.Helper()
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.Dial("tcp", parsed.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	_, err = conn.Write([]byte("GET /api/v1/sync/ws HTTP/1.1\r\n" +
+		"Host: " + parsed.Host + "\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"Authorization: Bearer " + token + "\r\n\r\n"))
+	if err != nil {
+		conn.Close()
+		t.Fatal(err)
+	}
+	status, err := reader.ReadString('\n')
+	if err != nil {
+		conn.Close()
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, " 101 ") {
+		conn.Close()
+		t.Fatalf("websocket status = %q", strings.TrimSpace(status))
+	}
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			conn.Close()
+			t.Fatal(err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	return reader, conn
+}
+
+func readTestWebSocketEvent(t *testing.T, reader *bufio.Reader) syncEvent {
+	t.Helper()
+	_, payload, err := readWebSocketFrame(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event syncEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		t.Fatal(err)
+	}
+	return event
 }
 
 func TestSyncRejectsSignedRequestWithoutBearer(t *testing.T) {

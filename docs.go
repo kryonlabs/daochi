@@ -59,6 +59,7 @@ a{color:#254da8}
 <p>Stateless post-quantum sync relay for Inner Breeze. The server stores public keys and mirrored app data, never client private keys.</p>
 <p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a></p>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies signed local changes and returns remote changes newer than <code>since_server_version</code>.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Deletes all remote data for the signed sync account.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying an exported <code>inbe-sync.key</code>.</p></section>
@@ -130,6 +131,26 @@ func openAPISpec() map[string]any {
 						"200": map[string]any{"description": "Changes applied"},
 						"400": map[string]any{"description": "Invalid request or missing challenge"},
 						"401": map[string]any{"description": "Signature rejected"},
+					},
+				},
+			},
+			"/api/v1/sync/ws": map[string]any{
+				"get": map[string]any{
+					"summary":     "Subscribe to sync change events",
+					"description": "WebSocket endpoint. Send Authorization: Bearer <auth_token>. The server emits sync_ready after connect and sync_changed whenever another client applies changes.",
+					"parameters": []map[string]any{
+						{
+							"name":        "Authorization",
+							"in":          "header",
+							"required":    true,
+							"description": "Bearer auth token returned by POST /api/v1/sync/login.",
+							"schema":      map[string]any{"type": "string"},
+						},
+					},
+					"responses": map[string]any{
+						"101": map[string]any{"description": "WebSocket upgrade accepted"},
+						"400": map[string]any{"description": "Invalid websocket handshake"},
+						"401": map[string]any{"description": "Bearer token rejected"},
 					},
 				},
 			},

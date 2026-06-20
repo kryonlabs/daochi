@@ -89,7 +89,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	signature := hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize))
 
 	token, loginNonce := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
-	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","preferences":[{"key":"theme","value":"dark","updated_at":"2026-06-19T00:00:00Z"}],"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":0,"updated_at":"2026-06-19T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":60}]}]}`)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","preferences":[{"key":"theme","value":"dark","updated_at":"2026-06-19T00:00:00Z"}],"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":0,"updated_at":"2026-06-19T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":60}]}]}`)
 	res := syncWithBody(t, handler, "", userID, token, body)
 	if res.Code != http.StatusOK {
 		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
@@ -105,6 +105,9 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	}
 	if syncResponse.Changes.HabitDays[0].Count != 4 {
 		t.Fatalf("habit day count = %d, want 4", syncResponse.Changes.HabitDays[0].Count)
+	}
+	if syncResponse.Changes.Habits[0].CounterEnabled != 1 {
+		t.Fatalf("habit counter_enabled = %d, want 1", syncResponse.Changes.Habits[0].CounterEnabled)
 	}
 	loginBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
 	wantMessage := string(canonicalMessage(mustDecodeHex(t, loginNonce), http.MethodPost, "/api/v1/sync/login", loginBody))
@@ -150,7 +153,7 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	signature := hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize))
 
 	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
-	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}]}`)
 	res := syncWithBody(t, handler, "", userID, token, body)
 	var first SyncResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil {
@@ -161,6 +164,9 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	}
 	if first.Changes.HabitDays[0].Count != 4 {
 		t.Fatalf("first habit day count = %d, want 4", first.Changes.HabitDays[0].Count)
+	}
+	if first.Changes.Habits[0].CounterEnabled != 1 {
+		t.Fatalf("first habit counter_enabled = %d, want 1", first.Changes.Habits[0].CounterEnabled)
 	}
 
 	emptyBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","since_server_version":` + strconv.FormatInt(first.ServerVersion, 10) + `}`)

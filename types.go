@@ -70,16 +70,17 @@ type Preference struct {
 }
 
 type Habit struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	ColorR       int    `json:"color_r"`
-	ColorG       int    `json:"color_g"`
-	ColorB       int    `json:"color_b"`
-	SyncMode     int    `json:"sync_mode"`
-	SyncActivity int    `json:"sync_activity"`
-	SortOrder    int    `json:"sort_order"`
-	DeletedAt    int64  `json:"deleted_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	ColorR         int    `json:"color_r"`
+	ColorG         int    `json:"color_g"`
+	ColorB         int    `json:"color_b"`
+	SyncMode       int    `json:"sync_mode"`
+	SyncActivity   int    `json:"sync_activity"`
+	CounterEnabled int    `json:"counter_enabled"`
+	SortOrder      int    `json:"sort_order"`
+	DeletedAt      int64  `json:"deleted_at"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 type HabitDay struct {

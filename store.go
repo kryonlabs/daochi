@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS server_habits (
 	color_b INTEGER NOT NULL DEFAULT 0,
 	sync_mode INTEGER NOT NULL DEFAULT 0,
 	sync_activity INTEGER NOT NULL DEFAULT 0,
+	counter_enabled INTEGER NOT NULL DEFAULT 0,
 	sort_order INTEGER NOT NULL DEFAULT 0,
 	deleted_at INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL,
@@ -152,6 +153,7 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 	for _, stmt := range []string{
 		`ALTER TABLE server_meditation_logs ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_habits ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_habits ADD COLUMN counter_enabled INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_habit_days ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_habit_days ADD COLUMN count INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE server_habit_days SET count=CASE WHEN completed!=0 THEN 1 ELSE 0 END WHERE count=0`,
@@ -225,8 +227,8 @@ WHERE excluded.updated_at >= server_preferences.updated_at`, req.UserIDHash, pre
 			return SyncResult{}, err
 		}
 		res, err := tx.ExecContext(ctx, `
-INSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,sort_order,deleted_at,updated_at,server_version)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+INSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
 ON CONFLICT(user_id_hash,id) DO UPDATE SET
 	name=excluded.name,
 	color_r=excluded.color_r,
@@ -234,13 +236,15 @@ ON CONFLICT(user_id_hash,id) DO UPDATE SET
 	color_b=excluded.color_b,
 	sync_mode=excluded.sync_mode,
 	sync_activity=excluded.sync_activity,
+	counter_enabled=excluded.counter_enabled,
 	sort_order=excluded.sort_order,
 	deleted_at=excluded.deleted_at,
 	updated_at=excluded.updated_at,
 	server_version=excluded.server_version
 WHERE excluded.updated_at >= server_habits.updated_at`,
 			req.UserIDHash, habit.ID, habit.Name, habit.ColorR, habit.ColorG, habit.ColorB,
-			habit.SyncMode, habit.SyncActivity, habit.SortOrder, habit.DeletedAt, normalizeTime(habit.UpdatedAt, ""), version)
+			habit.SyncMode, habit.SyncActivity, habit.CounterEnabled, habit.SortOrder,
+			habit.DeletedAt, normalizeTime(habit.UpdatedAt, ""), version)
 		if err != nil {
 			return SyncResult{}, err
 		}
@@ -395,7 +399,7 @@ ORDER BY pref_key`, userID)
 
 func (s *Store) snapshotHabits(ctx context.Context, userID string, sinceVersion int64) ([]Habit, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,sort_order,deleted_at,updated_at
+SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at
 FROM server_habits
 WHERE user_id_hash=?1 AND server_version>?2
 ORDER BY server_version,sort_order,id`, userID, sinceVersion)
@@ -408,7 +412,8 @@ ORDER BY server_version,sort_order,id`, userID, sinceVersion)
 	for rows.Next() {
 		var item Habit
 		if err := rows.Scan(&item.ID, &item.Name, &item.ColorR, &item.ColorG, &item.ColorB,
-			&item.SyncMode, &item.SyncActivity, &item.SortOrder, &item.DeletedAt, &item.UpdatedAt); err != nil {
+			&item.SyncMode, &item.SyncActivity, &item.CounterEnabled, &item.SortOrder,
+			&item.DeletedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

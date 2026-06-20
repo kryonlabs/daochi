@@ -25,7 +25,8 @@ func (v *recordingVerifier) Verify(publicKey, message, signature []byte) bool {
 
 func testServer(t *testing.T) (*Server, *Store, *recordingVerifier) {
 	t.Helper()
-	store, err := OpenStore(filepath.Join(t.TempDir(), "lyra-test.db"))
+	dbPath := filepath.Join(t.TempDir(), "lyra-test.db")
+	store, err := OpenStore(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +34,7 @@ func testServer(t *testing.T) (*Server, *Store, *recordingVerifier) {
 	server := NewServer(Config{
 		Addr:         "127.0.0.1:0",
 		BaseURL:      "http://127.0.0.1:0",
-		DBPath:       "test.db",
+		DBPath:       dbPath,
 		ChallengeTTL: time.Minute,
 		TokenTTL:     time.Hour,
 		TokenSecret:  bytes.Repeat([]byte{0x99}, 32),
@@ -54,6 +55,11 @@ func TestDocsEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(root.Body.String(), "Lyra Sync API") {
 		t.Fatalf("root docs missing title: %s", root.Body.String())
+	}
+	for _, want := range []string{"Users", "Storage used", "Available storage"} {
+		if !strings.Contains(root.Body.String(), want) {
+			t.Fatalf("root docs missing %q: %s", want, root.Body.String())
+		}
 	}
 
 	spec := httptest.NewRecorder()

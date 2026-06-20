@@ -21,6 +21,7 @@ type Server struct {
 	store      *Store
 	challenges *ChallengeStore
 	verifier   Verifier
+	syncHub    *syncHub
 }
 
 func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
@@ -29,6 +30,7 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 		store:      store,
 		challenges: NewChallengeStore(cfg.ChallengeTTL),
 		verifier:   verifier,
+		syncHub:    newSyncHub(),
 	}
 }
 
@@ -38,6 +40,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/sync/challenge", s.handleChallenge)
+	mux.HandleFunc("GET /api/v1/sync/ws", s.handleSyncWebSocket)
 	mux.HandleFunc("POST /api/v1/sync/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
@@ -109,12 +112,23 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "client state failed")
 		return
 	}
+	if syncResultApplied(result) {
+		s.syncHub.publish(req.UserIDHash, serverVersion)
+	}
 	writeJSON(w, http.StatusOK, SyncResponse{
 		Status:        "ok",
 		Applied:       result,
 		ServerVersion: serverVersion,
 		Changes:       changes,
 	})
+}
+
+func syncResultApplied(result SyncResult) bool {
+	return result.MeditationLogs > 0 ||
+		result.Preferences > 0 ||
+		result.Habits > 0 ||
+		result.HabitDays > 0 ||
+		result.Sessions > 0
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

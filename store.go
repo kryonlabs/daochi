@@ -7,7 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -15,6 +18,15 @@ import (
 
 type Store struct {
 	db *sql.DB
+}
+
+type PublicStats struct {
+	UserCount        int64
+	StorageUsedBytes int64
+	StorageUsedGB    int64
+	StorageUsedText  string
+	AvailableBytes   int64
+	AvailableGB      int64
 }
 
 func OpenStore(path string) (*Store, error) {
@@ -305,6 +317,30 @@ ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
 func (s *Store) DeleteAccount(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM server_users WHERE user_id_hash=?1`, userID)
 	return err
+}
+
+func (s *Store) PublicStats(ctx context.Context, dbPath string) (PublicStats, error) {
+	var stats PublicStats
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_users`).Scan(&stats.UserCount); err != nil {
+		return PublicStats{}, err
+	}
+	used, err := sqliteFileSetSize(dbPath)
+	if err != nil {
+		return PublicStats{}, err
+	}
+	stats.StorageUsedBytes = used
+	stats.StorageUsedGB = bytesToFloorGB(used)
+	stats.StorageUsedText = storageUsedText(stats.StorageUsedGB)
+	available, err := diskAvailableBytes(dbPath)
+	if err != nil {
+		return PublicStats{}, err
+	}
+	stats.AvailableBytes = available - (1 << 30)
+	if stats.AvailableBytes < 0 {
+		stats.AvailableBytes = 0
+	}
+	stats.AvailableGB = bytesToFloorGB(stats.AvailableBytes)
+	return stats, nil
 }
 
 func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion int64) (SyncChanges, int64, error) {
@@ -636,4 +672,46 @@ func boolInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func sqliteFileSetSize(dbPath string) (int64, error) {
+	var total int64
+	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		info, err := os.Stat(path)
+		if err == nil {
+			total += info.Size()
+			continue
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		return 0, err
+	}
+	return total, nil
+}
+
+func diskAvailableBytes(path string) (int64, error) {
+	dir := filepath.Dir(path)
+	if dir == "" {
+		dir = "."
+	}
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(dir, &stat); err != nil {
+		return 0, err
+	}
+	return int64(stat.Bavail) * int64(stat.Bsize), nil
+}
+
+func bytesToFloorGB(bytes int64) int64 {
+	if bytes <= 0 {
+		return 0
+	}
+	return bytes / (1 << 30)
+}
+
+func storageUsedText(gb int64) string {
+	if gb <= 0 {
+		return "under 1 GB"
+	}
+	return fmt.Sprintf("%d GB", gb)
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 )
 
@@ -10,9 +12,26 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	stats, err := s.store.PublicStats(r.Context(), s.cfg.DBPath)
+	statusHTML := `<p class="status-error">Stats are temporarily unavailable.</p>`
+	if err != nil {
+		slog.Error("load public stats", "error", err)
+	} else {
+		usedPercent := 0.0
+		total := stats.StorageUsedBytes + stats.AvailableBytes
+		if total > 0 {
+			usedPercent = float64(stats.StorageUsedBytes) / float64(total) * 100
+		}
+		statusHTML = fmt.Sprintf(`<footer class="status" aria-label="Users: %d; Storage used: %s; Available storage: %d GB" title="Storage used: %d bytes">
+<span>%d users</span>
+<div class="status-bar" aria-label="Storage used: %s; available storage: %d GB"><span style="width:%.4f%%"></span></div>
+<span>%s used</span>
+<span>%d GB available</span>
+</footer>`, stats.UserCount, stats.StorageUsedText, stats.AvailableGB, stats.StorageUsedBytes, stats.UserCount, stats.StorageUsedText, stats.AvailableGB, usedPercent, stats.StorageUsedText, stats.AvailableGB)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`<!doctype html>
+	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -26,7 +45,12 @@ code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 pre{overflow:auto;background:#111827;color:#f9fafb;padding:16px}
 .endpoint{border-top:1px solid #e5e7eb;padding:14px 0}
 .method{display:inline-block;min-width:56px;font-weight:700}
+.status{border-top:1px solid #e5e7eb;margin-top:22px;padding-top:14px;display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;color:#5c6675;font-size:.9rem}
+.status-bar{height:8px;background:#e5e7eb;overflow:hidden}
+.status-bar span{display:block;height:100%%;background:#254da8;min-width:2px}
+.status-error{border-top:1px solid #e5e7eb;margin-top:22px;padding-top:14px;color:#5c6675}
 a{color:#254da8}
+@media (max-width:640px){.status{grid-template-columns:1fr}.status-bar{width:100%%}}
 </style>
 </head>
 <body>
@@ -45,9 +69,10 @@ a{color:#254da8}
 &lt;sha256 hex of exact raw request body bytes&gt;
 &lt;challenge nonce hex&gt;</pre>
 <p>Signed requests use <code>X-Inbe-User</code>, <code>X-Inbe-Signature</code>, and <code>Content-Type: application/json</code>.</p>
+%s
 </main>
 </body>
-</html>`))
+</html>`, statusHTML)
 }
 
 func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {

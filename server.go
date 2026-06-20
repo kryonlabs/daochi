@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -467,7 +468,10 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Access-Control-Allow-Origin", "https://inbe.waozi.xyz")
+		if origin := allowedCORSOrigin(r.Header.Get("Origin")); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Inbe-User, X-Inbe-Signature")
 		if r.Method == http.MethodOptions {
@@ -476,6 +480,26 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func allowedCORSOrigin(origin string) string {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Path != "" ||
+		u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return ""
+	}
+	if origin == "https://inbe.waozi.xyz" {
+		return origin
+	}
+	if u.Scheme != "http" {
+		return ""
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "0.0.0.0", "::1":
+		return origin
+	default:
+		return ""
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

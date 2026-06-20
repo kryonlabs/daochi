@@ -237,12 +237,49 @@ func TestDeleteWithKeyCORSPreflight(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/account/delete-with-key", nil)
+	req.Header.Set("Origin", "https://inbe.waozi.xyz")
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusNoContent {
 		t.Fatalf("preflight status = %d", res.Code)
 	}
 	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "https://inbe.waozi.xyz" {
+		t.Fatalf("allow-origin = %q", got)
+	}
+}
+
+func TestLocalhostCORSPreflight(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	for _, origin := range []string{
+		"http://localhost:8080",
+		"http://127.0.0.1:8080",
+		"http://0.0.0.0:8080",
+	} {
+		req := httptest.NewRequest(http.MethodOptions, "/api/v1/sync/challenge", nil)
+		req.Header.Set("Origin", origin)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusNoContent {
+			t.Fatalf("%s preflight status = %d", origin, res.Code)
+		}
+		if got := res.Header().Get("Access-Control-Allow-Origin"); got != origin {
+			t.Fatalf("%s allow-origin = %q", origin, got)
+		}
+	}
+}
+
+func TestUnknownOriginDoesNotGetCORS(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/sync/challenge", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d", res.Code)
+	}
+	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("allow-origin = %q", got)
 	}
 }

@@ -17,17 +17,15 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("load public stats", "error", err)
 	} else {
-		usedPercent := 0.0
-		total := stats.StorageUsedBytes + stats.AvailableBytes
-		if total > 0 {
-			usedPercent = float64(stats.StorageUsedBytes) / float64(total) * 100
+		usedGB := stats.StorageUsedGB
+		if stats.StorageUsedBytes > 0 && usedGB == 0 {
+			usedGB = 1
 		}
-		statusHTML = fmt.Sprintf(`<footer class="status" aria-label="Users: %d; Storage used: %s; Available storage: %d GB" title="Storage used: %d bytes">
-<span>%d users</span>
-<div class="status-bar" aria-label="Storage used: %s; available storage: %d GB"><span style="width:%.4f%%"></span></div>
-<span>%s used</span>
-<span>%d GB available</span>
-</footer>`, stats.UserCount, stats.StorageUsedText, stats.AvailableGB, stats.StorageUsedBytes, stats.UserCount, stats.StorageUsedText, stats.AvailableGB, usedPercent, stats.StorageUsedText, stats.AvailableGB)
+		totalGB := usedGB + stats.AvailableGB
+		statusHTML = fmt.Sprintf(`<footer class="status" aria-label="Users: %d; Storage: %d/%d GB">
+<span><strong>Users</strong> %d</span>
+<span><strong>Storage</strong> %d/%d GB</span>
+</footer>`, stats.UserCount, usedGB, totalGB, stats.UserCount, usedGB, totalGB)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -45,12 +43,11 @@ code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 pre{overflow:auto;background:#111827;color:#f9fafb;padding:16px}
 .endpoint{border-top:1px solid #e5e7eb;padding:14px 0}
 .method{display:inline-block;min-width:56px;font-weight:700}
-.status{border-top:1px solid #e5e7eb;margin-top:22px;padding-top:14px;display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;color:#5c6675;font-size:.9rem}
-.status-bar{height:8px;background:#e5e7eb;overflow:hidden}
-.status-bar span{display:block;height:100%%;background:#254da8;min-width:2px}
+.status{border-top:1px solid #e5e7eb;margin-top:22px;padding-top:14px;display:flex;gap:18px;align-items:center;color:#5c6675;font-size:.9rem;flex-wrap:wrap}
+.status strong{color:#18202a;font-weight:650}
 .status-error{border-top:1px solid #e5e7eb;margin-top:22px;padding-top:14px;color:#5c6675}
 a{color:#254da8}
-@media (max-width:640px){.status{grid-template-columns:1fr}.status-bar{width:100%%}}
+@media (max-width:640px){.status{gap:10px}}
 </style>
 </head>
 <body>
@@ -199,7 +196,6 @@ func openAPISpec() map[string]any {
 					"properties": map[string]any{
 						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 						"public_key":   map[string]any{"type": "string", "description": "ML-DSA-44 public key as hex or base64; required on first sync."},
-						"preferences":  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Preference"}},
 						"habits":       map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Habit"}},
 						"habit_days":   map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/HabitDay"}},
 						"sessions":     map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Session"}},
@@ -218,14 +214,6 @@ func openAPISpec() map[string]any {
 					"properties": map[string]any{
 						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 						"exported_key": map[string]any{"type": "string", "description": "Full text of the exported inbe-sync.key file."},
-					},
-				},
-				"Preference": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"key":        map[string]any{"type": "string"},
-						"value":      map[string]any{"type": "string"},
-						"updated_at": map[string]any{"type": "string", "format": "date-time"},
 					},
 				},
 				"Habit": map[string]any{

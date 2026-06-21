@@ -8,7 +8,7 @@ import (
 
 func TestCanonicalMessageSignsRawBodyHash(t *testing.T) {
 	nonce := []byte("01234567890123456789012345678901")
-	body := []byte(`{"user_id_hash":"u","preferences":[{"key":"theme","value":"dark"}]}`)
+	body := []byte(`{"user_id_hash":"u","habits":[{"id":"habit-1","name":"Meditate"}]}`)
 	bodyHash := sha256.Sum256(body)
 	got := string(canonicalMessage(nonce, "post", "/api/v1/sync", body))
 	want := "inbe-sync-v1\nPOST\n/api/v1/sync\n" +

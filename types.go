@@ -24,14 +24,12 @@ type SyncRequest struct {
 	SinceServerVersion int64           `json:"since_server_version,omitempty"`
 	Bootstrap          bool            `json:"bootstrap,omitempty"`
 	MeditationLogs     []MeditationLog `json:"meditation_logs,omitempty"`
-	Preferences        []Preference    `json:"preferences,omitempty"`
 	Habits             []Habit         `json:"habits,omitempty"`
 	HabitDays          []HabitDay      `json:"habit_days,omitempty"`
 	Sessions           []Session       `json:"sessions,omitempty"`
 }
 
 type SyncChanges struct {
-	Preferences    []Preference    `json:"preferences"`
 	Habits         []Habit         `json:"habits"`
 	HabitDays      []HabitDay      `json:"habit_days"`
 	Sessions       []Session       `json:"sessions"`
@@ -61,12 +59,6 @@ type MeditationLog struct {
 	Duration        int    `json:"duration,omitempty"`
 	CompletedAt     string `json:"completed_at,omitempty"`
 	Timestamp       string `json:"timestamp,omitempty"`
-}
-
-type Preference struct {
-	Key       string `json:"key"`
-	Value     string `json:"value"`
-	UpdatedAt string `json:"updated_at"`
 }
 
 type Habit struct {
@@ -112,7 +104,6 @@ type SessionRound struct {
 
 type SyncResult struct {
 	MeditationLogs int `json:"meditation_logs"`
-	Preferences    int `json:"preferences"`
 	Habits         int `json:"habits"`
 	HabitDays      int `json:"habit_days"`
 	Sessions       int `json:"sessions"`

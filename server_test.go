@@ -60,7 +60,7 @@ func TestDocsEndpoints(t *testing.T) {
 	if !strings.Contains(root.Body.String(), "Lyra Sync API") {
 		t.Fatalf("root docs missing title: %s", root.Body.String())
 	}
-	for _, want := range []string{"Users", "Storage used", "Available storage"} {
+	for _, want := range []string{"Users", "Storage", "/"} {
 		if !strings.Contains(root.Body.String(), want) {
 			t.Fatalf("root docs missing %q: %s", want, root.Body.String())
 		}
@@ -89,7 +89,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	signature := hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize))
 
 	token, loginNonce := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
-	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","preferences":[{"key":"theme","value":"dark","updated_at":"2026-06-19T00:00:00Z"}],"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":0,"updated_at":"2026-06-19T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":60}]}]}`)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":0,"updated_at":"2026-06-19T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":60}]}]}`)
 	res := syncWithBody(t, handler, "", userID, token, body)
 	if res.Code != http.StatusOK {
 		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
@@ -115,7 +115,6 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 		t.Fatalf("signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
 	assertCount(t, store, "server_users", 1)
-	assertCount(t, store, "server_preferences", 1)
 	assertCount(t, store, "server_habits", 1)
 	assertCount(t, store, "server_habit_days", 1)
 	assertCount(t, store, "server_sessions", 1)
@@ -137,7 +136,6 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 		t.Fatalf("delete signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
 	assertCount(t, store, "server_users", 0)
-	assertCount(t, store, "server_preferences", 0)
 	assertCount(t, store, "server_habits", 0)
 	assertCount(t, store, "server_habit_days", 0)
 	assertCount(t, store, "server_sessions", 0)
@@ -316,9 +314,9 @@ func TestDeleteWithExportedKeyDeletesAccount(t *testing.T) {
 	userID := hex.EncodeToString(userHash[:])
 	_, err = store.ApplySync(t.Context(), SyncRequest{
 		UserIDHash: userID,
-		Preferences: []Preference{{
-			Key:       "theme",
-			Value:     "dark",
+		Habits: []Habit{{
+			ID:        "delete-key-probe",
+			Name:      "Delete key probe",
 			UpdatedAt: "2026-06-19T00:00:00Z",
 		}},
 	}, publicKey)
@@ -338,7 +336,6 @@ func TestDeleteWithExportedKeyDeletesAccount(t *testing.T) {
 		t.Fatalf("delete-with-key status = %d body=%s", res.Code, res.Body.String())
 	}
 	assertCount(t, store, "server_users", 0)
-	assertCount(t, store, "server_preferences", 0)
 }
 
 func issueChallenge(t *testing.T, target any, baseURL, userID string) string {

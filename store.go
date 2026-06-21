@@ -86,14 +86,6 @@ CREATE TABLE IF NOT EXISTS server_meditation_logs (
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS server_preferences (
-	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
-	pref_key TEXT NOT NULL,
-	pref_value TEXT NOT NULL DEFAULT '',
-	updated_at TEXT NOT NULL,
-	PRIMARY KEY(user_id_hash, pref_key)
-);
-
 CREATE TABLE IF NOT EXISTS server_habits (
 	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
 	id TEXT NOT NULL,
@@ -207,19 +199,6 @@ ON CONFLICT(id) DO NOTHING`, item.ID, req.UserIDHash, item.SessionID, item.Durat
 			return SyncResult{}, err
 		}
 		result.MeditationLogs += rowsAffected(res)
-	}
-	for _, pref := range req.Preferences {
-		_, err := tx.ExecContext(ctx, `
-INSERT INTO server_preferences(user_id_hash,pref_key,pref_value,updated_at)
-VALUES(?1,?2,?3,?4)
-ON CONFLICT(user_id_hash,pref_key) DO UPDATE SET
-	pref_value=excluded.pref_value,
-	updated_at=excluded.updated_at
-WHERE excluded.updated_at >= server_preferences.updated_at`, req.UserIDHash, pref.Key, pref.Value, normalizeTime(pref.UpdatedAt, ""))
-		if err != nil {
-			return SyncResult{}, err
-		}
-		result.Preferences++
 	}
 	for _, habit := range req.Habits {
 		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
@@ -351,7 +330,6 @@ func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion in
 	var changes SyncChanges
 	var err error
 
-	changes.Preferences = []Preference{}
 	changes.Habits, err = s.snapshotHabits(ctx, userID, sinceVersion)
 	if err != nil {
 		return changes, 0, err
@@ -373,28 +351,6 @@ func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion in
 		return changes, 0, err
 	}
 	return changes, version, nil
-}
-
-func (s *Store) snapshotPreferences(ctx context.Context, userID string) ([]Preference, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT pref_key,pref_value,updated_at
-FROM server_preferences
-WHERE user_id_hash=?1
-ORDER BY pref_key`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := []Preference{}
-	for rows.Next() {
-		var item Preference
-		if err := rows.Scan(&item.Key, &item.Value, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
 }
 
 func (s *Store) snapshotHabits(ctx context.Context, userID string, sinceVersion int64) ([]Habit, error) {

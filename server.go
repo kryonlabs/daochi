@@ -126,7 +126,6 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 
 func syncResultApplied(result SyncResult) bool {
 	return result.MeditationLogs > 0 ||
-		result.Preferences > 0 ||
 		result.Habits > 0 ||
 		result.HabitDays > 0 ||
 		result.Sessions > 0

@@ -74,7 +74,6 @@ func openInspectDB(path string) (*sql.DB, error) {
 func inspectSummary(ctx context.Context, db *sql.DB, out io.Writer) error {
 	tables := []string{
 		"server_users",
-		"server_preferences",
 		"server_habits",
 		"server_habit_days",
 		"server_sessions",
@@ -137,42 +136,17 @@ WHERE user_id_hash=?1`, userID).Scan(&publicKey, &createdAt, &lastSeenAt)
 	fmt.Fprintf(out, "public_key=%s\n", redactID(strings.ToLower(publicKey), full))
 	fmt.Fprintf(out, "created=%s\nlast_seen=%s\n", createdAt, lastSeenAt)
 
-	for _, table := range []string{"server_preferences", "server_habits", "server_habit_days", "server_sessions", "server_session_rounds", "server_meditation_logs"} {
+	for _, table := range []string{"server_habits", "server_habit_days", "server_sessions", "server_session_rounds", "server_meditation_logs"} {
 		n, err := inspectCount(ctx, db, table, "WHERE user_id_hash=?1", userID)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%-24s %d\n", table, n)
 	}
-	if err := inspectUserPreferences(ctx, db, out, userID); err != nil {
-		return err
-	}
 	if err := inspectUserHabits(ctx, db, out, userID); err != nil {
 		return err
 	}
 	return inspectUserSessions(ctx, db, out, userID)
-}
-
-func inspectUserPreferences(ctx context.Context, db *sql.DB, out io.Writer, userID string) error {
-	rows, err := db.QueryContext(ctx, `
-SELECT pref_key, pref_value, updated_at
-FROM server_preferences
-WHERE user_id_hash=?1
-ORDER BY pref_key`, userID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	fmt.Fprintln(out, "\nPreferences")
-	for rows.Next() {
-		var key, value, updatedAt string
-		if err := rows.Scan(&key, &value, &updatedAt); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "%s=%s  updated=%s\n", key, value, updatedAt)
-	}
-	return rows.Err()
 }
 
 func inspectUserHabits(ctx context.Context, db *sql.DB, out io.Writer, userID string) error {

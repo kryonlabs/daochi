@@ -98,7 +98,6 @@ SQLite tables mirror the app data:
 
 - `server_users`
 - `server_meditation_logs`
-- `server_preferences`
 - `server_habits`
 - `server_habit_days`
 - `server_sessions`

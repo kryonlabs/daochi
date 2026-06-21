@@ -21,11 +21,6 @@ func TestInspectSummaryAndUser(t *testing.T) {
 	userID := hex.EncodeToString(sum[:])
 	_, err = store.ApplySync(context.Background(), SyncRequest{
 		UserIDHash: userID,
-		Preferences: []Preference{{
-			Key:       "theme",
-			Value:     "dark",
-			UpdatedAt: "2026-06-19T00:00:00Z",
-		}},
 		Habits: []Habit{{
 			ID:           "habit-1",
 			Name:         "Meditate",
@@ -62,9 +57,6 @@ func TestInspectSummaryAndUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := user.String()
-	if !strings.Contains(got, "Preferences") || !strings.Contains(got, "theme=dark") {
-		t.Fatalf("user output missing preference:\n%s", got)
-	}
 	if !strings.Contains(got, "Meditate") || !strings.Contains(got, "session-1") {
 		t.Fatalf("user output missing data:\n%s", got)
 	}

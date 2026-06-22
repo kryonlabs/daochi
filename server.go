@@ -490,6 +490,9 @@ func allowedCORSOrigin(origin string) string {
 	if origin == "https://inbe.waozi.xyz" {
 		return origin
 	}
+	if u.Scheme == "chrome-extension" && validChromeExtensionID(u.Host) {
+		return origin
+	}
 	if u.Scheme != "http" {
 		return ""
 	}
@@ -499,6 +502,18 @@ func allowedCORSOrigin(origin string) string {
 	default:
 		return ""
 	}
+}
+
+func validChromeExtensionID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for _, r := range id {
+		if r < 'a' || r > 'p' {
+			return false
+		}
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

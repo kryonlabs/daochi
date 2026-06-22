@@ -189,6 +189,39 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	}
 }
 
+func TestSyncReturnsRecoveredHabitForOrphanHabitDays(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x42}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habit_days":[{"habit_id":"habit-2","local_date":20260619,"completed":true,"count":1,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", userID, token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Changes.Habits) != 1 || payload.Changes.Habits[0].ID != "habit-2" ||
+		payload.Changes.Habits[0].Name != "Recovered habit-2" {
+		t.Fatalf("recovered habits = %#v", payload.Changes.Habits)
+	}
+	if len(payload.Changes.HabitDays) != 1 || payload.Changes.HabitDays[0].HabitID != "habit-2" {
+		t.Fatalf("habit day changes = %#v", payload.Changes.HabitDays)
+	}
+
+	emptyBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","since_server_version":` + strconv.FormatInt(payload.ServerVersion, 10) + `}`)
+	res = syncWithBody(t, handler, "", userID, token, emptyBody)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Changes.Habits) != 0 || len(payload.Changes.HabitDays) != 0 {
+		t.Fatalf("expected no repeated recovered changes: %#v", payload.Changes)
+	}
+}
+
 func TestSyncWebSocketReceivesChangeEvents(t *testing.T) {
 	server, _, _ := testServer(t)
 	ts := httptest.NewServer(server.Routes())
@@ -273,18 +306,40 @@ func TestLocalhostCORSPreflight(t *testing.T) {
 	}
 }
 
-func TestUnknownOriginDoesNotGetCORS(t *testing.T) {
+func TestChromeExtensionCORSPreflight(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
+	origin := "chrome-extension://lballhghblaenelehneigekpofgcaifa"
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/sync/challenge", nil)
-	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Origin", origin)
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusNoContent {
 		t.Fatalf("preflight status = %d", res.Code)
 	}
-	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "" {
+	if got := res.Header().Get("Access-Control-Allow-Origin"); got != origin {
 		t.Fatalf("allow-origin = %q", got)
+	}
+}
+
+func TestUnknownOriginDoesNotGetCORS(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	for _, origin := range []string{
+		"https://evil.example",
+		"chrome-extension://bad",
+		"chrome-extension://lballhghblaenelehneigekpofgcaifq",
+	} {
+		req := httptest.NewRequest(http.MethodOptions, "/api/v1/sync/challenge", nil)
+		req.Header.Set("Origin", origin)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusNoContent {
+			t.Fatalf("%s preflight status = %d", origin, res.Code)
+		}
+		if got := res.Header().Get("Access-Control-Allow-Origin"); got != "" {
+			t.Fatalf("%s allow-origin = %q", origin, got)
+		}
 	}
 }
 

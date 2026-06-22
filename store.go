@@ -355,9 +355,29 @@ func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion in
 
 func (s *Store) snapshotHabits(ctx context.Context, userID string, sinceVersion int64) ([]Habit, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at
-FROM server_habits
-WHERE user_id_hash=?1 AND server_version>?2
+SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version
+FROM (
+	SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version
+	FROM server_habits
+	WHERE user_id_hash=?1 AND server_version>?2
+	UNION ALL
+	SELECT hd.habit_id,
+	       'Recovered ' || hd.habit_id,
+	       99,196,165,
+	       0,0,0,
+	       1000,
+	       0,
+	       MAX(hd.updated_at),
+	       MAX(hd.server_version)
+	FROM server_habit_days hd
+	WHERE hd.user_id_hash=?1
+	  AND hd.server_version>?2
+	  AND NOT EXISTS (
+		SELECT 1 FROM server_habits h
+		WHERE h.user_id_hash=hd.user_id_hash AND h.id=hd.habit_id
+	  )
+	GROUP BY hd.habit_id
+)
 ORDER BY server_version,sort_order,id`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
@@ -367,9 +387,10 @@ ORDER BY server_version,sort_order,id`, userID, sinceVersion)
 	items := []Habit{}
 	for rows.Next() {
 		var item Habit
+		var serverVersion int64
 		if err := rows.Scan(&item.ID, &item.Name, &item.ColorR, &item.ColorG, &item.ColorB,
 			&item.SyncMode, &item.SyncActivity, &item.CounterEnabled, &item.SortOrder,
-			&item.DeletedAt, &item.UpdatedAt); err != nil {
+			&item.DeletedAt, &item.UpdatedAt, &serverVersion); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

@@ -80,7 +80,7 @@ type HabitDay struct {
 	HabitID   string `json:"habit_id"`
 	LocalDate int    `json:"local_date"`
 	Completed bool   `json:"completed"`
-	Count     int    `json:"count,omitempty"`
+	Count     int    `json:"count"`
 	UpdatedAt string `json:"updated_at"`
 }
 

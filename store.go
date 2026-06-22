@@ -249,8 +249,7 @@ ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
 	updated_at=excluded.updated_at,
 	server_version=excluded.server_version
 WHERE excluded.updated_at > server_habit_days.updated_at
-AND (excluded.count > 0 OR server_habit_days.count <= 0)
-OR (excluded.updated_at = server_habit_days.updated_at AND excluded.count > server_habit_days.count)`,
+OR excluded.updated_at = server_habit_days.updated_at`,
 			req.UserIDHash, day.HabitID, day.LocalDate, boolInt(day.Completed), normalizedHabitDayCount(day), normalizeTime(day.UpdatedAt, ""), version)
 		if err != nil {
 			return SyncResult{}, err
@@ -650,13 +649,13 @@ func normalizeTime(primary, fallback string) string {
 }
 
 func normalizedHabitDayCount(day HabitDay) int {
+	if !day.Completed {
+		return 0
+	}
 	if day.Count > 0 {
 		return day.Count
 	}
-	if day.Completed {
-		return 1
-	}
-	return 0
+	return 1
 }
 
 func boolInt(v bool) int {

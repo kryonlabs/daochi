@@ -222,7 +222,7 @@ func TestSyncReturnsRecoveredHabitForOrphanHabitDays(t *testing.T) {
 	}
 }
 
-func TestSyncDoesNotErasePositiveHabitDayWithLaterZero(t *testing.T) {
+func TestSyncAppliesLaterZeroHabitDay(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
 	publicKey := bytes.Repeat([]byte{0x44}, mlDSA44PublicKeySize)
@@ -249,9 +249,42 @@ func TestSyncDoesNotErasePositiveHabitDayWithLaterZero(t *testing.T) {
 	}
 	if len(payload.Changes.HabitDays) != 1 ||
 		payload.Changes.HabitDays[0].HabitID != "habit-2" ||
-		!payload.Changes.HabitDays[0].Completed ||
-		payload.Changes.HabitDays[0].Count != 1 {
-		t.Fatalf("positive habit day was erased: %#v", payload.Changes.HabitDays)
+		payload.Changes.HabitDays[0].Completed ||
+		payload.Changes.HabitDays[0].Count != 0 {
+		t.Fatalf("habit day clear did not apply: %#v", payload.Changes.HabitDays)
+	}
+}
+
+func TestSyncAppliesEqualTimestampZeroHabitDay(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x45}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x56}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habit_days":[{"habit_id":"habit-2","local_date":20260619,"completed":true,"count":1,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", userID, token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	zeroBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":` + strconv.FormatInt(payload.ServerVersion, 10) + `,"habit_days":[{"habit_id":"habit-2","local_date":20260619,"completed":false,"count":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	res = syncWithBody(t, handler, "", userID, token, zeroBody)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	fullBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-3","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", userID, token, fullBody)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Changes.HabitDays) != 1 ||
+		payload.Changes.HabitDays[0].HabitID != "habit-2" ||
+		payload.Changes.HabitDays[0].Completed ||
+		payload.Changes.HabitDays[0].Count != 0 {
+		t.Fatalf("equal timestamp habit day clear did not apply: %#v", payload.Changes.HabitDays)
 	}
 }
 

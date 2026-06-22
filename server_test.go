@@ -222,6 +222,105 @@ func TestSyncReturnsRecoveredHabitForOrphanHabitDays(t *testing.T) {
 	}
 }
 
+func TestSyncDoesNotErasePositiveHabitDayWithLaterZero(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x44}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x55}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habit_days":[{"habit_id":"habit-2","local_date":20260619,"completed":true,"count":1,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", userID, token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	zeroBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":` + strconv.FormatInt(payload.ServerVersion, 10) + `,"habit_days":[{"habit_id":"habit-2","local_date":20260619,"completed":false,"count":0,"updated_at":"2026-06-20T00:00:00Z"}]}`)
+	res = syncWithBody(t, handler, "", userID, token, zeroBody)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	fullBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-3","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", userID, token, fullBody)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Changes.HabitDays) != 1 ||
+		payload.Changes.HabitDays[0].HabitID != "habit-2" ||
+		!payload.Changes.HabitDays[0].Completed ||
+		payload.Changes.HabitDays[0].Count != 1 {
+		t.Fatalf("positive habit day was erased: %#v", payload.Changes.HabitDays)
+	}
+}
+
+func TestBootstrapDoesNotApplyLocalTombstones(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x46}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x57}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":0,"updated_at":"2026-06-19T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":60}]}]}`)
+	res := syncWithBody(t, handler, "", userID, token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	bootstrapDeletes := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":0,"bootstrap":true,"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":1782098659,"updated_at":"2026-06-20T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":false,"count":0,"updated_at":"2026-06-20T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":1782098659,"updated_at":"2026-06-20T00:00:00Z"}]}`)
+	res = syncWithBody(t, handler, "", userID, token, bootstrapDeletes)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	fullBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-3","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", userID, token, fullBody)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Changes.Habits) != 1 || payload.Changes.Habits[0].DeletedAt != 0 {
+		t.Fatalf("bootstrap tombstone erased habit: %#v", payload.Changes.Habits)
+	}
+	if len(payload.Changes.HabitDays) != 1 || !payload.Changes.HabitDays[0].Completed || payload.Changes.HabitDays[0].Count != 4 {
+		t.Fatalf("bootstrap clear erased habit day: %#v", payload.Changes.HabitDays)
+	}
+	if len(payload.Changes.Sessions) != 1 || payload.Changes.Sessions[0].DeletedAt != 0 || len(payload.Changes.Sessions[0].Rounds) != 1 {
+		t.Fatalf("bootstrap tombstone erased session: %#v", payload.Changes.Sessions)
+	}
+}
+
+func TestBearerSyncCanRegisterUserWithPublicKey(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x48}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	token, err := issueAuthToken(server.cfg.TokenSecret, userID, server.cfg.TokenTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `","since_server_version":0,"bootstrap":true,"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", userID, token, body)
+	if res.Code != http.StatusOK {
+		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Applied.Habits != 1 || len(payload.Changes.Habits) != 1 {
+		t.Fatalf("registered sync response = %#v", payload)
+	}
+	if _, found, err := server.store.PublicKey(t.Context(), userID); err != nil || !found {
+		t.Fatalf("registered public key found=%v err=%v", found, err)
+	}
+}
+
 func TestSyncWebSocketReceivesChangeEvents(t *testing.T) {
 	server, _, _ := testServer(t)
 	ts := httptest.NewServer(server.Routes())

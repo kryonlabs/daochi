@@ -95,8 +95,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "token user mismatch")
 		return
 	}
+	publicKey, err := syncRequestPublicKey(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	normalizeMeditationDurations(req.MeditationLogs)
-	result, err := s.store.ApplySync(r.Context(), req, nil)
+	result, err := s.store.ApplySync(r.Context(), req, publicKey)
 	if err != nil {
 		slog.Error("apply sync", "user", req.UserIDHash, "error", err)
 		writeError(w, http.StatusInternalServerError, "sync failed")
@@ -122,6 +127,23 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		ServerVersion: serverVersion,
 		Changes:       changes,
 	})
+}
+
+func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
+	if strings.TrimSpace(req.PublicKey) == "" {
+		return nil, nil
+	}
+	publicKey, err := decodeBinaryField(req.PublicKey)
+	if err != nil {
+		return nil, errors.New("invalid public_key")
+	}
+	if len(publicKey) != mlDSA44PublicKeySize {
+		return nil, errors.New("wrong public_key size")
+	}
+	if err := validateUserIDForPublicKey(req.UserIDHash, publicKey); err != nil {
+		return nil, errors.New("public_key does not match user_id_hash")
+	}
+	return publicKey, nil
 }
 
 func syncResultApplied(result SyncResult) bool {
@@ -321,6 +343,7 @@ func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]b
 		return nil, req, errors.New("invalid json")
 	}
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.PublicKey = strings.TrimSpace(req.PublicKey)
 	req.ClientID = strings.TrimSpace(req.ClientID)
 	return body, req, nil
 }

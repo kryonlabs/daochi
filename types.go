@@ -21,6 +21,7 @@ type LoginResponse struct {
 type SyncRequest struct {
 	UserIDHash         string          `json:"user_id_hash"`
 	ClientID           string          `json:"client_id"`
+	PublicKey          string          `json:"public_key,omitempty"`
 	SinceServerVersion int64           `json:"since_server_version,omitempty"`
 	Bootstrap          bool            `json:"bootstrap,omitempty"`
 	MeditationLogs     []MeditationLog `json:"meditation_logs,omitempty"`

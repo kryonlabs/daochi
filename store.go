@@ -201,6 +201,9 @@ ON CONFLICT(id) DO NOTHING`, item.ID, req.UserIDHash, item.SessionID, item.Durat
 		result.MeditationLogs += rowsAffected(res)
 	}
 	for _, habit := range req.Habits {
+		if req.Bootstrap && habit.DeletedAt > 0 {
+			continue
+		}
 		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
 		if err != nil {
 			return SyncResult{}, err
@@ -230,6 +233,9 @@ WHERE excluded.updated_at >= server_habits.updated_at`,
 		result.Habits += rowsAffected(res)
 	}
 	for _, day := range req.HabitDays {
+		if req.Bootstrap && !day.Completed && day.Count <= 0 {
+			continue
+		}
 		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
 		if err != nil {
 			return SyncResult{}, err
@@ -243,6 +249,7 @@ ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
 	updated_at=excluded.updated_at,
 	server_version=excluded.server_version
 WHERE excluded.updated_at > server_habit_days.updated_at
+AND (excluded.count > 0 OR server_habit_days.count <= 0)
 OR (excluded.updated_at = server_habit_days.updated_at AND excluded.count > server_habit_days.count)`,
 			req.UserIDHash, day.HabitID, day.LocalDate, boolInt(day.Completed), normalizedHabitDayCount(day), normalizeTime(day.UpdatedAt, ""), version)
 		if err != nil {
@@ -251,6 +258,9 @@ OR (excluded.updated_at = server_habit_days.updated_at AND excluded.count > serv
 		result.HabitDays += rowsAffected(res)
 	}
 	for _, session := range req.Sessions {
+		if req.Bootstrap && session.DeletedAt > 0 {
+			continue
+		}
 		applied, err := upsertSession(ctx, tx, req.UserIDHash, session)
 		if err != nil {
 			return SyncResult{}, err

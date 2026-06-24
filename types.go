@@ -43,6 +43,7 @@ type SyncChanges struct {
 type SyncResponse struct {
 	Status               string      `json:"status"`
 	Applied              SyncResult  `json:"applied"`
+	AccountAlias         string      `json:"account_alias,omitempty"`
 	ServerVersion        int64       `json:"server_version"`
 	ServerStateHash      string      `json:"server_state_hash,omitempty"`
 	BaseStateHash        string      `json:"base_state_hash,omitempty"`
@@ -53,6 +54,16 @@ type SyncResponse struct {
 
 type DeleteRequest struct {
 	UserIDHash string `json:"user_id_hash"`
+}
+
+type AliasRequest struct {
+	UserIDHash string `json:"user_id_hash"`
+	Alias      string `json:"alias"`
+}
+
+type AliasResponse struct {
+	Status string `json:"status"`
+	Alias  string `json:"alias"`
 }
 
 type DeleteWithKeyRequest struct {

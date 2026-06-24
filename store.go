@@ -55,6 +55,7 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS server_users (
 	user_id_hash TEXT PRIMARY KEY,
 	public_key BLOB NOT NULL,
+	alias TEXT UNIQUE,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -150,10 +151,17 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 		`ALTER TABLE server_habit_days ADD COLUMN count INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE server_habit_days SET count=CASE WHEN completed!=0 THEN 1 ELSE 0 END WHERE count=0`,
 		`ALTER TABLE server_sessions ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_users ADD COLUMN alias TEXT`,
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
 		}
+	}
+	if _, err := s.db.ExecContext(ctx, `
+CREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique
+ON server_users(alias)
+WHERE alias IS NOT NULL AND alias<>''`); err != nil {
+		return err
 	}
 	return nil
 }
@@ -287,6 +295,35 @@ func (s *Store) RegisterUser(ctx context.Context, userID string, publicKey []byt
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) AccountAlias(ctx context.Context, userID string) (string, error) {
+	var alias sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT alias FROM server_users WHERE user_id_hash=?1`, userID).Scan(&alias)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !alias.Valid {
+		return "", nil
+	}
+	return alias.String, nil
+}
+
+func (s *Store) SetAccountAlias(ctx context.Context, userID, alias string) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE server_users
+SET alias=?2,last_seen_at=CURRENT_TIMESTAMP
+WHERE user_id_hash=?1`, userID, alias)
+	if err != nil {
+		return err
+	}
+	if rowsAffected(res) == 0 {
+		return errors.New("sync user not found")
+	}
+	return nil
 }
 
 func (s *Store) RecordClientLogin(ctx context.Context, userID, clientID string) error {

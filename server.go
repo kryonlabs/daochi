@@ -16,6 +16,7 @@ import (
 
 var userIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
+var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
 
 type Server struct {
 	cfg        Config
@@ -44,6 +45,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/sync/ws", s.handleSyncWebSocket)
 	mux.HandleFunc("POST /api/v1/sync/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
+	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
 	return s.withCommonHeaders(mux)
@@ -148,9 +150,16 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if syncResultApplied(result) {
 		s.syncHub.publish(req.UserIDHash, serverVersion)
 	}
+	accountAlias, err := s.store.AccountAlias(r.Context(), req.UserIDHash)
+	if err != nil {
+		slog.Error("load account alias", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "alias failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, SyncResponse{
 		Status:               "ok",
 		Applied:              result,
+		AccountAlias:         accountAlias,
 		ServerVersion:        serverVersion,
 		ServerStateHash:      serverHash,
 		BaseStateHash:        baseHash,
@@ -158,6 +167,42 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		FullSnapshotRequired: fullSnapshotRequired,
 		Changes:              changes,
 	})
+}
+
+func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
+	_, req, err := readAliasRequest(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	tokenUser, err := s.authenticateToken(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if tokenUser != req.UserIDHash {
+		writeError(w, http.StatusUnauthorized, "token user mismatch")
+		return
+	}
+	alias := normalizeAlias(req.Alias)
+	if !validAccountAlias(alias) {
+		writeError(w, http.StatusBadRequest, "invalid alias")
+		return
+	}
+	if err := s.store.SetAccountAlias(r.Context(), req.UserIDHash, alias); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			writeError(w, http.StatusConflict, "alias unavailable")
+			return
+		}
+		slog.Error("set account alias", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "alias failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, AliasResponse{Status: "ok", Alias: alias})
 }
 
 func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
@@ -182,6 +227,16 @@ func syncResultApplied(result SyncResult) bool {
 		result.Habits > 0 ||
 		result.HabitDays > 0 ||
 		result.Sessions > 0
+}
+
+func normalizeAlias(alias string) string {
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	alias = strings.TrimPrefix(alias, "@")
+	return alias
+}
+
+func validAccountAlias(alias string) bool {
+	return accountAliasPattern.MatchString(alias)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -404,6 +459,20 @@ func readDeleteRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([
 		return nil, req, errors.New("invalid json")
 	}
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	return body, req, nil
+}
+
+func readAliasRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, AliasRequest, error) {
+	var req AliasRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return nil, req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, req, errors.New("invalid json")
+	}
+	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.Alias = normalizeAlias(req.Alias)
 	return body, req, nil
 }
 

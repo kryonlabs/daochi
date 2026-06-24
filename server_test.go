@@ -251,6 +251,59 @@ func TestHashMismatchRequiresFullSnapshotWithoutApplyingUpload(t *testing.T) {
 	}
 }
 
+func TestAccountAliasRegistersAndSyncs(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x4a}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x6a}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	aliasBody := []byte(`{"user_id_hash":"` + userID + `","alias":"@waozi"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("alias status = %d body=%s", res.Code, res.Body.String())
+	}
+	var aliasRes AliasResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &aliasRes); err != nil {
+		t.Fatal(err)
+	}
+	if aliasRes.Alias != "waozi" {
+		t.Fatalf("alias = %q", aliasRes.Alias)
+	}
+
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","since_server_version":0}`)
+	syncRes := syncWithBody(t, handler, "", userID, token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(syncRes.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.AccountAlias != "waozi" {
+		t.Fatalf("sync alias = %q", payload.AccountAlias)
+	}
+
+	otherKey := bytes.Repeat([]byte{0x4b}, mlDSA44PublicKeySize)
+	otherHash := sha256.Sum256(otherKey)
+	otherID := hex.EncodeToString(otherHash[:])
+	otherToken, _ := loginWithKey(t, handler, "", otherID, hex.EncodeToString(otherKey), signature)
+	aliasBody = []byte(`{"user_id_hash":"` + otherID + `","alias":"waozi"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", otherID)
+	req.Header.Set("Authorization", "Bearer "+otherToken)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusConflict {
+		t.Fatalf("alias conflict status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestSyncReturnsRecoveredHabitForOrphanHabitDays(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()

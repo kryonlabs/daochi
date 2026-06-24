@@ -19,15 +19,18 @@ type LoginResponse struct {
 }
 
 type SyncRequest struct {
-	UserIDHash         string          `json:"user_id_hash"`
-	ClientID           string          `json:"client_id"`
-	PublicKey          string          `json:"public_key,omitempty"`
-	SinceServerVersion int64           `json:"since_server_version,omitempty"`
-	Bootstrap          bool            `json:"bootstrap,omitempty"`
-	MeditationLogs     []MeditationLog `json:"meditation_logs,omitempty"`
-	Habits             []Habit         `json:"habits,omitempty"`
-	HabitDays          []HabitDay      `json:"habit_days,omitempty"`
-	Sessions           []Session       `json:"sessions,omitempty"`
+	UserIDHash          string          `json:"user_id_hash"`
+	ClientID            string          `json:"client_id"`
+	PublicKey           string          `json:"public_key,omitempty"`
+	SinceServerVersion  int64           `json:"since_server_version,omitempty"`
+	ClientStateHash     string          `json:"client_state_hash,omitempty"`
+	LastServerStateHash string          `json:"last_server_state_hash,omitempty"`
+	FullSyncRequested   bool            `json:"full_sync_requested,omitempty"`
+	Bootstrap           bool            `json:"bootstrap,omitempty"`
+	MeditationLogs      []MeditationLog `json:"meditation_logs,omitempty"`
+	Habits              []Habit         `json:"habits,omitempty"`
+	HabitDays           []HabitDay      `json:"habit_days,omitempty"`
+	Sessions            []Session       `json:"sessions,omitempty"`
 }
 
 type SyncChanges struct {
@@ -38,10 +41,14 @@ type SyncChanges struct {
 }
 
 type SyncResponse struct {
-	Status        string      `json:"status"`
-	Applied       SyncResult  `json:"applied"`
-	ServerVersion int64       `json:"server_version"`
-	Changes       SyncChanges `json:"changes"`
+	Status               string      `json:"status"`
+	Applied              SyncResult  `json:"applied"`
+	ServerVersion        int64       `json:"server_version"`
+	ServerStateHash      string      `json:"server_state_hash,omitempty"`
+	BaseStateHash        string      `json:"base_state_hash,omitempty"`
+	ChangesComplete      bool        `json:"changes_complete"`
+	FullSnapshotRequired bool        `json:"full_snapshot_required"`
+	Changes              SyncChanges `json:"changes"`
 }
 
 type DeleteRequest struct {

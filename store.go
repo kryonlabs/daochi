@@ -184,6 +184,11 @@ func (s *Store) ApplySync(ctx context.Context, req SyncRequest, publicKey []byte
 	} else if err := touchUser(ctx, tx, req.UserIDHash); err != nil {
 		return SyncResult{}, err
 	}
+	if req.FullSyncRequested {
+		if err := replaceUserData(ctx, tx, req.UserIDHash); err != nil {
+			return SyncResult{}, err
+		}
+	}
 
 	result := SyncResult{}
 	for _, item := range req.MeditationLogs {
@@ -360,6 +365,144 @@ func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion in
 		return changes, 0, err
 	}
 	return changes, version, nil
+}
+
+func (s *Store) StateHash(ctx context.Context, userID string) (string, error) {
+	h := sha256.New()
+
+	if err := s.hashHabits(ctx, h, userID); err != nil {
+		return "", err
+	}
+	if err := s.hashHabitDays(ctx, h, userID); err != nil {
+		return "", err
+	}
+	if err := s.hashSessions(ctx, h, userID); err != nil {
+		return "", err
+	}
+	if err := s.hashMeditationLogs(ctx, h, userID); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func (s *Store) hashHabits(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at
+FROM server_habits
+WHERE user_id_hash=?1
+ORDER BY id`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, name, updatedAt string
+		var colorR, colorG, colorB, syncMode, syncActivity, counterEnabled, sortOrder int
+		var deletedAt int64
+		if err := rows.Scan(&id, &name, &colorR, &colorG, &colorB, &syncMode, &syncActivity,
+			&counterEnabled, &sortOrder, &deletedAt, &updatedAt); err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "habit\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+			id, name, colorR, colorG, colorB, syncMode, syncActivity, counterEnabled,
+			sortOrder, deletedAt, updatedAt)
+	}
+	return rows.Err()
+}
+
+func (s *Store) hashHabitDays(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT habit_id,local_date,completed,count,updated_at
+FROM server_habit_days
+WHERE user_id_hash=?1
+ORDER BY habit_id,local_date`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var habitID, updatedAt string
+		var localDate, completed, count int
+		if err := rows.Scan(&habitID, &localDate, &completed, &count, &updatedAt); err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "habit_day\t%s\t%d\t%d\t%d\t%s\n",
+			habitID, localDate, completed, count, updatedAt)
+	}
+	return rows.Err()
+}
+
+func (s *Store) hashSessions(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at
+FROM server_sessions
+WHERE user_id_hash=?1
+ORDER BY id`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, startedAt, topic, source, roundsHash, updatedAt string
+		var localDate, activity int
+		var deletedAt int64
+		if err := rows.Scan(&id, &startedAt, &localDate, &topic, &activity, &source,
+			&roundsHash, &deletedAt, &updatedAt); err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "session\t%s\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%s\n",
+			id, startedAt, localDate, topic, activity, source, roundsHash, deletedAt, updatedAt)
+		if err := s.hashSessionRounds(ctx, h, userID, id); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (s *Store) hashSessionRounds(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID, sessionID string) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT round_index,breaths,hold_seconds
+FROM server_session_rounds
+WHERE user_id_hash=?1 AND session_id=?2
+ORDER BY round_index`, userID, sessionID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var roundIndex, breaths, holdSeconds int
+		if err := rows.Scan(&roundIndex, &breaths, &holdSeconds); err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "round\t%s\t%d\t%d\t%d\n", sessionID, roundIndex, breaths, holdSeconds)
+	}
+	return rows.Err()
+}
+
+func (s *Store) hashMeditationLogs(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,session_id,duration_seconds,completed_at
+FROM server_meditation_logs
+WHERE user_id_hash=?1
+ORDER BY id`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, sessionID, completedAt string
+		var durationSeconds int
+		if err := rows.Scan(&id, &sessionID, &durationSeconds, &completedAt); err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "meditation_log\t%s\t%s\t%d\t%s\n", id, sessionID, durationSeconds, completedAt)
+	}
+	return rows.Err()
 }
 
 func (s *Store) snapshotHabits(ctx context.Context, userID string, sinceVersion int64) ([]Habit, error) {
@@ -540,6 +683,22 @@ WHERE user_id_hash=?1`, userID)
 	_, err = tx.ExecContext(ctx, `
 INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)
 VALUES(?1,0)`, userID)
+	return err
+}
+
+func replaceUserData(ctx context.Context, tx *sql.Tx, userID string) error {
+	for _, query := range []string{
+		`DELETE FROM server_session_rounds WHERE user_id_hash=?1`,
+		`DELETE FROM server_sessions WHERE user_id_hash=?1`,
+		`DELETE FROM server_habit_days WHERE user_id_hash=?1`,
+		`DELETE FROM server_habits WHERE user_id_hash=?1`,
+		`DELETE FROM server_meditation_logs WHERE user_id_hash=?1`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
+			return err
+		}
+	}
+	_, err := nextUserVersion(ctx, tx, userID)
 	return err
 }
 

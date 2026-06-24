@@ -101,16 +101,43 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	normalizeMeditationDurations(req.MeditationLogs)
-	result, err := s.store.ApplySync(r.Context(), req, publicKey)
+
+	baseHash, err := s.store.StateHash(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("apply sync", "user", req.UserIDHash, "error", err)
-		writeError(w, http.StatusInternalServerError, "sync failed")
+		slog.Error("hash sync state", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "state hash failed")
 		return
 	}
-	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, req.SinceServerVersion)
+
+	result := SyncResult{}
+	fullSnapshotRequired := false
+	changesComplete := true
+	sinceVersion := req.SinceServerVersion
+	if req.LastServerStateHash != "" &&
+		!strings.EqualFold(req.LastServerStateHash, baseHash) &&
+		!req.FullSyncRequested {
+		fullSnapshotRequired = true
+		changesComplete = false
+		sinceVersion = 0
+	} else {
+		result, err = s.store.ApplySync(r.Context(), req, publicKey)
+		if err != nil {
+			slog.Error("apply sync", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "sync failed")
+			return
+		}
+	}
+
+	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, sinceVersion)
 	if err != nil {
 		slog.Error("load sync changes", "user", req.UserIDHash, "error", err)
 		writeError(w, http.StatusInternalServerError, "changes failed")
+		return
+	}
+	serverHash, err := s.store.StateHash(r.Context(), req.UserIDHash)
+	if err != nil {
+		slog.Error("hash sync response", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "state hash failed")
 		return
 	}
 	if err := s.store.RecordClientSync(r.Context(), req.UserIDHash, req.ClientID, req.SinceServerVersion, serverVersion); err != nil {
@@ -122,10 +149,14 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		s.syncHub.publish(req.UserIDHash, serverVersion)
 	}
 	writeJSON(w, http.StatusOK, SyncResponse{
-		Status:        "ok",
-		Applied:       result,
-		ServerVersion: serverVersion,
-		Changes:       changes,
+		Status:               "ok",
+		Applied:              result,
+		ServerVersion:        serverVersion,
+		ServerStateHash:      serverHash,
+		BaseStateHash:        baseHash,
+		ChangesComplete:      changesComplete,
+		FullSnapshotRequired: fullSnapshotRequired,
+		Changes:              changes,
 	})
 }
 

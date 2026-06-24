@@ -189,6 +189,68 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	}
 }
 
+func TestHashMismatchRequiresFullSnapshotWithoutApplyingUpload(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x49}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x5a}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Remote","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", userID, token, body)
+	var first SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.ServerStateHash == "" || !first.ChangesComplete || first.FullSnapshotRequired {
+		t.Fatalf("first response = %#v", first)
+	}
+
+	staleHash := strings.Repeat("0", 64)
+	staleBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":` + strconv.FormatInt(first.ServerVersion, 10) + `,"last_server_state_hash":"` + staleHash + `","habits":[{"id":"habit-2","name":"Local stale upload","color_r":9,"color_g":9,"color_b":9,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":1,"deleted_at":0,"updated_at":"2026-06-20T00:00:00Z"}]}`)
+	res = syncWithBody(t, handler, "", userID, token, staleBody)
+	var mismatch SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &mismatch); err != nil {
+		t.Fatal(err)
+	}
+	if !mismatch.FullSnapshotRequired || mismatch.ChangesComplete || mismatch.Applied.Habits != 0 {
+		t.Fatalf("mismatch response = %#v", mismatch)
+	}
+	if len(mismatch.Changes.Habits) != 1 || mismatch.Changes.Habits[0].ID != "habit-1" {
+		t.Fatalf("mismatch snapshot = %#v", mismatch.Changes.Habits)
+	}
+
+	fullBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-3","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", userID, token, fullBody)
+	var full SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &full); err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Changes.Habits) != 1 || full.Changes.Habits[0].ID != "habit-1" {
+		t.Fatalf("stale upload was applied: %#v", full.Changes.Habits)
+	}
+
+	replaceBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":0,"full_sync_requested":true,"habits":[{"id":"habit-2","name":"Local replacement","color_r":9,"color_g":9,"color_b":9,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":1,"deleted_at":0,"updated_at":"2026-06-20T00:00:00Z"}]}`)
+	res = syncWithBody(t, handler, "", userID, token, replaceBody)
+	var replaced SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &replaced); err != nil {
+		t.Fatal(err)
+	}
+	if replaced.FullSnapshotRequired || !replaced.ChangesComplete || replaced.Applied.Habits != 1 {
+		t.Fatalf("replace response = %#v", replaced)
+	}
+	fullBody = []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-3","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", userID, token, fullBody)
+	if err := json.Unmarshal(res.Body.Bytes(), &full); err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Changes.Habits) != 1 || full.Changes.Habits[0].ID != "habit-2" {
+		t.Fatalf("remote was not replaced: %#v", full.Changes.Habits)
+	}
+}
+
 func TestSyncReturnsRecoveredHabitForOrphanHabitDays(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()

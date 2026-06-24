@@ -198,6 +198,10 @@ func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "alias unavailable")
 			return
 		}
+		if errors.Is(err, ErrSyncUserNotFound) {
+			writeError(w, http.StatusNotFound, "sync account not found")
+			return
+		}
 		slog.Error("set account alias", "user", req.UserIDHash, "error", err)
 		writeError(w, http.StatusInternalServerError, "alias failed")
 		return

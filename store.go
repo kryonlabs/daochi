@@ -20,6 +20,8 @@ type Store struct {
 	db *sql.DB
 }
 
+var ErrSyncUserNotFound = errors.New("sync user not found")
+
 type PublicStats struct {
 	UserCount        int64
 	StorageUsedBytes int64
@@ -143,6 +145,9 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 	if err != nil {
 		return err
 	}
+	if err := s.migrateMeditationLogPrimaryKey(ctx); err != nil {
+		return err
+	}
 	for _, stmt := range []string{
 		`ALTER TABLE server_meditation_logs ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_habits ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
@@ -161,6 +166,63 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 CREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique
 ON server_users(alias)
 WHERE alias IS NOT NULL AND alias<>''`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) migrateMeditationLogPrimaryKey(ctx context.Context) error {
+	var userIDPK int
+	var idPK int
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(server_meditation_logs)`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		switch name {
+		case "user_id_hash":
+			userIDPK = pk
+		case "id":
+			idPK = pk
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if userIDPK == 1 && idPK == 2 {
+		return nil
+	}
+	_, err = s.db.ExecContext(ctx, `
+PRAGMA foreign_keys=OFF;
+BEGIN;
+CREATE TABLE IF NOT EXISTS server_meditation_logs_new (
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	id TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	duration_seconds INTEGER NOT NULL DEFAULT 0,
+	completed_at TEXT NOT NULL,
+	server_version INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(user_id_hash, id)
+);
+INSERT OR IGNORE INTO server_meditation_logs_new(user_id_hash,id,session_id,duration_seconds,completed_at,server_version,created_at)
+SELECT user_id_hash,id,session_id,duration_seconds,completed_at,server_version,created_at
+FROM server_meditation_logs;
+DROP TABLE server_meditation_logs;
+ALTER TABLE server_meditation_logs_new RENAME TO server_meditation_logs;
+COMMIT;
+PRAGMA foreign_keys=ON;`)
+	if err != nil {
+		_, _ = s.db.ExecContext(ctx, `ROLLBACK; PRAGMA foreign_keys=ON;`)
 		return err
 	}
 	return nil
@@ -205,9 +267,9 @@ func (s *Store) ApplySync(ctx context.Context, req SyncRequest, publicKey []byte
 			return SyncResult{}, err
 		}
 		res, err := tx.ExecContext(ctx, `
-INSERT INTO server_meditation_logs(id,user_id_hash,session_id,duration_seconds,completed_at,server_version)
+INSERT INTO server_meditation_logs(user_id_hash,id,session_id,duration_seconds,completed_at,server_version)
 VALUES(?1,?2,?3,?4,?5,?6)
-ON CONFLICT(id) DO NOTHING`, item.ID, req.UserIDHash, item.SessionID, item.DurationSeconds, normalizeTime(item.CompletedAt, item.Timestamp), version)
+ON CONFLICT(user_id_hash,id) DO NOTHING`, req.UserIDHash, item.ID, item.SessionID, item.DurationSeconds, normalizeTime(item.CompletedAt, item.Timestamp), version)
 		if err != nil {
 			return SyncResult{}, err
 		}
@@ -321,7 +383,7 @@ WHERE user_id_hash=?1`, userID, alias)
 		return err
 	}
 	if rowsAffected(res) == 0 {
-		return errors.New("sync user not found")
+		return ErrSyncUserNotFound
 	}
 	return nil
 }
@@ -472,6 +534,7 @@ ORDER BY habit_id,local_date`, userID)
 }
 
 func (s *Store) hashSessions(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
+	sessionIDs := []string{}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at
 FROM server_sessions
@@ -492,11 +555,20 @@ ORDER BY id`, userID)
 		}
 		fmt.Fprintf(h, "session\t%s\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%s\n",
 			id, startedAt, localDate, topic, activity, source, roundsHash, deletedAt, updatedAt)
+		sessionIDs = append(sessionIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range sessionIDs {
 		if err := s.hashSessionRounds(ctx, h, userID, id); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func (s *Store) hashSessionRounds(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID, sessionID string) error {
@@ -715,7 +787,7 @@ WHERE user_id_hash=?1`, userID)
 		return err
 	}
 	if rowsAffected(res) == 0 {
-		return errors.New("sync user not found")
+		return ErrSyncUserNotFound
 	}
 	_, err = tx.ExecContext(ctx, `
 INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)

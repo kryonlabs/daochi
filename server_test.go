@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -46,6 +47,27 @@ func testServer(t *testing.T) (*Server, *Store, *recordingVerifier) {
 	}, store, verifier)
 	t.Cleanup(func() { _ = store.Close() })
 	return server, store, verifier
+}
+
+type testIdentity struct {
+	PublicKey []byte
+	UserID    string
+	Signature string
+	Token     string
+}
+
+func newTestIdentity(t *testing.T, target any, seed byte) testIdentity {
+	return newTestIdentityAt(t, target, "", seed)
+}
+
+func newTestIdentityAt(t *testing.T, target any, baseURL string, seed byte) testIdentity {
+	t.Helper()
+	publicKey := bytes.Repeat([]byte{seed}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{seed + 0x11}, mlDSA44SignatureSize))
+	token, _ := loginWithKey(t, target, baseURL, userID, hex.EncodeToString(publicKey), signature)
+	return testIdentity{PublicKey: publicKey, UserID: userID, Signature: signature, Token: token}
 }
 
 func TestDocsEndpoints(t *testing.T) {
@@ -304,6 +326,190 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	}
 }
 
+func TestCrossAccountSyncIsolation(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x51)
+	bob := newTestIdentity(t, handler, 0x52)
+
+	aliceBody := []byte(`{"user_id_hash":"` + alice.UserID + `","client_id":"alice-client","habits":[{"id":"shared-id","name":"Alice habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"shared-id","local_date":20260619,"completed":true,"count":1,"updated_at":"2026-06-19T00:00:00Z"}],"sessions":[{"id":"shared-session","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"a","deleted_at":0,"updated_at":"2026-06-19T00:00:00Z","rounds":[{"round_index":0,"breaths":10,"hold_seconds":20}]}],"meditation_logs":[{"id":"shared-log","session_id":"alice-session","duration_seconds":60,"completed_at":"2026-06-19T00:00:00Z"}]}`)
+	syncWithBody(t, handler, "", alice.UserID, alice.Token, aliceBody)
+
+	bobBody := []byte(`{"user_id_hash":"` + bob.UserID + `","client_id":"bob-client","since_server_version":0}`)
+	res := syncWithBody(t, handler, "", bob.UserID, bob.Token, bobBody)
+	var bobSync SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &bobSync); err != nil {
+		t.Fatal(err)
+	}
+	if len(bobSync.Changes.Habits) != 0 || len(bobSync.Changes.HabitDays) != 0 ||
+		len(bobSync.Changes.Sessions) != 0 || len(bobSync.Changes.MeditationLogs) != 0 {
+		t.Fatalf("bob received alice data: %#v", bobSync.Changes)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(aliceBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", alice.UserID)
+	req.Header.Set("Authorization", "Bearer "+bob.Token)
+	mismatch := httptest.NewRecorder()
+	handler.ServeHTTP(mismatch, req)
+	if mismatch.Code != http.StatusUnauthorized {
+		t.Fatalf("bob token for alice sync status = %d body=%s", mismatch.Code, mismatch.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(bobBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", bob.UserID)
+	req.Header.Set("Authorization", "Bearer "+alice.Token)
+	mismatch = httptest.NewRecorder()
+	handler.ServeHTTP(mismatch, req)
+	if mismatch.Code != http.StatusUnauthorized {
+		t.Fatalf("alice token for bob sync status = %d body=%s", mismatch.Code, mismatch.Body.String())
+	}
+}
+
+func TestMeditationLogsAreScopedPerUser(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x61)
+	bob := newTestIdentity(t, handler, 0x62)
+
+	aliceBody := []byte(`{"user_id_hash":"` + alice.UserID + `","client_id":"alice-client","meditation_logs":[{"id":"same-log","session_id":"alice-session","duration_seconds":60,"completed_at":"2026-06-19T00:00:00Z"}]}`)
+	bobBody := []byte(`{"user_id_hash":"` + bob.UserID + `","client_id":"bob-client","meditation_logs":[{"id":"same-log","session_id":"bob-session","duration_seconds":120,"completed_at":"2026-06-20T00:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", alice.UserID, alice.Token, aliceBody)
+	var aliceWrite SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &aliceWrite); err != nil {
+		t.Fatal(err)
+	}
+	if aliceWrite.Applied.MeditationLogs != 1 {
+		t.Fatalf("alice applied meditation logs = %d", aliceWrite.Applied.MeditationLogs)
+	}
+	res = syncWithBody(t, handler, "", bob.UserID, bob.Token, bobBody)
+	var bobWrite SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &bobWrite); err != nil {
+		t.Fatal(err)
+	}
+	if bobWrite.Applied.MeditationLogs != 1 {
+		t.Fatalf("bob applied meditation logs = %d", bobWrite.Applied.MeditationLogs)
+	}
+
+	res = syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-reader","since_server_version":0}`))
+	var aliceRead SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &aliceRead); err != nil {
+		t.Fatal(err)
+	}
+	res = syncWithBody(t, handler, "", bob.UserID, bob.Token, []byte(`{"user_id_hash":"`+bob.UserID+`","client_id":"bob-reader","since_server_version":0}`))
+	var bobRead SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &bobRead); err != nil {
+		t.Fatal(err)
+	}
+	if len(aliceRead.Changes.MeditationLogs) != 1 || aliceRead.Changes.MeditationLogs[0].DurationSeconds != 60 {
+		t.Fatalf("alice meditation logs = %#v", aliceRead.Changes.MeditationLogs)
+	}
+	if len(bobRead.Changes.MeditationLogs) != 1 || bobRead.Changes.MeditationLogs[0].DurationSeconds != 120 {
+		t.Fatalf("bob meditation logs = %#v", bobRead.Changes.MeditationLogs)
+	}
+}
+
+func TestMigrateMeditationLogsToPerUserPrimaryKey(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "old-lyra.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE server_users (
+	user_id_hash TEXT PRIMARY KEY,
+	public_key BLOB NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE server_meditation_logs (
+	id TEXT PRIMARY KEY,
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	session_id TEXT NOT NULL,
+	duration_seconds INTEGER NOT NULL DEFAULT 0,
+	completed_at TEXT NOT NULL,
+	server_version INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);`)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	rows, err := store.db.Query(`PRAGMA table_info(server_meditation_logs)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userIDPK := 0
+	idPK := 0
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		if name == "user_id_hash" {
+			userIDPK = pk
+		}
+		if name == "id" {
+			idPK = pk
+		}
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if userIDPK != 1 || idPK != 2 {
+		t.Fatalf("meditation log primary key user_id_hash=%d id=%d", userIDPK, idPK)
+	}
+}
+
+func TestAliasRejectsCrossAccountAndMissingAccount(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x71)
+	bob := newTestIdentity(t, handler, 0x72)
+
+	aliasBody := []byte(`{"user_id_hash":"` + alice.UserID + `","alias":"alice_alias"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", alice.UserID)
+	req.Header.Set("Authorization", "Bearer "+bob.Token)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("bob token for alice alias status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	missingUser := strings.Repeat("a", 64)
+	missingToken, err := issueAuthToken(server.cfg.TokenSecret, missingUser, server.cfg.TokenTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasBody = []byte(`{"user_id_hash":"` + missingUser + `","alias":"missing_alias"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", missingUser)
+	req.Header.Set("Authorization", "Bearer "+missingToken)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("missing account alias status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestSyncReturnsRecoveredHabitForOrphanHabitDays(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -498,6 +704,51 @@ func TestSyncWebSocketReceivesChangeEvents(t *testing.T) {
 	if changed.Type != "sync_changed" || changed.UserIDHash != userID ||
 		changed.ServerVersion != syncResponse.ServerVersion {
 		t.Fatalf("changed event = %#v, sync response version = %d", changed, syncResponse.ServerVersion)
+	}
+}
+
+func TestSyncWebSocketIsScopedToTokenUser(t *testing.T) {
+	server, _, _ := testServer(t)
+	ts := httptest.NewServer(server.Routes())
+	t.Cleanup(ts.Close)
+
+	alice := newTestIdentityAt(t, ts.Client(), ts.URL, 0x81)
+	bob := newTestIdentityAt(t, ts.Client(), ts.URL, 0x82)
+	reader, conn := openSyncWebSocket(t, ts.URL, alice.Token)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	ready := readTestWebSocketEvent(t, reader)
+	if ready.Type != "sync_ready" || ready.UserIDHash != alice.UserID {
+		t.Fatalf("ready event = %#v", ready)
+	}
+	server.syncHub.mu.Lock()
+	aliceSubs := len(server.syncHub.subs[alice.UserID])
+	bobSubs := len(server.syncHub.subs[bob.UserID])
+	server.syncHub.mu.Unlock()
+	if aliceSubs != 1 || bobSubs != 0 {
+		t.Fatalf("unexpected websocket subscriptions alice=%d bob=%d", aliceSubs, bobSubs)
+	}
+
+	bobBody := []byte(`{"user_id_hash":"` + bob.UserID + `","client_id":"bob-client","habits":[{"id":"bob-habit","name":"Bob habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	syncWithBody(t, ts.Client(), ts.URL, bob.UserID, bob.Token, bobBody)
+	server.syncHub.mu.Lock()
+	aliceSubs = len(server.syncHub.subs[alice.UserID])
+	bobSubs = len(server.syncHub.subs[bob.UserID])
+	server.syncHub.mu.Unlock()
+	if aliceSubs != 1 || bobSubs != 0 {
+		t.Fatalf("bob sync changed websocket subscriptions alice=%d bob=%d", aliceSubs, bobSubs)
+	}
+
+	aliceBody := []byte(`{"user_id_hash":"` + alice.UserID + `","client_id":"alice-client","habits":[{"id":"alice-habit","name":"Alice habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	res := syncWithBody(t, ts.Client(), ts.URL, alice.UserID, alice.Token, aliceBody)
+	var syncResponse SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &syncResponse); err != nil {
+		t.Fatal(err)
+	}
+	changed := readTestWebSocketEvent(t, reader)
+	if changed.Type != "sync_changed" || changed.UserIDHash != alice.UserID ||
+		changed.ServerVersion != syncResponse.ServerVersion {
+		t.Fatalf("alice changed event = %#v, sync response version = %d", changed, syncResponse.ServerVersion)
 	}
 }
 

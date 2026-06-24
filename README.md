@@ -13,6 +13,8 @@ Lyra is the stateless sync relay for Inbe. It stores public keys and mirrored ap
 - `GET /`
 
 `api.waozi.xyz` should terminate TLS at a reverse proxy and forward to `LYRA_ADDR`, for example `127.0.0.1:8080`.
+Set `LYRA_TOKEN_SECRET_HEX` to at least 32 random bytes encoded as hex in production.
+`LYRA_ALLOW_EPHEMERAL_TOKEN_SECRET=1` is only for local development because it invalidates tokens on restart and is not a stable server secret.
 
 ## Signature Message
 

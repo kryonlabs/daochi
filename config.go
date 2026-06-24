@@ -3,9 +3,11 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"log"
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,6 +24,9 @@ type Config struct {
 func loadConfig() Config {
 	secret := envBytesHex("LYRA_TOKEN_SECRET_HEX", nil)
 	if len(secret) < 32 {
+		if !envBool("LYRA_ALLOW_EPHEMERAL_TOKEN_SECRET", false) {
+			log.Fatal("LYRA_TOKEN_SECRET_HEX must be at least 32 bytes; set LYRA_ALLOW_EPHEMERAL_TOKEN_SECRET=1 only for local development")
+		}
 		slog.Warn("LYRA_TOKEN_SECRET_HEX is missing or too short; using an ephemeral token secret suitable only for local development")
 		secret = make([]byte, 32)
 		if _, err := rand.Read(secret); err != nil {
@@ -62,6 +67,13 @@ func envInt64(key string, fallback int64) int64 {
 		if err == nil && n > 0 {
 			return n
 		}
+	}
+	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	if value := strings.ToLower(strings.TrimSpace(os.Getenv(key))); value != "" {
+		return value == "1" || value == "true" || value == "yes" || value == "on"
 	}
 	return fallback
 }

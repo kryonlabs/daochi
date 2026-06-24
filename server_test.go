@@ -310,11 +310,45 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 		t.Fatalf("sync alias = %q", payload.AccountAlias)
 	}
 
+	aliasBody = []byte(`{"user_id_hash":"` + userID + `","alias":"@new_waozi"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("alias change status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &aliasRes); err != nil {
+		t.Fatal(err)
+	}
+	if aliasRes.Alias != "new_waozi" {
+		t.Fatalf("changed alias = %q", aliasRes.Alias)
+	}
+	syncRes = syncWithBody(t, handler, "", userID, token, body)
+	if err := json.Unmarshal(syncRes.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.AccountAlias != "new_waozi" {
+		t.Fatalf("sync changed alias = %q", payload.AccountAlias)
+	}
+
 	otherKey := bytes.Repeat([]byte{0x4b}, mlDSA44PublicKeySize)
 	otherHash := sha256.Sum256(otherKey)
 	otherID := hex.EncodeToString(otherHash[:])
 	otherToken, _ := loginWithKey(t, handler, "", otherID, hex.EncodeToString(otherKey), signature)
 	aliasBody = []byte(`{"user_id_hash":"` + otherID + `","alias":"waozi"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", otherID)
+	req.Header.Set("Authorization", "Bearer "+otherToken)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("old alias reuse status = %d body=%s", res.Code, res.Body.String())
+	}
+	aliasBody = []byte(`{"user_id_hash":"` + otherID + `","alias":"new_waozi"}`)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Inbe-User", otherID)

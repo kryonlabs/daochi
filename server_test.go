@@ -602,11 +602,8 @@ func TestSyncAppliesLaterZeroHabitDay(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Changes.HabitDays) != 1 ||
-		payload.Changes.HabitDays[0].HabitID != "habit-2" ||
-		payload.Changes.HabitDays[0].Completed ||
-		payload.Changes.HabitDays[0].Count != 0 {
-		t.Fatalf("habit day clear did not apply: %#v", payload.Changes.HabitDays)
+	if len(payload.Changes.HabitDays) != 0 {
+		t.Fatalf("habit day clear was still snapshotted: %#v", payload.Changes.HabitDays)
 	}
 }
 
@@ -635,11 +632,43 @@ func TestSyncAppliesEqualTimestampZeroHabitDay(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Changes.HabitDays) != 1 ||
-		payload.Changes.HabitDays[0].HabitID != "habit-2" ||
-		payload.Changes.HabitDays[0].Completed ||
-		payload.Changes.HabitDays[0].Count != 0 {
-		t.Fatalf("equal timestamp habit day clear did not apply: %#v", payload.Changes.HabitDays)
+	if len(payload.Changes.HabitDays) != 0 {
+		t.Fatalf("equal timestamp habit day clear was still snapshotted: %#v", payload.Changes.HabitDays)
+	}
+}
+
+func TestNormalDeletesRemoveServerData(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x47}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x58}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":true,"count":4,"updated_at":"2026-06-19T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":0,"updated_at":"2026-06-19T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":60}]}]}`)
+	res := syncWithBody(t, handler, "", userID, token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	deletes := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":` + strconv.FormatInt(payload.ServerVersion, 10) + `,"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":1782098659,"updated_at":"2026-06-20T00:00:00Z"}],"habit_days":[{"habit_id":"habit-1","local_date":20260619,"completed":false,"count":0,"updated_at":"2026-06-20T00:00:00Z"}],"sessions":[{"id":"session-1","started_at":"2026-06-19T00:00:00Z","local_date":20260619,"topic":"0","activity":1,"source":"test","rounds_hash":"abc","deleted_at":1782098659,"updated_at":"2026-06-20T00:00:00Z"}]}`)
+	res = syncWithBody(t, handler, "", userID, token, deletes)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Applied.Habits == 0 || payload.Applied.Sessions == 0 {
+		t.Fatalf("delete commands were not applied: %#v", payload.Applied)
+	}
+
+	fullBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-3","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", userID, token, fullBody)
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Changes.Habits) != 0 || len(payload.Changes.HabitDays) != 0 || len(payload.Changes.Sessions) != 0 {
+		t.Fatalf("deleted data was still snapshotted: %#v", payload.Changes)
 	}
 }
 

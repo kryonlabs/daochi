@@ -279,6 +279,14 @@ ON CONFLICT(user_id_hash,id) DO NOTHING`, req.UserIDHash, item.ID, item.SessionI
 		if req.Bootstrap && habit.DeletedAt > 0 {
 			continue
 		}
+		if habit.DeletedAt > 0 {
+			applied, err := deleteHabit(ctx, tx, req.UserIDHash, habit)
+			if err != nil {
+				return SyncResult{}, err
+			}
+			result.Habits += applied
+			continue
+		}
 		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
 		if err != nil {
 			return SyncResult{}, err
@@ -311,6 +319,14 @@ WHERE excluded.updated_at >= server_habits.updated_at`,
 		if req.Bootstrap && !day.Completed && day.Count <= 0 {
 			continue
 		}
+		if !day.Completed && day.Count <= 0 {
+			applied, err := deleteHabitDay(ctx, tx, req.UserIDHash, day)
+			if err != nil {
+				return SyncResult{}, err
+			}
+			result.HabitDays += applied
+			continue
+		}
 		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
 		if err != nil {
 			return SyncResult{}, err
@@ -333,6 +349,14 @@ OR excluded.updated_at = server_habit_days.updated_at`,
 	}
 	for _, session := range req.Sessions {
 		if req.Bootstrap && session.DeletedAt > 0 {
+			continue
+		}
+		if session.DeletedAt > 0 {
+			applied, err := deleteSession(ctx, tx, req.UserIDHash, session)
+			if err != nil {
+				return SyncResult{}, err
+			}
+			result.Sessions += applied
 			continue
 		}
 		applied, err := upsertSession(ctx, tx, req.UserIDHash, session)
@@ -849,6 +873,75 @@ VALUES(?1,?2,?3,?4,?5)`, userID, session.ID, round.RoundIndex, round.Breaths, ro
 		if err != nil {
 			return 0, err
 		}
+	}
+	return applied, nil
+}
+
+func deleteHabit(ctx context.Context, tx *sql.Tx, userID string, habit Habit) (int, error) {
+	updatedAt := normalizeTime(habit.UpdatedAt, "")
+	res, err := tx.ExecContext(ctx, `
+DELETE FROM server_habits
+WHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3`, userID, habit.ID, updatedAt)
+	if err != nil {
+		return 0, err
+	}
+	applied := rowsAffected(res)
+	if applied == 0 {
+		return 0, nil
+	}
+	res, err = tx.ExecContext(ctx, `
+DELETE FROM server_habit_days
+WHERE user_id_hash=?1 AND habit_id=?2`, userID, habit.ID)
+	if err != nil {
+		return 0, err
+	}
+	applied += rowsAffected(res)
+	if _, err := nextUserVersion(ctx, tx, userID); err != nil {
+		return 0, err
+	}
+	return applied, nil
+}
+
+func deleteHabitDay(ctx context.Context, tx *sql.Tx, userID string, day HabitDay) (int, error) {
+	updatedAt := normalizeTime(day.UpdatedAt, "")
+	res, err := tx.ExecContext(ctx, `
+DELETE FROM server_habit_days
+WHERE user_id_hash=?1 AND habit_id=?2 AND local_date=?3 AND updated_at<=?4`,
+		userID, day.HabitID, day.LocalDate, updatedAt)
+	if err != nil {
+		return 0, err
+	}
+	applied := rowsAffected(res)
+	if applied == 0 {
+		return 0, nil
+	}
+	if _, err := nextUserVersion(ctx, tx, userID); err != nil {
+		return 0, err
+	}
+	return applied, nil
+}
+
+func deleteSession(ctx context.Context, tx *sql.Tx, userID string, session Session) (int, error) {
+	updatedAt := normalizeTime(session.UpdatedAt, session.StartedAt)
+	res, err := tx.ExecContext(ctx, `
+DELETE FROM server_sessions
+WHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3`, userID, session.ID, updatedAt)
+	if err != nil {
+		return 0, err
+	}
+	applied := rowsAffected(res)
+	if applied == 0 {
+		return 0, nil
+	}
+	res, err = tx.ExecContext(ctx, `
+DELETE FROM server_session_rounds
+WHERE user_id_hash=?1 AND session_id=?2`, userID, session.ID)
+	if err != nil {
+		return 0, err
+	}
+	applied += rowsAffected(res)
+	if _, err := nextUserVersion(ctx, tx, userID); err != nil {
+		return 0, err
 	}
 	return applied, nil
 }

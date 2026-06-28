@@ -957,16 +957,27 @@ WHERE excluded.value != server_profile_stats.value
 
 func (s *Store) FriendStats(ctx context.Context, userID, app, practice, metric string) ([]FriendStatRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT ps.user_id_hash,COALESCE(u.alias,''),ps.app,ps.practice,ps.metric,ps.value,ps.label,ps.local_date,ps.updated_at
-FROM server_profile_stats ps
-JOIN server_users u ON u.user_id_hash=ps.user_id_hash
-WHERE ps.app=?2 AND ps.practice=?3 AND ps.metric=?4
-  AND (ps.user_id_hash=?1 OR EXISTS (
-      SELECT 1 FROM server_friendships f
-      WHERE (f.user_id_a=?1 AND f.user_id_b=ps.user_id_hash)
-         OR (f.user_id_b=?1 AND f.user_id_a=ps.user_id_hash)
-  ))
-ORDER BY ps.value DESC, COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID, app, practice, metric)
+WITH visible_users AS (
+  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias
+  FROM server_users u
+  WHERE u.user_id_hash=?1
+  UNION
+  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias
+  FROM server_friendships f
+  JOIN server_users u ON u.user_id_hash=CASE
+      WHEN f.user_id_a=?1 THEN f.user_id_b
+      ELSE f.user_id_a
+  END
+  WHERE f.user_id_a=?1 OR f.user_id_b=?1
+)
+SELECT vu.user_id_hash,vu.alias,?2,?3,?4,
+       COALESCE(ps.value,0),COALESCE(ps.label,''),COALESCE(ps.local_date,0),
+       COALESCE(ps.updated_at,'')
+FROM visible_users vu
+LEFT JOIN server_profile_stats ps
+  ON ps.user_id_hash=vu.user_id_hash
+ AND ps.app=?2 AND ps.practice=?3 AND ps.metric=?4
+ORDER BY COALESCE(ps.value,0) DESC, COALESCE(vu.alias,vu.user_id_hash),vu.user_id_hash`, userID, app, practice, metric)
 	if err != nil {
 		return nil, err
 	}

@@ -692,7 +692,8 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
 		t.Fatal(err)
 	}
-	if len(stats.Rows) != 1 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 82.5 {
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 82.5 ||
+		stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 {
 		t.Fatalf("unexpected avg hold stats: %#v", stats.Rows)
 	}
 

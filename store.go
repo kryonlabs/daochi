@@ -957,7 +957,21 @@ WHERE excluded.value != server_profile_stats.value
 
 func (s *Store) FriendStats(ctx context.Context, userID, app, practice, metric string) ([]FriendStatRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-WITH visible_users AS (
+WITH RECURSIVE offsets(n, local_date) AS (
+  SELECT 0, CAST(strftime('%Y%m%d','now') AS INTEGER)
+  UNION ALL
+  SELECT n + 1, CAST(strftime('%Y%m%d','now', printf('-%d days', n + 1)) AS INTEGER)
+  FROM offsets
+  WHERE n < 370
+),
+activity(value) AS (
+  SELECT CASE ?3
+    WHEN 'meditation' THEN 1
+    WHEN 'sun_salutation' THEN 2
+    ELSE 0
+  END
+),
+visible_users AS (
   SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias
   FROM server_users u
   WHERE u.user_id_hash=?1
@@ -969,15 +983,82 @@ WITH visible_users AS (
       ELSE f.user_id_a
   END
   WHERE f.user_id_a=?1 OR f.user_id_b=?1
+),
+activity_days AS (
+  SELECT s.user_id_hash, s.local_date
+  FROM server_sessions s, activity a
+  WHERE s.deleted_at=0
+    AND s.local_date>0
+    AND s.activity=a.value
+  UNION
+  SELECT hd.user_id_hash, hd.local_date
+  FROM server_habit_days hd
+  JOIN server_habits h
+    ON h.user_id_hash=hd.user_id_hash
+   AND h.id=hd.habit_id
+  JOIN activity a
+  WHERE h.deleted_at=0
+    AND h.sync_mode=1
+    AND (h.sync_activity & (1 << a.value))<>0
+    AND (hd.completed<>0 OR hd.count>0)
+),
+activity_values AS (
+  SELECT vu.user_id_hash,
+         CASE ?4
+           WHEN 'avg_hold' THEN COALESCE((
+             SELECT AVG(sr.hold_seconds)
+             FROM server_sessions s
+             JOIN server_session_rounds sr
+               ON sr.user_id_hash=s.user_id_hash
+              AND sr.session_id=s.id
+             JOIN activity a
+             WHERE s.user_id_hash=vu.user_id_hash
+               AND s.deleted_at=0
+               AND s.activity=a.value
+               AND sr.hold_seconds>0
+           ), 0)
+           ELSE COALESCE((
+             SELECT MIN(o.n)
+             FROM offsets o
+             WHERE NOT EXISTS (
+               SELECT 1
+               FROM activity_days d
+               WHERE d.user_id_hash=vu.user_id_hash
+                 AND d.local_date=o.local_date
+             )
+           ), 371)
+         END AS value,
+         COALESCE((
+           SELECT MAX(updated_at)
+           FROM (
+             SELECT s.updated_at
+             FROM server_sessions s, activity a
+             WHERE s.user_id_hash=vu.user_id_hash
+               AND s.deleted_at=0
+               AND s.activity=a.value
+             UNION ALL
+             SELECT hd.updated_at
+             FROM server_habit_days hd
+             JOIN server_habits h
+               ON h.user_id_hash=hd.user_id_hash
+              AND h.id=hd.habit_id
+             JOIN activity a
+             WHERE hd.user_id_hash=vu.user_id_hash
+               AND h.deleted_at=0
+               AND h.sync_mode=1
+               AND (h.sync_activity & (1 << a.value))<>0
+               AND (hd.completed<>0 OR hd.count>0)
+           )
+         ), '') AS updated_at
+  FROM visible_users vu
 )
 SELECT vu.user_id_hash,vu.alias,?2,?3,?4,
-       COALESCE(ps.value,0),COALESCE(ps.label,''),COALESCE(ps.local_date,0),
-       COALESCE(ps.updated_at,'')
+       COALESCE(av.value,0),printf('%.0f',COALESCE(av.value,0)),CAST(strftime('%Y%m%d','now') AS INTEGER),
+       COALESCE(av.updated_at,'')
 FROM visible_users vu
-LEFT JOIN server_profile_stats ps
-  ON ps.user_id_hash=vu.user_id_hash
- AND ps.app=?2 AND ps.practice=?3 AND ps.metric=?4
-ORDER BY COALESCE(ps.value,0) DESC, COALESCE(vu.alias,vu.user_id_hash),vu.user_id_hash`, userID, app, practice, metric)
+LEFT JOIN activity_values av
+  ON av.user_id_hash=vu.user_id_hash
+ORDER BY COALESCE(av.value,0) DESC, COALESCE(vu.alias,vu.user_id_hash),vu.user_id_hash`, userID, app, practice, metric)
 	if err != nil {
 		return nil, err
 	}

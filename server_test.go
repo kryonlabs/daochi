@@ -664,9 +664,9 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		t.Fatalf("accept resent status = %d body=%s", res.Code, res.Body.String())
 	}
 
-	putStats(t, handler, alice, `{"app":"inbe","metrics":[{"practice":"whm","metric":"streak","value":7,"label":"7 days","local_date":20260628},{"practice":"whm","metric":"avg_hold","value":82.5,"label":"82s"}]}`)
-	putStats(t, handler, bob, `{"app":"inbe","metrics":[{"practice":"whm","metric":"streak","value":5,"label":"5 days"}]}`)
-	putStats(t, handler, carol, `{"app":"inbe","metrics":[{"practice":"whm","metric":"streak","value":99,"label":"99 days"}]}`)
+	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-stats","habits":[{"id":"whm","name":"WHM","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":1,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-26T00:00:00Z"}],"habit_days":[{"habit_id":"whm","local_date":`+time.Now().UTC().Format("20060102")+`,"completed":true,"count":1,"updated_at":"2026-06-28T00:00:00Z"}],"sessions":[{"id":"alice-hold","started_at":"2026-06-28T00:00:00Z","local_date":`+time.Now().UTC().Format("20060102")+`,"topic":"0","activity":0,"source":"test","rounds_hash":"alice","deleted_at":0,"updated_at":"2026-06-28T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":82},{"round_index":1,"breaths":0,"hold_seconds":83}]}]}`))
+	syncWithBody(t, handler, "", bob.UserID, bob.Token, []byte(`{"user_id_hash":"`+bob.UserID+`","client_id":"bob-stats","habits":[{"id":"whm","name":"WHM","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":1,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-26T00:00:00Z"}],"habit_days":[{"habit_id":"whm","local_date":`+time.Now().UTC().Format("20060102")+`,"completed":true,"count":1,"updated_at":"2026-06-28T00:00:00Z"}]}`))
+	syncWithBody(t, handler, "", carol.UserID, carol.Token, []byte(`{"user_id_hash":"`+carol.UserID+`","client_id":"carol-stats","habits":[{"id":"whm","name":"WHM","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":1,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-26T00:00:00Z"}],"habit_days":[{"habit_id":"whm","local_date":`+time.Now().UTC().Format("20060102")+`,"completed":true,"count":1,"updated_at":"2026-06-28T00:00:00Z"}]}`))
 
 	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=whm&metric=streak", bob, nil)
 	if res.Code != http.StatusOK {
@@ -676,7 +676,7 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
 		t.Fatal(err)
 	}
-	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 7 || stats.Rows[1].UserIDHash != bob.UserID {
+	if len(stats.Rows) != 2 || stats.Rows[0].Value != 1 || stats.Rows[1].Value != 1 {
 		t.Fatalf("unexpected friend stats: %#v", stats.Rows)
 	}
 	for _, row := range stats.Rows {

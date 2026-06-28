@@ -712,6 +712,50 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 	}
 }
 
+func TestSocialCacheIsServerOwnedAndSynced(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x27)
+	bob := newTestIdentity(t, handler, 0x28)
+
+	req := createFriendRequest(t, handler, alice, bob.UserID)
+	res := friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+req.ID+"/accept", bob, []byte(`{}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("accept status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	upload := []byte(`{"protocol_version":2,"user_id_hash":"` + alice.UserID + `","client_id":"test-client-social","social_cache":[{"kind":"friends.list","json":{"friends":[{"user_id_hash":"hacked"}]},"updated_at":"2026-06-28T00:00:00Z"}]}`)
+	raw := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(upload))
+	raw.Header.Set("Content-Type", "application/json")
+	raw.Header.Set("X-Inbe-User", alice.UserID)
+	raw.Header.Set("Authorization", "Bearer "+alice.Token)
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, raw)
+	if rejected.Code == http.StatusOK {
+		t.Fatalf("client social cache upload accepted: %s", rejected.Body.String())
+	}
+	assertCount(t, store, "server_social_cache", 0)
+
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends", alice, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("friends status = %d body=%s", res.Code, res.Body.String())
+	}
+	assertCount(t, store, "server_social_cache", 1)
+
+	syncBody := []byte(`{"protocol_version":2,"user_id_hash":"` + alice.UserID + `","client_id":"test-client-social","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", alice.UserID, alice.Token, syncBody)
+	var synced SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &synced); err != nil {
+		t.Fatal(err)
+	}
+	if len(synced.Changes.SocialCache) != 1 ||
+		synced.Changes.SocialCache[0].Kind != "friends.list" ||
+		!bytes.Contains(synced.Changes.SocialCache[0].JSON, []byte(bob.UserID)) ||
+		bytes.Contains(synced.Changes.SocialCache[0].JSON, []byte("hacked")) {
+		t.Fatalf("unexpected synced social cache: %#v", synced.Changes.SocialCache)
+	}
+}
+
 func TestCrossAccountSyncIsolation(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()

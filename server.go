@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +19,7 @@ import (
 var userIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
 var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
+var ukuIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{4,128}$`)
 
 type Server struct {
 	cfg        Config
@@ -48,6 +51,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
+	mux.HandleFunc("GET /api/v1/uku/processes", s.handleUkuProcessList)
+	mux.HandleFunc("POST /api/v1/uku/processes", s.handleUkuProcessCreate)
+	mux.HandleFunc("GET /api/v1/uku/processes/", s.handleUkuProcessRoute)
+	mux.HandleFunc("PATCH /api/v1/uku/processes/", s.handleUkuProcessRoute)
+	mux.HandleFunc("POST /api/v1/uku/processes/", s.handleUkuProcessRoute)
 	return s.withCommonHeaders(mux)
 }
 
@@ -112,17 +120,39 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := SyncResult{}
+	acceptedOps := []string{}
+	remoteOps := []SyncOp{}
 	fullSnapshotRequired := false
 	changesComplete := true
 	sinceVersion := req.SinceServerVersion
+	recordedClientClock := req.ClientClock
 	if req.LastServerStateHash != "" &&
 		!strings.EqualFold(req.LastServerStateHash, baseHash) &&
 		!req.FullSyncRequested {
 		fullSnapshotRequired = true
 		changesComplete = false
 		sinceVersion = 0
+	} else if req.ProtocolVersion >= 2 && !req.FullSyncRequested {
+		compacted, _, err := s.store.SyncOpsCompacted(r.Context(), req.UserIDHash, req.ClientClock)
+		if err != nil {
+			slog.Error("check sync op compaction", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "compaction check failed")
+			return
+		}
+		if compacted {
+			fullSnapshotRequired = true
+			changesComplete = false
+			sinceVersion = 0
+		} else {
+			result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
+			if err != nil {
+				slog.Error("apply sync", "user", req.UserIDHash, "error", err)
+				writeError(w, http.StatusInternalServerError, "sync failed")
+				return
+			}
+		}
 	} else {
-		result, err = s.store.ApplySync(r.Context(), req, publicKey)
+		result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
 		if err != nil {
 			slog.Error("apply sync", "user", req.UserIDHash, "error", err)
 			writeError(w, http.StatusInternalServerError, "sync failed")
@@ -136,16 +166,36 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "changes failed")
 		return
 	}
+	if req.ProtocolVersion >= 2 {
+		if fullSnapshotRequired {
+			remoteOps = []SyncOp{}
+			recordedClientClock = serverVersion
+		} else {
+			remoteOps, err = s.store.OpsSince(r.Context(), req.UserIDHash, req.ClientClock)
+			if err != nil {
+				slog.Error("load sync ops", "user", req.UserIDHash, "error", err)
+				writeError(w, http.StatusInternalServerError, "ops failed")
+				return
+			}
+		}
+	}
 	serverHash, err := s.store.StateHash(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("hash sync response", "user", req.UserIDHash, "error", err)
 		writeError(w, http.StatusInternalServerError, "state hash failed")
 		return
 	}
-	if err := s.store.RecordClientSync(r.Context(), req.UserIDHash, req.ClientID, req.SinceServerVersion, serverVersion); err != nil {
+	if err := s.store.RecordClientSync(r.Context(), req.UserIDHash, req.ClientID, req.SinceServerVersion, serverVersion, req.ProtocolVersion, recordedClientClock); err != nil {
 		slog.Error("record sync client", "user", req.UserIDHash, "client", req.ClientID, "error", err)
 		writeError(w, http.StatusInternalServerError, "client state failed")
 		return
+	}
+	if req.ProtocolVersion >= 2 {
+		if err := s.store.CompactSyncOps(r.Context(), req.UserIDHash); err != nil {
+			slog.Error("compact sync ops", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "compaction failed")
+			return
+		}
 	}
 	if syncResultApplied(result) {
 		s.syncHub.publish(req.UserIDHash, serverVersion)
@@ -157,14 +207,18 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, SyncResponse{
+		ProtocolVersion:      req.ProtocolVersion,
 		Status:               "ok",
 		Applied:              result,
 		AccountAlias:         accountAlias,
 		ServerVersion:        serverVersion,
+		ServerClock:          serverVersion,
 		ServerStateHash:      serverHash,
 		BaseStateHash:        baseHash,
 		ChangesComplete:      changesComplete,
 		FullSnapshotRequired: fullSnapshotRequired,
+		AcceptedOps:          acceptedOps,
+		Ops:                  remoteOps,
 		Changes:              changes,
 	})
 }
@@ -207,6 +261,154 @@ func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, AliasResponse{Status: "ok", Alias: alias})
+}
+
+func (s *Server) handleUkuProcessList(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ListUkuPublicProcesses(r.Context(), 50)
+	if err != nil {
+		slog.Error("list uku processes", "error", err)
+		writeError(w, http.StatusInternalServerError, "process list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"processes": items})
+}
+
+func (s *Server) handleUkuProcessCreate(w http.ResponseWriter, r *http.Request) {
+	req, err := readUkuCreateProcessRequest(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if req.ID == "" {
+		req.ID, err = randomUkuID()
+		if err != nil {
+			slog.Error("generate uku process id", "error", err)
+			writeError(w, http.StatusInternalServerError, "process create failed")
+			return
+		}
+	}
+	process, err := s.store.CreateUkuProcess(r.Context(), req)
+	if err != nil {
+		slog.Error("create uku process", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "process create failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, process)
+}
+
+func (s *Server) handleUkuProcessRoute(w http.ResponseWriter, r *http.Request) {
+	processID, action, ok := parseUkuProcessPath(r.URL.Path)
+	if !ok || !validUkuID(processID) {
+		writeError(w, http.StatusNotFound, "process not found")
+		return
+	}
+	if r.Method == http.MethodGet && action == "" {
+		process, found, err := s.store.UkuProcess(r.Context(), processID)
+		if err != nil {
+			slog.Error("load uku process", "process", processID, "error", err)
+			writeError(w, http.StatusInternalServerError, "process load failed")
+			return
+		}
+		if !found {
+			writeError(w, http.StatusNotFound, "process not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, process)
+		return
+	}
+	if r.Method == http.MethodPatch && action == "" {
+		req, err := readUkuUpdateProcessRequest(w, r, s.cfg.MaxBodyBytes)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+		process, err := s.store.UpdateUkuProcess(r.Context(), processID, req)
+		if err != nil {
+			writeUkuMutationError(w, err, "process update failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, process)
+		return
+	}
+	if r.Method == http.MethodPost && action == "proposals" {
+		req, err := readUkuProposalRequest(w, r, s.cfg.MaxBodyBytes)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+		if req.ID == "" {
+			req.ID, err = randomUkuID()
+			if err != nil {
+				slog.Error("generate uku proposal id", "error", err)
+				writeError(w, http.StatusInternalServerError, "proposal failed")
+				return
+			}
+		}
+		process, err := s.store.UpsertUkuProposal(r.Context(), processID, req)
+		if err != nil {
+			writeUkuMutationError(w, err, "proposal failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, process)
+		return
+	}
+	if r.Method == http.MethodPost && action == "votes" {
+		req, err := readUkuVoteRequest(w, r, s.cfg.MaxBodyBytes)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+		process, err := s.store.UpsertUkuVote(r.Context(), processID, req)
+		if err != nil {
+			writeUkuMutationError(w, err, "vote failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, process)
+		return
+	}
+	writeError(w, http.StatusNotFound, "process not found")
+}
+
+func (s *Server) applyBearerUser(r *http.Request, bodyUser *string) error {
+	if err := applyHeaderUser(r, bodyUser); err != nil {
+		return authError{status: http.StatusBadRequest, message: err.Error()}
+	}
+	tokenUser, err := s.authenticateToken(r)
+	if err != nil {
+		return err
+	}
+	if tokenUser != *bodyUser {
+		return authError{status: http.StatusUnauthorized, message: "token user mismatch"}
+	}
+	return nil
+}
+
+func writeUkuMutationError(w http.ResponseWriter, err error, fallback string) {
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "process not found")
+		return
+	}
+	if errors.Is(err, ErrSyncUserNotFound) {
+		writeError(w, http.StatusForbidden, "not process owner")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, fallback)
 }
 
 func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
@@ -278,10 +480,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "login failed")
 		return
 	}
+	accountAlias, err := s.store.AccountAlias(r.Context(), req.UserIDHash)
+	if err != nil {
+		slog.Error("load account alias", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "alias failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, LoginResponse{
-		Status:    "ok",
-		AuthToken: token,
-		ExpiresIn: int64(s.cfg.TokenTTL.Seconds()),
+		Status:       "ok",
+		AuthToken:    token,
+		ExpiresIn:    int64(s.cfg.TokenTTL.Seconds()),
+		AccountAlias: accountAlias,
 	})
 }
 
@@ -480,6 +689,107 @@ func readAliasRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]
 	return body, req, nil
 }
 
+func readUkuCreateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuCreateProcessRequest, error) {
+	var req UkuCreateProcessRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, errors.New("invalid json")
+	}
+	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.ID = strings.TrimSpace(req.ID)
+	req.Question = strings.TrimSpace(req.Question)
+	req.Description = strings.TrimSpace(req.Description)
+	req.Visibility = normalizeUkuVisibility(req.Visibility)
+	if req.ID != "" && !validUkuID(req.ID) {
+		return req, errors.New("invalid process id")
+	}
+	if req.Question == "" {
+		return req, errors.New("question required")
+	}
+	if !validUkuVisibility(req.Visibility) {
+		return req, errors.New("invalid visibility")
+	}
+	if req.ProposalMinutes <= 0 || req.ProposalMinutes > 525600 {
+		return req, errors.New("invalid proposal_minutes")
+	}
+	if req.VotingMinutes <= 0 || req.VotingMinutes > 525600 {
+		return req, errors.New("invalid voting_minutes")
+	}
+	if req.NegativeWeight < 0 || req.NegativeWeight > 1000000 {
+		return req, errors.New("invalid negative_weight")
+	}
+	return req, nil
+}
+
+func readUkuUpdateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuUpdateProcessRequest, error) {
+	var req UkuUpdateProcessRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, errors.New("invalid json")
+	}
+	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.Question = strings.TrimSpace(req.Question)
+	req.Description = strings.TrimSpace(req.Description)
+	req.Visibility = normalizeUkuVisibility(req.Visibility)
+	if req.Visibility != "" && !validUkuVisibility(req.Visibility) {
+		return req, errors.New("invalid visibility")
+	}
+	return req, nil
+}
+
+func readUkuProposalRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuProposalRequest, error) {
+	var req UkuProposalRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, errors.New("invalid json")
+	}
+	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.ID = strings.TrimSpace(req.ID)
+	req.Title = strings.TrimSpace(req.Title)
+	req.Description = strings.TrimSpace(req.Description)
+	if req.ID != "" && !validUkuID(req.ID) {
+		return req, errors.New("invalid proposal id")
+	}
+	if req.Title == "" {
+		return req, errors.New("title required")
+	}
+	return req, nil
+}
+
+func readUkuVoteRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuVoteRequest, error) {
+	var req UkuVoteRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, errors.New("invalid json")
+	}
+	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	if len(req.Scores) == 0 {
+		return req, errors.New("scores required")
+	}
+	for proposalID, score := range req.Scores {
+		if !validUkuID(proposalID) {
+			return req, errors.New("invalid proposal id")
+		}
+		if score < -3 || score > 3 {
+			return req, errors.New("score out of range")
+		}
+	}
+	return req, nil
+}
+
 func readDeleteWithKeyRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (DeleteWithKeyRequest, error) {
 	var req DeleteWithKeyRequest
 	body, err := readJSONBody(w, r, maxBody)
@@ -528,15 +838,67 @@ func validClientID(value string) bool {
 	return clientIDPattern.MatchString(value)
 }
 
+func validUkuID(value string) bool {
+	return ukuIDPattern.MatchString(value)
+}
+
+func normalizeUkuVisibility(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "public"
+	}
+	if value == "unlisted" || value == "private" || value == "private_link" {
+		return "unlisted"
+	}
+	return value
+}
+
+func validUkuVisibility(value string) bool {
+	return value == "public" || value == "unlisted"
+}
+
+func parseUkuProcessPath(path string) (processID string, action string, ok bool) {
+	const prefix = "/api/v1/uku/processes/"
+	rest := strings.TrimPrefix(path, prefix)
+	if rest == path || rest == "" {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) == 1 {
+		return parts[0], "", true
+	}
+	if len(parts) == 2 && (parts[1] == "proposals" || parts[1] == "votes") {
+		return parts[0], parts[1], true
+	}
+	return "", "", false
+}
+
+func randomUkuID() (string, error) {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes[:]), nil
+}
+
 type exportedSyncKey struct {
 	PublicID   string
 	PrivateKey []byte
 }
 
+const (
+	accountKeyHeader    = "account-key-v1"
+	legacyInbeKeyHeader = "inbe-sync-key-v1"
+)
+
 func parseExportedSyncKey(text string) (exportedSyncKey, error) {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "inbe-sync-key-v1" {
-		return exportedSyncKey{}, errors.New("invalid sync key file")
+	if len(lines) == 0 {
+		return exportedSyncKey{}, errors.New("invalid account key file")
+	}
+	header := strings.TrimSpace(lines[0])
+	if header != accountKeyHeader && header != legacyInbeKeyHeader {
+		return exportedSyncKey{}, errors.New("invalid account key file")
 	}
 	algorithmOK := false
 	publicID := ""
@@ -556,7 +918,7 @@ func parseExportedSyncKey(text string) (exportedSyncKey, error) {
 		}
 	}
 	if !algorithmOK {
-		return exportedSyncKey{}, errors.New("sync key algorithm must be ML-DSA-44")
+		return exportedSyncKey{}, errors.New("account key algorithm must be ML-DSA-44")
 	}
 	if publicID != "" && !validUserID(publicID) {
 		return exportedSyncKey{}, errors.New("invalid public_id")

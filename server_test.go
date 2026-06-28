@@ -273,6 +273,173 @@ func TestHashMismatchRequiresFullSnapshotWithoutApplyingUpload(t *testing.T) {
 	}
 }
 
+func TestSyncV2AppliesOpsIdempotentlyAndReturnsRemoteOps(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x61)
+
+	opPayload := `{"id":"habit-v2","name":"Yoga","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"}`
+	body := []byte(`{"protocol_version":2,"user_id_hash":"` + identity.UserID + `","client_id":"client-a","client_clock":0,"ops":[{"op_id":"client-a:1","client_id":"client-a","seq":1,"entity_type":"habit","entity_id":"habit-v2","op_type":"upsert","payload":` + opPayload + `,"created_at":"2026-06-24T10:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v2 sync status = %d body=%s", res.Code, res.Body.String())
+	}
+	var first SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.ProtocolVersion != 2 || first.ServerClock == 0 || len(first.AcceptedOps) != 1 || first.AcceptedOps[0] != "client-a:1" {
+		t.Fatalf("first v2 response = %#v", first)
+	}
+	assertCount(t, store, "server_habits", 1)
+	assertCount(t, store, "server_sync_ops", 1)
+
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
+	if res.Code != http.StatusOK {
+		t.Fatalf("duplicate v2 sync status = %d body=%s", res.Code, res.Body.String())
+	}
+	var duplicate SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &duplicate); err != nil {
+		t.Fatal(err)
+	}
+	if len(duplicate.AcceptedOps) != 1 || duplicate.AcceptedOps[0] != "client-a:1" {
+		t.Fatalf("duplicate accepted ops = %#v", duplicate.AcceptedOps)
+	}
+	assertCount(t, store, "server_habits", 1)
+	assertCount(t, store, "server_sync_ops", 1)
+
+	readBody := []byte(`{"protocol_version":2,"user_id_hash":"` + identity.UserID + `","client_id":"client-b","client_clock":0}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, readBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v2 read status = %d body=%s", res.Code, res.Body.String())
+	}
+	var read SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Ops) != 1 || read.Ops[0].OpID != "client-a:1" || read.Ops[0].EntityType != "habit" {
+		t.Fatalf("remote ops = %#v", read.Ops)
+	}
+	if len(read.Changes.Habits) != 1 || read.Changes.Habits[0].ID != "habit-v2" {
+		t.Fatalf("materialized changes = %#v", read.Changes.Habits)
+	}
+}
+
+func TestHabitDayZeroCountIncompleteIsSyncedState(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x64)
+
+	createBody := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"client-a","habits":[{"id":"push-ups","name":"Push Ups","color_r":1,"color_g":2,"color_b":3,"sync_mode":0,"sync_activity":0,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-28T10:00:00Z"}],"habit_days":[{"habit_id":"push-ups","local_date":20260628,"completed":true,"count":1,"updated_at":"2026-06-28T10:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, createBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	zeroBody := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"client-b","since_server_version":0,"habit_days":[{"habit_id":"push-ups","local_date":20260628,"completed":false,"count":0,"updated_at":"2026-06-28T11:00:00Z"}]}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, zeroBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("zero status = %d body=%s", res.Code, res.Body.String())
+	}
+	assertCount(t, store, "server_habit_days", 1)
+
+	readBody := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"client-c","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, readBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("read status = %d body=%s", res.Code, res.Body.String())
+	}
+	var read SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Changes.HabitDays) != 1 || read.Changes.HabitDays[0].Completed || read.Changes.HabitDays[0].Count != 0 {
+		t.Fatalf("zero count habit day not preserved: %#v", read.Changes.HabitDays)
+	}
+}
+
+func TestSyncV2DeleteHabitKeepsSessions(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x62)
+
+	body := []byte(`{"protocol_version":2,"user_id_hash":"` + identity.UserID + `","client_id":"client-a","client_clock":0,"ops":[` +
+		`{"op_id":"client-a:1","client_id":"client-a","seq":1,"entity_type":"habit","entity_id":"yoga","op_type":"upsert","payload":{"id":"yoga","name":"Yoga","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"},"created_at":"2026-06-24T10:00:00Z"},` +
+		`{"op_id":"client-a:2","client_id":"client-a","seq":2,"entity_type":"session","entity_id":"sun-1","op_type":"upsert","payload":{"id":"sun-1","started_at":"2026-06-24T10:05:00Z","local_date":20260624,"topic":"0","activity":2,"source":"sun","rounds_hash":"1","deleted_at":0,"updated_at":"2026-06-24T10:05:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":1}]},"created_at":"2026-06-24T10:05:00Z"},` +
+		`{"op_id":"client-a:3","client_id":"client-a","seq":3,"entity_type":"habit","entity_id":"yoga","op_type":"delete","payload":{"id":"yoga","name":"Yoga","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":1782300600,"updated_at":"2026-06-24T10:10:00Z"},"created_at":"2026-06-24T10:10:00Z"}` +
+		`]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v2 delete sync status = %d body=%s", res.Code, res.Body.String())
+	}
+	var response SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.AcceptedOps) != 3 {
+		t.Fatalf("accepted delete ops = %#v", response.AcceptedOps)
+	}
+	assertCount(t, store, "server_sync_ops", 3)
+	assertCount(t, store, "server_sessions", 1)
+	assertCount(t, store, "server_session_rounds", 1)
+	assertCount(t, store, "server_habits", 0)
+}
+
+func TestSyncV2CompactsAcknowledgedOpsAndFallsBackToSnapshot(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x63)
+
+	writeBody := []byte(`{"protocol_version":2,"user_id_hash":"` + identity.UserID + `","client_id":"client-a","client_clock":0,"ops":[{"op_id":"client-a:1","client_id":"client-a","seq":1,"entity_type":"habit","entity_id":"habit-v2","op_type":"upsert","payload":{"id":"habit-v2","name":"Yoga","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"},"created_at":"2026-06-24T10:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, writeBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v2 write status = %d body=%s", res.Code, res.Body.String())
+	}
+	var written SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &written); err != nil {
+		t.Fatal(err)
+	}
+	assertCount(t, store, "server_sync_ops", 1)
+
+	readBody := []byte(`{"protocol_version":2,"user_id_hash":"` + identity.UserID + `","client_id":"client-b","client_clock":0}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, readBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v2 read status = %d body=%s", res.Code, res.Body.String())
+	}
+	var read SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	if read.FullSnapshotRequired || len(read.Ops) != 1 || read.ServerClock == 0 {
+		t.Fatalf("expected op replay before compaction: %#v", read)
+	}
+	assertCount(t, store, "server_sync_ops", 1)
+
+	ackBody := []byte(`{"protocol_version":2,"user_id_hash":"` + identity.UserID + `","client_id":"client-b","client_clock":` + strconv.FormatInt(read.ServerClock, 10) + `}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, ackBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v2 ack status = %d body=%s", res.Code, res.Body.String())
+	}
+	assertCount(t, store, "server_sync_ops", 0)
+
+	staleBody := []byte(`{"protocol_version":2,"user_id_hash":"` + identity.UserID + `","client_id":"client-c","client_clock":0,"ops":[{"op_id":"client-c:1","client_id":"client-c","seq":1,"entity_type":"habit","entity_id":"stale-local","op_type":"upsert","payload":{"id":"stale-local","name":"Stale local","color_r":9,"color_g":9,"color_b":9,"sync_mode":0,"sync_activity":0,"counter_enabled":0,"sort_order":1,"deleted_at":0,"updated_at":"2026-06-24T10:30:00Z"},"created_at":"2026-06-24T10:30:00Z"}]}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, staleBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v2 stale status = %d body=%s", res.Code, res.Body.String())
+	}
+	var stale SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if !stale.FullSnapshotRequired || stale.ChangesComplete || len(stale.Ops) != 0 || stale.Applied.Habits != 0 {
+		t.Fatalf("expected full snapshot fallback for compacted ops: %#v", stale)
+	}
+	if len(stale.Changes.Habits) != 1 || stale.Changes.Habits[0].ID != "habit-v2" {
+		t.Fatalf("stale fallback snapshot = %#v", stale.Changes.Habits)
+	}
+	assertCount(t, store, "server_habits", 1)
+	assertCount(t, store, "server_sync_ops", 0)
+}
+
 func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -298,6 +465,26 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	}
 	if aliasRes.Alias != "waozi" {
 		t.Fatalf("alias = %q", aliasRes.Alias)
+	}
+	{
+		nonce := issueChallenge(t, handler, "", userID)
+		loginBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sync/login", bytes.NewReader(loginBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Inbe-User", userID)
+		req.Header.Set("X-Inbe-Signature", signature)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("login alias status = %d body=%s nonce=%s", res.Code, res.Body.String(), nonce)
+		}
+		var loginRes LoginResponse
+		if err := json.Unmarshal(res.Body.Bytes(), &loginRes); err != nil {
+			t.Fatal(err)
+		}
+		if loginRes.AccountAlias != "waozi" {
+			t.Fatalf("login alias = %q", loginRes.AccountAlias)
+		}
 	}
 
 	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","since_server_version":0}`)
@@ -602,8 +789,8 @@ func TestSyncAppliesLaterZeroHabitDay(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Changes.HabitDays) != 0 {
-		t.Fatalf("habit day clear was still snapshotted: %#v", payload.Changes.HabitDays)
+	if len(payload.Changes.HabitDays) != 1 || payload.Changes.HabitDays[0].Completed || payload.Changes.HabitDays[0].Count != 0 {
+		t.Fatalf("habit day zero state was not snapshotted: %#v", payload.Changes.HabitDays)
 	}
 }
 
@@ -632,8 +819,8 @@ func TestSyncAppliesEqualTimestampZeroHabitDay(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Changes.HabitDays) != 0 {
-		t.Fatalf("equal timestamp habit day clear was still snapshotted: %#v", payload.Changes.HabitDays)
+	if len(payload.Changes.HabitDays) != 1 || payload.Changes.HabitDays[0].Completed || payload.Changes.HabitDays[0].Count != 0 {
+		t.Fatalf("equal timestamp zero state was not snapshotted: %#v", payload.Changes.HabitDays)
 	}
 }
 
@@ -818,16 +1005,18 @@ func TestSyncWebSocketIsScopedToTokenUser(t *testing.T) {
 func TestParseExportedSyncKey(t *testing.T) {
 	privateKey := bytes.Repeat([]byte{0x64}, mlDSA44PrivateKeySize)
 	publicID := strings.Repeat("a", 64)
-	keyText := "inbe-sync-key-v1\nalgorithm=ML-DSA-44\npublic_id=" + publicID + "\nprivate_key=" + hex.EncodeToString(privateKey) + "\n"
-	parsed, err := parseExportedSyncKey(keyText)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if parsed.PublicID != publicID {
-		t.Fatalf("public id = %q", parsed.PublicID)
-	}
-	if !bytes.Equal(parsed.PrivateKey, privateKey) {
-		t.Fatal("parsed private key mismatch")
+	for _, header := range []string{"account-key-v1", "inbe-sync-key-v1"} {
+		keyText := header + "\nalgorithm=ML-DSA-44\npublic_id=" + publicID + "\nprivate_key=" + hex.EncodeToString(privateKey) + "\n"
+		parsed, err := parseExportedSyncKey(keyText)
+		if err != nil {
+			t.Fatalf("%s parse: %v", header, err)
+		}
+		if parsed.PublicID != publicID {
+			t.Fatalf("%s public id = %q", header, parsed.PublicID)
+		}
+		if !bytes.Equal(parsed.PrivateKey, privateKey) {
+			t.Fatalf("%s parsed private key mismatch", header)
+		}
 	}
 }
 
@@ -939,7 +1128,7 @@ func TestDeleteWithExportedKeyDeletesAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyText := "inbe-sync-key-v1\nalgorithm=ML-DSA-44\npublic_id=" + userID + "\nprivate_key=" + hex.EncodeToString(privateKey) + "\n"
+	keyText := "account-key-v1\nalgorithm=ML-DSA-44\npublic_id=" + userID + "\nprivate_key=" + hex.EncodeToString(privateKey) + "\n"
 	body, err := json.Marshal(DeleteWithKeyRequest{UserIDHash: userID, ExportedKey: keyText})
 	if err != nil {
 		t.Fatal(err)
@@ -952,6 +1141,101 @@ func TestDeleteWithExportedKeyDeletesAccount(t *testing.T) {
 		t.Fatalf("delete-with-key status = %d body=%s", res.Code, res.Body.String())
 	}
 	assertCount(t, store, "server_users", 0)
+}
+
+func TestUkuProcessesVisibilityAndMutationAuth(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x72)
+
+	publicBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"public-process","question":"Where should we meet?","description":"Choose a place","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
+	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes", identity.UserID, identity.Token, publicBody)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create public status = %d body=%s", res.Code, res.Body.String())
+	}
+	var process UkuProcess
+	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
+		t.Fatal(err)
+	}
+	if process.ID != "public-process" || process.OwnerUserIDHash != identity.UserID || len(process.Proposals) != 2 {
+		t.Fatalf("unexpected process: %#v", process)
+	}
+
+	privateBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"secret-process","question":"Private vote","visibility":"unlisted","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes", identity.UserID, identity.Token, privateBody)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create unlisted status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/uku/processes", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", list.Code, list.Body.String())
+	}
+	if !strings.Contains(list.Body.String(), "public-process") || strings.Contains(list.Body.String(), "secret-process") {
+		t.Fatalf("public list leaked or missed process: %s", list.Body.String())
+	}
+
+	direct := httptest.NewRecorder()
+	handler.ServeHTTP(direct, httptest.NewRequest(http.MethodGet, "/api/v1/uku/processes/secret-process", nil))
+	if direct.Code != http.StatusOK || !strings.Contains(direct.Body.String(), "Private vote") {
+		t.Fatalf("direct unlisted status = %d body=%s", direct.Code, direct.Body.String())
+	}
+
+	unauth := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes/public-process/proposals", identity.UserID, "", []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe"}`))
+	if unauth.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth proposal status = %d body=%s", unauth.Code, unauth.Body.String())
+	}
+
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes/public-process/proposals", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe","description":"Near transit"}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("proposal status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes/public-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","display_name":"wao","scores":{"prop-1":3,"status-quo":-1}}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("vote status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
+		t.Fatal(err)
+	}
+	if len(process.Votes) != 1 || process.Votes[0].Scores["prop-1"] != 3 {
+		t.Fatalf("unexpected votes: %#v", process.Votes)
+	}
+}
+
+func TestUkuDataCascadesOnAccountDelete(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x31)
+
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"delete-me","question":"Delete?","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
+	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes", identity.UserID, identity.Token, body)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes/delete-me/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"status-quo":1}}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("vote status = %d body=%s", res.Code, res.Body.String())
+	}
+	assertCount(t, store, "uku_processes", 1)
+	assertCount(t, store, "uku_proposals", 2)
+	assertCount(t, store, "uku_votes", 1)
+
+	issueChallenge(t, handler, "", identity.UserID)
+	deleteBody := []byte(`{"user_id_hash":"` + identity.UserID + `"}`)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/account", bytes.NewReader(deleteBody))
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteReq.Header.Set("X-Inbe-User", identity.UserID)
+	deleteReq.Header.Set("X-Inbe-Signature", identity.Signature)
+	deleteRes := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRes, deleteReq)
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("delete status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
+	}
+	assertCount(t, store, "server_users", 0)
+	assertCount(t, store, "uku_processes", 0)
+	assertCount(t, store, "uku_proposals", 0)
+	assertCount(t, store, "uku_votes", 0)
 }
 
 func issueChallenge(t *testing.T, target any, baseURL, userID string) string {
@@ -1003,6 +1287,21 @@ func syncWithBody(t *testing.T, target any, baseURL, userID, token string, body 
 	if res.Code != http.StatusOK {
 		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
 	}
+	return res
+}
+
+func ukuJSONRequest(t *testing.T, target any, method, path, userID, token string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if userID != "" {
+		req.Header.Set("X-Inbe-User", userID)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	res := httptest.NewRecorder()
+	target.(http.Handler).ServeHTTP(res, req)
 	return res
 }
 

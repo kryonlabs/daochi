@@ -1,5 +1,7 @@
 package main
 
+import "encoding/json"
+
 type ChallengeResponse struct {
 	UserIDHash string `json:"user_id_hash"`
 	Nonce      string `json:"nonce"`
@@ -13,20 +15,24 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Status    string `json:"status"`
-	AuthToken string `json:"auth_token"`
-	ExpiresIn int64  `json:"expires_in_seconds"`
+	Status       string `json:"status"`
+	AuthToken    string `json:"auth_token"`
+	ExpiresIn    int64  `json:"expires_in_seconds"`
+	AccountAlias string `json:"account_alias,omitempty"`
 }
 
 type SyncRequest struct {
+	ProtocolVersion     int             `json:"protocol_version,omitempty"`
 	UserIDHash          string          `json:"user_id_hash"`
 	ClientID            string          `json:"client_id"`
+	ClientClock         int64           `json:"client_clock,omitempty"`
 	PublicKey           string          `json:"public_key,omitempty"`
 	SinceServerVersion  int64           `json:"since_server_version,omitempty"`
 	ClientStateHash     string          `json:"client_state_hash,omitempty"`
 	LastServerStateHash string          `json:"last_server_state_hash,omitempty"`
 	FullSyncRequested   bool            `json:"full_sync_requested,omitempty"`
 	Bootstrap           bool            `json:"bootstrap,omitempty"`
+	Ops                 []SyncOp        `json:"ops,omitempty"`
 	MeditationLogs      []MeditationLog `json:"meditation_logs,omitempty"`
 	Habits              []Habit         `json:"habits,omitempty"`
 	HabitDays           []HabitDay      `json:"habit_days,omitempty"`
@@ -41,15 +47,31 @@ type SyncChanges struct {
 }
 
 type SyncResponse struct {
+	ProtocolVersion      int         `json:"protocol_version,omitempty"`
 	Status               string      `json:"status"`
 	Applied              SyncResult  `json:"applied"`
 	AccountAlias         string      `json:"account_alias,omitempty"`
 	ServerVersion        int64       `json:"server_version"`
+	ServerClock          int64       `json:"server_clock,omitempty"`
 	ServerStateHash      string      `json:"server_state_hash,omitempty"`
 	BaseStateHash        string      `json:"base_state_hash,omitempty"`
 	ChangesComplete      bool        `json:"changes_complete"`
 	FullSnapshotRequired bool        `json:"full_snapshot_required"`
+	AcceptedOps          []string    `json:"accepted_ops,omitempty"`
+	Ops                  []SyncOp    `json:"ops,omitempty"`
 	Changes              SyncChanges `json:"changes"`
+}
+
+type SyncOp struct {
+	OpID       string          `json:"op_id"`
+	ClientID   string          `json:"client_id"`
+	Seq        int64           `json:"seq"`
+	EntityType string          `json:"entity_type"`
+	EntityID   string          `json:"entity_id"`
+	LocalDate  int             `json:"local_date,omitempty"`
+	OpType     string          `json:"op_type"`
+	Payload    json.RawMessage `json:"payload,omitempty"`
+	CreatedAt  string          `json:"created_at,omitempty"`
 }
 
 type DeleteRequest struct {
@@ -126,4 +148,68 @@ type SyncResult struct {
 	Habits         int `json:"habits"`
 	HabitDays      int `json:"habit_days"`
 	Sessions       int `json:"sessions"`
+}
+
+type UkuProcess struct {
+	ID              string        `json:"id"`
+	OwnerUserIDHash string        `json:"owner_user_id_hash,omitempty"`
+	Question        string        `json:"question"`
+	Description     string        `json:"description,omitempty"`
+	Visibility      string        `json:"visibility"`
+	ProposalMinutes int           `json:"proposal_minutes"`
+	VotingMinutes   int           `json:"voting_minutes"`
+	NegativeWeight  int           `json:"negative_weight"`
+	CreatedAt       string        `json:"created_at"`
+	UpdatedAt       string        `json:"updated_at"`
+	Proposals       []UkuProposal `json:"proposals,omitempty"`
+	Votes           []UkuVote     `json:"votes,omitempty"`
+}
+
+type UkuProposal struct {
+	ID               string `json:"id"`
+	AuthorUserIDHash string `json:"author_user_id_hash,omitempty"`
+	Title            string `json:"title"`
+	Description      string `json:"description,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+	DeletedAt        int64  `json:"deleted_at,omitempty"`
+}
+
+type UkuVote struct {
+	VoterUserIDHash string         `json:"voter_user_id_hash,omitempty"`
+	DisplayName     string         `json:"display_name,omitempty"`
+	Scores          map[string]int `json:"scores"`
+	CreatedAt       string         `json:"created_at"`
+	UpdatedAt       string         `json:"updated_at"`
+}
+
+type UkuCreateProcessRequest struct {
+	UserIDHash      string `json:"user_id_hash"`
+	ID              string `json:"id,omitempty"`
+	Question        string `json:"question"`
+	Description     string `json:"description,omitempty"`
+	Visibility      string `json:"visibility,omitempty"`
+	ProposalMinutes int    `json:"proposal_minutes"`
+	VotingMinutes   int    `json:"voting_minutes"`
+	NegativeWeight  int    `json:"negative_weight"`
+}
+
+type UkuUpdateProcessRequest struct {
+	UserIDHash  string `json:"user_id_hash"`
+	Question    string `json:"question,omitempty"`
+	Description string `json:"description,omitempty"`
+	Visibility  string `json:"visibility,omitempty"`
+}
+
+type UkuProposalRequest struct {
+	UserIDHash  string `json:"user_id_hash"`
+	ID          string `json:"id,omitempty"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+}
+
+type UkuVoteRequest struct {
+	UserIDHash  string         `json:"user_id_hash"`
+	DisplayName string         `json:"display_name,omitempty"`
+	Scores      map[string]int `json:"scores"`
 }

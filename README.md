@@ -38,7 +38,7 @@ Signed `POST /api/v1/sync` and `DELETE /api/v1/account` requests must include:
 
 The JSON body still includes `user_id_hash`, and first sync includes `public_key`. The server accepts `public_key` and `X-Inbe-Signature` as either base64 or lowercase/uppercase hex. This matches the current C client account storage, which keeps ML-DSA-44 keys as hex strings.
 
-The website deletion endpoint `POST /api/v1/account/delete-with-key` accepts `user_id_hash` plus the full exported `inbe-sync.key` text. Current key exports include `public_id`, and Lyra rejects a request if that public ID does not match `user_id_hash`. Lyra signs a fixed deletion proof with that private key, verifies it against the registered public key, deletes the account, and does not store the uploaded key.
+The website deletion endpoint `POST /api/v1/account/delete-with-key` accepts `user_id_hash` plus the full exported account key text. Generic exports start with `account-key-v1`; legacy Inbe exports starting with `inbe-sync-key-v1` are still accepted. Current key exports include `public_id`, and Lyra rejects a request if that public ID does not match `user_id_hash`. Lyra signs a fixed deletion proof with that private key, verifies it against the registered public key, deletes the account, and does not store the uploaded key.
 
 ## Build
 

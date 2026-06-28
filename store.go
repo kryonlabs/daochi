@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -21,6 +22,8 @@ type Store struct {
 }
 
 var ErrSyncUserNotFound = errors.New("sync user not found")
+
+const syncClientActiveRetention = 90 * 24 * time.Hour
 
 type PublicStats struct {
 	UserCount        int64
@@ -67,6 +70,12 @@ CREATE TABLE IF NOT EXISTS server_sync_state (
 	server_version INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS server_sync_compaction (
+	user_id_hash TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	compacted_through_version INTEGER NOT NULL DEFAULT 0,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS server_clients (
 	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
 	client_id TEXT NOT NULL,
@@ -76,6 +85,8 @@ CREATE TABLE IF NOT EXISTS server_clients (
 	last_sync_at TEXT,
 	last_since_server_version INTEGER NOT NULL DEFAULT 0,
 	last_seen_server_version INTEGER NOT NULL DEFAULT 0,
+	protocol_version INTEGER NOT NULL DEFAULT 1,
+	last_client_clock INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, client_id)
 );
 
@@ -141,6 +152,58 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 	PRIMARY KEY(user_id_hash, session_id, round_index),
 	FOREIGN KEY(user_id_hash, session_id) REFERENCES server_sessions(user_id_hash, id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS server_sync_ops (
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	op_id TEXT NOT NULL,
+	client_id TEXT NOT NULL,
+	seq INTEGER NOT NULL,
+	entity_type TEXT NOT NULL,
+	entity_id TEXT NOT NULL,
+	local_date INTEGER NOT NULL DEFAULT 0,
+	op_type TEXT NOT NULL,
+	payload_json TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	server_version INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(user_id_hash, op_id),
+	UNIQUE(user_id_hash, client_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS uku_processes (
+	id TEXT PRIMARY KEY,
+	owner_user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	question TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	visibility TEXT NOT NULL DEFAULT 'public',
+	proposal_minutes INTEGER NOT NULL,
+	voting_minutes INTEGER NOT NULL,
+	negative_weight INTEGER NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	deleted_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS uku_proposals (
+	process_id TEXT NOT NULL REFERENCES uku_processes(id) ON DELETE CASCADE,
+	id TEXT NOT NULL,
+	author_user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	title TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	deleted_at INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(process_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS uku_votes (
+	process_id TEXT NOT NULL REFERENCES uku_processes(id) ON DELETE CASCADE,
+	voter_user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	display_name TEXT NOT NULL DEFAULT '',
+	scores_json TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(process_id, voter_user_id_hash)
+);
 `)
 	if err != nil {
 		return err
@@ -157,6 +220,8 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 		`UPDATE server_habit_days SET count=CASE WHEN completed!=0 THEN 1 ELSE 0 END WHERE count=0`,
 		`ALTER TABLE server_sessions ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_users ADD COLUMN alias TEXT`,
+		`ALTER TABLE server_clients ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE server_clients ADD COLUMN last_client_clock INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
@@ -241,55 +306,63 @@ func (s *Store) PublicKey(ctx context.Context, userID string) ([]byte, bool, err
 }
 
 func (s *Store) ApplySync(ctx context.Context, req SyncRequest, publicKey []byte) (SyncResult, error) {
+	result, _, err := s.ApplySyncDetailed(ctx, req, publicKey)
+	return result, err
+}
+
+func (s *Store) ApplySyncDetailed(ctx context.Context, req SyncRequest, publicKey []byte) (SyncResult, []string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return SyncResult{}, err
+		return SyncResult{}, nil, err
 	}
 	defer tx.Rollback()
 
 	if publicKey != nil {
 		if err := upsertUser(ctx, tx, req.UserIDHash, publicKey); err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 	} else if err := touchUser(ctx, tx, req.UserIDHash); err != nil {
-		return SyncResult{}, err
+		return SyncResult{}, nil, err
 	}
 	if req.FullSyncRequested {
 		if err := replaceUserData(ctx, tx, req.UserIDHash); err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 	}
 
 	result := SyncResult{}
+	deletedHabitIDs := map[string]bool{}
 	for _, item := range req.MeditationLogs {
 		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
 		if err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 		res, err := tx.ExecContext(ctx, `
 INSERT INTO server_meditation_logs(user_id_hash,id,session_id,duration_seconds,completed_at,server_version)
 VALUES(?1,?2,?3,?4,?5,?6)
 ON CONFLICT(user_id_hash,id) DO NOTHING`, req.UserIDHash, item.ID, item.SessionID, item.DurationSeconds, normalizeTime(item.CompletedAt, item.Timestamp), version)
 		if err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 		result.MeditationLogs += rowsAffected(res)
 	}
 	for _, habit := range req.Habits {
 		if req.Bootstrap && habit.DeletedAt > 0 {
+			deletedHabitIDs[habit.ID] = true
 			continue
 		}
 		if habit.DeletedAt > 0 {
+			deletedHabitIDs[habit.ID] = true
 			applied, err := deleteHabit(ctx, tx, req.UserIDHash, habit)
 			if err != nil {
-				return SyncResult{}, err
+				return SyncResult{}, nil, err
 			}
 			result.Habits += applied
 			continue
 		}
 		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
 		if err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 		res, err := tx.ExecContext(ctx, `
 INSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)
@@ -311,25 +384,17 @@ WHERE excluded.updated_at >= server_habits.updated_at`,
 			habit.SyncMode, habit.SyncActivity, habit.CounterEnabled, habit.SortOrder,
 			habit.DeletedAt, normalizeTime(habit.UpdatedAt, ""), version)
 		if err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 		result.Habits += rowsAffected(res)
 	}
 	for _, day := range req.HabitDays {
-		if req.Bootstrap && !day.Completed && day.Count <= 0 {
-			continue
-		}
-		if !day.Completed && day.Count <= 0 {
-			applied, err := deleteHabitDay(ctx, tx, req.UserIDHash, day)
-			if err != nil {
-				return SyncResult{}, err
-			}
-			result.HabitDays += applied
+		if deletedHabitIDs[day.HabitID] {
 			continue
 		}
 		version, err := nextUserVersion(ctx, tx, req.UserIDHash)
 		if err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 		res, err := tx.ExecContext(ctx, `
 INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)
@@ -343,7 +408,7 @@ WHERE excluded.updated_at > server_habit_days.updated_at
 OR excluded.updated_at = server_habit_days.updated_at`,
 			req.UserIDHash, day.HabitID, day.LocalDate, boolInt(day.Completed), normalizedHabitDayCount(day), normalizeTime(day.UpdatedAt, ""), version)
 		if err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 		result.HabitDays += rowsAffected(res)
 	}
@@ -354,21 +419,206 @@ OR excluded.updated_at = server_habit_days.updated_at`,
 		if session.DeletedAt > 0 {
 			applied, err := deleteSession(ctx, tx, req.UserIDHash, session)
 			if err != nil {
-				return SyncResult{}, err
+				return SyncResult{}, nil, err
 			}
 			result.Sessions += applied
 			continue
 		}
 		applied, err := upsertSession(ctx, tx, req.UserIDHash, session)
 		if err != nil {
-			return SyncResult{}, err
+			return SyncResult{}, nil, err
 		}
 		result.Sessions += applied
 	}
-	if err := tx.Commit(); err != nil {
-		return SyncResult{}, err
+	acceptedOps, err := applySyncOps(ctx, tx, req.UserIDHash, req.Ops, &result)
+	if err != nil {
+		return SyncResult{}, nil, err
 	}
-	return result, nil
+	if err := tx.Commit(); err != nil {
+		return SyncResult{}, nil, err
+	}
+	return result, acceptedOps, nil
+}
+
+func applySyncOps(ctx context.Context, tx *sql.Tx, userID string, ops []SyncOp, result *SyncResult) ([]string, error) {
+	accepted := []string{}
+	for _, op := range ops {
+		if op.OpID == "" || op.ClientID == "" || op.Seq <= 0 {
+			return nil, fmt.Errorf("invalid sync op identity")
+		}
+		exists, err := syncOpExists(ctx, tx, userID, op.OpID)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			accepted = append(accepted, op.OpID)
+			continue
+		}
+		if err := materializeSyncOp(ctx, tx, userID, op, result); err != nil {
+			return nil, err
+		}
+		version, err := currentUserVersionTx(ctx, tx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if version <= 0 {
+			version, err = nextUserVersion(ctx, tx, userID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		payload := string(op.Payload)
+		createdAt := normalizeTime(op.CreatedAt, "")
+		if createdAt == "" {
+			createdAt = time.Now().UTC().Format(time.RFC3339)
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO server_sync_ops(user_id_hash,op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`,
+			userID, op.OpID, op.ClientID, op.Seq, op.EntityType, op.EntityID,
+			op.LocalDate, op.OpType, payload, createdAt, version); err != nil {
+			return nil, err
+		}
+		accepted = append(accepted, op.OpID)
+	}
+	return accepted, nil
+}
+
+func syncOpExists(ctx context.Context, tx *sql.Tx, userID, opID string) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM server_sync_ops WHERE user_id_hash=?1 AND op_id=?2)`,
+		userID, opID).Scan(&exists)
+	return exists != 0, err
+}
+
+func materializeSyncOp(ctx context.Context, tx *sql.Tx, userID string, op SyncOp, result *SyncResult) error {
+	switch op.EntityType {
+	case "habit":
+		var habit Habit
+		if len(op.Payload) == 0 {
+			return fmt.Errorf("habit op missing payload")
+		}
+		if err := json.Unmarshal(op.Payload, &habit); err != nil {
+			return err
+		}
+		if habit.ID == "" {
+			habit.ID = op.EntityID
+		}
+		if op.OpType == "delete" && habit.DeletedAt <= 0 {
+			habit.DeletedAt = time.Now().Unix()
+		}
+		if habit.DeletedAt > 0 || op.OpType == "delete" {
+			applied, err := deleteHabit(ctx, tx, userID, habit)
+			if err != nil {
+				return err
+			}
+			result.Habits += applied
+			return nil
+		}
+		version, err := nextUserVersion(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `
+INSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+ON CONFLICT(user_id_hash,id) DO UPDATE SET
+	name=excluded.name,color_r=excluded.color_r,color_g=excluded.color_g,color_b=excluded.color_b,
+	sync_mode=excluded.sync_mode,sync_activity=excluded.sync_activity,counter_enabled=excluded.counter_enabled,
+	sort_order=excluded.sort_order,deleted_at=excluded.deleted_at,updated_at=excluded.updated_at,
+	server_version=excluded.server_version
+WHERE excluded.updated_at >= server_habits.updated_at`,
+			userID, habit.ID, habit.Name, habit.ColorR, habit.ColorG, habit.ColorB,
+			habit.SyncMode, habit.SyncActivity, habit.CounterEnabled, habit.SortOrder,
+			habit.DeletedAt, normalizeTime(habit.UpdatedAt, ""), version)
+		if err != nil {
+			return err
+		}
+		result.Habits += rowsAffected(res)
+	case "habit_day":
+		var day HabitDay
+		if len(op.Payload) == 0 {
+			return fmt.Errorf("habit_day op missing payload")
+		}
+		if err := json.Unmarshal(op.Payload, &day); err != nil {
+			return err
+		}
+		if day.HabitID == "" {
+			day.HabitID = op.EntityID
+		}
+		if day.LocalDate == 0 {
+			day.LocalDate = op.LocalDate
+		}
+		if op.OpType == "delete" {
+			applied, err := deleteHabitDay(ctx, tx, userID, day)
+			if err != nil {
+				return err
+			}
+			result.HabitDays += applied
+			return nil
+		}
+		version, err := nextUserVersion(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `
+INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7)
+ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
+	completed=excluded.completed,count=excluded.count,updated_at=excluded.updated_at,server_version=excluded.server_version
+WHERE excluded.updated_at >= server_habit_days.updated_at`,
+			userID, day.HabitID, day.LocalDate, boolInt(day.Completed),
+			normalizedHabitDayCount(day), normalizeTime(day.UpdatedAt, ""), version)
+		if err != nil {
+			return err
+		}
+		result.HabitDays += rowsAffected(res)
+	case "session":
+		var session Session
+		if len(op.Payload) == 0 {
+			return fmt.Errorf("session op missing payload")
+		}
+		if err := json.Unmarshal(op.Payload, &session); err != nil {
+			return err
+		}
+		if session.ID == "" {
+			session.ID = op.EntityID
+		}
+		if op.OpType == "delete" && session.DeletedAt <= 0 {
+			session.DeletedAt = time.Now().Unix()
+		}
+		if session.DeletedAt > 0 || op.OpType == "delete" {
+			applied, err := deleteSession(ctx, tx, userID, session)
+			if err != nil {
+				return err
+			}
+			result.Sessions += applied
+			return nil
+		}
+		applied, err := upsertSession(ctx, tx, userID, session)
+		if err != nil {
+			return err
+		}
+		result.Sessions += applied
+	default:
+		if _, err := nextUserVersion(ctx, tx, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func currentUserVersionTx(ctx context.Context, tx *sql.Tx, userID string) (int64, error) {
+	var version int64
+	err := tx.QueryRowContext(ctx, `
+SELECT server_version
+FROM server_sync_state
+WHERE user_id_hash=?1`, userID).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return version, err
 }
 
 func (s *Store) RegisterUser(ctx context.Context, userID string, publicKey []byte) error {
@@ -422,16 +672,83 @@ ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
 	return err
 }
 
-func (s *Store) RecordClientSync(ctx context.Context, userID, clientID string, sinceVersion, serverVersion int64) error {
+func (s *Store) RecordClientSync(ctx context.Context, userID, clientID string, sinceVersion, serverVersion int64, protocolVersion int, clientClock int64) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_sync_at,last_since_server_version,last_seen_server_version)
-VALUES(?1,?2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?3,?4)
+INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_sync_at,last_since_server_version,last_seen_server_version,protocol_version,last_client_clock)
+VALUES(?1,?2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?3,?4,?5,?6)
 ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
 	last_seen_at=CURRENT_TIMESTAMP,
 	last_sync_at=CURRENT_TIMESTAMP,
 	last_since_server_version=excluded.last_since_server_version,
-	last_seen_server_version=excluded.last_seen_server_version`, userID, clientID, sinceVersion, serverVersion)
+	last_seen_server_version=excluded.last_seen_server_version,
+	protocol_version=excluded.protocol_version,
+	last_client_clock=excluded.last_client_clock`, userID, clientID, sinceVersion, serverVersion, protocolVersion, clientClock)
 	return err
+}
+
+func (s *Store) SyncOpsCompacted(ctx context.Context, userID string, clientClock int64) (bool, int64, error) {
+	var compactedThrough int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT compacted_through_version
+FROM server_sync_compaction
+WHERE user_id_hash=?1`, userID).Scan(&compactedThrough)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, 0, nil
+	}
+	if err != nil {
+		return false, 0, err
+	}
+	return compactedThrough > 0 && clientClock < compactedThrough, compactedThrough, nil
+}
+
+func (s *Store) CompactSyncOps(ctx context.Context, userID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	currentVersion, err := currentUserVersionTx(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	if currentVersion <= 0 {
+		return tx.Commit()
+	}
+
+	cutoff := time.Now().UTC().Add(-syncClientActiveRetention).Format(time.RFC3339)
+	var floor sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+SELECT MIN(last_client_clock)
+FROM server_clients
+WHERE user_id_hash=?1
+  AND protocol_version>=2
+	AND last_client_clock>0
+	AND last_seen_at>=?2`, userID, cutoff).Scan(&floor); err != nil {
+		return err
+	}
+	if !floor.Valid || floor.Int64 <= 0 {
+		return tx.Commit()
+	}
+
+	compactThrough := floor.Int64
+	if compactThrough > currentVersion {
+		compactThrough = currentVersion
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM server_sync_ops
+WHERE user_id_hash=?1 AND server_version<=?2`, userID, compactThrough); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO server_sync_compaction(user_id_hash,compacted_through_version,updated_at)
+VALUES(?1,?2,CURRENT_TIMESTAMP)
+ON CONFLICT(user_id_hash) DO UPDATE SET
+	compacted_through_version=MAX(server_sync_compaction.compacted_through_version,excluded.compacted_through_version),
+	updated_at=CURRENT_TIMESTAMP`, userID, compactThrough); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) DeleteAccount(ctx context.Context, userID string) error {
@@ -463,6 +780,196 @@ func (s *Store) PublicStats(ctx context.Context, dbPath string) (PublicStats, er
 	return stats, nil
 }
 
+func (s *Store) ListUkuPublicProcesses(ctx context.Context, limit int) ([]UkuProcess, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,owner_user_id_hash,question,description,visibility,proposal_minutes,voting_minutes,negative_weight,created_at,updated_at
+FROM uku_processes
+WHERE deleted_at=0 AND visibility='public'
+ORDER BY created_at DESC
+LIMIT ?1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanUkuProcesses(rows)
+}
+
+func (s *Store) UkuProcess(ctx context.Context, id string) (UkuProcess, bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id,owner_user_id_hash,question,description,visibility,proposal_minutes,voting_minutes,negative_weight,created_at,updated_at
+FROM uku_processes
+WHERE id=?1 AND deleted_at=0`, id)
+	process, err := scanUkuProcess(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UkuProcess{}, false, nil
+	}
+	if err != nil {
+		return UkuProcess{}, false, err
+	}
+	proposals, err := s.UkuProposals(ctx, id)
+	if err != nil {
+		return UkuProcess{}, false, err
+	}
+	votes, err := s.UkuVotes(ctx, id)
+	if err != nil {
+		return UkuProcess{}, false, err
+	}
+	process.Proposals = proposals
+	process.Votes = votes
+	return process, true, nil
+}
+
+func (s *Store) CreateUkuProcess(ctx context.Context, req UkuCreateProcessRequest) (UkuProcess, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO uku_processes(id,owner_user_id_hash,question,description,visibility,proposal_minutes,voting_minutes,negative_weight,created_at,updated_at)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)`,
+		req.ID, req.UserIDHash, req.Question, req.Description, req.Visibility,
+		req.ProposalMinutes, req.VotingMinutes, req.NegativeWeight, now); err != nil {
+		return UkuProcess{}, err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO uku_proposals(process_id,id,author_user_id_hash,title,description,created_at,updated_at)
+VALUES(?1,'status-quo',?2,'Status quo','keep things the way they are',?3,?3),
+      (?1,'repeat-process',?2,'Repeat process','repeat the process and look for other options',?3,?3)`,
+		req.ID, req.UserIDHash, now); err != nil {
+		return UkuProcess{}, err
+	}
+	process, _, err := s.UkuProcess(ctx, req.ID)
+	return process, err
+}
+
+func (s *Store) UpdateUkuProcess(ctx context.Context, processID string, req UkuUpdateProcessRequest) (UkuProcess, error) {
+	current, found, err := s.UkuProcess(ctx, processID)
+	if err != nil {
+		return UkuProcess{}, err
+	}
+	if !found {
+		return UkuProcess{}, sql.ErrNoRows
+	}
+	if current.OwnerUserIDHash != req.UserIDHash {
+		return UkuProcess{}, ErrSyncUserNotFound
+	}
+	question := current.Question
+	description := current.Description
+	visibility := current.Visibility
+	if strings.TrimSpace(req.Question) != "" {
+		question = strings.TrimSpace(req.Question)
+	}
+	if req.Description != "" {
+		description = strings.TrimSpace(req.Description)
+	}
+	if strings.TrimSpace(req.Visibility) != "" {
+		visibility = strings.TrimSpace(req.Visibility)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE uku_processes
+SET question=?2,description=?3,visibility=?4,updated_at=?5
+WHERE id=?1 AND owner_user_id_hash=?6 AND deleted_at=0`,
+		processID, question, description, visibility, now, req.UserIDHash); err != nil {
+		return UkuProcess{}, err
+	}
+	process, _, err := s.UkuProcess(ctx, processID)
+	return process, err
+}
+
+func (s *Store) UpsertUkuProposal(ctx context.Context, processID string, req UkuProposalRequest) (UkuProcess, error) {
+	if _, found, err := s.UkuProcess(ctx, processID); err != nil {
+		return UkuProcess{}, err
+	} else if !found {
+		return UkuProcess{}, sql.ErrNoRows
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO uku_proposals(process_id,id,author_user_id_hash,title,description,created_at,updated_at)
+VALUES(?1,?2,?3,?4,?5,?6,?6)
+ON CONFLICT(process_id,id) DO UPDATE SET
+	title=excluded.title,
+	description=excluded.description,
+	updated_at=excluded.updated_at
+WHERE uku_proposals.author_user_id_hash=excluded.author_user_id_hash`,
+		processID, req.ID, req.UserIDHash, req.Title, req.Description, now); err != nil {
+		return UkuProcess{}, err
+	}
+	process, _, err := s.UkuProcess(ctx, processID)
+	return process, err
+}
+
+func (s *Store) UpsertUkuVote(ctx context.Context, processID string, req UkuVoteRequest) (UkuProcess, error) {
+	if _, found, err := s.UkuProcess(ctx, processID); err != nil {
+		return UkuProcess{}, err
+	} else if !found {
+		return UkuProcess{}, sql.ErrNoRows
+	}
+	scores, err := json.Marshal(req.Scores)
+	if err != nil {
+		return UkuProcess{}, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO uku_votes(process_id,voter_user_id_hash,display_name,scores_json,created_at,updated_at)
+VALUES(?1,?2,?3,?4,?5,?5)
+ON CONFLICT(process_id,voter_user_id_hash) DO UPDATE SET
+	display_name=excluded.display_name,
+	scores_json=excluded.scores_json,
+	updated_at=excluded.updated_at`,
+		processID, req.UserIDHash, req.DisplayName, string(scores), now); err != nil {
+		return UkuProcess{}, err
+	}
+	process, _, err := s.UkuProcess(ctx, processID)
+	return process, err
+}
+
+func (s *Store) UkuProposals(ctx context.Context, processID string) ([]UkuProposal, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,author_user_id_hash,title,description,created_at,updated_at,deleted_at
+FROM uku_proposals
+WHERE process_id=?1 AND deleted_at=0
+ORDER BY created_at,id`, processID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	proposals := []UkuProposal{}
+	for rows.Next() {
+		var item UkuProposal
+		if err := rows.Scan(&item.ID, &item.AuthorUserIDHash, &item.Title, &item.Description, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt); err != nil {
+			return nil, err
+		}
+		proposals = append(proposals, item)
+	}
+	return proposals, rows.Err()
+}
+
+func (s *Store) UkuVotes(ctx context.Context, processID string) ([]UkuVote, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT voter_user_id_hash,display_name,scores_json,created_at,updated_at
+FROM uku_votes
+WHERE process_id=?1
+ORDER BY updated_at,voter_user_id_hash`, processID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	votes := []UkuVote{}
+	for rows.Next() {
+		var item UkuVote
+		var scores string
+		if err := rows.Scan(&item.VoterUserIDHash, &item.DisplayName, &scores, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(scores), &item.Scores); err != nil {
+			return nil, err
+		}
+		votes = append(votes, item)
+	}
+	return votes, rows.Err()
+}
+
 func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion int64) (SyncChanges, int64, error) {
 	var changes SyncChanges
 	var err error
@@ -488,6 +995,33 @@ func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion in
 		return changes, 0, err
 	}
 	return changes, version, nil
+}
+
+func (s *Store) OpsSince(ctx context.Context, userID string, sinceVersion int64) ([]SyncOp, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at
+FROM server_sync_ops
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,client_id,seq,op_id`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ops := []SyncOp{}
+	for rows.Next() {
+		var op SyncOp
+		var payload string
+		if err := rows.Scan(&op.OpID, &op.ClientID, &op.Seq, &op.EntityType,
+			&op.EntityID, &op.LocalDate, &op.OpType, &payload, &op.CreatedAt); err != nil {
+			return nil, err
+		}
+		if payload != "" {
+			op.Payload = json.RawMessage(payload)
+		}
+		ops = append(ops, op)
+	}
+	return ops, rows.Err()
 }
 
 func (s *Store) StateHash(ctx context.Context, userID string) (string, error) {
@@ -985,6 +1519,30 @@ func validateUserIDForPublicKey(userID string, publicKey []byte) error {
 		return fmt.Errorf("public key hash mismatch")
 	}
 	return nil
+}
+
+type ukuProcessScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanUkuProcess(row ukuProcessScanner) (UkuProcess, error) {
+	var process UkuProcess
+	err := row.Scan(&process.ID, &process.OwnerUserIDHash, &process.Question, &process.Description,
+		&process.Visibility, &process.ProposalMinutes, &process.VotingMinutes,
+		&process.NegativeWeight, &process.CreatedAt, &process.UpdatedAt)
+	return process, err
+}
+
+func scanUkuProcesses(rows *sql.Rows) ([]UkuProcess, error) {
+	processes := []UkuProcess{}
+	for rows.Next() {
+		process, err := scanUkuProcess(rows)
+		if err != nil {
+			return nil, err
+		}
+		processes = append(processes, process)
+	}
+	return processes, rows.Err()
 }
 
 func rowsAffected(res sql.Result) int {

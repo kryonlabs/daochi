@@ -59,7 +59,7 @@ a{color:#254da8}
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies signed local changes and returns remote changes newer than <code>since_server_version</code>.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Deletes all remote data for the signed sync account.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying an exported <code>inbe-sync.key</code>.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
 <h2>Signed Message</h2>
 <pre>inbe-sync-v1
 &lt;HTTP_METHOD&gt;
@@ -172,7 +172,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/account/delete-with-key": map[string]any{
 				"post": map[string]any{
 					"summary":     "Delete remote account using exported key",
-					"description": "Accepts the exported inbe-sync.key text, verifies it matches the registered public key, then deletes server-side mirrored data.",
+					"description": "Accepts exported account key text. Generic account-key-v1 keys and legacy inbe-sync-key-v1 keys are supported.",
 					"requestBody": map[string]any{
 						"required": true,
 						"content": map[string]any{
@@ -213,7 +213,7 @@ func openAPISpec() map[string]any {
 					"required": []string{"user_id_hash", "exported_key"},
 					"properties": map[string]any{
 						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
-						"exported_key": map[string]any{"type": "string", "description": "Full text of the exported inbe-sync.key file."},
+						"exported_key": map[string]any{"type": "string", "description": "Full text of the exported account key file."},
 					},
 				},
 				"Habit": map[string]any{

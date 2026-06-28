@@ -6,6 +6,14 @@ Lyra is the stateless sync relay for Inbe. It stores public keys and mirrored ap
 
 - `GET /api/v1/sync/challenge?user_id=<sha256-public-key-hex>`
 - `POST /api/v1/sync`
+- `GET /api/v1/friends`
+- `GET /api/v1/friends/requests`
+- `POST /api/v1/friends/requests`
+- `POST /api/v1/friends/requests/{id}/accept`
+- `POST /api/v1/friends/requests/{id}/decline`
+- `DELETE /api/v1/friends/{user_id_hash}`
+- `PUT /api/v1/profile/stats`
+- `GET /api/v1/friends/stats?app=&practice=&metric=`
 - `DELETE /api/v1/account`
 - `POST /api/v1/account/delete-with-key`
 - `GET /openapi.json`
@@ -104,5 +112,8 @@ SQLite tables mirror the app data:
 - `server_habit_days`
 - `server_sessions`
 - `server_session_rounds`
+- `server_friend_requests`
+- `server_friendships`
+- `server_profile_stats`
 
 Deleting an account removes all rows through foreign-key cascade.

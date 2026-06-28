@@ -204,6 +204,37 @@ CREATE TABLE IF NOT EXISTS uku_votes (
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY(process_id, voter_user_id_hash)
 );
+
+CREATE TABLE IF NOT EXISTS server_friend_requests (
+	id TEXT PRIMARY KEY,
+	requester_user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	target_user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	status TEXT NOT NULL DEFAULT 'pending',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	CHECK(requester_user_id_hash<>target_user_id_hash),
+	UNIQUE(requester_user_id_hash,target_user_id_hash)
+);
+
+CREATE TABLE IF NOT EXISTS server_friendships (
+	user_id_a TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	user_id_b TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(user_id_a,user_id_b),
+	CHECK(user_id_a<user_id_b)
+);
+
+CREATE TABLE IF NOT EXISTS server_profile_stats (
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	app TEXT NOT NULL,
+	practice TEXT NOT NULL,
+	metric TEXT NOT NULL,
+	value REAL NOT NULL,
+	label TEXT NOT NULL DEFAULT '',
+	local_date INTEGER NOT NULL DEFAULT 0,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(user_id_hash,app,practice,metric)
+);
 `)
 	if err != nil {
 		return err
@@ -232,6 +263,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique
 ON server_users(alias)
 WHERE alias IS NOT NULL AND alias<>''`); err != nil {
 		return err
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS server_friend_requests_target_status ON server_friend_requests(target_user_id_hash,status,updated_at)`,
+		`CREATE INDEX IF NOT EXISTS server_friend_requests_requester_status ON server_friend_requests(requester_user_id_hash,status,updated_at)`,
+		`CREATE INDEX IF NOT EXISTS server_profile_stats_lookup ON server_profile_stats(app,practice,metric,value)`,
+	} {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -660,6 +700,268 @@ WHERE user_id_hash=?1`, userID, alias)
 		return ErrSyncUserNotFound
 	}
 	return nil
+}
+
+func (s *Store) ResolveAccountRef(ctx context.Context, ref string) (string, bool, error) {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "@") {
+		ref = strings.TrimPrefix(ref, "@")
+	}
+	if validUserID(strings.ToLower(ref)) {
+		userID := strings.ToLower(ref)
+		var exists int
+		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)`, userID).Scan(&exists)
+		return userID, exists != 0, err
+	}
+	alias := strings.ToLower(ref)
+	if !accountAliasPattern.MatchString(alias) {
+		return "", false, nil
+	}
+	var userID string
+	err := s.db.QueryRowContext(ctx, `SELECT user_id_hash FROM server_users WHERE alias=?1`, alias).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return userID, true, err
+}
+
+func friendPair(a, b string) (string, string) {
+	if a < b {
+		return a, b
+	}
+	return b, a
+}
+
+func (s *Store) CreateFriendRequest(ctx context.Context, id, requester, target string) (FriendRequest, error) {
+	if requester == target {
+		return FriendRequest{}, errors.New("cannot friend self")
+	}
+	a, b := friendPair(requester, target)
+	var alreadyFriends int
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2)`, a, b).Scan(&alreadyFriends); err != nil {
+		return FriendRequest{}, err
+	}
+	if alreadyFriends != 0 {
+		return FriendRequest{}, errors.New("already friends")
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO server_friend_requests(id,requester_user_id_hash,target_user_id_hash,status,created_at,updated_at)
+VALUES(?1,?2,?3,'pending',?4,?4)
+ON CONFLICT(requester_user_id_hash,target_user_id_hash) DO UPDATE SET
+	status=CASE WHEN server_friend_requests.status='declined' THEN 'pending' ELSE server_friend_requests.status END,
+	updated_at=CASE WHEN server_friend_requests.status='declined' THEN excluded.updated_at ELSE server_friend_requests.updated_at END`,
+		id, requester, target, now); err != nil {
+		return FriendRequest{}, err
+	}
+	return s.friendRequestByUsers(ctx, requester, target)
+}
+
+func (s *Store) friendRequestByUsers(ctx context.Context, requester, target string) (FriendRequest, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
+FROM server_friend_requests fr
+JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
+JOIN server_users tu ON tu.user_id_hash=fr.target_user_id_hash
+WHERE fr.requester_user_id_hash=?1 AND fr.target_user_id_hash=?2`, requester, target)
+	return scanFriendRequest(row)
+}
+
+func (s *Store) FriendRequest(ctx context.Context, id string) (FriendRequest, bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
+FROM server_friend_requests fr
+JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
+JOIN server_users tu ON tu.user_id_hash=fr.target_user_id_hash
+WHERE fr.id=?1`, id)
+	req, err := scanFriendRequest(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return FriendRequest{}, false, nil
+	}
+	return req, err == nil, err
+}
+
+func scanFriendRequest(row interface{ Scan(...any) error }) (FriendRequest, error) {
+	var req FriendRequest
+	err := row.Scan(&req.ID, &req.RequesterUserID, &req.RequesterAlias, &req.TargetUserID, &req.TargetAlias, &req.Status, &req.CreatedAt, &req.UpdatedAt)
+	return req, err
+}
+
+func (s *Store) ListFriendRequests(ctx context.Context, userID string) ([]FriendRequest, []FriendRequest, error) {
+	query := func(where string) ([]FriendRequest, error) {
+		rows, err := s.db.QueryContext(ctx, `
+SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
+FROM server_friend_requests fr
+JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
+JOIN server_users tu ON tu.user_id_hash=fr.target_user_id_hash
+WHERE `+where+` AND fr.status='pending'
+ORDER BY fr.updated_at DESC`, userID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		items := []FriendRequest{}
+		for rows.Next() {
+			req, err := scanFriendRequest(rows)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, req)
+		}
+		return items, rows.Err()
+	}
+	incoming, err := query("fr.target_user_id_hash=?1")
+	if err != nil {
+		return nil, nil, err
+	}
+	outgoing, err := query("fr.requester_user_id_hash=?1")
+	return incoming, outgoing, err
+}
+
+func (s *Store) AcceptFriendRequest(ctx context.Context, userID, id string) (FriendRequest, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return FriendRequest{}, err
+	}
+	defer tx.Rollback()
+	var req FriendRequest
+	row := tx.QueryRowContext(ctx, `
+SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
+FROM server_friend_requests fr
+JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
+JOIN server_users tu ON tu.user_id_hash=fr.target_user_id_hash
+WHERE fr.id=?1`, id)
+	if err := row.Scan(&req.ID, &req.RequesterUserID, &req.RequesterAlias, &req.TargetUserID, &req.TargetAlias, &req.Status, &req.CreatedAt, &req.UpdatedAt); err != nil {
+		return FriendRequest{}, err
+	}
+	if req.TargetUserID != userID {
+		return FriendRequest{}, ErrSyncUserNotFound
+	}
+	if req.Status != "pending" {
+		return FriendRequest{}, errors.New("request not pending")
+	}
+	a, b := friendPair(req.RequesterUserID, req.TargetUserID)
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx, `UPDATE server_friend_requests SET status='accepted',updated_at=?2 WHERE id=?1`, id, now); err != nil {
+		return FriendRequest{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT OR IGNORE INTO server_friendships(user_id_a,user_id_b,created_at)
+VALUES(?1,?2,?3)`, a, b, now); err != nil {
+		return FriendRequest{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return FriendRequest{}, err
+	}
+	req.Status = "accepted"
+	req.UpdatedAt = now
+	return req, nil
+}
+
+func (s *Store) DeclineFriendRequest(ctx context.Context, userID, id string) (FriendRequest, error) {
+	req, found, err := s.FriendRequest(ctx, id)
+	if err != nil {
+		return FriendRequest{}, err
+	}
+	if !found {
+		return FriendRequest{}, sql.ErrNoRows
+	}
+	if req.TargetUserID != userID {
+		return FriendRequest{}, ErrSyncUserNotFound
+	}
+	if req.Status != "pending" {
+		return FriendRequest{}, errors.New("request not pending")
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `UPDATE server_friend_requests SET status='declined',updated_at=?2 WHERE id=?1`, id, now); err != nil {
+		return FriendRequest{}, err
+	}
+	req.Status = "declined"
+	req.UpdatedAt = now
+	return req, nil
+}
+
+func (s *Store) ListFriends(ctx context.Context, userID string) ([]Friend, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT u.user_id_hash,COALESCE(u.alias,''),f.created_at
+FROM server_friendships f
+JOIN server_users u ON u.user_id_hash=CASE WHEN f.user_id_a=?1 THEN f.user_id_b ELSE f.user_id_a END
+WHERE f.user_id_a=?1 OR f.user_id_b=?1
+ORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Friend{}
+	for rows.Next() {
+		var item Friend
+		if err := rows.Scan(&item.UserIDHash, &item.Alias, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) RemoveFriend(ctx context.Context, userID, friendID string) error {
+	a, b := friendPair(userID, friendID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2`, a, b)
+	return err
+}
+
+func (s *Store) UpsertProfileStats(ctx context.Context, userID, app string, metrics []ProfileMetric) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339)
+	applied := 0
+	for _, metric := range metrics {
+		practice := strings.TrimSpace(metric.Practice)
+		name := strings.TrimSpace(metric.Metric)
+		if practice == "" || name == "" {
+			continue
+		}
+		res, err := tx.ExecContext(ctx, `
+INSERT INTO server_profile_stats(user_id_hash,app,practice,metric,value,label,local_date,updated_at)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+ON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET
+	value=excluded.value,label=excluded.label,local_date=excluded.local_date,updated_at=excluded.updated_at`,
+			userID, app, practice, name, metric.Value, metric.Label, metric.LocalDate, now)
+		if err != nil {
+			return 0, err
+		}
+		applied += rowsAffected(res)
+	}
+	return applied, tx.Commit()
+}
+
+func (s *Store) FriendStats(ctx context.Context, userID, app, practice, metric string) ([]FriendStatRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT ps.user_id_hash,COALESCE(u.alias,''),ps.app,ps.practice,ps.metric,ps.value,ps.label,ps.local_date,ps.updated_at
+FROM server_profile_stats ps
+JOIN server_users u ON u.user_id_hash=ps.user_id_hash
+WHERE ps.app=?2 AND ps.practice=?3 AND ps.metric=?4
+  AND (ps.user_id_hash=?1 OR EXISTS (
+      SELECT 1 FROM server_friendships f
+      WHERE (f.user_id_a=?1 AND f.user_id_b=ps.user_id_hash)
+         OR (f.user_id_b=?1 AND f.user_id_a=ps.user_id_hash)
+  ))
+ORDER BY ps.value DESC, COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID, app, practice, metric)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FriendStatRow{}
+	for rows.Next() {
+		var item FriendStatRow
+		if err := rows.Scan(&item.UserIDHash, &item.Alias, &item.App, &item.Practice, &item.Metric, &item.Value, &item.Label, &item.LocalDate, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (s *Store) RecordClientLogin(ctx context.Context, userID, clientID string) error {

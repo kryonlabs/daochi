@@ -58,6 +58,7 @@ a{color:#254da8}
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies signed local changes and returns remote changes newer than <code>since_server_version</code>.</p></section>
+<section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Deletes all remote data for the signed sync account.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
 <h2>Signed Message</h2>
@@ -187,9 +188,102 @@ func openAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/friends": map[string]any{
+				"get": map[string]any{
+					"summary":     "List accepted friends",
+					"description": "Bearer-authenticated. Returns account-level Lyra friends.",
+					"parameters":  bearerHeaderParameters(),
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Friends list"},
+						"401": map[string]any{"description": "Bearer token rejected"},
+					},
+				},
+			},
+			"/api/v1/friends/requests": map[string]any{
+				"get": map[string]any{
+					"summary":    "List pending friend requests",
+					"parameters": bearerHeaderParameters(),
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Incoming and outgoing requests"},
+						"401": map[string]any{"description": "Bearer token rejected"},
+					},
+				},
+				"post": map[string]any{
+					"summary":    "Create friend request",
+					"parameters": bearerHeaderParameters(),
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/FriendRequestCreateRequest"}},
+						},
+					},
+					"responses": map[string]any{
+						"201": map[string]any{"description": "Friend request created"},
+						"404": map[string]any{"description": "Target account not found"},
+						"409": map[string]any{"description": "Already friends or self-request"},
+					},
+				},
+			},
+			"/api/v1/profile/stats": map[string]any{
+				"put": map[string]any{
+					"summary":     "Publish app-neutral profile stats",
+					"description": "Bearer-authenticated aggregate stats. Lyra stores only app/practice/metric/value rows.",
+					"parameters":  bearerHeaderParameters(),
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ProfileStatsRequest"}},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Stats stored"},
+						"400": map[string]any{"description": "Invalid stat namespace"},
+					},
+				},
+			},
+			"/api/v1/friends/stats": map[string]any{
+				"get": map[string]any{
+					"summary":     "List friend leaderboard stats",
+					"description": "Returns the caller and accepted friends only.",
+					"parameters": append(bearerHeaderParameters(),
+						map[string]any{"name": "app", "in": "query", "required": true, "schema": map[string]any{"type": "string"}},
+						map[string]any{"name": "practice", "in": "query", "required": true, "schema": map[string]any{"type": "string"}},
+						map[string]any{"name": "metric", "in": "query", "required": true, "schema": map[string]any{"type": "string"}},
+					),
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Leaderboard rows"},
+						"400": map[string]any{"description": "Invalid stats query"},
+					},
+				},
+			},
 		},
 		"components": map[string]any{
 			"schemas": map[string]any{
+				"FriendRequestCreateRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"target"},
+					"properties": map[string]any{
+						"target": map[string]any{"type": "string", "description": "Alias with optional @ prefix or 64-character public ID hash."},
+					},
+				},
+				"ProfileStatsRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"app", "metrics"},
+					"properties": map[string]any{
+						"app":     map[string]any{"type": "string"},
+						"metrics": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/ProfileMetric"}},
+					},
+				},
+				"ProfileMetric": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"practice":   map[string]any{"type": "string"},
+						"metric":     map[string]any{"type": "string"},
+						"value":      map[string]any{"type": "number"},
+						"label":      map[string]any{"type": "string"},
+						"local_date": map[string]any{"type": "integer"},
+					},
+				},
 				"SyncRequest": map[string]any{
 					"type":     "object",
 					"required": []string{"user_id_hash"},
@@ -284,6 +378,18 @@ func signedHeaderParameters() []map[string]any {
 			"in":          "header",
 			"required":    true,
 			"description": "ML-DSA-44 signature as hex or base64.",
+			"schema":      map[string]any{"type": "string"},
+		},
+	}
+}
+
+func bearerHeaderParameters() []map[string]any {
+	return []map[string]any{
+		{
+			"name":        "Authorization",
+			"in":          "header",
+			"required":    true,
+			"description": "Bearer auth token returned by POST /api/v1/sync/login.",
 			"schema":      map[string]any{"type": "string"},
 		},
 	}

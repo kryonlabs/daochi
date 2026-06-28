@@ -88,6 +88,79 @@ type AliasResponse struct {
 	Alias  string `json:"alias"`
 }
 
+type FriendRequestCreateRequest struct {
+	Target string `json:"target"`
+}
+
+type FriendRequestActionRequest struct {
+	UserIDHash string `json:"user_id_hash,omitempty"`
+}
+
+type FriendRequestResponse struct {
+	Status  string        `json:"status"`
+	Request FriendRequest `json:"request"`
+}
+
+type FriendRequestsResponse struct {
+	Incoming []FriendRequest `json:"incoming"`
+	Outgoing []FriendRequest `json:"outgoing"`
+}
+
+type FriendsResponse struct {
+	Friends []Friend `json:"friends"`
+}
+
+type ProfileStatsRequest struct {
+	App     string          `json:"app"`
+	Metrics []ProfileMetric `json:"metrics"`
+}
+
+type ProfileStatsResponse struct {
+	Status  string `json:"status"`
+	Applied int    `json:"applied"`
+}
+
+type FriendStatsResponse struct {
+	Rows []FriendStatRow `json:"rows"`
+}
+
+type FriendRequest struct {
+	ID              string `json:"id"`
+	RequesterUserID string `json:"requester_user_id_hash"`
+	RequesterAlias  string `json:"requester_alias,omitempty"`
+	TargetUserID    string `json:"target_user_id_hash"`
+	TargetAlias     string `json:"target_alias,omitempty"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+}
+
+type Friend struct {
+	UserIDHash string `json:"user_id_hash"`
+	Alias      string `json:"alias,omitempty"`
+	CreatedAt  string `json:"created_at"`
+}
+
+type ProfileMetric struct {
+	Practice  string  `json:"practice"`
+	Metric    string  `json:"metric"`
+	Value     float64 `json:"value"`
+	Label     string  `json:"label,omitempty"`
+	LocalDate int     `json:"local_date,omitempty"`
+}
+
+type FriendStatRow struct {
+	UserIDHash string  `json:"user_id_hash"`
+	Alias      string  `json:"alias,omitempty"`
+	App        string  `json:"app"`
+	Practice   string  `json:"practice"`
+	Metric     string  `json:"metric"`
+	Value      float64 `json:"value"`
+	Label      string  `json:"label,omitempty"`
+	LocalDate  int     `json:"local_date,omitempty"`
+	UpdatedAt  string  `json:"updated_at"`
+}
+
 type DeleteWithKeyRequest struct {
 	UserIDHash  string `json:"user_id_hash"`
 	ExportedKey string `json:"exported_key,omitempty"`

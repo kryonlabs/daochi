@@ -20,6 +20,7 @@ var userIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
 var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
 var ukuIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{4,128}$`)
+var lyraNamespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
 
 type Server struct {
 	cfg        Config
@@ -51,6 +52,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
+	mux.HandleFunc("GET /api/v1/friends", s.handleFriends)
+	mux.HandleFunc("DELETE /api/v1/friends/", s.handleFriendRoute)
+	mux.HandleFunc("GET /api/v1/friends/requests", s.handleFriendRequests)
+	mux.HandleFunc("POST /api/v1/friends/requests", s.handleFriendRequestCreate)
+	mux.HandleFunc("POST /api/v1/friends/requests/", s.handleFriendRequestRoute)
+	mux.HandleFunc("PUT /api/v1/profile/stats", s.handleProfileStatsPut)
+	mux.HandleFunc("GET /api/v1/friends/stats", s.handleFriendStats)
 	mux.HandleFunc("GET /api/v1/uku/processes", s.handleUkuProcessList)
 	mux.HandleFunc("POST /api/v1/uku/processes", s.handleUkuProcessCreate)
 	mux.HandleFunc("GET /api/v1/uku/processes/", s.handleUkuProcessRoute)
@@ -263,6 +271,182 @@ func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, AliasResponse{Status: "ok", Alias: alias})
 }
 
+func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, bool) {
+	userID, err := s.authenticateToken(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return "", false
+	}
+	return userID, true
+}
+
+func (s *Server) handleFriends(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	friends, err := s.store.ListFriends(r.Context(), userID)
+	if err != nil {
+		slog.Error("list friends", "user", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "friends failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, FriendsResponse{Friends: friends})
+}
+
+func (s *Server) handleFriendRoute(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	friendID := strings.TrimPrefix(r.URL.Path, "/api/v1/friends/")
+	friendID = strings.ToLower(strings.Trim(friendID, "/"))
+	if !validUserID(friendID) {
+		writeError(w, http.StatusNotFound, "friend not found")
+		return
+	}
+	if err := s.store.RemoveFriend(r.Context(), userID, friendID); err != nil {
+		slog.Error("remove friend", "user", userID, "friend", friendID, "error", err)
+		writeError(w, http.StatusInternalServerError, "friend remove failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+func (s *Server) handleFriendRequests(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	incoming, outgoing, err := s.store.ListFriendRequests(r.Context(), userID)
+	if err != nil {
+		slog.Error("list friend requests", "user", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "friend requests failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, FriendRequestsResponse{Incoming: incoming, Outgoing: outgoing})
+}
+
+func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	req, err := readFriendRequestCreateRequest(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	target, found, err := s.store.ResolveAccountRef(r.Context(), req.Target)
+	if err != nil {
+		slog.Error("resolve friend target", "user", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "friend request failed")
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "friend target not found")
+		return
+	}
+	id, err := randomUkuID()
+	if err != nil {
+		slog.Error("generate friend request id", "error", err)
+		writeError(w, http.StatusInternalServerError, "friend request failed")
+		return
+	}
+	item, err := s.store.CreateFriendRequest(r.Context(), id, userID, target)
+	if err != nil {
+		if strings.Contains(err.Error(), "self") || strings.Contains(err.Error(), "already friends") {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		slog.Error("create friend request", "user", userID, "target", target, "error", err)
+		writeError(w, http.StatusInternalServerError, "friend request failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, FriendRequestResponse{Status: "ok", Request: item})
+}
+
+func (s *Server) handleFriendRequestRoute(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	requestID, action, ok := parseFriendRequestPath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "friend request not found")
+		return
+	}
+	var item FriendRequest
+	var err error
+	switch action {
+	case "accept":
+		item, err = s.store.AcceptFriendRequest(r.Context(), userID, requestID)
+	case "decline":
+		item, err = s.store.DeclineFriendRequest(r.Context(), userID, requestID)
+	default:
+		writeError(w, http.StatusNotFound, "friend request not found")
+		return
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "friend request not found")
+		return
+	}
+	if errors.Is(err, ErrSyncUserNotFound) {
+		writeError(w, http.StatusForbidden, "friend request not owned by user")
+		return
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "not pending") {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		slog.Error("friend request action", "user", userID, "request", requestID, "action", action, "error", err)
+		writeError(w, http.StatusInternalServerError, "friend request failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, FriendRequestResponse{Status: item.Status, Request: item})
+}
+
+func (s *Server) handleProfileStatsPut(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	req, err := readProfileStatsRequest(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	applied, err := s.store.UpsertProfileStats(r.Context(), userID, req.App, req.Metrics)
+	if err != nil {
+		slog.Error("upsert profile stats", "user", userID, "app", req.App, "error", err)
+		writeError(w, http.StatusInternalServerError, "profile stats failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, ProfileStatsResponse{Status: "ok", Applied: applied})
+}
+
+func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	app := strings.TrimSpace(r.URL.Query().Get("app"))
+	practice := strings.TrimSpace(r.URL.Query().Get("practice"))
+	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
+	if !validLyraNamespace(app) || !validLyraNamespace(practice) || !validLyraNamespace(metric) {
+		writeError(w, http.StatusBadRequest, "invalid stats query")
+		return
+	}
+	rows, err := s.store.FriendStats(r.Context(), userID, app, practice, metric)
+	if err != nil {
+		slog.Error("friend stats", "user", userID, "app", app, "practice", practice, "metric", metric, "error", err)
+		writeError(w, http.StatusInternalServerError, "friend stats failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, FriendStatsResponse{Rows: rows})
+}
+
 func (s *Server) handleUkuProcessList(w http.ResponseWriter, r *http.Request) {
 	items, err := s.store.ListUkuPublicProcesses(r.Context(), 50)
 	if err != nil {
@@ -443,6 +627,10 @@ func normalizeAlias(alias string) string {
 
 func validAccountAlias(alias string) bool {
 	return accountAliasPattern.MatchString(alias)
+}
+
+func validLyraNamespace(value string) bool {
+	return lyraNamespacePattern.MatchString(value)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -689,6 +877,49 @@ func readAliasRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]
 	return body, req, nil
 }
 
+func readFriendRequestCreateRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (FriendRequestCreateRequest, error) {
+	var req FriendRequestCreateRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, errors.New("invalid json")
+	}
+	req.Target = strings.TrimSpace(req.Target)
+	if req.Target == "" {
+		return req, errors.New("target required")
+	}
+	return req, nil
+}
+
+func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (ProfileStatsRequest, error) {
+	var req ProfileStatsRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, errors.New("invalid json")
+	}
+	req.App = strings.TrimSpace(req.App)
+	if !validLyraNamespace(req.App) {
+		return req, errors.New("invalid app")
+	}
+	if len(req.Metrics) > 100 {
+		return req, errors.New("too many metrics")
+	}
+	for i := range req.Metrics {
+		req.Metrics[i].Practice = strings.TrimSpace(req.Metrics[i].Practice)
+		req.Metrics[i].Metric = strings.TrimSpace(req.Metrics[i].Metric)
+		req.Metrics[i].Label = strings.TrimSpace(req.Metrics[i].Label)
+		if !validLyraNamespace(req.Metrics[i].Practice) || !validLyraNamespace(req.Metrics[i].Metric) {
+			return req, errors.New("invalid metric")
+		}
+	}
+	return req, nil
+}
+
 func readUkuCreateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuCreateProcessRequest, error) {
 	var req UkuCreateProcessRequest
 	body, err := readJSONBody(w, r, maxBody)
@@ -868,6 +1099,19 @@ func parseUkuProcessPath(path string) (processID string, action string, ok bool)
 		return parts[0], "", true
 	}
 	if len(parts) == 2 && (parts[1] == "proposals" || parts[1] == "votes") {
+		return parts[0], parts[1], true
+	}
+	return "", "", false
+}
+
+func parseFriendRequestPath(path string) (requestID string, action string, ok bool) {
+	const prefix = "/api/v1/friends/requests/"
+	rest := strings.TrimPrefix(path, prefix)
+	if rest == path || rest == "" {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) == 2 && validUkuID(parts[0]) && (parts[1] == "accept" || parts[1] == "decline") {
 		return parts[0], parts[1], true
 	}
 	return "", "", false

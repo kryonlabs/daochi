@@ -547,6 +547,153 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	}
 }
 
+func TestFriendRequestsByAliasAndPublicID(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x21)
+	bob := newTestIdentity(t, handler, 0x22)
+	carol := newTestIdentity(t, handler, 0x23)
+
+	setAlias(t, handler, alice, "alice")
+	setAlias(t, handler, bob, "bobby")
+
+	res := friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests", alice, []byte(`{"target":"@bobby"}`))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create by alias status = %d body=%s", res.Code, res.Body.String())
+	}
+	var created FriendRequestResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Request.RequesterUserID != alice.UserID || created.Request.TargetUserID != bob.UserID || created.Request.TargetAlias != "bobby" {
+		t.Fatalf("unexpected created request: %#v", created.Request)
+	}
+
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/requests", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("bob requests status = %d body=%s", res.Code, res.Body.String())
+	}
+	var pending FriendRequestsResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &pending); err != nil {
+		t.Fatal(err)
+	}
+	if len(pending.Incoming) != 1 || pending.Incoming[0].RequesterAlias != "alice" || len(pending.Outgoing) != 0 {
+		t.Fatalf("unexpected bob pending: %#v", pending)
+	}
+
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+created.Request.ID+"/accept", alice, []byte(`{}`))
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("requester accept status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+created.Request.ID+"/accept", bob, []byte(`{}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("target accept status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends", alice, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("alice friends status = %d body=%s", res.Code, res.Body.String())
+	}
+	var friends FriendsResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &friends); err != nil {
+		t.Fatal(err)
+	}
+	if len(friends.Friends) != 1 || friends.Friends[0].UserIDHash != bob.UserID || friends.Friends[0].Alias != "bobby" {
+		t.Fatalf("unexpected alice friends: %#v", friends)
+	}
+
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests", alice, []byte(`{"target":"`+bob.UserID+`"}`))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("already friends status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests", carol, []byte(`{"target":"`+alice.UserID+`"}`))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create by public id status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests", alice, []byte(`{"target":"`+alice.UserID+`"}`))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("self friend status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests", alice, []byte(`{"target":"@missing_alias"}`))
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("missing target status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	assertCount(t, store, "server_friend_requests", 2)
+	assertCount(t, store, "server_friendships", 1)
+}
+
+func TestFriendDeclineAndStatsVisibility(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x24)
+	bob := newTestIdentity(t, handler, 0x25)
+	carol := newTestIdentity(t, handler, 0x26)
+
+	req := createFriendRequest(t, handler, alice, bob.UserID)
+	res := friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+req.ID+"/decline", bob, []byte(`{}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("decline status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+req.ID+"/accept", bob, []byte(`{}`))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("accept declined status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req = createFriendRequest(t, handler, alice, bob.UserID)
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+req.ID+"/accept", bob, []byte(`{}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("accept resent status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	putStats(t, handler, alice, `{"app":"inbe","metrics":[{"practice":"whm","metric":"streak","value":7,"label":"7 days","local_date":20260628},{"practice":"whm","metric":"avg_hold","value":82.5,"label":"82s"}]}`)
+	putStats(t, handler, bob, `{"app":"inbe","metrics":[{"practice":"whm","metric":"streak","value":5,"label":"5 days"}]}`)
+	putStats(t, handler, carol, `{"app":"inbe","metrics":[{"practice":"whm","metric":"streak","value":99,"label":"99 days"}]}`)
+
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=whm&metric=streak", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("bob stats status = %d body=%s", res.Code, res.Body.String())
+	}
+	var stats FriendStatsResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 7 || stats.Rows[1].UserIDHash != bob.UserID {
+		t.Fatalf("unexpected friend stats: %#v", stats.Rows)
+	}
+	for _, row := range stats.Rows {
+		if row.UserIDHash == carol.UserID {
+			t.Fatalf("non-friend carol leaked into stats: %#v", stats.Rows)
+		}
+	}
+
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=whm&metric=avg_hold", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("avg hold stats status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 1 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 82.5 {
+		t.Fatalf("unexpected avg hold stats: %#v", stats.Rows)
+	}
+
+	res = friendJSONRequest(t, handler, http.MethodDelete, "/api/v1/friends/"+alice.UserID, bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("remove status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=whm&metric=streak", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("post-remove stats status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 1 || stats.Rows[0].UserIDHash != bob.UserID {
+		t.Fatalf("removed friend still visible: %#v", stats.Rows)
+	}
+}
+
 func TestCrossAccountSyncIsolation(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -1303,6 +1450,57 @@ func ukuJSONRequest(t *testing.T, target any, method, path, userID, token string
 	res := httptest.NewRecorder()
 	target.(http.Handler).ServeHTTP(res, req)
 	return res
+}
+
+func friendJSONRequest(t *testing.T, target any, method, path string, identity testIdentity, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	res := httptest.NewRecorder()
+	target.(http.Handler).ServeHTTP(res, req)
+	return res
+}
+
+func setAlias(t *testing.T, target any, identity testIdentity, alias string) {
+	t.Helper()
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","alias":"` + alias + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", identity.UserID)
+	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	res := httptest.NewRecorder()
+	target.(http.Handler).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("set alias status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func createFriendRequest(t *testing.T, target any, requester testIdentity, targetRef string) FriendRequest {
+	t.Helper()
+	res := friendJSONRequest(t, target, http.MethodPost, "/api/v1/friends/requests", requester, []byte(`{"target":"`+targetRef+`"}`))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create friend request status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload FriendRequestResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload.Request
+}
+
+func putStats(t *testing.T, target any, identity testIdentity, body string) {
+	t.Helper()
+	res := friendJSONRequest(t, target, http.MethodPut, "/api/v1/profile/stats", identity, []byte(body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("put stats status = %d body=%s", res.Code, res.Body.String())
+	}
 }
 
 func newTestRequest(t *testing.T, method, baseURL, path string, body io.Reader) *http.Request {

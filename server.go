@@ -277,6 +277,11 @@ func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, boo
 		writeAuthError(w, err)
 		return "", false
 	}
+	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Inbe-User")))
+	if headerUser != "" && headerUser != userID {
+		writeAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
+		return "", false
+	}
 	return userID, true
 }
 

@@ -623,6 +623,24 @@ func TestFriendRequestsByAliasAndPublicID(t *testing.T) {
 	assertCount(t, store, "server_friendships", 1)
 }
 
+func TestFriendRequestsRejectMismatchedHeaderUser(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x31)
+	bob := newTestIdentity(t, handler, 0x32)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/friends/requests",
+		bytes.NewReader([]byte(`{"target":"`+bob.UserID+`"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+alice.Token)
+	req.Header.Set("X-Inbe-User", bob.UserID)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("mismatched friend user status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -1463,6 +1481,7 @@ func friendJSONRequest(t *testing.T, target any, method, path string, identity t
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	req.Header.Set("X-Inbe-User", identity.UserID)
 	res := httptest.NewRecorder()
 	target.(http.Handler).ServeHTTP(res, req)
 	return res

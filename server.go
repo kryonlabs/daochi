@@ -296,7 +296,9 @@ func (s *Server) handleFriends(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "friends failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, FriendsResponse{Friends: friends})
+	response := FriendsResponse{Friends: friends}
+	s.cacheSocialSnapshot(r.Context(), userID, "friends.list", response)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleFriendRoute(w http.ResponseWriter, r *http.Request) {
@@ -315,6 +317,8 @@ func (s *Server) handleFriendRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "friend remove failed")
 		return
 	}
+	s.syncHub.publish(userID, 0)
+	s.syncHub.publish(friendID, 0)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
@@ -329,7 +333,9 @@ func (s *Server) handleFriendRequests(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "friend requests failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, FriendRequestsResponse{Incoming: incoming, Outgoing: outgoing})
+	response := FriendRequestsResponse{Incoming: incoming, Outgoing: outgoing}
+	s.cacheSocialSnapshot(r.Context(), userID, "friends.requests", response)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Request) {
@@ -368,6 +374,8 @@ func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
+	s.syncHub.publish(userID, 0)
+	s.syncHub.publish(target, 0)
 	writeJSON(w, http.StatusCreated, FriendRequestResponse{Status: "ok", Request: item})
 }
 
@@ -409,6 +417,8 @@ func (s *Server) handleFriendRequestRoute(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
+	s.syncHub.publish(item.RequesterUserID, 0)
+	s.syncHub.publish(item.TargetUserID, 0)
 	writeJSON(w, http.StatusOK, FriendRequestResponse{Status: item.Status, Request: item})
 }
 
@@ -427,6 +437,16 @@ func (s *Server) handleProfileStatsPut(w http.ResponseWriter, r *http.Request) {
 		slog.Error("upsert profile stats", "user", userID, "app", req.App, "error", err)
 		writeError(w, http.StatusInternalServerError, "profile stats failed")
 		return
+	}
+	if applied > 0 {
+		s.syncHub.publish(userID, 0)
+		if friends, err := s.store.ListFriends(r.Context(), userID); err == nil {
+			for _, friend := range friends {
+				s.syncHub.publish(friend.UserIDHash, 0)
+			}
+		} else {
+			slog.Error("notify profile stats friends", "user", userID, "error", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, ProfileStatsResponse{Status: "ok", Applied: applied})
 }
@@ -449,7 +469,10 @@ func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "friend stats failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, FriendStatsResponse{Rows: rows})
+	response := FriendStatsResponse{Rows: rows}
+	s.cacheSocialSnapshot(r.Context(), userID,
+		"leaderboard."+app+"."+practice+"."+metric, response)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleUkuProcessList(w http.ResponseWriter, r *http.Request) {
@@ -621,7 +644,24 @@ func syncResultApplied(result SyncResult) bool {
 	return result.MeditationLogs > 0 ||
 		result.Habits > 0 ||
 		result.HabitDays > 0 ||
-		result.Sessions > 0
+		result.Sessions > 0 ||
+		result.SocialCache > 0
+}
+
+func (s *Server) cacheSocialSnapshot(ctx context.Context, userID, kind string, value any) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		slog.Error("marshal social cache", "user", userID, "kind", kind, "error", err)
+		return
+	}
+	applied, err := s.store.SetSocialCacheJSON(ctx, userID, kind, payload)
+	if err != nil {
+		slog.Error("write social cache", "user", userID, "kind", kind, "error", err)
+		return
+	}
+	if applied > 0 {
+		s.syncHub.publish(userID, 0)
+	}
 }
 
 func normalizeAlias(alias string) string {

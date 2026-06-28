@@ -37,6 +37,7 @@ type SyncRequest struct {
 	Habits              []Habit         `json:"habits,omitempty"`
 	HabitDays           []HabitDay      `json:"habit_days,omitempty"`
 	Sessions            []Session       `json:"sessions,omitempty"`
+	SocialCache         []SocialCache   `json:"social_cache,omitempty"`
 }
 
 type SyncChanges struct {
@@ -44,6 +45,7 @@ type SyncChanges struct {
 	HabitDays      []HabitDay      `json:"habit_days"`
 	Sessions       []Session       `json:"sessions"`
 	MeditationLogs []MeditationLog `json:"meditation_logs"`
+	SocialCache    []SocialCache   `json:"social_cache"`
 }
 
 type SyncResponse struct {
@@ -72,6 +74,12 @@ type SyncOp struct {
 	OpType     string          `json:"op_type"`
 	Payload    json.RawMessage `json:"payload,omitempty"`
 	CreatedAt  string          `json:"created_at,omitempty"`
+}
+
+type SocialCache struct {
+	Kind      string          `json:"kind"`
+	JSON      json.RawMessage `json:"json"`
+	UpdatedAt string          `json:"updated_at"`
 }
 
 type DeleteRequest struct {
@@ -221,6 +229,7 @@ type SyncResult struct {
 	Habits         int `json:"habits"`
 	HabitDays      int `json:"habit_days"`
 	Sessions       int `json:"sessions"`
+	SocialCache    int `json:"social_cache"`
 }
 
 type UkuProcess struct {

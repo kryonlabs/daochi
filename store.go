@@ -153,6 +153,15 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 	FOREIGN KEY(user_id_hash, session_id) REFERENCES server_sessions(user_id_hash, id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS server_social_cache (
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	kind TEXT NOT NULL,
+	json TEXT NOT NULL DEFAULT '{}',
+	updated_at TEXT NOT NULL,
+	server_version INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(user_id_hash, kind)
+);
+
 CREATE TABLE IF NOT EXISTS server_sync_ops (
 	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
 	op_id TEXT NOT NULL,
@@ -250,6 +259,7 @@ CREATE TABLE IF NOT EXISTS server_profile_stats (
 		`ALTER TABLE server_habit_days ADD COLUMN count INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE server_habit_days SET count=CASE WHEN completed!=0 THEN 1 ELSE 0 END WHERE count=0`,
 		`ALTER TABLE server_sessions ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_social_cache ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_users ADD COLUMN alias TEXT`,
 		`ALTER TABLE server_clients ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE server_clients ADD COLUMN last_client_clock INTEGER NOT NULL DEFAULT 0`,
@@ -368,6 +378,9 @@ func (s *Store) ApplySyncDetailed(ctx context.Context, req SyncRequest, publicKe
 		if err := replaceUserData(ctx, tx, req.UserIDHash); err != nil {
 			return SyncResult{}, nil, err
 		}
+	}
+	if len(req.SocialCache) > 0 {
+		return SyncResult{}, nil, fmt.Errorf("social_cache is server-owned")
 	}
 
 	result := SyncResult{}
@@ -641,6 +654,8 @@ WHERE excluded.updated_at >= server_habit_days.updated_at`,
 			return err
 		}
 		result.Sessions += applied
+	case "social_cache":
+		return fmt.Errorf("social_cache is server-owned")
 	default:
 		if _, err := nextUserVersion(ctx, tx, userID); err != nil {
 			return err
@@ -927,7 +942,10 @@ func (s *Store) UpsertProfileStats(ctx context.Context, userID, app string, metr
 INSERT INTO server_profile_stats(user_id_hash,app,practice,metric,value,label,local_date,updated_at)
 VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
 ON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET
-	value=excluded.value,label=excluded.label,local_date=excluded.local_date,updated_at=excluded.updated_at`,
+	value=excluded.value,label=excluded.label,local_date=excluded.local_date,updated_at=excluded.updated_at
+WHERE excluded.value != server_profile_stats.value
+   OR excluded.label != server_profile_stats.label
+   OR excluded.local_date != server_profile_stats.local_date`,
 			userID, app, practice, name, metric.Value, metric.Label, metric.LocalDate, now)
 		if err != nil {
 			return 0, err
@@ -1292,6 +1310,10 @@ func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion in
 	if err != nil {
 		return changes, 0, err
 	}
+	changes.SocialCache, err = s.snapshotSocialCache(ctx, userID, sinceVersion)
+	if err != nil {
+		return changes, 0, err
+	}
 	version, err := s.currentUserVersion(ctx, userID)
 	if err != nil {
 		return changes, 0, err
@@ -1339,6 +1361,9 @@ func (s *Store) StateHash(ctx context.Context, userID string) (string, error) {
 		return "", err
 	}
 	if err := s.hashMeditationLogs(ctx, h, userID); err != nil {
+		return "", err
+	}
+	if err := s.hashSocialCache(ctx, h, userID); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -1470,6 +1495,27 @@ ORDER BY id`, userID)
 			return err
 		}
 		fmt.Fprintf(h, "meditation_log\t%s\t%s\t%d\t%s\n", id, sessionID, durationSeconds, completedAt)
+	}
+	return rows.Err()
+}
+
+func (s *Store) hashSocialCache(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT kind,json,updated_at
+FROM server_social_cache
+WHERE user_id_hash=?1
+ORDER BY kind`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var kind, payload, updatedAt string
+		if err := rows.Scan(&kind, &payload, &updatedAt); err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "social_cache\t%s\t%s\t%s\n", kind, payload, updatedAt)
 	}
 	return rows.Err()
 }
@@ -1625,6 +1671,33 @@ ORDER BY server_version,completed_at,id`, userID, sinceVersion)
 	return items, rows.Err()
 }
 
+func (s *Store) snapshotSocialCache(ctx context.Context, userID string, sinceVersion int64) ([]SocialCache, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT kind,json,updated_at
+FROM server_social_cache
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,kind`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []SocialCache{}
+	for rows.Next() {
+		var item SocialCache
+		var payload string
+		if err := rows.Scan(&item.Kind, &payload, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if payload == "" {
+			payload = "{}"
+		}
+		item.JSON = json.RawMessage(payload)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func upsertUser(ctx context.Context, tx *sql.Tx, userID string, publicKey []byte) error {
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_users(user_id_hash,public_key)
@@ -1662,6 +1735,7 @@ func replaceUserData(ctx context.Context, tx *sql.Tx, userID string) error {
 		`DELETE FROM server_habit_days WHERE user_id_hash=?1`,
 		`DELETE FROM server_habits WHERE user_id_hash=?1`,
 		`DELETE FROM server_meditation_logs WHERE user_id_hash=?1`,
+		`DELETE FROM server_social_cache WHERE user_id_hash=?1`,
 	} {
 		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
 			return err
@@ -1709,6 +1783,66 @@ VALUES(?1,?2,?3,?4,?5)`, userID, session.ID, round.RoundIndex, round.Breaths, ro
 		if err != nil {
 			return 0, err
 		}
+	}
+	return applied, nil
+}
+
+func upsertSocialCache(ctx context.Context, tx *sql.Tx, userID string, item SocialCache) (int, error) {
+	kind := strings.TrimSpace(item.Kind)
+	payload := item.JSON
+	var same int
+
+	if kind == "" || len(kind) > 96 {
+		return 0, fmt.Errorf("invalid social_cache kind")
+	}
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	if !json.Valid(payload) {
+		return 0, fmt.Errorf("invalid social_cache json")
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM server_social_cache WHERE user_id_hash=?1 AND kind=?2 AND json=?3)`,
+		userID, kind, string(payload)).Scan(&same); err != nil {
+		return 0, err
+	}
+	if same != 0 {
+		return 0, nil
+	}
+	version, err := nextUserVersion(ctx, tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `
+INSERT INTO server_social_cache(user_id_hash,kind,json,updated_at,server_version)
+VALUES(?1,?2,?3,?4,?5)
+ON CONFLICT(user_id_hash,kind) DO UPDATE SET
+	json=excluded.json,
+	updated_at=excluded.updated_at,
+	server_version=excluded.server_version
+WHERE excluded.json != server_social_cache.json`,
+		userID, kind, string(payload), normalizeTime(item.UpdatedAt, ""), version)
+	if err != nil {
+		return 0, err
+	}
+	return rowsAffected(res), nil
+}
+
+func (s *Store) SetSocialCacheJSON(ctx context.Context, userID, kind string, payload []byte) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	applied, err := upsertSocialCache(ctx, tx, userID, SocialCache{
+		Kind: kind,
+		JSON: json.RawMessage(payload),
+	})
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
 	}
 	return applied, nil
 }

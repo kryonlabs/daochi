@@ -697,6 +697,37 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		t.Fatalf("unexpected avg hold stats: %#v", stats.Rows)
 	}
 
+	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-meditation-stats","sessions":[{"id":"alice-meditation-1","started_at":"2026-06-28T00:00:00Z","local_date":`+time.Now().UTC().Format("20060102")+`,"topic":"0","activity":1,"source":"test","rounds_hash":"meditation-1","deleted_at":0,"updated_at":"2026-06-28T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":600}]}],"meditation_logs":[{"id":"alice-meditation-log-1","session_id":"alice-meditation-log-session","duration_seconds":1200,"completed_at":"2026-06-28T00:00:00Z"}]}`))
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=meditation&metric=avg_time", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("avg time stats status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 900 ||
+		stats.Rows[0].Label != "00:15" || stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 {
+		t.Fatalf("unexpected avg time stats: %#v", stats.Rows)
+	}
+
+	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-meditation-stats","sessions":[{"id":"alice-meditation-2","started_at":"2026-06-28T00:30:00Z","local_date":`+time.Now().UTC().Format("20060102")+`,"topic":"0","activity":1,"source":"test","rounds_hash":"meditation-2","deleted_at":0,"updated_at":"2026-06-28T00:30:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":1800}]}]}`))
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=meditation&metric=avg_time", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("recomputed avg time stats status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 1200 ||
+		stats.Rows[0].Label != "00:20" {
+		t.Fatalf("avg time cache was not refreshed after source data changed: %#v", stats.Rows)
+	}
+
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=sun_salutation&metric=avg_hold", bob, nil)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("sun avg hold should be rejected, status = %d body=%s", res.Code, res.Body.String())
+	}
+
 	res = friendJSONRequest(t, handler, http.MethodDelete, "/api/v1/friends/"+alice.UserID, bob, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("remove status = %d body=%s", res.Code, res.Body.String())

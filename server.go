@@ -459,7 +459,8 @@ func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
 	app := strings.TrimSpace(r.URL.Query().Get("app"))
 	practice := strings.TrimSpace(r.URL.Query().Get("practice"))
 	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
-	if !validLyraNamespace(app) || !validLyraNamespace(practice) || !validLyraNamespace(metric) {
+	if !validLyraNamespace(app) || !validLyraNamespace(practice) || !validLyraNamespace(metric) ||
+		!validLeaderboardMetric(practice, metric) {
 		writeError(w, http.StatusBadRequest, "invalid stats query")
 		return
 	}
@@ -676,6 +677,19 @@ func validAccountAlias(alias string) bool {
 
 func validLyraNamespace(value string) bool {
 	return lyraNamespacePattern.MatchString(value)
+}
+
+func validLeaderboardMetric(practice, metric string) bool {
+	switch practice {
+	case "whm":
+		return metric == "streak" || metric == "avg_hold"
+	case "meditation":
+		return metric == "streak" || metric == "avg_time"
+	case "sun_salutation":
+		return metric == "streak"
+	default:
+		return false
+	}
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

@@ -252,6 +252,7 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 	practice TEXT NOT NULL,
 	metric TEXT NOT NULL,
 	source_version INTEGER NOT NULL DEFAULT 0,
+	calc_version INTEGER NOT NULL DEFAULT 0,
 	value REAL NOT NULL,
 	label TEXT NOT NULL DEFAULT '',
 	local_date INTEGER NOT NULL DEFAULT 0,
@@ -278,6 +279,7 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 		`ALTER TABLE server_clients ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE server_clients ADD COLUMN last_client_clock INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
@@ -977,6 +979,8 @@ type visibleStatsUser struct {
 	SourceVersion int64
 }
 
+const leaderboardStatsCalcVersion = 2
+
 func leaderboardActivity(practice string) int {
 	switch practice {
 	case "meditation":
@@ -992,7 +996,7 @@ func leaderboardTimeLabel(seconds int) string {
 	if seconds < 0 {
 		seconds = 0
 	}
-	return fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+	return fmt.Sprintf("%d:%02d", seconds/3600, (seconds%3600)/60)
 }
 
 func (s *Store) visibleStatsUsers(ctx context.Context, userID string) ([]visibleStatsUser, error) {
@@ -1031,18 +1035,19 @@ LEFT JOIN server_sync_state ss ON ss.user_id_hash=vu.user_id_hash`, userID)
 func (s *Store) cachedLeaderboardStat(ctx context.Context, user visibleStatsUser, app, practice, metric string) (FriendStatRow, bool, error) {
 	var row FriendStatRow
 	var sourceVersion int64
+	var calcVersion int
 	err := s.db.QueryRowContext(ctx, `
-SELECT source_version,value,label,local_date,updated_at
+SELECT source_version,calc_version,value,label,local_date,updated_at
 FROM server_leaderboard_stats
 WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4`,
-		user.UserIDHash, app, practice, metric).Scan(&sourceVersion, &row.Value, &row.Label, &row.LocalDate, &row.UpdatedAt)
+		user.UserIDHash, app, practice, metric).Scan(&sourceVersion, &calcVersion, &row.Value, &row.Label, &row.LocalDate, &row.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, false, nil
 	}
 	if err != nil {
 		return row, false, err
 	}
-	if sourceVersion != user.SourceVersion {
+	if sourceVersion != user.SourceVersion || calcVersion != leaderboardStatsCalcVersion {
 		return row, false, nil
 	}
 	row.UserIDHash = user.UserIDHash
@@ -1073,6 +1078,7 @@ WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity, 1<<act
 	defer rows.Close()
 	seen := map[int]bool{}
 	updatedAt := ""
+	latestDate := 0
 	for rows.Next() {
 		var localDate int
 		var updated string
@@ -1081,6 +1087,9 @@ WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity, 1<<act
 		}
 		if localDate > 0 {
 			seen[localDate] = true
+			if localDate > latestDate {
+				latestDate = localDate
+			}
 		}
 		if updated > updatedAt {
 			updatedAt = updated
@@ -1091,9 +1100,13 @@ WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity, 1<<act
 	}
 	today := time.Now().UTC()
 	todayDate := today.Year()*10000 + int(today.Month())*100 + today.Day()
+	start := today
+	if !seen[todayDate] && latestDate > 0 {
+		start = time.Date(latestDate/10000, time.Month((latestDate/100)%100), latestDate%100, 12, 0, 0, 0, time.UTC)
+	}
 	streak := 0
 	for ; streak <= 370; streak++ {
-		day := today.AddDate(0, 0, -streak)
+		day := start.AddDate(0, 0, -streak)
 		localDate := day.Year()*10000 + int(day.Month())*100 + day.Day()
 		if !seen[localDate] {
 			break
@@ -1173,15 +1186,16 @@ func (s *Store) computeLeaderboardStat(ctx context.Context, user visibleStatsUse
 		row.Label = label
 	}
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,value,label,local_date,updated_at)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+INSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,calc_version,value,label,local_date,updated_at)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
 ON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET
 	source_version=excluded.source_version,
+	calc_version=excluded.calc_version,
 	value=excluded.value,
 	label=excluded.label,
 	local_date=excluded.local_date,
 	updated_at=excluded.updated_at`,
-		user.UserIDHash, app, practice, metric, user.SourceVersion,
+		user.UserIDHash, app, practice, metric, user.SourceVersion, leaderboardStatsCalcVersion,
 		row.Value, row.Label, row.LocalDate, row.UpdatedAt)
 	return row, err
 }

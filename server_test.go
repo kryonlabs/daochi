@@ -642,7 +642,7 @@ func TestFriendRequestsRejectMismatchedHeaderUser(t *testing.T) {
 }
 
 func TestFriendDeclineAndStatsVisibility(t *testing.T) {
-	server, _, _ := testServer(t)
+	server, store, _ := testServer(t)
 	handler := server.Routes()
 	alice := newTestIdentity(t, handler, 0x24)
 	bob := newTestIdentity(t, handler, 0x25)
@@ -667,6 +667,12 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-stats","habits":[{"id":"whm","name":"WHM","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":1,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-26T00:00:00Z"}],"habit_days":[{"habit_id":"whm","local_date":`+time.Now().UTC().Format("20060102")+`,"completed":true,"count":1,"updated_at":"2026-06-28T00:00:00Z"}],"sessions":[{"id":"alice-hold","started_at":"2026-06-28T00:00:00Z","local_date":`+time.Now().UTC().Format("20060102")+`,"topic":"0","activity":0,"source":"test","rounds_hash":"alice","deleted_at":0,"updated_at":"2026-06-28T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":82},{"round_index":1,"breaths":0,"hold_seconds":83}]}]}`))
 	syncWithBody(t, handler, "", bob.UserID, bob.Token, []byte(`{"user_id_hash":"`+bob.UserID+`","client_id":"bob-stats","habits":[{"id":"whm","name":"WHM","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":1,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-26T00:00:00Z"}],"habit_days":[{"habit_id":"whm","local_date":`+time.Now().UTC().Format("20060102")+`,"completed":true,"count":1,"updated_at":"2026-06-28T00:00:00Z"}]}`))
 	syncWithBody(t, handler, "", carol.UserID, carol.Token, []byte(`{"user_id_hash":"`+carol.UserID+`","client_id":"carol-stats","habits":[{"id":"whm","name":"WHM","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":1,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-26T00:00:00Z"}],"habit_days":[{"habit_id":"whm","local_date":`+time.Now().UTC().Format("20060102")+`,"completed":true,"count":1,"updated_at":"2026-06-28T00:00:00Z"}]}`))
+	if _, err := store.db.Exec(`
+INSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,value,label,local_date,updated_at)
+SELECT ?1,'inbe','whm','avg_hold',server_version,0,'0',0,'stale'
+FROM server_sync_state WHERE user_id_hash=?1`, alice.UserID); err != nil {
+		t.Fatal(err)
+	}
 
 	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=whm&metric=streak", bob, nil)
 	if res.Code != http.StatusOK {
@@ -706,7 +712,8 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 900 ||
-		stats.Rows[0].Label != "00:15" || stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 {
+		stats.Rows[0].Label != "0:15" || stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 ||
+		stats.Rows[1].Label != "0:00" {
 		t.Fatalf("unexpected avg time stats: %#v", stats.Rows)
 	}
 
@@ -719,7 +726,7 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 1200 ||
-		stats.Rows[0].Label != "00:20" {
+		stats.Rows[0].Label != "0:20" {
 		t.Fatalf("avg time cache was not refreshed after source data changed: %#v", stats.Rows)
 	}
 

@@ -320,7 +320,7 @@ func TestSyncV2AppliesOpsIdempotentlyAndReturnsRemoteOps(t *testing.T) {
 	if len(read.Ops) != 1 || read.Ops[0].OpID != "client-a:1" || read.Ops[0].EntityType != "habit" {
 		t.Fatalf("remote ops = %#v", read.Ops)
 	}
-	if len(read.Changes.Habits) != 1 || read.Changes.Habits[0].ID != "habit-v2" {
+	if len(read.Changes.Habits) != 1 || !isCanonicalHabitID(read.Changes.Habits[0].ID) {
 		t.Fatalf("materialized changes = %#v", read.Changes.Habits)
 	}
 }
@@ -487,7 +487,7 @@ func TestSyncV2CompactsAcknowledgedOpsAndFallsBackToSnapshot(t *testing.T) {
 	if !stale.FullSnapshotRequired || stale.ChangesComplete || len(stale.Ops) != 0 || stale.Applied.Habits != 0 {
 		t.Fatalf("expected full snapshot fallback for compacted ops: %#v", stale)
 	}
-	if len(stale.Changes.Habits) != 1 || stale.Changes.Habits[0].ID != "habit-v2" {
+	if len(stale.Changes.Habits) != 1 || !isCanonicalHabitID(stale.Changes.Habits[0].ID) {
 		t.Fatalf("stale fallback snapshot = %#v", stale.Changes.Habits)
 	}
 	assertCount(t, store, "server_habits", 1)
@@ -556,14 +556,14 @@ func TestProtocolV3MaterializesLegacyOrphanHabitDays(t *testing.T) {
 	if decoded.Data == nil || len(decoded.Data.Habits) != 1 {
 		t.Fatalf("unexpected clean habits: %#v body=%s", decoded.Data, res.Body.String())
 	}
-	if decoded.Data.Habits[0].ID != "habit-8" || decoded.Data.Habits[0].Name != "Habit 8" {
+	if !isCanonicalHabitID(decoded.Data.Habits[0].ID) || decoded.Data.Habits[0].Name != "Habit 8" {
 		t.Fatalf("legacy habit was not materialized with a readable name: %#v", decoded.Data.Habits[0])
 	}
-	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != "habit-8" || decoded.Data.HabitDays[0].HabitName != "Habit 8" || decoded.Data.HabitDays[0].Count != 2 {
+	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != decoded.Data.Habits[0].ID || decoded.Data.HabitDays[0].HabitName != "Habit 8" || decoded.Data.HabitDays[0].Count != 2 {
 		t.Fatalf("legacy habit day was not attached to materialized habit: %#v", decoded.Data.HabitDays)
 	}
 	var habitRows int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id='habit-8' AND name='Habit 8'`, identity.UserID).Scan(&habitRows); err != nil {
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id=?2 AND name='Habit 8'`, identity.UserID, decoded.Data.Habits[0].ID).Scan(&habitRows); err != nil {
 		t.Fatal(err)
 	}
 	if habitRows != 1 {
@@ -592,10 +592,10 @@ func TestProtocolV3AutoMigratesSunSalutationHabitIDAndKeepsLegacyClient(t *testi
 	if decoded.Data == nil || len(decoded.Data.Habits) != 1 {
 		t.Fatalf("unexpected clean habits: %#v body=%s", decoded.Data, res.Body.String())
 	}
-	if decoded.Data.Habits[0].ID != "sun-salutation" {
+	if !isCanonicalHabitID(decoded.Data.Habits[0].ID) {
 		t.Fatalf("habit was not canonicalized: %#v", decoded.Data.Habits[0])
 	}
-	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != "sun-salutation" || decoded.Data.HabitDays[0].HabitName != "Yoga" {
+	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != decoded.Data.Habits[0].ID || decoded.Data.HabitDays[0].HabitName != "Yoga" {
 		t.Fatalf("habit day was not canonicalized with name: %#v", decoded.Data.HabitDays)
 	}
 	if len(decoded.LegacyClients) == 0 || decoded.UpgradeNotice == "" {

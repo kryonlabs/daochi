@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -25,6 +26,36 @@ type Store struct {
 var ErrSyncUserNotFound = errors.New("sync user not found")
 
 const syncClientActiveRetention = 90 * 24 * time.Hour
+
+func newCanonicalHabitID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+func isCanonicalHabitID(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for i, ch := range id {
+		switch i {
+		case 8, 13, 18, 23:
+			if ch != '-' {
+				return false
+			}
+		default:
+			if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 type PublicStats struct {
 	UserCount        int64
@@ -198,6 +229,10 @@ func OpenStore(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.AutoMigrateAllAccounts(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -582,12 +617,20 @@ ON CONFLICT(user_id_hash,id) DO NOTHING`, req.UserIDHash, item.ID, item.SessionI
 		result.MeditationLogs += rowsAffected(res)
 	}
 	for _, habit := range req.Habits {
+		originalID := habit.ID
+		canonicalID, _, err := canonicalHabitIDForWrite(ctx, tx, req.UserIDHash, habit.ID, "legacy-write")
+		if err != nil {
+			return SyncResult{}, nil, err
+		}
+		habit.ID = canonicalID
 		if req.Bootstrap && habit.DeletedAt > 0 {
 			deletedHabitIDs[habit.ID] = true
+			deletedHabitIDs[originalID] = true
 			continue
 		}
 		if habit.DeletedAt > 0 {
 			deletedHabitIDs[habit.ID] = true
+			deletedHabitIDs[originalID] = true
 			applied, err := deleteHabit(ctx, tx, req.UserIDHash, habit)
 			if err != nil {
 				return SyncResult{}, nil, err
@@ -624,6 +667,15 @@ WHERE excluded.updated_at >= server_habits.updated_at`,
 		result.Habits += rowsAffected(res)
 	}
 	for _, day := range req.HabitDays {
+		originalID := day.HabitID
+		if deletedHabitIDs[originalID] {
+			continue
+		}
+		canonicalID, _, err := canonicalHabitIDForWrite(ctx, tx, req.UserIDHash, day.HabitID, "legacy-day-write")
+		if err != nil {
+			return SyncResult{}, nil, err
+		}
+		day.HabitID = canonicalID
 		if deletedHabitIDs[day.HabitID] {
 			continue
 		}
@@ -689,6 +741,9 @@ func applySyncOps(ctx context.Context, tx *sql.Tx, userID string, ops []SyncOp, 
 			accepted = append(accepted, op.OpID)
 			continue
 		}
+		if err := canonicalizeSyncOpHabitIDs(ctx, tx, userID, &op); err != nil {
+			return nil, err
+		}
 		if err := materializeSyncOp(ctx, tx, userID, op, result); err != nil {
 			return nil, err
 		}
@@ -717,6 +772,39 @@ VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`,
 		accepted = append(accepted, op.OpID)
 	}
 	return accepted, nil
+}
+
+func canonicalizeSyncOpHabitIDs(ctx context.Context, tx *sql.Tx, userID string, op *SyncOp) error {
+	if op == nil {
+		return nil
+	}
+	if op.EntityType != "habit" && op.EntityType != "habit_day" {
+		return nil
+	}
+	id := strings.TrimSpace(op.EntityID)
+	if id == "" && len(op.Payload) > 0 {
+		var obj struct {
+			ID      string `json:"id"`
+			HabitID string `json:"habit_id"`
+		}
+		if err := json.Unmarshal(op.Payload, &obj); err == nil {
+			if obj.HabitID != "" {
+				id = obj.HabitID
+			} else {
+				id = obj.ID
+			}
+		}
+	}
+	if id == "" {
+		return fmt.Errorf("habit op missing id")
+	}
+	canonicalID, _, err := canonicalHabitIDForWrite(ctx, tx, userID, id, "legacy-op")
+	if err != nil {
+		return err
+	}
+	op.EntityID = canonicalID
+	op.Payload = rewriteHabitPayloadID(op.Payload, canonicalID)
+	return nil
 }
 
 func syncOpExists(ctx context.Context, tx *sql.Tx, userID, opID string) (bool, error) {
@@ -1793,16 +1881,28 @@ func (s *Store) CleanData(ctx context.Context, userID string) (*CleanData, error
 	if err != nil {
 		return nil, err
 	}
-	socialCache, err := s.cleanSocialCache(ctx, userID)
+	social, err := s.cleanSocialCache(ctx, userID)
 	if err != nil {
 		return nil, err
+	}
+	friends := json.RawMessage(`{"friends":[]}`)
+	friendRequests := json.RawMessage(`{"incoming":[],"outgoing":[]}`)
+	for _, item := range social {
+		switch item.Kind {
+		case "friends.list":
+			friends = item.JSON
+		case "friends.requests":
+			friendRequests = item.JSON
+		}
 	}
 	return &CleanData{
 		Habits:         habits,
 		HabitDays:      habitDays,
 		Sessions:       sessions,
 		MeditationLogs: meditationLogs,
-		SocialCache:    socialCache,
+		Social:         social,
+		Friends:        friends,
+		FriendRequests: friendRequests,
 	}, nil
 }
 
@@ -2030,16 +2130,124 @@ WHERE user_id_hash=?1
 	return rowsAffected(res) > 0, nil
 }
 
+func canonicalHabitIDForWrite(ctx context.Context, tx *sql.Tx, userID, id, source string) (string, bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", false, fmt.Errorf("empty habit id")
+	}
+	if isCanonicalHabitID(id) {
+		return strings.ToLower(id), false, nil
+	}
+	var mapped string
+	err := tx.QueryRowContext(ctx, `
+SELECT new_id
+FROM server_habit_id_migrations
+WHERE user_id_hash=?1 AND old_id=?2`, userID, id).Scan(&mapped)
+	if err == nil && mapped != "" {
+		return mapped, true, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", false, err
+	}
+	canonical, err := newCanonicalHabitID()
+	if err != nil {
+		return "", false, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT OR REPLACE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)
+VALUES(?1,?2,?3,?4)`, userID, id, canonical, source); err != nil {
+		return "", false, err
+	}
+	return canonical, true, nil
+}
+
+func canonicalHabitIDForRead(ctx context.Context, tx *sql.Tx, userID, id string) (string, bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" || isCanonicalHabitID(id) {
+		return strings.ToLower(id), false, nil
+	}
+	var mapped string
+	err := tx.QueryRowContext(ctx, `
+SELECT new_id
+FROM server_habit_id_migrations
+WHERE user_id_hash=?1 AND old_id=?2`, userID, id).Scan(&mapped)
+	if errors.Is(err, sql.ErrNoRows) {
+		return id, false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return mapped, mapped != id, nil
+}
+
+func rewriteHabitPayloadID(payload json.RawMessage, canonicalID string) json.RawMessage {
+	if len(payload) == 0 || canonicalID == "" {
+		return payload
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return payload
+	}
+	changed := false
+	if _, ok := obj["id"]; ok {
+		obj["id"] = canonicalID
+		changed = true
+	}
+	if _, ok := obj["habit_id"]; ok {
+		obj["habit_id"] = canonicalID
+		changed = true
+	}
+	if !changed {
+		return payload
+	}
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return payload
+	}
+	return json.RawMessage(out)
+}
+
 func (s *Store) AutoMigrateAccountForProtocol(ctx context.Context, userID string, protocol int) error {
 	if protocol < 3 {
 		return nil
 	}
+	return s.autoMigrateAccount(ctx, userID)
+}
+
+func (s *Store) AutoMigrateAllAccounts(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT user_id_hash FROM server_users ORDER BY user_id_hash`)
+	if err != nil {
+		return err
+	}
+	users := []string{}
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			rows.Close()
+			return err
+		}
+		users = append(users, userID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, userID := range users {
+		if err := s.autoMigrateAccount(ctx, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) autoMigrateAccount(ctx context.Context, userID string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	changed, err := migrateSunSalutationHabitID(ctx, tx, userID)
+	changed, err := migrateAllHabitIDsToCanonicalUUIDs(ctx, tx, userID)
 	if err != nil {
 		return err
 	}
@@ -2058,6 +2266,173 @@ func (s *Store) AutoMigrateAccountForProtocol(ctx context.Context, userID string
 		}
 	}
 	return tx.Commit()
+}
+
+func migrateAllHabitIDsToCanonicalUUIDs(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT id
+FROM server_habits
+WHERE user_id_hash=?1
+ORDER BY sort_order,id`, userID)
+	if err != nil {
+		return false, err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return false, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, err
+	}
+	rows.Close()
+
+	changed := false
+	for _, oldID := range ids {
+		if oldID == "" || isCanonicalHabitID(oldID) {
+			continue
+		}
+		newID, mapped, err := canonicalHabitIDForWrite(ctx, tx, userID, oldID, "protocol-v3-canonical")
+		if err != nil {
+			return false, err
+		}
+		if newID == oldID {
+			continue
+		}
+		if err := mergeHabitRows(ctx, tx, userID, newID, oldID); err != nil {
+			return false, err
+		}
+		changed = changed || mapped
+	}
+	opsChanged, err := canonicalizeExistingHabitOps(ctx, tx, userID)
+	if err != nil {
+		return false, err
+	}
+	changed = changed || opsChanged
+	return changed, nil
+}
+
+func canonicalizeExistingHabitOps(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT op_id,entity_id,payload_json
+FROM server_sync_ops
+WHERE user_id_hash=?1
+  AND entity_type IN ('habit','habit_day')
+ORDER BY server_version,op_id`, userID)
+	if err != nil {
+		return false, err
+	}
+	type opRow struct {
+		opID     string
+		entityID string
+		payload  string
+	}
+	items := []opRow{}
+	for rows.Next() {
+		var item opRow
+		if err := rows.Scan(&item.opID, &item.entityID, &item.payload); err != nil {
+			rows.Close()
+			return false, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, err
+	}
+	rows.Close()
+
+	changed := false
+	for _, item := range items {
+		canonicalID, mapped, err := canonicalHabitIDForRead(ctx, tx, userID, item.entityID)
+		if err != nil {
+			return false, err
+		}
+		if !mapped {
+			continue
+		}
+		payload := rewriteHabitPayloadID(json.RawMessage(item.payload), canonicalID)
+		res, err := tx.ExecContext(ctx, `
+UPDATE server_sync_ops
+SET entity_id=?3,payload_json=?4
+WHERE user_id_hash=?1 AND op_id=?2`, userID, item.opID, canonicalID, string(payload))
+		if err != nil {
+			return false, err
+		}
+		changed = changed || rowsAffected(res) > 0
+	}
+	return changed, nil
+}
+
+func mergeHabitRows(ctx context.Context, tx *sql.Tx, userID, keeperID, duplicateID string) error {
+	var keeperExists int
+	var duplicateExists int
+	if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)`,
+		userID, keeperID).Scan(&keeperExists); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)`,
+		userID, duplicateID).Scan(&duplicateExists); err != nil {
+		return err
+	}
+	if duplicateExists != 0 {
+		if keeperExists == 0 {
+			if _, err := tx.ExecContext(ctx, `
+UPDATE server_habits
+SET id=?3
+WHERE user_id_hash=?1 AND id=?2`, userID, duplicateID, keeperID); err != nil {
+				return err
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx, `
+UPDATE server_habits
+SET name=CASE WHEN name='' THEN (SELECT name FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE name END,
+	color_r=CASE WHEN color_r=0 THEN (SELECT color_r FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_r END,
+	color_g=CASE WHEN color_g=0 THEN (SELECT color_g FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_g END,
+	color_b=CASE WHEN color_b=0 THEN (SELECT color_b FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_b END,
+	sync_mode=MAX(sync_mode,(SELECT sync_mode FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),
+	sync_activity=(sync_activity | (SELECT sync_activity FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),
+	counter_enabled=MAX(counter_enabled,(SELECT counter_enabled FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),
+	sort_order=MIN(sort_order,(SELECT sort_order FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),
+	deleted_at=CASE WHEN deleted_at=0 THEN 0 ELSE MIN(deleted_at,(SELECT deleted_at FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)) END,
+	updated_at=MAX(updated_at,(SELECT updated_at FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),
+	server_version=MAX(server_version,(SELECT server_version FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2))
+WHERE user_id_hash=?1 AND id=?3`, userID, duplicateID, keeperID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `
+DELETE FROM server_habits
+WHERE user_id_hash=?1 AND id=?2`, userID, duplicateID); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)
+SELECT user_id_hash,?3,local_date,completed,count,updated_at,server_version
+FROM server_habit_days
+WHERE user_id_hash=?1 AND habit_id=?2
+ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
+	completed=MAX(server_habit_days.completed,excluded.completed),
+	count=MAX(server_habit_days.count,excluded.count),
+	updated_at=MAX(server_habit_days.updated_at,excluded.updated_at),
+	server_version=MAX(server_habit_days.server_version,excluded.server_version)`,
+		userID, duplicateID, keeperID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM server_habit_days
+WHERE user_id_hash=?1 AND habit_id=?2`, userID, duplicateID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func materializeLegacyHabitDays(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {
@@ -2111,15 +2486,22 @@ ORDER BY hd.habit_id`, userID)
 		if updatedAt == "" {
 			updatedAt = time.Now().UTC().Format(time.RFC3339)
 		}
+		canonicalID, _, err := canonicalHabitIDForWrite(ctx, tx, userID, habit.id, "protocol-v3-orphan")
+		if err != nil {
+			return false, err
+		}
 		res, err := tx.ExecContext(ctx, `
 INSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)
 VALUES(?1,?2,?3,99,196,165,0,0,0,?4,0,?5,?6)
 ON CONFLICT(user_id_hash,id) DO NOTHING`,
-			userID, habit.id, legacyHabitDisplayName(habit.id), 1000+index, updatedAt, habit.serverVersion)
+			userID, canonicalID, legacyHabitDisplayName(habit.id), 1000+index, updatedAt, habit.serverVersion)
 		if err != nil {
 			return false, err
 		}
 		changed = changed || rowsAffected(res) > 0
+		if err := mergeHabitRows(ctx, tx, userID, canonicalID, habit.id); err != nil {
+			return false, err
+		}
 	}
 	return changed, nil
 }

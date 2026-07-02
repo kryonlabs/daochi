@@ -79,11 +79,13 @@ type SyncResponse struct {
 }
 
 type CleanData struct {
-	Habits         []Habit         `json:"habits"`
-	HabitDays      []CleanHabitDay `json:"habit_days"`
-	Sessions       []Session       `json:"sessions"`
-	MeditationLogs []MeditationLog `json:"meditation_logs"`
-	SocialCache    []SocialCache   `json:"social_cache"`
+	Habits         []Habit          `json:"habits"`
+	HabitDays      []CleanHabitDay  `json:"habit_days"`
+	Sessions       []Session        `json:"sessions"`
+	MeditationLogs []MeditationLog  `json:"meditation_logs"`
+	Social         []SocialSnapshot `json:"social,omitempty"`
+	Friends        json.RawMessage  `json:"friends,omitempty"`
+	FriendRequests json.RawMessage  `json:"friend_requests,omitempty"`
 }
 
 type CleanHabitDay struct {
@@ -118,11 +120,13 @@ type SyncOp struct {
 	CreatedAt  string          `json:"created_at,omitempty"`
 }
 
-type SocialCache struct {
+type SocialSnapshot struct {
 	Kind      string          `json:"kind"`
 	JSON      json.RawMessage `json:"json"`
 	UpdatedAt string          `json:"updated_at"`
 }
+
+type SocialCache = SocialSnapshot
 
 type DeleteRequest struct {
 	UserIDHash string `json:"user_id_hash"`

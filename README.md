@@ -2,10 +2,26 @@
 
 Lyra is the stateless sync relay for Inbe. It stores public keys and mirrored app data, but never stores client private keys.
 
+## Privacy Model
+
+Lyra uses the client account key for identity and authentication. A client proves control of the account by signing a short-lived challenge with ML-DSA-44, and Lyra then issues a bearer token for normal sync and social API calls.
+
+Lyra does not currently provide end-to-end encryption against the server. Mirrored app data is stored in SQLite as normal typed rows and JSON payloads so the service can sync, compact, export, derive friend leaderboard stats, and delete account data. This is intentional. Operational access to the server database or a valid bearer token can read the data those credentials allow.
+
+API access is scoped by account, with explicit shared surfaces:
+
+- accepted friends can see the account alias and selected profile/leaderboard stats;
+- pending friend request participants can see the request metadata;
+- public Uku processes, proposals, and votes are public by design.
+
 ## Endpoints
 
 - `GET /api/v1/sync/challenge?user_id=<sha256-public-key-hex>`
+- `GET /api/v1/sync/ws`
+- `POST /api/v1/sync/login`
 - `POST /api/v1/sync`
+- `POST /api/v1/account/alias`
+- `GET /api/v1/account/export`
 - `GET /api/v1/friends`
 - `GET /api/v1/friends/requests`
 - `POST /api/v1/friends/requests`
@@ -14,6 +30,12 @@ Lyra is the stateless sync relay for Inbe. It stores public keys and mirrored ap
 - `DELETE /api/v1/friends/{user_id_hash}`
 - `PUT /api/v1/profile/stats`
 - `GET /api/v1/friends/stats?app=&practice=&metric=`
+- `GET /api/v1/uku/processes`
+- `POST /api/v1/uku/processes`
+- `GET /api/v1/uku/processes/{id}`
+- `PATCH /api/v1/uku/processes/{id}`
+- `POST /api/v1/uku/processes/{id}/proposals`
+- `POST /api/v1/uku/processes/{id}/votes`
 - `DELETE /api/v1/account`
 - `POST /api/v1/account/delete-with-key`
 - `GET /openapi.json`

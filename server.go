@@ -291,9 +291,6 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "legacy clients failed")
 			return
 		}
-		if len(response.LegacyClients) > 0 {
-			response.UpgradeNotice = "Another device is using an older Inbe Breeze. Upgrade it before major sync changes."
-		}
 	}
 	writeJSON(w, http.StatusOK, response)
 }

@@ -602,8 +602,11 @@ func TestProtocolV3AutoMigratesSunSalutationHabitIDAndKeepsLegacyClient(t *testi
 	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != decoded.Data.Habits[0].ID || decoded.Data.HabitDays[0].HabitName != "Yoga" {
 		t.Fatalf("habit day was not canonicalized with name: %#v", decoded.Data.HabitDays)
 	}
-	if len(decoded.LegacyClients) == 0 || decoded.UpgradeNotice == "" {
-		t.Fatalf("legacy client upgrade warning missing: clients=%#v notice=%q", decoded.LegacyClients, decoded.UpgradeNotice)
+	if len(decoded.LegacyClients) == 0 {
+		t.Fatalf("legacy client diagnostics missing: clients=%#v", decoded.LegacyClients)
+	}
+	if decoded.UpgradeNotice != "" {
+		t.Fatalf("dual-mode compatibility should not warn: %q", decoded.UpgradeNotice)
 	}
 	var oldRows int
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id='yoga'`, identity.UserID).Scan(&oldRows); err != nil {

@@ -259,6 +259,20 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "clean data failed")
 			return
 		}
+		response.Changes.Habits = response.Data.Habits
+		response.Changes.HabitDays = make([]HabitDay, 0, len(response.Data.HabitDays))
+		for _, day := range response.Data.HabitDays {
+			response.Changes.HabitDays = append(response.Changes.HabitDays, HabitDay{
+				HabitID:   day.HabitID,
+				LocalDate: day.LocalDate,
+				Completed: day.Completed,
+				Count:     day.Count,
+				UpdatedAt: day.UpdatedAt,
+			})
+		}
+		response.Changes.Sessions = response.Data.Sessions
+		response.Changes.MeditationLogs = response.Data.MeditationLogs
+		response.Changes.SocialCache = response.Data.Social
 		response.Logs, err = s.store.SyncLogs(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
 			slog.Error("load sync logs", "user", req.UserIDHash, "error", err)

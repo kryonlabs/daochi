@@ -125,8 +125,8 @@ WHERE user_id_hash=?1`, userID).Scan(&alias); err != nil {
 			query: `SELECT id, session_id, duration_seconds, completed_at, server_version, created_at FROM server_meditation_logs WHERE user_id_hash=?1 ORDER BY completed_at DESC, id`,
 		},
 		{
-			name:       "social_cache",
-			query:      `SELECT kind, json, updated_at, server_version FROM server_social_cache WHERE user_id_hash=?1 ORDER BY kind`,
+			name:       "social_snapshots",
+			query:      `SELECT kind, json, updated_at, server_version FROM server_social_snapshots WHERE user_id_hash=?1 ORDER BY kind`,
 			jsonFields: map[string]bool{"json": true},
 		},
 		{
@@ -344,7 +344,7 @@ CREATE TABLE IF NOT EXISTS server_session_rounds (
 	FOREIGN KEY(user_id_hash, session_id) REFERENCES server_sessions(user_id_hash, id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS server_social_cache (
+CREATE TABLE IF NOT EXISTS server_social_snapshots (
 	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
 	kind TEXT NOT NULL,
 	json TEXT NOT NULL DEFAULT '{}',
@@ -465,6 +465,9 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 	if err := s.migrateMeditationLogPrimaryKey(ctx); err != nil {
 		return err
 	}
+	if err := s.migrateSocialCacheTable(ctx); err != nil {
+		return err
+	}
 	for _, stmt := range []string{
 		`ALTER TABLE server_meditation_logs ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_habits ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
@@ -473,7 +476,7 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 		`ALTER TABLE server_habit_days ADD COLUMN count INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE server_habit_days SET count=CASE WHEN completed!=0 THEN 1 ELSE 0 END WHERE count=0`,
 		`ALTER TABLE server_sessions ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE server_social_cache ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_social_snapshots ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_users ADD COLUMN alias TEXT`,
 		`ALTER TABLE server_clients ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE server_clients ADD COLUMN last_client_clock INTEGER NOT NULL DEFAULT 0`,
@@ -558,6 +561,26 @@ PRAGMA foreign_keys=ON;`)
 		return err
 	}
 	return nil
+}
+
+func (s *Store) migrateSocialCacheTable(ctx context.Context) error {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+	SELECT 1 FROM sqlite_master
+	WHERE type='table' AND name='server_social_cache'
+)`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT OR REPLACE INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)
+SELECT user_id_hash,kind,json,updated_at,server_version
+FROM server_social_cache;
+DROP TABLE server_social_cache;`)
+	return err
 }
 
 func (s *Store) PublicKey(ctx context.Context, userID string) ([]byte, bool, error) {
@@ -924,7 +947,7 @@ WHERE excluded.updated_at >= server_habit_days.updated_at`,
 			return err
 		}
 		result.Sessions += applied
-	case "social_cache":
+	case "social_snapshots":
 		return fmt.Errorf("social_cache is server-owned")
 	default:
 		if _, err := nextUserVersion(ctx, tx, userID); err != nil {
@@ -2772,7 +2795,7 @@ ORDER BY id`, userID)
 func (s *Store) hashSocialCache(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT kind,json,updated_at
-FROM server_social_cache
+FROM server_social_snapshots
 WHERE user_id_hash=?1
 ORDER BY kind`, userID)
 	if err != nil {
@@ -2944,7 +2967,7 @@ ORDER BY server_version,completed_at,id`, userID, sinceVersion)
 func (s *Store) snapshotSocialCache(ctx context.Context, userID string, sinceVersion int64) ([]SocialCache, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT kind,json,updated_at
-FROM server_social_cache
+FROM server_social_snapshots
 WHERE user_id_hash=?1 AND server_version>?2
 ORDER BY server_version,kind`, userID, sinceVersion)
 	if err != nil {
@@ -3005,7 +3028,7 @@ func replaceUserData(ctx context.Context, tx *sql.Tx, userID string) error {
 		`DELETE FROM server_habit_days WHERE user_id_hash=?1`,
 		`DELETE FROM server_habits WHERE user_id_hash=?1`,
 		`DELETE FROM server_meditation_logs WHERE user_id_hash=?1`,
-		`DELETE FROM server_social_cache WHERE user_id_hash=?1`,
+		`DELETE FROM server_social_snapshots WHERE user_id_hash=?1`,
 	} {
 		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
 			return err
@@ -3072,7 +3095,7 @@ func upsertSocialCache(ctx context.Context, tx *sql.Tx, userID string, item Soci
 		return 0, fmt.Errorf("invalid social_cache json")
 	}
 	if err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM server_social_cache WHERE user_id_hash=?1 AND kind=?2 AND json=?3)`,
+		`SELECT EXISTS(SELECT 1 FROM server_social_snapshots WHERE user_id_hash=?1 AND kind=?2 AND json=?3)`,
 		userID, kind, string(payload)).Scan(&same); err != nil {
 		return 0, err
 	}
@@ -3084,13 +3107,13 @@ func upsertSocialCache(ctx context.Context, tx *sql.Tx, userID string, item Soci
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO server_social_cache(user_id_hash,kind,json,updated_at,server_version)
+INSERT INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)
 VALUES(?1,?2,?3,?4,?5)
 ON CONFLICT(user_id_hash,kind) DO UPDATE SET
 	json=excluded.json,
 	updated_at=excluded.updated_at,
 	server_version=excluded.server_version
-WHERE excluded.json != server_social_cache.json`,
+WHERE excluded.json != server_social_snapshots.json`,
 		userID, kind, string(payload), normalizeTime(item.UpdatedAt, ""), version)
 	if err != nil {
 		return 0, err

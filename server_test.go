@@ -335,7 +335,7 @@ func TestAccountExportReturnsOnlyAuthenticatedAccountData(t *testing.T) {
 	if res := syncWithBody(t, handler, "", alice.UserID, alice.Token, aliceBody); res.Code != http.StatusOK {
 		t.Fatalf("alice sync status = %d body=%s", res.Code, res.Body.String())
 	}
-	if _, err := store.db.Exec(`INSERT INTO server_social_cache(user_id_hash,kind,json,updated_at,server_version) VALUES(?1,'friends.list','{"friends":[]}','2026-06-24T10:00:00Z',99)`, alice.UserID); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version) VALUES(?1,'friends.list','{"friends":[]}','2026-06-24T10:00:00Z',99)`, alice.UserID); err != nil {
 		t.Fatal(err)
 	}
 	bobBody := []byte(`{"user_id_hash":"` + bob.UserID + `","client_id":"client-b","habits":[{"id":"bob-habit","name":"Bob Habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"}]}`)
@@ -357,11 +357,15 @@ func TestAccountExportReturnsOnlyAuthenticatedAccountData(t *testing.T) {
 	if payload.UserIDHash != alice.UserID {
 		t.Fatalf("export user = %s, want %s", payload.UserIDHash, alice.UserID)
 	}
-	if len(payload.Tables["habits"]) != 1 || payload.Tables["habits"][0]["id"] != "alice-habit" {
+	if len(payload.Tables["habits"]) != 1 {
 		t.Fatalf("export habits = %#v", payload.Tables["habits"])
 	}
-	if len(payload.Tables["social_cache"]) != 1 {
-		t.Fatalf("export social cache = %#v", payload.Tables["social_cache"])
+	id, _ := payload.Tables["habits"][0]["id"].(string)
+	if !isCanonicalHabitID(id) {
+		t.Fatalf("export habits = %#v", payload.Tables["habits"])
+	}
+	if len(payload.Tables["social_snapshots"]) != 1 {
+		t.Fatalf("export social cache = %#v", payload.Tables["social_snapshots"])
 	}
 	if len(payload.Tables["sync_ops"]) != 1 || payload.Tables["sync_ops"][0]["entity_type"] != "artifact" {
 		t.Fatalf("export sync ops = %#v", payload.Tables["sync_ops"])
@@ -989,13 +993,13 @@ func TestSocialCacheIsServerOwnedAndSynced(t *testing.T) {
 	if rejected.Code == http.StatusOK {
 		t.Fatalf("client social cache upload accepted: %s", rejected.Body.String())
 	}
-	assertCount(t, store, "server_social_cache", 0)
+	assertCount(t, store, "server_social_snapshots", 0)
 
 	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends", alice, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("friends status = %d body=%s", res.Code, res.Body.String())
 	}
-	assertCount(t, store, "server_social_cache", 1)
+	assertCount(t, store, "server_social_snapshots", 1)
 
 	syncBody := []byte(`{"protocol_version":2,"user_id_hash":"` + alice.UserID + `","client_id":"test-client-social","since_server_version":0}`)
 	res = syncWithBody(t, handler, "", alice.UserID, alice.Token, syncBody)

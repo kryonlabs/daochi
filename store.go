@@ -1988,15 +1988,46 @@ ORDER BY last_seen_at DESC,client_id`, userID, minProtocol)
 }
 
 func (s *Store) CleanupOrphanHabitDays(ctx context.Context, userID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	changed, err := cleanupOrphanHabitDays(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if _, err := nextUserVersion(ctx, tx, userID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func cleanupOrphanHabitDays(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
 DELETE FROM server_habit_days
 WHERE user_id_hash=?1
   AND NOT EXISTS (
 	SELECT 1 FROM server_habits h
 	WHERE h.user_id_hash=server_habit_days.user_id_hash
 	  AND h.id=server_habit_days.habit_id
+  )
+  AND (
+	(completed=0 AND count=0)
+	OR EXISTS (
+		SELECT 1 FROM server_sync_ops op
+		WHERE op.user_id_hash=server_habit_days.user_id_hash
+		  AND op.entity_type='habit'
+		  AND op.entity_id=server_habit_days.habit_id
+		  AND op.op_type='delete'
+	)
   )`, userID)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected(res) > 0, nil
 }
 
 func (s *Store) AutoMigrateAccountForProtocol(ctx context.Context, userID string, protocol int) error {
@@ -2012,12 +2043,110 @@ func (s *Store) AutoMigrateAccountForProtocol(ctx context.Context, userID string
 	if err != nil {
 		return err
 	}
+	materialized, err := materializeLegacyHabitDays(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	cleaned, err := cleanupOrphanHabitDays(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	changed = changed || materialized || cleaned
 	if changed {
 		if _, err := nextUserVersion(ctx, tx, userID); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+func materializeLegacyHabitDays(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT hd.habit_id, MAX(hd.updated_at), MAX(hd.server_version)
+FROM server_habit_days hd
+WHERE hd.user_id_hash=?1
+  AND (hd.completed!=0 OR hd.count>0)
+  AND NOT EXISTS (
+	SELECT 1 FROM server_habits h
+	WHERE h.user_id_hash=hd.user_id_hash
+	  AND h.id=hd.habit_id
+  )
+  AND NOT EXISTS (
+	SELECT 1 FROM server_sync_ops op
+	WHERE op.user_id_hash=hd.user_id_hash
+	  AND op.entity_type='habit'
+	  AND op.entity_id=hd.habit_id
+	  AND op.op_type='delete'
+  )
+GROUP BY hd.habit_id
+ORDER BY hd.habit_id`, userID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	type legacyHabit struct {
+		id            string
+		updatedAt     string
+		serverVersion int64
+	}
+	habits := []legacyHabit{}
+	for rows.Next() {
+		var item legacyHabit
+		if err := rows.Scan(&item.id, &item.updatedAt, &item.serverVersion); err != nil {
+			return false, err
+		}
+		habits = append(habits, item)
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if len(habits) == 0 {
+		return false, nil
+	}
+
+	changed := false
+	for index, habit := range habits {
+		updatedAt := normalizeTime(habit.updatedAt, "")
+		if updatedAt == "" {
+			updatedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+		res, err := tx.ExecContext(ctx, `
+INSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)
+VALUES(?1,?2,?3,99,196,165,0,0,0,?4,0,?5,?6)
+ON CONFLICT(user_id_hash,id) DO NOTHING`,
+			userID, habit.id, legacyHabitDisplayName(habit.id), 1000+index, updatedAt, habit.serverVersion)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || rowsAffected(res) > 0
+	}
+	return changed, nil
+}
+
+func legacyHabitDisplayName(id string) string {
+	switch id {
+	case "sun-salutation":
+		return "Sun Salutation"
+	case "whm":
+		return "Wim Hof"
+	case "meditation":
+		return "Meditation"
+	case "yoga":
+		return "Yoga"
+	}
+	name := strings.TrimSpace(strings.ReplaceAll(id, "-", " "))
+	if name == "" {
+		return "Habit"
+	}
+	parts := strings.Fields(name)
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
 }
 
 func migrateSunSalutationHabitID(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {

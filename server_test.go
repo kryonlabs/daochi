@@ -507,7 +507,7 @@ func TestProtocolV3CleanDataHidesDeletedAndOrphanHabits(t *testing.T) {
 	if res := syncWithBody(t, handler, "", identity.UserID, identity.Token, deleteBody); res.Code != http.StatusOK {
 		t.Fatalf("delete sync status=%d body=%s", res.Code, res.Body.String())
 	}
-	if _, err := store.db.Exec(`INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version) VALUES(?1,'habit-8',20260625,1,1,'2026-06-25T00:00:00Z',999)`, identity.UserID); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version) VALUES(?1,'habit-8',20260625,0,0,'2026-06-25T00:00:00Z',999)`, identity.UserID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -532,6 +532,42 @@ func TestProtocolV3CleanDataHidesDeletedAndOrphanHabits(t *testing.T) {
 	}
 	if orphanCount != 0 {
 		t.Fatalf("orphan habit days were not cleaned: %d", orphanCount)
+	}
+}
+
+func TestProtocolV3MaterializesLegacyOrphanHabitDays(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x75)
+
+	if _, err := store.db.Exec(`INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version) VALUES(?1,'habit-8',20260625,1,2,'2026-06-25T00:00:00Z',9)`, identity.UserID); err != nil {
+		t.Fatal(err)
+	}
+
+	readBody := []byte(`{"protocol_version":3,"user_id_hash":"` + identity.UserID + `","client_id":"client-v3","client_clock":0,"since_server_version":0}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, readBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v3 sync status=%d body=%s", res.Code, res.Body.String())
+	}
+	var decoded SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Data == nil || len(decoded.Data.Habits) != 1 {
+		t.Fatalf("unexpected clean habits: %#v body=%s", decoded.Data, res.Body.String())
+	}
+	if decoded.Data.Habits[0].ID != "habit-8" || decoded.Data.Habits[0].Name != "Habit 8" {
+		t.Fatalf("legacy habit was not materialized with a readable name: %#v", decoded.Data.Habits[0])
+	}
+	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != "habit-8" || decoded.Data.HabitDays[0].HabitName != "Habit 8" || decoded.Data.HabitDays[0].Count != 2 {
+		t.Fatalf("legacy habit day was not attached to materialized habit: %#v", decoded.Data.HabitDays)
+	}
+	var habitRows int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id='habit-8' AND name='Habit 8'`, identity.UserID).Scan(&habitRows); err != nil {
+		t.Fatal(err)
+	}
+	if habitRows != 1 {
+		t.Fatalf("materialized habit row missing: %d", habitRows)
 	}
 }
 

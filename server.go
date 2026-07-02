@@ -238,11 +238,6 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "migration failed")
 			return
 		}
-		if err := s.store.CleanupOrphanHabitDays(r.Context(), req.UserIDHash); err != nil {
-			slog.Error("cleanup orphan habit days", "user", req.UserIDHash, "error", err)
-			writeError(w, http.StatusInternalServerError, "cleanup failed")
-			return
-		}
 		serverVersion, err = s.store.currentUserVersion(r.Context(), req.UserIDHash)
 		if err != nil {
 			slog.Error("load migrated server version", "user", req.UserIDHash, "error", err)

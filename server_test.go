@@ -325,6 +325,60 @@ func TestSyncV2AppliesOpsIdempotentlyAndReturnsRemoteOps(t *testing.T) {
 	}
 }
 
+func TestAccountExportReturnsOnlyAuthenticatedAccountData(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x65)
+	bob := newTestIdentity(t, handler, 0x66)
+
+	aliceBody := []byte(`{"protocol_version":2,"user_id_hash":"` + alice.UserID + `","client_id":"client-a","client_clock":0,"habits":[{"id":"alice-habit","name":"Alice Habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"}],"ops":[{"op_id":"client-a:1","client_id":"client-a","seq":1,"entity_type":"artifact","entity_id":"odd-one","op_type":"upsert","payload":{"kind":"weird"},"created_at":"2026-06-24T10:00:00Z"}]}`)
+	if res := syncWithBody(t, handler, "", alice.UserID, alice.Token, aliceBody); res.Code != http.StatusOK {
+		t.Fatalf("alice sync status = %d body=%s", res.Code, res.Body.String())
+	}
+	if _, err := store.db.Exec(`INSERT INTO server_social_cache(user_id_hash,kind,json,updated_at,server_version) VALUES(?1,'friends.list','{"friends":[]}','2026-06-24T10:00:00Z',99)`, alice.UserID); err != nil {
+		t.Fatal(err)
+	}
+	bobBody := []byte(`{"user_id_hash":"` + bob.UserID + `","client_id":"client-b","habits":[{"id":"bob-habit","name":"Bob Habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"}]}`)
+	if res := syncWithBody(t, handler, "", bob.UserID, bob.Token, bobBody); res.Code != http.StatusOK {
+		t.Fatalf("bob sync status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/account/export", nil)
+	req.Header.Set("Authorization", "Bearer "+alice.Token)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("export status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload AccountExportResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.UserIDHash != alice.UserID {
+		t.Fatalf("export user = %s, want %s", payload.UserIDHash, alice.UserID)
+	}
+	if len(payload.Tables["habits"]) != 1 || payload.Tables["habits"][0]["id"] != "alice-habit" {
+		t.Fatalf("export habits = %#v", payload.Tables["habits"])
+	}
+	if len(payload.Tables["social_cache"]) != 1 {
+		t.Fatalf("export social cache = %#v", payload.Tables["social_cache"])
+	}
+	if len(payload.Tables["sync_ops"]) != 1 || payload.Tables["sync_ops"][0]["entity_type"] != "artifact" {
+		t.Fatalf("export sync ops = %#v", payload.Tables["sync_ops"])
+	}
+	for _, row := range payload.Tables["habits"] {
+		if row["id"] == "bob-habit" {
+			t.Fatalf("export leaked bob data: %#v", payload.Tables["habits"])
+		}
+	}
+
+	unauth := httptest.NewRecorder()
+	handler.ServeHTTP(unauth, httptest.NewRequest(http.MethodGet, "/api/v1/account/export", nil))
+	if unauth.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth export status = %d body=%s", unauth.Code, unauth.Body.String())
+	}
+}
+
 func TestHabitDayZeroCountIncompleteIsSyncedState(t *testing.T) {
 	server, store, _ := testServer(t)
 	handler := server.Routes()
@@ -438,6 +492,86 @@ func TestSyncV2CompactsAcknowledgedOpsAndFallsBackToSnapshot(t *testing.T) {
 	}
 	assertCount(t, store, "server_habits", 1)
 	assertCount(t, store, "server_sync_ops", 0)
+}
+
+func TestProtocolV3CleanDataHidesDeletedAndOrphanHabits(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x73)
+
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"client-v2","habits":[{"id":"habit-8","name":"Old Habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"}],"habit_days":[{"habit_id":"habit-8","local_date":20260624,"completed":true,"count":1,"updated_at":"2026-06-24T10:00:00Z"}]}`)
+	if res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body); res.Code != http.StatusOK {
+		t.Fatalf("initial sync status=%d body=%s", res.Code, res.Body.String())
+	}
+	deleteBody := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"client-v2","habits":[{"id":"habit-8","name":"Old Habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":0,"deleted_at":1782300600,"updated_at":"2026-06-24T10:10:00Z"}]}`)
+	if res := syncWithBody(t, handler, "", identity.UserID, identity.Token, deleteBody); res.Code != http.StatusOK {
+		t.Fatalf("delete sync status=%d body=%s", res.Code, res.Body.String())
+	}
+	if _, err := store.db.Exec(`INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version) VALUES(?1,'habit-8',20260625,1,1,'2026-06-25T00:00:00Z',999)`, identity.UserID); err != nil {
+		t.Fatal(err)
+	}
+
+	readBody := []byte(`{"protocol_version":3,"user_id_hash":"` + identity.UserID + `","client_id":"client-v3","client_clock":0,"since_server_version":0}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, readBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v3 sync status=%d body=%s", res.Code, res.Body.String())
+	}
+	var decoded SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Data == nil {
+		t.Fatalf("v3 response missing clean data: %s", res.Body.String())
+	}
+	if len(decoded.Data.Habits) != 0 || len(decoded.Data.HabitDays) != 0 {
+		t.Fatalf("deleted/orphan habit leaked into v3 data: %#v %#v", decoded.Data.Habits, decoded.Data.HabitDays)
+	}
+	var orphanCount int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habit_days WHERE user_id_hash=?1 AND habit_id='habit-8'`, identity.UserID).Scan(&orphanCount); err != nil {
+		t.Fatal(err)
+	}
+	if orphanCount != 0 {
+		t.Fatalf("orphan habit days were not cleaned: %d", orphanCount)
+	}
+}
+
+func TestProtocolV3AutoMigratesSunSalutationHabitIDAndKeepsLegacyClient(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x74)
+
+	legacyBody := []byte(`{"protocol_version":2,"user_id_hash":"` + identity.UserID + `","client_id":"old-inbe","habits":[{"id":"yoga","name":"Yoga","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"}],"habit_days":[{"habit_id":"yoga","local_date":20260624,"completed":true,"count":3,"updated_at":"2026-06-24T10:00:00Z"}]}`)
+	if res := syncWithBody(t, handler, "", identity.UserID, identity.Token, legacyBody); res.Code != http.StatusOK {
+		t.Fatalf("legacy sync status=%d body=%s", res.Code, res.Body.String())
+	}
+	readBody := []byte(`{"protocol_version":3,"user_id_hash":"` + identity.UserID + `","client_id":"new-inbe","client_clock":0,"since_server_version":0}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, readBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v3 sync status=%d body=%s", res.Code, res.Body.String())
+	}
+	var decoded SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Data == nil || len(decoded.Data.Habits) != 1 {
+		t.Fatalf("unexpected clean habits: %#v body=%s", decoded.Data, res.Body.String())
+	}
+	if decoded.Data.Habits[0].ID != "sun-salutation" {
+		t.Fatalf("habit was not canonicalized: %#v", decoded.Data.Habits[0])
+	}
+	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != "sun-salutation" || decoded.Data.HabitDays[0].HabitName != "Yoga" {
+		t.Fatalf("habit day was not canonicalized with name: %#v", decoded.Data.HabitDays)
+	}
+	if len(decoded.LegacyClients) == 0 || decoded.UpgradeNotice == "" {
+		t.Fatalf("legacy client upgrade warning missing: clients=%#v notice=%q", decoded.LegacyClients, decoded.UpgradeNotice)
+	}
+	var oldRows int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id='yoga'`, identity.UserID).Scan(&oldRows); err != nil {
+		t.Fatal(err)
+	}
+	if oldRows != 0 {
+		t.Fatalf("legacy yoga row still exists: %d", oldRows)
+	}
 }
 
 func TestAccountAliasRegistersAndSyncs(t *testing.T) {
@@ -610,6 +744,24 @@ func TestFriendRequestsByAliasAndPublicID(t *testing.T) {
 	if res.Code != http.StatusCreated {
 		t.Fatalf("create by public id status = %d body=%s", res.Code, res.Body.String())
 	}
+	var outgoing FriendRequestResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &outgoing); err != nil {
+		t.Fatal(err)
+	}
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+outgoing.Request.ID+"/decline", carol, []byte(`{}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("requester cancel outgoing status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/requests", alice, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("alice requests after cancel status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &pending); err != nil {
+		t.Fatal(err)
+	}
+	if len(pending.Incoming) != 0 || len(pending.Outgoing) != 0 {
+		t.Fatalf("canceled outgoing request still visible: %#v", pending)
+	}
 	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests", alice, []byte(`{"target":"`+alice.UserID+`"}`))
 	if res.Code != http.StatusConflict {
 		t.Fatalf("self friend status = %d body=%s", res.Code, res.Body.String())
@@ -682,7 +834,8 @@ FROM server_sync_state WHERE user_id_hash=?1`, alice.UserID); err != nil {
 	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
 		t.Fatal(err)
 	}
-	if len(stats.Rows) != 2 || stats.Rows[0].Value != 1 || stats.Rows[1].Value != 1 {
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 1 ||
+		stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 {
 		t.Fatalf("unexpected friend stats: %#v", stats.Rows)
 	}
 	for _, row := range stats.Rows {
@@ -703,7 +856,30 @@ FROM server_sync_state WHERE user_id_hash=?1`, alice.UserID); err != nil {
 		t.Fatalf("unexpected avg hold stats: %#v", stats.Rows)
 	}
 
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=meditation&metric=streak", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("meditation streak before meditation status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].Value != 0 || stats.Rows[1].Value != 0 {
+		t.Fatalf("whm or habit-only data leaked into meditation streak: %#v", stats.Rows)
+	}
+
 	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-meditation-stats","sessions":[{"id":"alice-meditation-1","started_at":"2026-06-28T00:00:00Z","local_date":`+time.Now().UTC().Format("20060102")+`,"topic":"0","activity":1,"source":"test","rounds_hash":"meditation-1","deleted_at":0,"updated_at":"2026-06-28T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":600}]}],"meditation_logs":[{"id":"alice-meditation-log-1","session_id":"alice-meditation-log-session","duration_seconds":1200,"completed_at":"2026-06-28T00:00:00Z"}]}`))
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=meditation&metric=streak", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("meditation streak status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 2 ||
+		stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 {
+		t.Fatalf("unexpected meditation streak stats: %#v", stats.Rows)
+	}
+
 	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=meditation&metric=avg_time", bob, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("avg time stats status = %d body=%s", res.Code, res.Body.String())
@@ -748,6 +924,10 @@ FROM server_sync_state WHERE user_id_hash=?1`, alice.UserID); err != nil {
 	}
 	if len(stats.Rows) != 1 || stats.Rows[0].UserIDHash != bob.UserID {
 		t.Fatalf("removed friend still visible: %#v", stats.Rows)
+	}
+	req = createFriendRequest(t, handler, alice, bob.UserID)
+	if req.Status != "pending" || req.RequesterUserID != alice.UserID || req.TargetUserID != bob.UserID {
+		t.Fatalf("new friend request after unfriend mismatch: %#v", req)
 	}
 }
 

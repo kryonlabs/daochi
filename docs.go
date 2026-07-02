@@ -170,6 +170,18 @@ func openAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/account/export": map[string]any{
+				"get": map[string]any{
+					"summary":     "Export authenticated account data",
+					"description": "Bearer-authenticated read-only dump of all Lyra rows owned by or directly attached to the authenticated account.",
+					"parameters":  bearerHeaderParameters(),
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Account data export"},
+						"401": map[string]any{"description": "Bearer token rejected"},
+						"404": map[string]any{"description": "Sync account not found"},
+					},
+				},
+			},
 			"/api/v1/account/delete-with-key": map[string]any{
 				"post": map[string]any{
 					"summary":     "Delete remote account using exported key",
@@ -288,11 +300,43 @@ func openAPISpec() map[string]any {
 					"type":     "object",
 					"required": []string{"user_id_hash"},
 					"properties": map[string]any{
-						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
-						"public_key":   map[string]any{"type": "string", "description": "ML-DSA-44 public key as hex or base64; required on first sync."},
-						"habits":       map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Habit"}},
-						"habit_days":   map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/HabitDay"}},
-						"sessions":     map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Session"}},
+						"protocol_version":     map[string]any{"type": "integer", "description": "Use 3 for clean hierarchical data responses. Versions 1 and 2 remain supported for legacy clients."},
+						"user_id_hash":         map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+						"client_id":            map[string]any{"type": "string"},
+						"client_clock":         map[string]any{"type": "integer"},
+						"since_server_version": map[string]any{"type": "integer"},
+						"public_key":           map[string]any{"type": "string", "description": "ML-DSA-44 public key as hex or base64; required on first sync."},
+						"habits":               map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Habit"}},
+						"habit_days":           map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/HabitDay"}},
+						"sessions":             map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Session"}},
+						"ops":                  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncOp"}},
+					},
+				},
+				"SyncResponse": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"protocol_version":       map[string]any{"type": "integer"},
+						"status":                 map[string]any{"type": "string"},
+						"server_version":         map[string]any{"type": "integer"},
+						"server_clock":           map[string]any{"type": "integer"},
+						"changes":                map[string]any{"type": "object", "description": "Legacy v1/v2 table-array changes."},
+						"data":                   map[string]any{"$ref": "#/components/schemas/CleanData"},
+						"logs":                   map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncLog"}},
+						"deletes":                map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncLog"}},
+						"upgrade_notice":         map[string]any{"type": "string"},
+						"min_supported_protocol": map[string]any{"type": "integer"},
+						"latest_protocol":        map[string]any{"type": "integer"},
+						"legacy_clients":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					},
+				},
+				"CleanData": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"habits":          map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Habit"}},
+						"habit_days":      map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/CleanHabitDay"}},
+						"sessions":        map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Session"}},
+						"meditation_logs": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/MeditationLog"}},
+						"social_cache":    map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SocialCache"}},
 					},
 				},
 				"DeleteRequest": map[string]any{
@@ -336,6 +380,17 @@ func openAPISpec() map[string]any {
 						"updated_at": map[string]any{"type": "string", "format": "date-time"},
 					},
 				},
+				"CleanHabitDay": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"habit_id":   map[string]any{"type": "string"},
+						"habit_name": map[string]any{"type": "string"},
+						"local_date": map[string]any{"type": "integer"},
+						"completed":  map[string]any{"type": "boolean"},
+						"count":      map[string]any{"type": "integer"},
+						"updated_at": map[string]any{"type": "string", "format": "date-time"},
+					},
+				},
 				"Session": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -357,6 +412,50 @@ func openAPISpec() map[string]any {
 						"round_index":  map[string]any{"type": "integer"},
 						"breaths":      map[string]any{"type": "integer"},
 						"hold_seconds": map[string]any{"type": "integer"},
+					},
+				},
+				"MeditationLog": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":               map[string]any{"type": "string"},
+						"session_id":       map[string]any{"type": "string"},
+						"duration_seconds": map[string]any{"type": "integer"},
+						"completed_at":     map[string]any{"type": "string", "format": "date-time"},
+					},
+				},
+				"SocialCache": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"kind":       map[string]any{"type": "string"},
+						"json":       map[string]any{"type": "object"},
+						"updated_at": map[string]any{"type": "string", "format": "date-time"},
+					},
+				},
+				"SyncOp": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"op_id":       map[string]any{"type": "string"},
+						"client_id":   map[string]any{"type": "string"},
+						"seq":         map[string]any{"type": "integer"},
+						"entity_type": map[string]any{"type": "string"},
+						"entity_id":   map[string]any{"type": "string"},
+						"local_date":  map[string]any{"type": "integer"},
+						"op_type":     map[string]any{"type": "string"},
+						"payload":     map[string]any{"type": "object"},
+						"created_at":  map[string]any{"type": "string", "format": "date-time"},
+					},
+				},
+				"SyncLog": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"server_version": map[string]any{"type": "integer"},
+						"kind":           map[string]any{"type": "string"},
+						"entity_type":    map[string]any{"type": "string"},
+						"entity_id":      map[string]any{"type": "string"},
+						"local_date":     map[string]any{"type": "integer"},
+						"op_type":        map[string]any{"type": "string"},
+						"payload":        map[string]any{"type": "object"},
+						"created_at":     map[string]any{"type": "string", "format": "date-time"},
 					},
 				},
 			},

@@ -50,6 +50,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/sync/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
+	mux.HandleFunc("GET /api/v1/account/export", s.handleAccountExport)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
 	mux.HandleFunc("GET /api/v1/friends", s.handleFriends)
@@ -214,7 +215,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "alias failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, SyncResponse{
+	response := SyncResponse{
 		ProtocolVersion:      req.ProtocolVersion,
 		Status:               "ok",
 		Applied:              result,
@@ -228,7 +229,64 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		AcceptedOps:          acceptedOps,
 		Ops:                  remoteOps,
 		Changes:              changes,
-	})
+		MinSupportedProtocol: 1,
+		LatestProtocol:       3,
+	}
+	if req.ProtocolVersion >= 3 {
+		if err := s.store.AutoMigrateAccountForProtocol(r.Context(), req.UserIDHash, req.ProtocolVersion); err != nil {
+			slog.Error("auto migrate account", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "migration failed")
+			return
+		}
+		if err := s.store.CleanupOrphanHabitDays(r.Context(), req.UserIDHash); err != nil {
+			slog.Error("cleanup orphan habit days", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "cleanup failed")
+			return
+		}
+		serverVersion, err = s.store.currentUserVersion(r.Context(), req.UserIDHash)
+		if err != nil {
+			slog.Error("load migrated server version", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "version failed")
+			return
+		}
+		serverHash, err = s.store.StateHash(r.Context(), req.UserIDHash)
+		if err != nil {
+			slog.Error("hash migrated sync response", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "state hash failed")
+			return
+		}
+		response.ServerVersion = serverVersion
+		response.ServerClock = serverVersion
+		response.ServerStateHash = serverHash
+		response.Data, err = s.store.CleanData(r.Context(), req.UserIDHash)
+		if err != nil {
+			slog.Error("load clean data", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "clean data failed")
+			return
+		}
+		response.Logs, err = s.store.SyncLogs(r.Context(), req.UserIDHash, req.ClientClock)
+		if err != nil {
+			slog.Error("load sync logs", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "logs failed")
+			return
+		}
+		response.Deletes, err = s.store.DeleteLogs(r.Context(), req.UserIDHash, req.ClientClock)
+		if err != nil {
+			slog.Error("load delete logs", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "delete logs failed")
+			return
+		}
+		response.LegacyClients, err = s.store.LegacyClients(r.Context(), req.UserIDHash, 3)
+		if err != nil {
+			slog.Error("load legacy clients", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "legacy clients failed")
+			return
+		}
+		if len(response.LegacyClients) > 0 {
+			response.UpgradeNotice = "Another device is using an older Inbe Breeze. Upgrade it before major sync changes."
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +327,24 @@ func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, AliasResponse{Status: "ok", Alias: alias})
+}
+
+func (s *Server) handleAccountExport(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	response, err := s.store.ExportAccount(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "sync account not found")
+			return
+		}
+		slog.Error("export account", "user", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "export failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, bool) {

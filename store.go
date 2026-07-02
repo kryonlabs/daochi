@@ -35,6 +35,161 @@ type PublicStats struct {
 	AvailableGB      int64
 }
 
+func (s *Store) ExportAccount(ctx context.Context, userID string) (AccountExportResponse, error) {
+	var alias sql.NullString
+	response := AccountExportResponse{
+		Status:     "ok",
+		UserIDHash: userID,
+		Tables:     make(map[string][]map[string]any),
+	}
+	if err := s.db.QueryRowContext(ctx, `
+SELECT alias
+FROM server_users
+WHERE user_id_hash=?1`, userID).Scan(&alias); err != nil {
+		return AccountExportResponse{}, err
+	}
+	if alias.Valid {
+		response.AccountAlias = alias.String
+	}
+
+	queries := []struct {
+		name       string
+		query      string
+		jsonFields map[string]bool
+	}{
+		{
+			name:  "users",
+			query: `SELECT user_id_hash, alias, created_at, last_seen_at FROM server_users WHERE user_id_hash=?1`,
+		},
+		{
+			name:  "clients",
+			query: `SELECT client_id, created_at, last_seen_at, last_login_at, last_sync_at, last_since_server_version, last_seen_server_version, protocol_version, last_client_clock FROM server_clients WHERE user_id_hash=?1 ORDER BY last_seen_at DESC, client_id`,
+		},
+		{
+			name:  "sync_state",
+			query: `SELECT server_version FROM server_sync_state WHERE user_id_hash=?1`,
+		},
+		{
+			name:  "sync_compaction",
+			query: `SELECT compacted_through_version, updated_at FROM server_sync_compaction WHERE user_id_hash=?1`,
+		},
+		{
+			name:  "habits",
+			query: `SELECT id, name, color_r, color_g, color_b, sync_mode, sync_activity, counter_enabled, sort_order, deleted_at, updated_at, server_version FROM server_habits WHERE user_id_hash=?1 ORDER BY sort_order, id`,
+		},
+		{
+			name:  "habit_days",
+			query: `SELECT habit_id, local_date, completed, count, updated_at, server_version FROM server_habit_days WHERE user_id_hash=?1 ORDER BY local_date DESC, habit_id`,
+		},
+		{
+			name:  "sessions",
+			query: `SELECT id, started_at, local_date, topic, activity, source, rounds_hash, deleted_at, updated_at, server_version FROM server_sessions WHERE user_id_hash=?1 ORDER BY started_at DESC, id`,
+		},
+		{
+			name:  "session_rounds",
+			query: `SELECT session_id, round_index, breaths, hold_seconds FROM server_session_rounds WHERE user_id_hash=?1 ORDER BY session_id, round_index`,
+		},
+		{
+			name:  "meditation_logs",
+			query: `SELECT id, session_id, duration_seconds, completed_at, server_version, created_at FROM server_meditation_logs WHERE user_id_hash=?1 ORDER BY completed_at DESC, id`,
+		},
+		{
+			name:       "social_cache",
+			query:      `SELECT kind, json, updated_at, server_version FROM server_social_cache WHERE user_id_hash=?1 ORDER BY kind`,
+			jsonFields: map[string]bool{"json": true},
+		},
+		{
+			name:       "sync_ops",
+			query:      `SELECT op_id, client_id, seq, entity_type, entity_id, local_date, op_type, payload_json, created_at, server_version FROM server_sync_ops WHERE user_id_hash=?1 ORDER BY server_version, client_id, seq`,
+			jsonFields: map[string]bool{"payload_json": true},
+		},
+		{
+			name:  "friend_requests",
+			query: `SELECT id, requester_user_id_hash, target_user_id_hash, status, created_at, updated_at FROM server_friend_requests WHERE requester_user_id_hash=?1 OR target_user_id_hash=?1 ORDER BY updated_at DESC, id`,
+		},
+		{
+			name:  "friendships",
+			query: `SELECT user_id_a, user_id_b, created_at FROM server_friendships WHERE user_id_a=?1 OR user_id_b=?1 ORDER BY created_at DESC, user_id_a, user_id_b`,
+		},
+		{
+			name:  "profile_stats",
+			query: `SELECT app, practice, metric, value, label, local_date, updated_at FROM server_profile_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric`,
+		},
+		{
+			name:  "leaderboard_stats",
+			query: `SELECT app, practice, metric, source_version, calc_version, value, label, local_date, updated_at FROM server_leaderboard_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric`,
+		},
+		{
+			name:  "uku_processes",
+			query: `SELECT id, owner_user_id_hash, question, description, visibility, proposal_minutes, voting_minutes, negative_weight, created_at, updated_at, deleted_at FROM uku_processes WHERE owner_user_id_hash=?1 ORDER BY updated_at DESC, id`,
+		},
+		{
+			name:  "uku_proposals",
+			query: `SELECT process_id, id, author_user_id_hash, title, description, created_at, updated_at, deleted_at FROM uku_proposals WHERE author_user_id_hash=?1 ORDER BY updated_at DESC, process_id, id`,
+		},
+		{
+			name:       "uku_votes",
+			query:      `SELECT process_id, voter_user_id_hash, display_name, scores_json, created_at, updated_at FROM uku_votes WHERE voter_user_id_hash=?1 ORDER BY updated_at DESC, process_id`,
+			jsonFields: map[string]bool{"scores_json": true},
+		},
+	}
+	for _, item := range queries {
+		rows, err := s.queryAccountRows(ctx, item.query, userID, item.jsonFields)
+		if err != nil {
+			return AccountExportResponse{}, err
+		}
+		response.Tables[item.name] = rows
+	}
+	return response, nil
+}
+
+func (s *Store) queryAccountRows(ctx context.Context, query string, userID string, jsonFields map[string]bool) ([]map[string]any, error) {
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	out := []map[string]any{}
+	for rows.Next() {
+		values := make([]any, len(columns))
+		dest := make([]any, len(columns))
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, err
+		}
+		item := make(map[string]any, len(columns))
+		for i, column := range columns {
+			item[column] = exportRowValue(column, values[i], jsonFields)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func exportRowValue(column string, value any, jsonFields map[string]bool) any {
+	if value == nil {
+		return nil
+	}
+	if bytes, ok := value.([]byte); ok {
+		text := string(bytes)
+		if jsonFields[column] {
+			var raw any
+			if err := json.Unmarshal(bytes, &raw); err == nil {
+				return raw
+			}
+		}
+		return text
+	}
+	return value
+}
+
 func OpenStore(path string) (*Store, error) {
 	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000&_foreign_keys=on")
 	if err != nil {
@@ -177,6 +332,15 @@ CREATE TABLE IF NOT EXISTS server_sync_ops (
 	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, op_id),
 	UNIQUE(user_id_hash, client_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS server_habit_id_migrations (
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	old_id TEXT NOT NULL,
+	new_id TEXT NOT NULL,
+	source TEXT NOT NULL DEFAULT '',
+	migrated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(user_id_hash, old_id)
 );
 
 CREATE TABLE IF NOT EXISTS uku_processes (
@@ -899,7 +1063,7 @@ func (s *Store) DeclineFriendRequest(ctx context.Context, userID, id string) (Fr
 	if !found {
 		return FriendRequest{}, sql.ErrNoRows
 	}
-	if req.TargetUserID != userID {
+	if req.TargetUserID != userID && req.RequesterUserID != userID {
 		return FriendRequest{}, ErrSyncUserNotFound
 	}
 	if req.Status != "pending" {
@@ -938,8 +1102,21 @@ ORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID)
 
 func (s *Store) RemoveFriend(ctx context.Context, userID, friendID string) error {
 	a, b := friendPair(userID, friendID)
-	_, err := s.db.ExecContext(ctx, `DELETE FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2`, a, b)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2`, a, b); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM server_friend_requests
+WHERE (requester_user_id_hash=?1 AND target_user_id_hash=?2)
+   OR (requester_user_id_hash=?2 AND target_user_id_hash=?1)`, userID, friendID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) UpsertProfileStats(ctx context.Context, userID, app string, metrics []ProfileMetric) (int, error) {
@@ -979,7 +1156,7 @@ type visibleStatsUser struct {
 	SourceVersion int64
 }
 
-const leaderboardStatsCalcVersion = 2
+const leaderboardStatsCalcVersion = 3
 
 func leaderboardActivity(practice string) int {
 	switch practice {
@@ -1063,15 +1240,9 @@ func (s *Store) activityStreak(ctx context.Context, userID string, activity int)
 SELECT local_date, updated_at FROM server_sessions
 WHERE user_id_hash=?1 AND deleted_at=0 AND activity=?2 AND local_date>0
 UNION
-SELECT hd.local_date, hd.updated_at
-FROM server_habit_days hd
-JOIN server_habits h ON h.user_id_hash=hd.user_id_hash AND h.id=hd.habit_id
-WHERE hd.user_id_hash=?1 AND h.deleted_at=0 AND h.sync_mode=1
-  AND (h.sync_activity & ?3)<>0 AND (hd.completed<>0 OR hd.count>0)
-UNION
 SELECT CAST(strftime('%Y%m%d', completed_at) AS INTEGER), completed_at
 FROM server_meditation_logs
-WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity, 1<<activity)
+WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity)
 	if err != nil {
 		return 0, 0, "", err
 	}
@@ -1603,6 +1774,337 @@ ORDER BY server_version,client_id,seq,op_id`, userID, sinceVersion)
 		ops = append(ops, op)
 	}
 	return ops, rows.Err()
+}
+
+func (s *Store) CleanData(ctx context.Context, userID string) (*CleanData, error) {
+	habits, err := s.cleanHabits(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	habitDays, err := s.cleanHabitDays(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := s.cleanSessions(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	meditationLogs, err := s.cleanMeditationLogs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	socialCache, err := s.cleanSocialCache(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &CleanData{
+		Habits:         habits,
+		HabitDays:      habitDays,
+		Sessions:       sessions,
+		MeditationLogs: meditationLogs,
+		SocialCache:    socialCache,
+	}, nil
+}
+
+func (s *Store) cleanHabits(ctx context.Context, userID string) ([]Habit, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at
+FROM server_habits
+WHERE user_id_hash=?1 AND deleted_at=0
+ORDER BY sort_order,id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []Habit{}
+	for rows.Next() {
+		var item Habit
+		if err := rows.Scan(&item.ID, &item.Name, &item.ColorR, &item.ColorG, &item.ColorB,
+			&item.SyncMode, &item.SyncActivity, &item.CounterEnabled, &item.SortOrder,
+			&item.DeletedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) cleanHabitDays(ctx context.Context, userID string) ([]CleanHabitDay, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT hd.habit_id,h.name,hd.local_date,hd.completed,hd.count,hd.updated_at
+FROM server_habit_days hd
+JOIN server_habits h ON h.user_id_hash=hd.user_id_hash AND h.id=hd.habit_id
+WHERE hd.user_id_hash=?1
+  AND h.deleted_at=0
+  AND (hd.completed!=0 OR hd.count>0)
+ORDER BY hd.local_date DESC,h.sort_order,hd.habit_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []CleanHabitDay{}
+	for rows.Next() {
+		var item CleanHabitDay
+		var completed int
+		if err := rows.Scan(&item.HabitID, &item.HabitName, &item.LocalDate,
+			&completed, &item.Count, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.Completed = completed != 0
+		if item.Count <= 0 && item.Completed {
+			item.Count = 1
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) cleanSessions(ctx context.Context, userID string) ([]Session, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at
+FROM server_sessions
+WHERE user_id_hash=?1 AND deleted_at=0
+ORDER BY started_at DESC,id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []Session{}
+	for rows.Next() {
+		var item Session
+		if err := rows.Scan(&item.ID, &item.StartedAt, &item.LocalDate, &item.Topic,
+			&item.Activity, &item.Source, &item.RoundsHash, &item.DeletedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	for i := range items {
+		rounds, err := s.snapshotSessionRounds(ctx, userID, items[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		items[i].Rounds = rounds
+	}
+	return items, nil
+}
+
+func (s *Store) cleanMeditationLogs(ctx context.Context, userID string) ([]MeditationLog, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,session_id,duration_seconds,completed_at
+FROM server_meditation_logs
+WHERE user_id_hash=?1
+ORDER BY completed_at DESC,id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []MeditationLog{}
+	for rows.Next() {
+		var item MeditationLog
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.DurationSeconds, &item.CompletedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) cleanSocialCache(ctx context.Context, userID string) ([]SocialCache, error) {
+	return s.snapshotSocialCache(ctx, userID, 0)
+}
+
+func (s *Store) SyncLogs(ctx context.Context, userID string, sinceVersion int64) ([]SyncLog, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT server_version,entity_type,entity_id,local_date,op_type,payload_json,created_at
+FROM server_sync_ops
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,client_id,seq,op_id`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []SyncLog{}
+	for rows.Next() {
+		var item SyncLog
+		var payload string
+		if err := rows.Scan(&item.ServerVersion, &item.EntityType, &item.EntityID,
+			&item.LocalDate, &item.OpType, &payload, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		item.Kind = "op"
+		if payload != "" {
+			item.Payload = json.RawMessage(payload)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) DeleteLogs(ctx context.Context, userID string, sinceVersion int64) ([]SyncLog, error) {
+	logs, err := s.SyncLogs(ctx, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	deletes := []SyncLog{}
+	for _, item := range logs {
+		if item.OpType == "delete" {
+			item.Kind = "delete"
+			deletes = append(deletes, item)
+		}
+	}
+	return deletes, nil
+}
+
+func (s *Store) LegacyClients(ctx context.Context, userID string, minProtocol int) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT client_id
+FROM server_clients
+WHERE user_id_hash=?1 AND protocol_version<?2
+ORDER BY last_seen_at DESC,client_id`, userID, minProtocol)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	clients := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		clients = append(clients, id)
+	}
+	return clients, rows.Err()
+}
+
+func (s *Store) CleanupOrphanHabitDays(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx, `
+DELETE FROM server_habit_days
+WHERE user_id_hash=?1
+  AND NOT EXISTS (
+	SELECT 1 FROM server_habits h
+	WHERE h.user_id_hash=server_habit_days.user_id_hash
+	  AND h.id=server_habit_days.habit_id
+  )`, userID)
+	return err
+}
+
+func (s *Store) AutoMigrateAccountForProtocol(ctx context.Context, userID string, protocol int) error {
+	if protocol < 3 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	changed, err := migrateSunSalutationHabitID(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if _, err := nextUserVersion(ctx, tx, userID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func migrateSunSalutationHabitID(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {
+	const oldID = "yoga"
+	const newID = "sun-salutation"
+	const sunSalutationMask = 1 << 2
+	var syncActivity int
+	var deletedAt int64
+	var oldExists int
+	var newExists int
+
+	if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM server_habit_id_migrations WHERE user_id_hash=?1 AND old_id=?2)`,
+		userID, oldID).Scan(&oldExists); err != nil {
+		return false, err
+	}
+	if oldExists != 0 {
+		return false, nil
+	}
+	err := tx.QueryRowContext(ctx, `
+SELECT sync_activity,deleted_at
+FROM server_habits
+WHERE user_id_hash=?1 AND id=?2`, userID, oldID).Scan(&syncActivity, &deletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, err = tx.ExecContext(ctx, `
+INSERT OR IGNORE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)
+VALUES(?1,?2,?3,'not-present')`, userID, oldID, newID)
+		return false, err
+	}
+	if err != nil {
+		return false, err
+	}
+	if deletedAt != 0 || syncActivity&sunSalutationMask == 0 {
+		_, err = tx.ExecContext(ctx, `
+INSERT OR IGNORE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)
+VALUES(?1,?2,?3,'not-sun-salutation')`, userID, oldID, newID)
+		return false, err
+	}
+	if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)`,
+		userID, newID).Scan(&newExists); err != nil {
+		return false, err
+	}
+	if newExists == 0 {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE server_habits
+SET id=?3
+WHERE user_id_hash=?1 AND id=?2`, userID, oldID, newID); err != nil {
+			return false, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+UPDATE server_habit_days
+SET habit_id=?3
+WHERE user_id_hash=?1 AND habit_id=?2`, userID, oldID, newID); err != nil {
+			return false, err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)
+SELECT user_id_hash,?3,local_date,completed,count,updated_at,server_version
+FROM server_habit_days
+WHERE user_id_hash=?1 AND habit_id=?2
+ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
+	completed=MAX(server_habit_days.completed,excluded.completed),
+	count=MAX(server_habit_days.count,excluded.count),
+	updated_at=MAX(server_habit_days.updated_at,excluded.updated_at),
+	server_version=MAX(server_habit_days.server_version,excluded.server_version)`,
+			userID, oldID, newID); err != nil {
+			return false, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+DELETE FROM server_habit_days
+WHERE user_id_hash=?1 AND habit_id=?2`, userID, oldID); err != nil {
+			return false, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+DELETE FROM server_habits
+WHERE user_id_hash=?1 AND id=?2`, userID, oldID); err != nil {
+			return false, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT OR REPLACE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)
+VALUES(?1,?2,?3,'protocol-v3')`, userID, oldID, newID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) StateHash(ctx context.Context, userID string) (string, error) {

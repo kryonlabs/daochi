@@ -21,6 +21,13 @@ type LoginResponse struct {
 	AccountAlias string `json:"account_alias,omitempty"`
 }
 
+type AccountExportResponse struct {
+	Status       string                      `json:"status"`
+	UserIDHash   string                      `json:"user_id_hash"`
+	AccountAlias string                      `json:"account_alias,omitempty"`
+	Tables       map[string][]map[string]any `json:"tables"`
+}
+
 type SyncRequest struct {
 	ProtocolVersion     int             `json:"protocol_version,omitempty"`
 	UserIDHash          string          `json:"user_id_hash"`
@@ -62,6 +69,41 @@ type SyncResponse struct {
 	AcceptedOps          []string    `json:"accepted_ops,omitempty"`
 	Ops                  []SyncOp    `json:"ops,omitempty"`
 	Changes              SyncChanges `json:"changes"`
+	Data                 *CleanData  `json:"data,omitempty"`
+	Logs                 []SyncLog   `json:"logs,omitempty"`
+	Deletes              []SyncLog   `json:"deletes,omitempty"`
+	UpgradeNotice        string      `json:"upgrade_notice,omitempty"`
+	MinSupportedProtocol int         `json:"min_supported_protocol,omitempty"`
+	LatestProtocol       int         `json:"latest_protocol,omitempty"`
+	LegacyClients        []string    `json:"legacy_clients,omitempty"`
+}
+
+type CleanData struct {
+	Habits         []Habit         `json:"habits"`
+	HabitDays      []CleanHabitDay `json:"habit_days"`
+	Sessions       []Session       `json:"sessions"`
+	MeditationLogs []MeditationLog `json:"meditation_logs"`
+	SocialCache    []SocialCache   `json:"social_cache"`
+}
+
+type CleanHabitDay struct {
+	HabitID   string `json:"habit_id"`
+	HabitName string `json:"habit_name,omitempty"`
+	LocalDate int    `json:"local_date"`
+	Completed bool   `json:"completed"`
+	Count     int    `json:"count"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type SyncLog struct {
+	ServerVersion int64           `json:"server_version"`
+	Kind          string          `json:"kind"`
+	EntityType    string          `json:"entity_type"`
+	EntityID      string          `json:"entity_id"`
+	LocalDate     int             `json:"local_date,omitempty"`
+	OpType        string          `json:"op_type,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitempty"`
+	CreatedAt     string          `json:"created_at,omitempty"`
 }
 
 type SyncOp struct {

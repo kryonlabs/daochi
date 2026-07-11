@@ -68,20 +68,22 @@ type PublicStats struct {
 
 func (s *Store) ExportAccount(ctx context.Context, userID string) (AccountExportResponse, error) {
 	var alias sql.NullString
+	var profileIcon int
 	response := AccountExportResponse{
 		Status:     "ok",
 		UserIDHash: userID,
 		Tables:     make(map[string][]map[string]any),
 	}
 	if err := s.db.QueryRowContext(ctx, `
-SELECT alias
+SELECT alias,profile_icon
 FROM server_users
-WHERE user_id_hash=?1`, userID).Scan(&alias); err != nil {
+WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 		return AccountExportResponse{}, err
 	}
 	if alias.Valid {
 		response.AccountAlias = alias.String
 	}
+	response.ProfileIcon = profileIcon
 
 	queries := []struct {
 		name       string
@@ -90,7 +92,7 @@ WHERE user_id_hash=?1`, userID).Scan(&alias); err != nil {
 	}{
 		{
 			name:  "users",
-			query: `SELECT user_id_hash, alias, created_at, last_seen_at FROM server_users WHERE user_id_hash=?1`,
+			query: `SELECT user_id_hash, alias, profile_icon, created_at, last_seen_at FROM server_users WHERE user_id_hash=?1`,
 		},
 		{
 			name:  "clients",
@@ -252,6 +254,7 @@ CREATE TABLE IF NOT EXISTS server_users (
 	user_id_hash TEXT PRIMARY KEY,
 	public_key BLOB NOT NULL,
 	alias TEXT UNIQUE,
+	profile_icon INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -478,6 +481,7 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 		`ALTER TABLE server_sessions ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_social_snapshots ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_users ADD COLUMN alias TEXT`,
+		`ALTER TABLE server_users ADD COLUMN profile_icon INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_clients ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE server_clients ADD COLUMN last_client_clock INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0`,
@@ -1010,6 +1014,32 @@ WHERE user_id_hash=?1`, userID, alias)
 	return nil
 }
 
+func (s *Store) AccountProfileIcon(ctx context.Context, userID string) (int, error) {
+	var profileIcon int
+	err := s.db.QueryRowContext(ctx, `SELECT profile_icon FROM server_users WHERE user_id_hash=?1`, userID).Scan(&profileIcon)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProfileIconNone, nil
+	}
+	if err != nil {
+		return ProfileIconNone, err
+	}
+	return profileIcon, nil
+}
+
+func (s *Store) SetAccountProfileIcon(ctx context.Context, userID string, profileIcon int) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE server_users
+SET profile_icon=?2,last_seen_at=CURRENT_TIMESTAMP
+WHERE user_id_hash=?1`, userID, profileIcon)
+	if err != nil {
+		return err
+	}
+	if rowsAffected(res) == 0 {
+		return ErrSyncUserNotFound
+	}
+	return nil
+}
+
 func (s *Store) ResolveAccountRef(ctx context.Context, ref string) (string, bool, error) {
 	ref = strings.TrimSpace(ref)
 	if strings.HasPrefix(ref, "@") {
@@ -1191,7 +1221,7 @@ func (s *Store) DeclineFriendRequest(ctx context.Context, userID, id string) (Fr
 
 func (s *Store) ListFriends(ctx context.Context, userID string) ([]Friend, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT u.user_id_hash,COALESCE(u.alias,''),f.created_at
+SELECT u.user_id_hash,COALESCE(u.alias,''),u.profile_icon,f.created_at
 FROM server_friendships f
 JOIN server_users u ON u.user_id_hash=CASE WHEN f.user_id_a=?1 THEN f.user_id_b ELSE f.user_id_a END
 WHERE f.user_id_a=?1 OR f.user_id_b=?1
@@ -1203,7 +1233,7 @@ ORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID)
 	items := []Friend{}
 	for rows.Next() {
 		var item Friend
-		if err := rows.Scan(&item.UserIDHash, &item.Alias, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.UserIDHash, &item.Alias, &item.ProfileIcon, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -1264,6 +1294,7 @@ WHERE excluded.value != server_profile_stats.value
 type visibleStatsUser struct {
 	UserIDHash    string
 	Alias         string
+	ProfileIcon   int
 	SourceVersion int64
 }
 
@@ -1290,11 +1321,11 @@ func leaderboardTimeLabel(seconds int) string {
 func (s *Store) visibleStatsUsers(ctx context.Context, userID string) ([]visibleStatsUser, error) {
 	rows, err := s.db.QueryContext(ctx, `
 WITH visible_users AS (
-  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias
+  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias, u.profile_icon
   FROM server_users u
   WHERE u.user_id_hash=?1
   UNION
-  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias
+  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias, u.profile_icon
   FROM server_friendships f
   JOIN server_users u ON u.user_id_hash=CASE
       WHEN f.user_id_a=?1 THEN f.user_id_b
@@ -1302,7 +1333,7 @@ WITH visible_users AS (
   END
   WHERE f.user_id_a=?1 OR f.user_id_b=?1
 )
-SELECT vu.user_id_hash, vu.alias, COALESCE(ss.server_version,0)
+SELECT vu.user_id_hash, vu.alias, vu.profile_icon, COALESCE(ss.server_version,0)
 FROM visible_users vu
 LEFT JOIN server_sync_state ss ON ss.user_id_hash=vu.user_id_hash`, userID)
 	if err != nil {
@@ -1312,7 +1343,7 @@ LEFT JOIN server_sync_state ss ON ss.user_id_hash=vu.user_id_hash`, userID)
 	users := []visibleStatsUser{}
 	for rows.Next() {
 		var user visibleStatsUser
-		if err := rows.Scan(&user.UserIDHash, &user.Alias, &user.SourceVersion); err != nil {
+		if err := rows.Scan(&user.UserIDHash, &user.Alias, &user.ProfileIcon, &user.SourceVersion); err != nil {
 			return nil, err
 		}
 		users = append(users, user)
@@ -1340,6 +1371,7 @@ WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4`,
 	}
 	row.UserIDHash = user.UserIDHash
 	row.Alias = user.Alias
+	row.ProfileIcon = user.ProfileIcon
 	row.App = app
 	row.Practice = practice
 	row.Metric = metric
@@ -1448,13 +1480,14 @@ func (s *Store) computeLeaderboardStat(ctx context.Context, user visibleStatsUse
 		return FriendStatRow{}, err
 	}
 	row := FriendStatRow{
-		UserIDHash: user.UserIDHash,
-		Alias:      user.Alias,
-		App:        app,
-		Practice:   practice,
-		Metric:     metric,
-		LocalDate:  todayDate,
-		UpdatedAt:  updatedAt,
+		UserIDHash:  user.UserIDHash,
+		Alias:       user.Alias,
+		ProfileIcon: user.ProfileIcon,
+		App:         app,
+		Practice:    practice,
+		Metric:      metric,
+		LocalDate:   todayDate,
+		UpdatedAt:   updatedAt,
 	}
 	if metric == "streak" {
 		row.Value = float64(streak)

@@ -724,6 +724,75 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	}
 }
 
+func TestAccountProfileIconRegistersAndSyncs(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x5c}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x7c}, mlDSA44SignatureSize))
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	iconBody := []byte(`{"user_id_hash":"` + userID + `","profile_icon":` + strconv.Itoa(ProfileIconLotus) + `}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/profile-icon", bytes.NewReader(iconBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("profile icon status = %d body=%s", res.Code, res.Body.String())
+	}
+	var iconRes ProfileIconResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &iconRes); err != nil {
+		t.Fatal(err)
+	}
+	if iconRes.ProfileIcon != ProfileIconLotus {
+		t.Fatalf("profile icon = %d", iconRes.ProfileIcon)
+	}
+
+	{
+		nonce := issueChallenge(t, handler, "", userID)
+		loginBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sync/login", bytes.NewReader(loginBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Inbe-User", userID)
+		req.Header.Set("X-Inbe-Signature", signature)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("login profile icon status = %d body=%s nonce=%s", res.Code, res.Body.String(), nonce)
+		}
+		var loginRes LoginResponse
+		if err := json.Unmarshal(res.Body.Bytes(), &loginRes); err != nil {
+			t.Fatal(err)
+		}
+		if loginRes.ProfileIcon != ProfileIconLotus {
+			t.Fatalf("login profile icon = %d", loginRes.ProfileIcon)
+		}
+	}
+
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","since_server_version":0}`)
+	syncRes := syncWithBody(t, handler, "", userID, token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(syncRes.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ProfileIcon != ProfileIconLotus {
+		t.Fatalf("sync profile icon = %d", payload.ProfileIcon)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/profile-icon", bytes.NewReader([]byte(`{"user_id_hash":"`+userID+`","profile_icon":99}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("invalid profile icon status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestFriendRequestsByAliasAndPublicID(t *testing.T) {
 	server, store, _ := testServer(t)
 	handler := server.Routes()

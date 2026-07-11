@@ -50,6 +50,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/sync/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
+	mux.HandleFunc("POST /api/v1/account/profile-icon", s.handleProfileIcon)
 	mux.HandleFunc("GET /api/v1/account/export", s.handleAccountExport)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
@@ -215,11 +216,18 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "alias failed")
 		return
 	}
+	profileIcon, err := s.store.AccountProfileIcon(r.Context(), req.UserIDHash)
+	if err != nil {
+		slog.Error("load profile icon", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "profile icon failed")
+		return
+	}
 	response := SyncResponse{
 		ProtocolVersion:      req.ProtocolVersion,
 		Status:               "ok",
 		Applied:              result,
 		AccountAlias:         accountAlias,
+		ProfileIcon:          profileIcon,
 		ServerVersion:        serverVersion,
 		ServerClock:          serverVersion,
 		ServerStateHash:      serverHash,
@@ -333,6 +341,41 @@ func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, AliasResponse{Status: "ok", Alias: alias})
+}
+
+func (s *Server) handleProfileIcon(w http.ResponseWriter, r *http.Request) {
+	_, req, err := readProfileIconRequest(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	tokenUser, err := s.authenticateToken(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if tokenUser != req.UserIDHash {
+		writeError(w, http.StatusUnauthorized, "token user mismatch")
+		return
+	}
+	if !validProfileIcon(req.ProfileIcon) {
+		writeError(w, http.StatusBadRequest, "invalid profile_icon")
+		return
+	}
+	if err := s.store.SetAccountProfileIcon(r.Context(), req.UserIDHash, req.ProfileIcon); err != nil {
+		if errors.Is(err, ErrSyncUserNotFound) {
+			writeError(w, http.StatusNotFound, "sync account not found")
+			return
+		}
+		slog.Error("set profile icon", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "profile icon failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, ProfileIconResponse{Status: "ok", ProfileIcon: req.ProfileIcon})
 }
 
 func (s *Server) handleAccountExport(w http.ResponseWriter, r *http.Request) {
@@ -757,6 +800,10 @@ func validAccountAlias(alias string) bool {
 	return accountAliasPattern.MatchString(alias)
 }
 
+func validProfileIcon(profileIcon int) bool {
+	return profileIcon >= ProfileIconNone && profileIcon <= ProfileIconTree5
+}
+
 func validLyraNamespace(value string) bool {
 	return lyraNamespacePattern.MatchString(value)
 }
@@ -815,11 +862,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "alias failed")
 		return
 	}
+	profileIcon, err := s.store.AccountProfileIcon(r.Context(), req.UserIDHash)
+	if err != nil {
+		slog.Error("load profile icon", "user", req.UserIDHash, "error", err)
+		writeError(w, http.StatusInternalServerError, "profile icon failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Status:       "ok",
 		AuthToken:    token,
 		ExpiresIn:    int64(s.cfg.TokenTTL.Seconds()),
 		AccountAlias: accountAlias,
+		ProfileIcon:  profileIcon,
 	})
 }
 
@@ -1015,6 +1069,19 @@ func readAliasRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]
 	}
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
 	req.Alias = normalizeAlias(req.Alias)
+	return body, req, nil
+}
+
+func readProfileIconRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, ProfileIconRequest, error) {
+	var req ProfileIconRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return nil, req, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, req, errors.New("invalid json")
+	}
+	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
 	return body, req, nil
 }
 

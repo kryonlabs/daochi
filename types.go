@@ -2,6 +2,21 @@ package main
 
 import "encoding/json"
 
+const (
+	ProfileIconNone    = 0
+	ProfileIconBird    = 1
+	ProfileIconBowl    = 2
+	ProfileIconCactus  = 3
+	ProfileIconHeart   = 4
+	ProfileIconIncense = 5
+	ProfileIconLotus   = 6
+	ProfileIconTree1   = 7
+	ProfileIconTree2   = 8
+	ProfileIconTree3   = 9
+	ProfileIconTree4   = 10
+	ProfileIconTree5   = 11
+)
+
 type ChallengeResponse struct {
 	UserIDHash string `json:"user_id_hash"`
 	Nonce      string `json:"nonce"`
@@ -19,12 +34,14 @@ type LoginResponse struct {
 	AuthToken    string `json:"auth_token"`
 	ExpiresIn    int64  `json:"expires_in_seconds"`
 	AccountAlias string `json:"account_alias,omitempty"`
+	ProfileIcon  int    `json:"profile_icon,omitempty"`
 }
 
 type AccountExportResponse struct {
 	Status       string                      `json:"status"`
 	UserIDHash   string                      `json:"user_id_hash"`
 	AccountAlias string                      `json:"account_alias,omitempty"`
+	ProfileIcon  int                         `json:"profile_icon,omitempty"`
 	Tables       map[string][]map[string]any `json:"tables"`
 }
 
@@ -60,6 +77,7 @@ type SyncResponse struct {
 	Status               string      `json:"status"`
 	Applied              SyncResult  `json:"applied"`
 	AccountAlias         string      `json:"account_alias,omitempty"`
+	ProfileIcon          int         `json:"profile_icon,omitempty"`
 	ServerVersion        int64       `json:"server_version"`
 	ServerClock          int64       `json:"server_clock,omitempty"`
 	ServerStateHash      string      `json:"server_state_hash,omitempty"`
@@ -142,6 +160,16 @@ type AliasResponse struct {
 	Alias  string `json:"alias"`
 }
 
+type ProfileIconRequest struct {
+	UserIDHash  string `json:"user_id_hash"`
+	ProfileIcon int    `json:"profile_icon"`
+}
+
+type ProfileIconResponse struct {
+	Status      string `json:"status"`
+	ProfileIcon int    `json:"profile_icon"`
+}
+
 type FriendRequestCreateRequest struct {
 	Target string `json:"target"`
 }
@@ -190,9 +218,10 @@ type FriendRequest struct {
 }
 
 type Friend struct {
-	UserIDHash string `json:"user_id_hash"`
-	Alias      string `json:"alias,omitempty"`
-	CreatedAt  string `json:"created_at"`
+	UserIDHash  string `json:"user_id_hash"`
+	Alias       string `json:"alias,omitempty"`
+	ProfileIcon int    `json:"profile_icon,omitempty"`
+	CreatedAt   string `json:"created_at"`
 }
 
 type ProfileMetric struct {
@@ -204,15 +233,16 @@ type ProfileMetric struct {
 }
 
 type FriendStatRow struct {
-	UserIDHash string  `json:"user_id_hash"`
-	Alias      string  `json:"alias,omitempty"`
-	App        string  `json:"app"`
-	Practice   string  `json:"practice"`
-	Metric     string  `json:"metric"`
-	Value      float64 `json:"value"`
-	Label      string  `json:"label,omitempty"`
-	LocalDate  int     `json:"local_date,omitempty"`
-	UpdatedAt  string  `json:"updated_at"`
+	UserIDHash  string  `json:"user_id_hash"`
+	Alias       string  `json:"alias,omitempty"`
+	ProfileIcon int     `json:"profile_icon,omitempty"`
+	App         string  `json:"app"`
+	Practice    string  `json:"practice"`
+	Metric      string  `json:"metric"`
+	Value       float64 `json:"value"`
+	Label       string  `json:"label,omitempty"`
+	LocalDate   int     `json:"local_date,omitempty"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 type DeleteWithKeyRequest struct {

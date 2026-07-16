@@ -218,9 +218,11 @@ func TestHashMismatchRequiresFullSnapshotWithoutApplyingUpload(t *testing.T) {
 	userHash := sha256.Sum256(publicKey)
 	userID := hex.EncodeToString(userHash[:])
 	signature := hex.EncodeToString(bytes.Repeat([]byte{0x5a}, mlDSA44SignatureSize))
+	habit1ID := "00000000-0000-4000-8000-000000000001"
+	habit2ID := "00000000-0000-4000-8000-000000000002"
 
 	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
-	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"habit-1","name":"Remote","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habits":[{"id":"` + habit1ID + `","name":"Remote","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
 	res := syncWithBody(t, handler, "", userID, token, body)
 	var first SyncResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil {
@@ -231,7 +233,7 @@ func TestHashMismatchRequiresFullSnapshotWithoutApplyingUpload(t *testing.T) {
 	}
 
 	staleHash := strings.Repeat("0", 64)
-	staleBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":` + strconv.FormatInt(first.ServerVersion, 10) + `,"last_server_state_hash":"` + staleHash + `","habits":[{"id":"habit-2","name":"Local stale upload","color_r":9,"color_g":9,"color_b":9,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":1,"deleted_at":0,"updated_at":"2026-06-20T00:00:00Z"}]}`)
+	staleBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":` + strconv.FormatInt(first.ServerVersion, 10) + `,"last_server_state_hash":"` + staleHash + `","habits":[{"id":"` + habit2ID + `","name":"Local stale upload","color_r":9,"color_g":9,"color_b":9,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":1,"deleted_at":0,"updated_at":"2026-06-20T00:00:00Z"}]}`)
 	res = syncWithBody(t, handler, "", userID, token, staleBody)
 	var mismatch SyncResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &mismatch); err != nil {
@@ -240,7 +242,7 @@ func TestHashMismatchRequiresFullSnapshotWithoutApplyingUpload(t *testing.T) {
 	if !mismatch.FullSnapshotRequired || mismatch.ChangesComplete || mismatch.Applied.Habits != 0 {
 		t.Fatalf("mismatch response = %#v", mismatch)
 	}
-	if len(mismatch.Changes.Habits) != 1 || mismatch.Changes.Habits[0].ID != "habit-1" {
+	if len(mismatch.Changes.Habits) != 1 || mismatch.Changes.Habits[0].ID != habit1ID {
 		t.Fatalf("mismatch snapshot = %#v", mismatch.Changes.Habits)
 	}
 
@@ -250,11 +252,11 @@ func TestHashMismatchRequiresFullSnapshotWithoutApplyingUpload(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &full); err != nil {
 		t.Fatal(err)
 	}
-	if len(full.Changes.Habits) != 1 || full.Changes.Habits[0].ID != "habit-1" {
+	if len(full.Changes.Habits) != 1 || full.Changes.Habits[0].ID != habit1ID {
 		t.Fatalf("stale upload was applied: %#v", full.Changes.Habits)
 	}
 
-	replaceBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":0,"full_sync_requested":true,"habits":[{"id":"habit-2","name":"Local replacement","color_r":9,"color_g":9,"color_b":9,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":1,"deleted_at":0,"updated_at":"2026-06-20T00:00:00Z"}]}`)
+	replaceBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-2","since_server_version":0,"full_sync_requested":true,"habits":[{"id":"` + habit2ID + `","name":"Local replacement","color_r":9,"color_g":9,"color_b":9,"sync_mode":1,"sync_activity":2,"counter_enabled":0,"sort_order":1,"deleted_at":0,"updated_at":"2026-06-20T00:00:00Z"}]}`)
 	res = syncWithBody(t, handler, "", userID, token, replaceBody)
 	var replaced SyncResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &replaced); err != nil {
@@ -268,7 +270,7 @@ func TestHashMismatchRequiresFullSnapshotWithoutApplyingUpload(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &full); err != nil {
 		t.Fatal(err)
 	}
-	if len(full.Changes.Habits) != 1 || full.Changes.Habits[0].ID != "habit-2" {
+	if len(full.Changes.Habits) != 1 || full.Changes.Habits[0].ID != habit2ID {
 		t.Fatalf("remote was not replaced: %#v", full.Changes.Habits)
 	}
 }
@@ -979,7 +981,8 @@ FROM server_sync_state WHERE user_id_hash=?1`, alice.UserID); err != nil {
 		t.Fatalf("whm or habit-only data leaked into meditation streak: %#v", stats.Rows)
 	}
 
-	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-meditation-stats","sessions":[{"id":"alice-meditation-1","started_at":"2026-06-28T00:00:00Z","local_date":`+time.Now().UTC().Format("20060102")+`,"topic":"0","activity":1,"source":"test","rounds_hash":"meditation-1","deleted_at":0,"updated_at":"2026-06-28T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":600}]}],"meditation_logs":[{"id":"alice-meditation-log-1","session_id":"alice-meditation-log-session","duration_seconds":1200,"completed_at":"2026-06-28T00:00:00Z"}]}`))
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(time.RFC3339)
+	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-meditation-stats","sessions":[{"id":"alice-meditation-1","started_at":"2026-06-28T00:00:00Z","local_date":`+time.Now().UTC().Format("20060102")+`,"topic":"0","activity":1,"source":"test","rounds_hash":"meditation-1","deleted_at":0,"updated_at":"2026-06-28T00:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":600}]}],"meditation_logs":[{"id":"alice-meditation-log-1","session_id":"alice-meditation-log-session","duration_seconds":1200,"completed_at":"`+yesterday+`"}]}`))
 	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=meditation&metric=streak", bob, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("meditation streak status = %d body=%s", res.Code, res.Body.String())
@@ -1278,19 +1281,20 @@ func TestSyncReturnsRecoveredHabitForOrphanHabitDays(t *testing.T) {
 	userHash := sha256.Sum256(publicKey)
 	userID := hex.EncodeToString(userHash[:])
 	signature := hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize))
+	habitID := "00000000-0000-4000-8000-000000000002"
 
 	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
-	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habit_days":[{"habit_id":"habit-2","local_date":20260619,"completed":true,"count":1,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","habit_days":[{"habit_id":"` + habitID + `","local_date":20260619,"completed":true,"count":1,"updated_at":"2026-06-19T00:00:00Z"}]}`)
 	res := syncWithBody(t, handler, "", userID, token, body)
 	var payload SyncResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Changes.Habits) != 1 || payload.Changes.Habits[0].ID != "habit-2" ||
-		payload.Changes.Habits[0].Name != "Recovered habit-2" {
+	if len(payload.Changes.Habits) != 1 || payload.Changes.Habits[0].ID != habitID ||
+		payload.Changes.Habits[0].Name != "Recovered "+habitID {
 		t.Fatalf("recovered habits = %#v", payload.Changes.Habits)
 	}
-	if len(payload.Changes.HabitDays) != 1 || payload.Changes.HabitDays[0].HabitID != "habit-2" {
+	if len(payload.Changes.HabitDays) != 1 || payload.Changes.HabitDays[0].HabitID != habitID {
 		t.Fatalf("habit day changes = %#v", payload.Changes.HabitDays)
 	}
 
@@ -1687,6 +1691,7 @@ func TestUkuProcessesVisibilityAndMutationAuth(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x72)
+	other := newTestIdentity(t, handler, 0x73)
 
 	publicBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"public-process","question":"Where should we meet?","description":"Choose a place","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
 	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes", identity.UserID, identity.Token, publicBody)
@@ -1740,6 +1745,37 @@ func TestUkuProcessesVisibilityAndMutationAuth(t *testing.T) {
 	}
 	if len(process.Votes) != 1 || process.Votes[0].Scores["prop-1"] != 3 {
 		t.Fatalf("unexpected votes: %#v", process.Votes)
+	}
+
+	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/uku/processes/public-process/proposals/prop-1", other.UserID, other.Token, nil)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("other proposal delete status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/uku/processes/public-process/proposals/prop-1", identity.UserID, identity.Token, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("proposal delete status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
+		t.Fatal(err)
+	}
+	for _, proposal := range process.Proposals {
+		if proposal.ID == "prop-1" {
+			t.Fatalf("deleted proposal still returned: %#v", process.Proposals)
+		}
+	}
+
+	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/uku/processes/public-process", other.UserID, other.Token, nil)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("other process delete status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/uku/processes/public-process", identity.UserID, identity.Token, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("process delete status = %d body=%s", res.Code, res.Body.String())
+	}
+	deleted := httptest.NewRecorder()
+	handler.ServeHTTP(deleted, httptest.NewRequest(http.MethodGet, "/api/v1/uku/processes/public-process", nil))
+	if deleted.Code != http.StatusNotFound {
+		t.Fatalf("deleted process get status = %d body=%s", deleted.Code, deleted.Body.String())
 	}
 }
 

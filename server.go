@@ -66,6 +66,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/uku/processes/", s.handleUkuProcessRoute)
 	mux.HandleFunc("PATCH /api/v1/uku/processes/", s.handleUkuProcessRoute)
 	mux.HandleFunc("POST /api/v1/uku/processes/", s.handleUkuProcessRoute)
+	mux.HandleFunc("DELETE /api/v1/uku/processes/", s.handleUkuProcessRoute)
 	return s.withCommonHeaders(mux)
 }
 
@@ -676,6 +677,18 @@ func (s *Server) handleUkuProcessRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, process)
 		return
 	}
+	if r.Method == http.MethodDelete && action == "" {
+		userID, ok := s.bearerUser(w, r)
+		if !ok {
+			return
+		}
+		if err := s.store.DeleteUkuProcess(r.Context(), processID, userID); err != nil {
+			writeUkuMutationError(w, err, "process delete failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 	if r.Method == http.MethodPost && action == "proposals" {
 		req, err := readUkuProposalRequest(w, r, s.cfg.MaxBodyBytes)
 		if err != nil {
@@ -697,6 +710,24 @@ func (s *Server) handleUkuProcessRoute(w http.ResponseWriter, r *http.Request) {
 		process, err := s.store.UpsertUkuProposal(r.Context(), processID, req)
 		if err != nil {
 			writeUkuMutationError(w, err, "proposal failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, process)
+		return
+	}
+	if r.Method == http.MethodDelete && strings.HasPrefix(action, "proposals/") {
+		userID, ok := s.bearerUser(w, r)
+		if !ok {
+			return
+		}
+		proposalID := strings.TrimPrefix(action, "proposals/")
+		if !validUkuID(proposalID) {
+			writeError(w, http.StatusNotFound, "proposal not found")
+			return
+		}
+		process, err := s.store.DeleteUkuProposal(r.Context(), processID, proposalID, userID)
+		if err != nil {
+			writeUkuMutationError(w, err, "proposal delete failed")
 			return
 		}
 		writeJSON(w, http.StatusOK, process)
@@ -1308,6 +1339,9 @@ func parseUkuProcessPath(path string) (processID string, action string, ok bool)
 	}
 	if len(parts) == 2 && (parts[1] == "proposals" || parts[1] == "votes") {
 		return parts[0], parts[1], true
+	}
+	if len(parts) == 3 && parts[1] == "proposals" && validUkuID(parts[2]) {
+		return parts[0], "proposals/" + parts[2], true
 	}
 	return "", "", false
 }

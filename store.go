@@ -1769,6 +1769,32 @@ WHERE id=?1 AND owner_user_id_hash=?6 AND deleted_at=0`,
 	return process, err
 }
 
+func (s *Store) DeleteUkuProcess(ctx context.Context, processID, userID string) error {
+	current, found, err := s.UkuProcess(ctx, processID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return sql.ErrNoRows
+	}
+	if current.OwnerUserIDHash != userID {
+		return ErrSyncUserNotFound
+	}
+	now := time.Now().UTC()
+	res, err := s.db.ExecContext(ctx, `
+UPDATE uku_processes
+SET deleted_at=?2,updated_at=?3
+WHERE id=?1 AND owner_user_id_hash=?4 AND deleted_at=0`,
+		processID, now.Unix(), now.Format(time.RFC3339), userID)
+	if err != nil {
+		return err
+	}
+	if rowsAffected(res) == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) UpsertUkuProposal(ctx context.Context, processID string, req UkuProposalRequest) (UkuProcess, error) {
 	if _, found, err := s.UkuProcess(ctx, processID); err != nil {
 		return UkuProcess{}, err
@@ -1786,6 +1812,40 @@ ON CONFLICT(process_id,id) DO UPDATE SET
 WHERE uku_proposals.author_user_id_hash=excluded.author_user_id_hash`,
 		processID, req.ID, req.UserIDHash, req.Title, req.Description, now); err != nil {
 		return UkuProcess{}, err
+	}
+	process, _, err := s.UkuProcess(ctx, processID)
+	return process, err
+}
+
+func (s *Store) DeleteUkuProposal(ctx context.Context, processID, proposalID, userID string) (UkuProcess, error) {
+	if _, found, err := s.UkuProcess(ctx, processID); err != nil {
+		return UkuProcess{}, err
+	} else if !found {
+		return UkuProcess{}, sql.ErrNoRows
+	}
+	now := time.Now().UTC()
+	res, err := s.db.ExecContext(ctx, `
+UPDATE uku_proposals
+SET deleted_at=?3,updated_at=?4
+WHERE process_id=?1 AND id=?2 AND author_user_id_hash=?5 AND deleted_at=0`,
+		processID, proposalID, now.Unix(), now.Format(time.RFC3339), userID)
+	if err != nil {
+		return UkuProcess{}, err
+	}
+	if rowsAffected(res) == 0 {
+		var exists int
+		err := s.db.QueryRowContext(ctx, `
+SELECT 1
+FROM uku_proposals
+WHERE process_id=?1 AND id=?2 AND deleted_at=0`,
+			processID, proposalID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return UkuProcess{}, sql.ErrNoRows
+		}
+		if err != nil {
+			return UkuProcess{}, err
+		}
+		return UkuProcess{}, ErrSyncUserNotFound
 	}
 	process, _, err := s.UkuProcess(ctx, processID)
 	return process, err

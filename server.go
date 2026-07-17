@@ -61,12 +61,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/friends/requests/", s.handleFriendRequestRoute)
 	mux.HandleFunc("PUT /api/v1/profile/stats", s.handleProfileStatsPut)
 	mux.HandleFunc("GET /api/v1/friends/stats", s.handleFriendStats)
-	mux.HandleFunc("GET /api/v1/uku/processes", s.handleUkuProcessList)
-	mux.HandleFunc("POST /api/v1/uku/processes", s.handleUkuProcessCreate)
-	mux.HandleFunc("GET /api/v1/uku/processes/", s.handleUkuProcessRoute)
-	mux.HandleFunc("PATCH /api/v1/uku/processes/", s.handleUkuProcessRoute)
-	mux.HandleFunc("POST /api/v1/uku/processes/", s.handleUkuProcessRoute)
-	mux.HandleFunc("DELETE /api/v1/uku/processes/", s.handleUkuProcessRoute)
+	mux.HandleFunc("GET /api/v1/governance/processes", s.handleGovernanceProcessList)
+	mux.HandleFunc("POST /api/v1/governance/processes", s.handleGovernanceProcessCreate)
+	mux.HandleFunc("GET /api/v1/governance/processes/", s.handleGovernanceProcessRoute)
+	mux.HandleFunc("PATCH /api/v1/governance/processes/", s.handleGovernanceProcessRoute)
+	mux.HandleFunc("POST /api/v1/governance/processes/", s.handleGovernanceProcessRoute)
+	mux.HandleFunc("DELETE /api/v1/governance/processes/", s.handleGovernanceProcessRoute)
 	return s.withCommonHeaders(mux)
 }
 
@@ -602,7 +602,7 @@ func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (s *Server) handleUkuProcessList(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGovernanceProcessList(w http.ResponseWriter, r *http.Request) {
 	items, err := s.store.ListUkuPublicProcesses(r.Context(), 50)
 	if err != nil {
 		slog.Error("list uku processes", "error", err)
@@ -612,7 +612,7 @@ func (s *Server) handleUkuProcessList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"processes": items})
 }
 
-func (s *Server) handleUkuProcessCreate(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGovernanceProcessCreate(w http.ResponseWriter, r *http.Request) {
 	req, err := readUkuCreateProcessRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -639,8 +639,8 @@ func (s *Server) handleUkuProcessCreate(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, process)
 }
 
-func (s *Server) handleUkuProcessRoute(w http.ResponseWriter, r *http.Request) {
-	processID, action, ok := parseUkuProcessPath(r.URL.Path)
+func (s *Server) handleGovernanceProcessRoute(w http.ResponseWriter, r *http.Request) {
+	processID, action, ok := parseGovernanceProcessPath(r.URL.Path)
 	if !ok || !validUkuID(processID) {
 		writeError(w, http.StatusNotFound, "process not found")
 		return
@@ -657,6 +657,23 @@ func (s *Server) handleUkuProcessRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, process)
+		return
+	}
+	if r.Method == http.MethodGet && action == "export" {
+		process, found, err := s.store.UkuDecisionPacket(r.Context(), processID)
+		if err != nil {
+			slog.Error("export uku process", "process", processID, "error", err)
+			writeError(w, http.StatusInternalServerError, "process export failed")
+			return
+		}
+		if !found {
+			writeError(w, http.StatusNotFound, "process not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"packet_type": "governance-decision-packet-v1",
+			"process":     process,
+		})
 		return
 	}
 	if r.Method == http.MethodPatch && action == "" {
@@ -775,6 +792,10 @@ func writeUkuMutationError(w http.ResponseWriter, err error, fallback string) {
 	}
 	if errors.Is(err, ErrSyncUserNotFound) {
 		writeError(w, http.StatusForbidden, "not process owner")
+		return
+	}
+	if errors.Is(err, ErrUkuVoteReasonRequired) {
+		writeError(w, http.StatusBadRequest, "vote reason required")
 		return
 	}
 	writeError(w, http.StatusInternalServerError, fallback)
@@ -1173,6 +1194,12 @@ func readUkuCreateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody
 	req.Question = strings.TrimSpace(req.Question)
 	req.Description = strings.TrimSpace(req.Description)
 	req.Visibility = normalizeUkuVisibility(req.Visibility)
+	req.DecisionType = strings.TrimSpace(req.DecisionType)
+	if req.DecisionType != "" {
+		req.DecisionType = normalizeUkuDecisionType(req.DecisionType)
+	} else {
+		req.DecisionType = "consent"
+	}
 	if req.ID != "" && !validUkuID(req.ID) {
 		return req, errors.New("invalid process id")
 	}
@@ -1182,6 +1209,9 @@ func readUkuCreateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody
 	if !validUkuVisibility(req.Visibility) {
 		return req, errors.New("invalid visibility")
 	}
+	if !validUkuDecisionType(req.DecisionType) {
+		return req, errors.New("invalid decision_type")
+	}
 	if req.ProposalMinutes <= 0 || req.ProposalMinutes > 525600 {
 		return req, errors.New("invalid proposal_minutes")
 	}
@@ -1190,6 +1220,12 @@ func readUkuCreateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody
 	}
 	if req.NegativeWeight < 0 || req.NegativeWeight > 1000000 {
 		return req, errors.New("invalid negative_weight")
+	}
+	if req.QuorumPercent < 0 || req.QuorumPercent > 100 {
+		return req, errors.New("invalid quorum_percent")
+	}
+	if !strings.Contains(string(body), `"require_vote_reason"`) {
+		req.RequireReason = true
 	}
 	return req, nil
 }
@@ -1206,9 +1242,24 @@ func readUkuUpdateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
 	req.Question = strings.TrimSpace(req.Question)
 	req.Description = strings.TrimSpace(req.Description)
-	req.Visibility = normalizeUkuVisibility(req.Visibility)
+	req.Visibility = strings.TrimSpace(req.Visibility)
+	if req.Visibility != "" {
+		req.Visibility = normalizeUkuVisibility(req.Visibility)
+	}
+	req.DecisionType = strings.TrimSpace(req.DecisionType)
+	if req.DecisionType != "" {
+		req.DecisionType = normalizeUkuDecisionType(req.DecisionType)
+	}
+	req.Outcome = strings.TrimSpace(req.Outcome)
+	req.ReviewAt = strings.TrimSpace(req.ReviewAt)
 	if req.Visibility != "" && !validUkuVisibility(req.Visibility) {
 		return req, errors.New("invalid visibility")
+	}
+	if req.DecisionType != "" && !validUkuDecisionType(req.DecisionType) {
+		return req, errors.New("invalid decision_type")
+	}
+	if req.QuorumPercent != nil && (*req.QuorumPercent < 0 || *req.QuorumPercent > 100) {
+		return req, errors.New("invalid quorum_percent")
 	}
 	return req, nil
 }
@@ -1246,6 +1297,7 @@ func readUkuVoteRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (
 	}
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	req.Reason = strings.TrimSpace(req.Reason)
 	if len(req.Scores) == 0 {
 		return req, errors.New("scores required")
 	}
@@ -1327,8 +1379,28 @@ func validUkuVisibility(value string) bool {
 	return value == "public" || value == "unlisted"
 }
 
-func parseUkuProcessPath(path string) (processID string, action string, ok bool) {
-	const prefix = "/api/v1/uku/processes/"
+func normalizeUkuDecisionType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "consent"
+	}
+	if value == "majority_vote" {
+		return "majority"
+	}
+	return value
+}
+
+func validUkuDecisionType(value string) bool {
+	switch value {
+	case "consent", "consensus", "majority", "ranked", "dot_vote", "budget", "advice":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseGovernanceProcessPath(path string) (processID string, action string, ok bool) {
+	const prefix = "/api/v1/governance/processes/"
 	rest := strings.TrimPrefix(path, prefix)
 	if rest == path || rest == "" {
 		return "", "", false
@@ -1338,6 +1410,9 @@ func parseUkuProcessPath(path string) (processID string, action string, ok bool)
 		return parts[0], "", true
 	}
 	if len(parts) == 2 && (parts[1] == "proposals" || parts[1] == "votes") {
+		return parts[0], parts[1], true
+	}
+	if len(parts) == 2 && parts[1] == "export" {
 		return parts[0], parts[1], true
 	}
 	if len(parts) == 3 && parts[1] == "proposals" && validUkuID(parts[2]) {

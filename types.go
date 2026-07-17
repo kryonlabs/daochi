@@ -314,13 +314,19 @@ type UkuProcess struct {
 	Question        string        `json:"question"`
 	Description     string        `json:"description,omitempty"`
 	Visibility      string        `json:"visibility"`
+	DecisionType    string        `json:"decision_type"`
 	ProposalMinutes int           `json:"proposal_minutes"`
 	VotingMinutes   int           `json:"voting_minutes"`
 	NegativeWeight  int           `json:"negative_weight"`
+	QuorumPercent   int           `json:"quorum_percent"`
+	RequireReason   bool          `json:"require_vote_reason"`
+	Outcome         string        `json:"outcome,omitempty"`
+	ReviewAt        string        `json:"review_at,omitempty"`
 	CreatedAt       string        `json:"created_at"`
 	UpdatedAt       string        `json:"updated_at"`
 	Proposals       []UkuProposal `json:"proposals,omitempty"`
 	Votes           []UkuVote     `json:"votes,omitempty"`
+	Audit           []UkuAudit    `json:"audit,omitempty"`
 }
 
 type UkuProposal struct {
@@ -337,8 +343,19 @@ type UkuVote struct {
 	VoterUserIDHash string         `json:"voter_user_id_hash,omitempty"`
 	DisplayName     string         `json:"display_name,omitempty"`
 	Scores          map[string]int `json:"scores"`
+	Reason          string         `json:"reason,omitempty"`
 	CreatedAt       string         `json:"created_at"`
 	UpdatedAt       string         `json:"updated_at"`
+}
+
+type UkuAudit struct {
+	ID              int64           `json:"id"`
+	ActorUserIDHash string          `json:"actor_user_id_hash,omitempty"`
+	Action          string          `json:"action"`
+	EntityType      string          `json:"entity_type"`
+	EntityID        string          `json:"entity_id,omitempty"`
+	Payload         json.RawMessage `json:"payload,omitempty"`
+	CreatedAt       string          `json:"created_at"`
 }
 
 type UkuCreateProcessRequest struct {
@@ -347,16 +364,23 @@ type UkuCreateProcessRequest struct {
 	Question        string `json:"question"`
 	Description     string `json:"description,omitempty"`
 	Visibility      string `json:"visibility,omitempty"`
+	DecisionType    string `json:"decision_type,omitempty"`
 	ProposalMinutes int    `json:"proposal_minutes"`
 	VotingMinutes   int    `json:"voting_minutes"`
 	NegativeWeight  int    `json:"negative_weight"`
+	QuorumPercent   int    `json:"quorum_percent,omitempty"`
+	RequireReason   bool   `json:"require_vote_reason,omitempty"`
 }
 
 type UkuUpdateProcessRequest struct {
-	UserIDHash  string `json:"user_id_hash"`
-	Question    string `json:"question,omitempty"`
-	Description string `json:"description,omitempty"`
-	Visibility  string `json:"visibility,omitempty"`
+	UserIDHash    string `json:"user_id_hash"`
+	Question      string `json:"question,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Visibility    string `json:"visibility,omitempty"`
+	DecisionType  string `json:"decision_type,omitempty"`
+	QuorumPercent *int   `json:"quorum_percent,omitempty"`
+	Outcome       string `json:"outcome,omitempty"`
+	ReviewAt      string `json:"review_at,omitempty"`
 }
 
 type UkuProposalRequest struct {
@@ -370,4 +394,5 @@ type UkuVoteRequest struct {
 	UserIDHash  string         `json:"user_id_hash"`
 	DisplayName string         `json:"display_name,omitempty"`
 	Scores      map[string]int `json:"scores"`
+	Reason      string         `json:"reason,omitempty"`
 }

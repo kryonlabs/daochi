@@ -24,6 +24,7 @@ type Store struct {
 }
 
 var ErrSyncUserNotFound = errors.New("sync user not found")
+var ErrUkuVoteReasonRequired = errors.New("vote reason required")
 
 const syncClientActiveRetention = 90 * 24 * time.Hour
 
@@ -154,7 +155,7 @@ WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 		},
 		{
 			name:  "uku_processes",
-			query: `SELECT id, owner_user_id_hash, question, description, visibility, proposal_minutes, voting_minutes, negative_weight, created_at, updated_at, deleted_at FROM uku_processes WHERE owner_user_id_hash=?1 ORDER BY updated_at DESC, id`,
+			query: `SELECT id, owner_user_id_hash, question, description, visibility, decision_type, proposal_minutes, voting_minutes, negative_weight, quorum_percent, require_vote_reason, outcome, review_at, created_at, updated_at, deleted_at FROM uku_processes WHERE owner_user_id_hash=?1 ORDER BY updated_at DESC, id`,
 		},
 		{
 			name:  "uku_proposals",
@@ -162,8 +163,13 @@ WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 		},
 		{
 			name:       "uku_votes",
-			query:      `SELECT process_id, voter_user_id_hash, display_name, scores_json, created_at, updated_at FROM uku_votes WHERE voter_user_id_hash=?1 ORDER BY updated_at DESC, process_id`,
+			query:      `SELECT process_id, voter_user_id_hash, display_name, scores_json, reason, created_at, updated_at FROM uku_votes WHERE voter_user_id_hash=?1 ORDER BY updated_at DESC, process_id`,
 			jsonFields: map[string]bool{"scores_json": true},
+		},
+		{
+			name:       "uku_audit",
+			query:      `SELECT process_id, actor_user_id_hash, action, entity_type, entity_id, payload_json, created_at FROM uku_audit WHERE actor_user_id_hash=?1 ORDER BY created_at DESC, id`,
+			jsonFields: map[string]bool{"payload_json": true},
 		},
 	}
 	for _, item := range queries {
@@ -387,9 +393,14 @@ CREATE TABLE IF NOT EXISTS uku_processes (
 	question TEXT NOT NULL,
 	description TEXT NOT NULL DEFAULT '',
 	visibility TEXT NOT NULL DEFAULT 'public',
+	decision_type TEXT NOT NULL DEFAULT 'consent',
 	proposal_minutes INTEGER NOT NULL,
 	voting_minutes INTEGER NOT NULL,
 	negative_weight INTEGER NOT NULL,
+	quorum_percent INTEGER NOT NULL DEFAULT 0,
+	require_vote_reason INTEGER NOT NULL DEFAULT 1,
+	outcome TEXT NOT NULL DEFAULT '',
+	review_at TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	deleted_at INTEGER NOT NULL DEFAULT 0
@@ -412,9 +423,21 @@ CREATE TABLE IF NOT EXISTS uku_votes (
 	voter_user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
 	display_name TEXT NOT NULL DEFAULT '',
 	scores_json TEXT NOT NULL,
+	reason TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY(process_id, voter_user_id_hash)
+);
+
+CREATE TABLE IF NOT EXISTS uku_audit (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	process_id TEXT NOT NULL REFERENCES uku_processes(id) ON DELETE CASCADE,
+	actor_user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	action TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	entity_id TEXT NOT NULL DEFAULT '',
+	payload_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS server_friend_requests (
@@ -486,6 +509,12 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 		`ALTER TABLE server_clients ADD COLUMN last_client_clock INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE uku_processes ADD COLUMN decision_type TEXT NOT NULL DEFAULT 'consent'`,
+		`ALTER TABLE uku_processes ADD COLUMN quorum_percent INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE uku_processes ADD COLUMN require_vote_reason INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE uku_processes ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE uku_processes ADD COLUMN review_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE uku_votes ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
@@ -1677,7 +1706,7 @@ func (s *Store) ListUkuPublicProcesses(ctx context.Context, limit int) ([]UkuPro
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id,owner_user_id_hash,question,description,visibility,proposal_minutes,voting_minutes,negative_weight,created_at,updated_at
+SELECT id,owner_user_id_hash,question,description,visibility,decision_type,proposal_minutes,voting_minutes,negative_weight,quorum_percent,require_vote_reason,outcome,review_at,created_at,updated_at
 FROM uku_processes
 WHERE deleted_at=0 AND visibility='public'
 ORDER BY created_at DESC
@@ -1691,7 +1720,7 @@ LIMIT ?1`, limit)
 
 func (s *Store) UkuProcess(ctx context.Context, id string) (UkuProcess, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id,owner_user_id_hash,question,description,visibility,proposal_minutes,voting_minutes,negative_weight,created_at,updated_at
+SELECT id,owner_user_id_hash,question,description,visibility,decision_type,proposal_minutes,voting_minutes,negative_weight,quorum_percent,require_vote_reason,outcome,review_at,created_at,updated_at
 FROM uku_processes
 WHERE id=?1 AND deleted_at=0`, id)
 	process, err := scanUkuProcess(row)
@@ -1716,18 +1745,33 @@ WHERE id=?1 AND deleted_at=0`, id)
 
 func (s *Store) CreateUkuProcess(ctx context.Context, req UkuCreateProcessRequest) (UkuProcess, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `
-INSERT INTO uku_processes(id,owner_user_id_hash,question,description,visibility,proposal_minutes,voting_minutes,negative_weight,created_at,updated_at)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)`,
-		req.ID, req.UserIDHash, req.Question, req.Description, req.Visibility,
-		req.ProposalMinutes, req.VotingMinutes, req.NegativeWeight, now); err != nil {
+	requireReason := 0
+	if req.RequireReason {
+		requireReason = 1
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return UkuProcess{}, err
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO uku_processes(id,owner_user_id_hash,question,description,visibility,decision_type,proposal_minutes,voting_minutes,negative_weight,quorum_percent,require_vote_reason,created_at,updated_at)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12)`,
+		req.ID, req.UserIDHash, req.Question, req.Description, req.Visibility, req.DecisionType,
+		req.ProposalMinutes, req.VotingMinutes, req.NegativeWeight, req.QuorumPercent, requireReason, now); err != nil {
+		return UkuProcess{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO uku_proposals(process_id,id,author_user_id_hash,title,description,created_at,updated_at)
 VALUES(?1,'status-quo',?2,'Status quo','keep things the way they are',?3,?3),
       (?1,'repeat-process',?2,'Repeat process','repeat the process and look for other options',?3,?3)`,
 		req.ID, req.UserIDHash, now); err != nil {
+		return UkuProcess{}, err
+	}
+	if err := insertUkuAudit(ctx, tx, req.ID, req.UserIDHash, "create", "process", req.ID, req); err != nil {
+		return UkuProcess{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return UkuProcess{}, err
 	}
 	process, _, err := s.UkuProcess(ctx, req.ID)
@@ -1748,6 +1792,10 @@ func (s *Store) UpdateUkuProcess(ctx context.Context, processID string, req UkuU
 	question := current.Question
 	description := current.Description
 	visibility := current.Visibility
+	decisionType := current.DecisionType
+	quorumPercent := current.QuorumPercent
+	outcome := current.Outcome
+	reviewAt := current.ReviewAt
 	if strings.TrimSpace(req.Question) != "" {
 		question = strings.TrimSpace(req.Question)
 	}
@@ -1757,12 +1805,35 @@ func (s *Store) UpdateUkuProcess(ctx context.Context, processID string, req UkuU
 	if strings.TrimSpace(req.Visibility) != "" {
 		visibility = strings.TrimSpace(req.Visibility)
 	}
+	if strings.TrimSpace(req.DecisionType) != "" {
+		decisionType = strings.TrimSpace(req.DecisionType)
+	}
+	if req.QuorumPercent != nil {
+		quorumPercent = *req.QuorumPercent
+	}
+	if strings.TrimSpace(req.Outcome) != "" {
+		outcome = strings.TrimSpace(req.Outcome)
+	}
+	if strings.TrimSpace(req.ReviewAt) != "" {
+		reviewAt = strings.TrimSpace(req.ReviewAt)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return UkuProcess{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
 UPDATE uku_processes
-SET question=?2,description=?3,visibility=?4,updated_at=?5
-WHERE id=?1 AND owner_user_id_hash=?6 AND deleted_at=0`,
-		processID, question, description, visibility, now, req.UserIDHash); err != nil {
+SET question=?2,description=?3,visibility=?4,decision_type=?5,quorum_percent=?6,outcome=?7,review_at=?8,updated_at=?9
+WHERE id=?1 AND owner_user_id_hash=?10 AND deleted_at=0`,
+		processID, question, description, visibility, decisionType, quorumPercent, outcome, reviewAt, now, req.UserIDHash); err != nil {
+		return UkuProcess{}, err
+	}
+	if err := insertUkuAudit(ctx, tx, processID, req.UserIDHash, "update", "process", processID, req); err != nil {
+		return UkuProcess{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return UkuProcess{}, err
 	}
 	process, _, err := s.UkuProcess(ctx, processID)
@@ -1781,7 +1852,12 @@ func (s *Store) DeleteUkuProcess(ctx context.Context, processID, userID string) 
 		return ErrSyncUserNotFound
 	}
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `
 UPDATE uku_processes
 SET deleted_at=?2,updated_at=?3
 WHERE id=?1 AND owner_user_id_hash=?4 AND deleted_at=0`,
@@ -1792,7 +1868,10 @@ WHERE id=?1 AND owner_user_id_hash=?4 AND deleted_at=0`,
 	if rowsAffected(res) == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	if err := insertUkuAudit(ctx, tx, processID, userID, "delete", "process", processID, map[string]string{"id": processID}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) UpsertUkuProposal(ctx context.Context, processID string, req UkuProposalRequest) (UkuProcess, error) {
@@ -1802,7 +1881,12 @@ func (s *Store) UpsertUkuProposal(ctx context.Context, processID string, req Uku
 		return UkuProcess{}, sql.ErrNoRows
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return UkuProcess{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO uku_proposals(process_id,id,author_user_id_hash,title,description,created_at,updated_at)
 VALUES(?1,?2,?3,?4,?5,?6,?6)
 ON CONFLICT(process_id,id) DO UPDATE SET
@@ -1811,6 +1895,12 @@ ON CONFLICT(process_id,id) DO UPDATE SET
 	updated_at=excluded.updated_at
 WHERE uku_proposals.author_user_id_hash=excluded.author_user_id_hash`,
 		processID, req.ID, req.UserIDHash, req.Title, req.Description, now); err != nil {
+		return UkuProcess{}, err
+	}
+	if err := insertUkuAudit(ctx, tx, processID, req.UserIDHash, "upsert", "proposal", req.ID, req); err != nil {
+		return UkuProcess{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return UkuProcess{}, err
 	}
 	process, _, err := s.UkuProcess(ctx, processID)
@@ -1824,7 +1914,12 @@ func (s *Store) DeleteUkuProposal(ctx context.Context, processID, proposalID, us
 		return UkuProcess{}, sql.ErrNoRows
 	}
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return UkuProcess{}, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `
 UPDATE uku_proposals
 SET deleted_at=?3,updated_at=?4
 WHERE process_id=?1 AND id=?2 AND author_user_id_hash=?5 AND deleted_at=0`,
@@ -1834,7 +1929,7 @@ WHERE process_id=?1 AND id=?2 AND author_user_id_hash=?5 AND deleted_at=0`,
 	}
 	if rowsAffected(res) == 0 {
 		var exists int
-		err := s.db.QueryRowContext(ctx, `
+		err := tx.QueryRowContext(ctx, `
 SELECT 1
 FROM uku_proposals
 WHERE process_id=?1 AND id=?2 AND deleted_at=0`,
@@ -1847,32 +1942,54 @@ WHERE process_id=?1 AND id=?2 AND deleted_at=0`,
 		}
 		return UkuProcess{}, ErrSyncUserNotFound
 	}
+	if err := insertUkuAudit(ctx, tx, processID, userID, "delete", "proposal", proposalID, map[string]string{"id": proposalID}); err != nil {
+		return UkuProcess{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return UkuProcess{}, err
+	}
 	process, _, err := s.UkuProcess(ctx, processID)
 	return process, err
 }
 
 func (s *Store) UpsertUkuVote(ctx context.Context, processID string, req UkuVoteRequest) (UkuProcess, error) {
-	if _, found, err := s.UkuProcess(ctx, processID); err != nil {
+	process, found, err := s.UkuProcess(ctx, processID)
+	if err != nil {
 		return UkuProcess{}, err
 	} else if !found {
 		return UkuProcess{}, sql.ErrNoRows
+	}
+	if process.RequireReason && strings.TrimSpace(req.Reason) == "" {
+		return UkuProcess{}, ErrUkuVoteReasonRequired
 	}
 	scores, err := json.Marshal(req.Scores)
 	if err != nil {
 		return UkuProcess{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `
-INSERT INTO uku_votes(process_id,voter_user_id_hash,display_name,scores_json,created_at,updated_at)
-VALUES(?1,?2,?3,?4,?5,?5)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return UkuProcess{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO uku_votes(process_id,voter_user_id_hash,display_name,scores_json,reason,created_at,updated_at)
+VALUES(?1,?2,?3,?4,?5,?6,?6)
 ON CONFLICT(process_id,voter_user_id_hash) DO UPDATE SET
 	display_name=excluded.display_name,
 	scores_json=excluded.scores_json,
+	reason=excluded.reason,
 	updated_at=excluded.updated_at`,
-		processID, req.UserIDHash, req.DisplayName, string(scores), now); err != nil {
+		processID, req.UserIDHash, req.DisplayName, string(scores), req.Reason, now); err != nil {
 		return UkuProcess{}, err
 	}
-	process, _, err := s.UkuProcess(ctx, processID)
+	if err := insertUkuAudit(ctx, tx, processID, req.UserIDHash, "upsert", "vote", req.UserIDHash, req); err != nil {
+		return UkuProcess{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return UkuProcess{}, err
+	}
+	process, _, err = s.UkuProcess(ctx, processID)
 	return process, err
 }
 
@@ -1899,7 +2016,7 @@ ORDER BY created_at,id`, processID)
 
 func (s *Store) UkuVotes(ctx context.Context, processID string) ([]UkuVote, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT voter_user_id_hash,display_name,scores_json,created_at,updated_at
+SELECT voter_user_id_hash,display_name,scores_json,reason,created_at,updated_at
 FROM uku_votes
 WHERE process_id=?1
 ORDER BY updated_at,voter_user_id_hash`, processID)
@@ -1911,7 +2028,7 @@ ORDER BY updated_at,voter_user_id_hash`, processID)
 	for rows.Next() {
 		var item UkuVote
 		var scores string
-		if err := rows.Scan(&item.VoterUserIDHash, &item.DisplayName, &scores, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.VoterUserIDHash, &item.DisplayName, &scores, &item.Reason, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(scores), &item.Scores); err != nil {
@@ -1920,6 +2037,44 @@ ORDER BY updated_at,voter_user_id_hash`, processID)
 		votes = append(votes, item)
 	}
 	return votes, rows.Err()
+}
+
+func (s *Store) UkuAudit(ctx context.Context, processID string) ([]UkuAudit, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,actor_user_id_hash,action,entity_type,entity_id,payload_json,created_at
+FROM uku_audit
+WHERE process_id=?1
+ORDER BY id`, processID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	audit := []UkuAudit{}
+	for rows.Next() {
+		var item UkuAudit
+		var payload string
+		if err := rows.Scan(&item.ID, &item.ActorUserIDHash, &item.Action, &item.EntityType, &item.EntityID, &payload, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		if payload == "" {
+			payload = "{}"
+		}
+		item.Payload = json.RawMessage(payload)
+		audit = append(audit, item)
+	}
+	return audit, rows.Err()
+}
+
+func (s *Store) UkuDecisionPacket(ctx context.Context, processID string) (UkuProcess, bool, error) {
+	process, found, err := s.UkuProcess(ctx, processID)
+	if err != nil || !found {
+		return process, found, err
+	}
+	process.Audit, err = s.UkuAudit(ctx, processID)
+	if err != nil {
+		return UkuProcess{}, false, err
+	}
+	return process, true, nil
 }
 
 func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion int64) (SyncChanges, int64, error) {
@@ -3343,15 +3498,30 @@ func validateUserIDForPublicKey(userID string, publicKey []byte) error {
 	return nil
 }
 
+func insertUkuAudit(ctx context.Context, tx *sql.Tx, processID, actor, action, entityType, entityID string, payload any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO uku_audit(process_id,actor_user_id_hash,action,entity_type,entity_id,payload_json,created_at)
+VALUES(?1,?2,?3,?4,?5,?6,?7)`,
+		processID, actor, action, entityType, entityID, string(body), time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
 type ukuProcessScanner interface {
 	Scan(dest ...any) error
 }
 
 func scanUkuProcess(row ukuProcessScanner) (UkuProcess, error) {
 	var process UkuProcess
+	var requireReason int
 	err := row.Scan(&process.ID, &process.OwnerUserIDHash, &process.Question, &process.Description,
-		&process.Visibility, &process.ProposalMinutes, &process.VotingMinutes,
-		&process.NegativeWeight, &process.CreatedAt, &process.UpdatedAt)
+		&process.Visibility, &process.DecisionType, &process.ProposalMinutes, &process.VotingMinutes,
+		&process.NegativeWeight, &process.QuorumPercent, &requireReason, &process.Outcome,
+		&process.ReviewAt, &process.CreatedAt, &process.UpdatedAt)
+	process.RequireReason = requireReason != 0
 	return process, err
 }
 

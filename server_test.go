@@ -1694,7 +1694,7 @@ func TestUkuProcessesVisibilityAndMutationAuth(t *testing.T) {
 	other := newTestIdentity(t, handler, 0x73)
 
 	publicBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"public-process","question":"Where should we meet?","description":"Choose a place","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
-	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes", identity.UserID, identity.Token, publicBody)
+	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes", identity.UserID, identity.Token, publicBody)
 	if res.Code != http.StatusCreated {
 		t.Fatalf("create public status = %d body=%s", res.Code, res.Body.String())
 	}
@@ -1707,13 +1707,13 @@ func TestUkuProcessesVisibilityAndMutationAuth(t *testing.T) {
 	}
 
 	privateBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"secret-process","question":"Private vote","visibility":"unlisted","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes", identity.UserID, identity.Token, privateBody)
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes", identity.UserID, identity.Token, privateBody)
 	if res.Code != http.StatusCreated {
 		t.Fatalf("create unlisted status = %d body=%s", res.Code, res.Body.String())
 	}
 
 	list := httptest.NewRecorder()
-	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/uku/processes", nil))
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/governance/processes", nil))
 	if list.Code != http.StatusOK {
 		t.Fatalf("list status = %d body=%s", list.Code, list.Body.String())
 	}
@@ -1722,36 +1722,36 @@ func TestUkuProcessesVisibilityAndMutationAuth(t *testing.T) {
 	}
 
 	direct := httptest.NewRecorder()
-	handler.ServeHTTP(direct, httptest.NewRequest(http.MethodGet, "/api/v1/uku/processes/secret-process", nil))
+	handler.ServeHTTP(direct, httptest.NewRequest(http.MethodGet, "/api/v1/governance/processes/secret-process", nil))
 	if direct.Code != http.StatusOK || !strings.Contains(direct.Body.String(), "Private vote") {
 		t.Fatalf("direct unlisted status = %d body=%s", direct.Code, direct.Body.String())
 	}
 
-	unauth := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes/public-process/proposals", identity.UserID, "", []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe"}`))
+	unauth := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes/public-process/proposals", identity.UserID, "", []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe"}`))
 	if unauth.Code != http.StatusUnauthorized {
 		t.Fatalf("unauth proposal status = %d body=%s", unauth.Code, unauth.Body.String())
 	}
 
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes/public-process/proposals", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe","description":"Near transit"}`))
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes/public-process/proposals", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe","description":"Near transit"}`))
 	if res.Code != http.StatusOK {
 		t.Fatalf("proposal status = %d body=%s", res.Code, res.Body.String())
 	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes/public-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","display_name":"wao","scores":{"prop-1":3,"status-quo":-1}}`))
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes/public-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","display_name":"wao","scores":{"prop-1":3,"status-quo":-1},"reason":"Cafe is close and status quo is harder for transit."}`))
 	if res.Code != http.StatusOK {
 		t.Fatalf("vote status = %d body=%s", res.Code, res.Body.String())
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
 		t.Fatal(err)
 	}
-	if len(process.Votes) != 1 || process.Votes[0].Scores["prop-1"] != 3 {
+	if len(process.Votes) != 1 || process.Votes[0].Scores["prop-1"] != 3 || process.Votes[0].Reason == "" {
 		t.Fatalf("unexpected votes: %#v", process.Votes)
 	}
 
-	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/uku/processes/public-process/proposals/prop-1", other.UserID, other.Token, nil)
+	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/governance/processes/public-process/proposals/prop-1", other.UserID, other.Token, nil)
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("other proposal delete status = %d body=%s", res.Code, res.Body.String())
 	}
-	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/uku/processes/public-process/proposals/prop-1", identity.UserID, identity.Token, nil)
+	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/governance/processes/public-process/proposals/prop-1", identity.UserID, identity.Token, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("proposal delete status = %d body=%s", res.Code, res.Body.String())
 	}
@@ -1764,16 +1764,16 @@ func TestUkuProcessesVisibilityAndMutationAuth(t *testing.T) {
 		}
 	}
 
-	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/uku/processes/public-process", other.UserID, other.Token, nil)
+	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/governance/processes/public-process", other.UserID, other.Token, nil)
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("other process delete status = %d body=%s", res.Code, res.Body.String())
 	}
-	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/uku/processes/public-process", identity.UserID, identity.Token, nil)
+	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/governance/processes/public-process", identity.UserID, identity.Token, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("process delete status = %d body=%s", res.Code, res.Body.String())
 	}
 	deleted := httptest.NewRecorder()
-	handler.ServeHTTP(deleted, httptest.NewRequest(http.MethodGet, "/api/v1/uku/processes/public-process", nil))
+	handler.ServeHTTP(deleted, httptest.NewRequest(http.MethodGet, "/api/v1/governance/processes/public-process", nil))
 	if deleted.Code != http.StatusNotFound {
 		t.Fatalf("deleted process get status = %d body=%s", deleted.Code, deleted.Body.String())
 	}
@@ -1785,11 +1785,11 @@ func TestUkuDataCascadesOnAccountDelete(t *testing.T) {
 	identity := newTestIdentity(t, handler, 0x31)
 
 	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"delete-me","question":"Delete?","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
-	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes", identity.UserID, identity.Token, body)
+	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes", identity.UserID, identity.Token, body)
 	if res.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
 	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/uku/processes/delete-me/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"status-quo":1}}`))
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes/delete-me/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"status-quo":1},"reason":"Keep it simple."}`))
 	if res.Code != http.StatusOK {
 		t.Fatalf("vote status = %d body=%s", res.Code, res.Body.String())
 	}
@@ -1812,6 +1812,69 @@ func TestUkuDataCascadesOnAccountDelete(t *testing.T) {
 	assertCount(t, store, "uku_processes", 0)
 	assertCount(t, store, "uku_proposals", 0)
 	assertCount(t, store, "uku_votes", 0)
+}
+
+func TestUkuGovernanceMetadataVoteReasonAndExport(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x42)
+
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"governance-process","question":"Adopt the policy?","visibility":"public","decision_type":"consensus","proposal_minutes":60,"voting_minutes":60,"negative_weight":5,"quorum_percent":60}`)
+	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes", identity.UserID, identity.Token, body)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
+	}
+	var process UkuProcess
+	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
+		t.Fatal(err)
+	}
+	if process.DecisionType != "consensus" || process.QuorumPercent != 60 || !process.RequireReason {
+		t.Fatalf("unexpected governance metadata: %#v", process)
+	}
+
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes/governance-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"status-quo":1}}`))
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "vote reason required") {
+		t.Fatalf("missing reason status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/governance/processes/governance-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","display_name":"wao","scores":{"status-quo":1},"reason":"This is acceptable."}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("vote status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
+		t.Fatal(err)
+	}
+	if len(process.Votes) != 1 || process.Votes[0].Reason != "This is acceptable." {
+		t.Fatalf("unexpected vote reason: %#v", process.Votes)
+	}
+
+	update := []byte(`{"user_id_hash":"` + identity.UserID + `","quorum_percent":0,"outcome":"accepted","review_at":"2026-08-01"}`)
+	res = ukuJSONRequest(t, handler, http.MethodPatch, "/api/v1/governance/processes/governance-process", identity.UserID, identity.Token, update)
+	if res.Code != http.StatusOK {
+		t.Fatalf("update status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
+		t.Fatal(err)
+	}
+	if process.QuorumPercent != 0 || process.Outcome != "accepted" || process.ReviewAt != "2026-08-01" {
+		t.Fatalf("unexpected update: %#v", process)
+	}
+
+	export := httptest.NewRecorder()
+	handler.ServeHTTP(export, httptest.NewRequest(http.MethodGet, "/api/v1/governance/processes/governance-process/export", nil))
+	if export.Code != http.StatusOK {
+		t.Fatalf("export status = %d body=%s", export.Code, export.Body.String())
+	}
+	var packet struct {
+		PacketType string     `json:"packet_type"`
+		Process    UkuProcess `json:"process"`
+	}
+	if err := json.Unmarshal(export.Body.Bytes(), &packet); err != nil {
+		t.Fatal(err)
+	}
+	if packet.PacketType != "governance-decision-packet-v1" || len(packet.Process.Audit) < 3 {
+		t.Fatalf("unexpected export packet: %#v", packet)
+	}
 }
 
 func issueChallenge(t *testing.T, target any, baseURL, userID string) string {

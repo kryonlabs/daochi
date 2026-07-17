@@ -12,7 +12,7 @@ API access is scoped by account, with explicit shared surfaces:
 
 - accepted friends can see the account alias and selected profile/leaderboard stats;
 - pending friend request participants can see the request metadata;
-- public Uku processes, proposals, and votes are public by design.
+- public governance processes, proposals, and votes are public by design.
 
 ## Endpoints
 
@@ -30,12 +30,12 @@ API access is scoped by account, with explicit shared surfaces:
 - `DELETE /api/v1/friends/{user_id_hash}`
 - `PUT /api/v1/profile/stats`
 - `GET /api/v1/friends/stats?app=&practice=&metric=`
-- `GET /api/v1/uku/processes`
-- `POST /api/v1/uku/processes`
-- `GET /api/v1/uku/processes/{id}`
-- `PATCH /api/v1/uku/processes/{id}`
-- `POST /api/v1/uku/processes/{id}/proposals`
-- `POST /api/v1/uku/processes/{id}/votes`
+- `GET /api/v1/governance/processes`
+- `POST /api/v1/governance/processes`
+- `GET /api/v1/governance/processes/{id}`
+- `PATCH /api/v1/governance/processes/{id}`
+- `POST /api/v1/governance/processes/{id}/proposals`
+- `POST /api/v1/governance/processes/{id}/votes`
 - `DELETE /api/v1/account`
 - `POST /api/v1/account/delete-with-key`
 - `GET /openapi.json`

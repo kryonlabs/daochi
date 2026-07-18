@@ -979,6 +979,10 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		t.Fatalf("unexpected avg hold stats: %#v", stats.Rows)
 	}
 
+	twoDaysAgo := time.Now().UTC().AddDate(0, 0, -2).Format(time.RFC3339)
+	threeDaysAgo := time.Now().UTC().AddDate(0, 0, -3).Format(time.RFC3339)
+	syncWithBody(t, handler, "", bob.UserID, bob.Token, []byte(`{"user_id_hash":"`+bob.UserID+`","client_id":"bob-past-meditation-stats","meditation_logs":[{"id":"bob-past-meditation-1","session_id":"bob-past-meditation-session-1","duration_seconds":600,"completed_at":"`+twoDaysAgo+`"},{"id":"bob-past-meditation-2","session_id":"bob-past-meditation-session-2","duration_seconds":600,"completed_at":"`+threeDaysAgo+`"}]}`))
+
 	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=meditation&metric=streak", bob, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("meditation streak before meditation status = %d body=%s", res.Code, res.Body.String())
@@ -1012,8 +1016,8 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 900 ||
-		stats.Rows[0].Label != "0:15" || stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 ||
-		stats.Rows[1].Label != "0:00" {
+		stats.Rows[0].Label != "0:15" || stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 600 ||
+		stats.Rows[1].Label != "0:10" {
 		t.Fatalf("unexpected avg time stats: %#v", stats.Rows)
 	}
 

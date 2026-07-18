@@ -1393,7 +1393,7 @@ type visibleStatsUser struct {
 	SourceVersion int64
 }
 
-const leaderboardStatsCalcVersion = 3
+const leaderboardStatsCalcVersion = 4
 
 func leaderboardActivity(practice string) int {
 	switch practice {
@@ -1411,6 +1411,11 @@ func leaderboardTimeLabel(seconds int) string {
 		seconds = 0
 	}
 	return fmt.Sprintf("%d:%02d", seconds/3600, (seconds%3600)/60)
+}
+
+func leaderboardTodayDate() int {
+	today := time.Now().UTC()
+	return today.Year()*10000 + int(today.Month())*100 + today.Day()
 }
 
 func (s *Store) visibleStatsUsers(ctx context.Context, userID string) ([]visibleStatsUser, error) {
@@ -1464,6 +1469,9 @@ WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4`,
 	if sourceVersion != user.SourceVersion || calcVersion != leaderboardStatsCalcVersion {
 		return row, false, nil
 	}
+	if metric == "streak" && row.LocalDate != leaderboardTodayDate() {
+		return row, false, nil
+	}
 	row.UserIDHash = user.UserIDHash
 	row.Alias = user.Alias
 	row.ProfileIcon = user.ProfileIcon
@@ -1487,7 +1495,6 @@ WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity)
 	defer rows.Close()
 	seen := map[int]bool{}
 	updatedAt := ""
-	latestDate := 0
 	for rows.Next() {
 		var localDate int
 		var updated string
@@ -1496,9 +1503,6 @@ WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity)
 		}
 		if localDate > 0 {
 			seen[localDate] = true
-			if localDate > latestDate {
-				latestDate = localDate
-			}
 		}
 		if updated > updatedAt {
 			updatedAt = updated
@@ -1508,11 +1512,8 @@ WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity)
 		return 0, 0, "", err
 	}
 	today := time.Now().UTC()
-	todayDate := today.Year()*10000 + int(today.Month())*100 + today.Day()
+	todayDate := leaderboardTodayDate()
 	start := today
-	if !seen[todayDate] && latestDate > 0 {
-		start = time.Date(latestDate/10000, time.Month((latestDate/100)%100), latestDate%100, 12, 0, 0, 0, time.UTC)
-	}
 	streak := 0
 	for ; streak <= 370; streak++ {
 		day := start.AddDate(0, 0, -streak)

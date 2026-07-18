@@ -311,10 +311,10 @@ type SyncResult struct {
 type UkuProcess struct {
 	ID              string        `json:"id"`
 	OwnerUserIDHash string        `json:"owner_user_id_hash,omitempty"`
-	Question        string        `json:"question"`
+	Type            string        `json:"type"`
+	Title           string        `json:"title"`
 	Description     string        `json:"description,omitempty"`
 	Visibility      string        `json:"visibility"`
-	DecisionType    string        `json:"decision_type"`
 	ProposalMinutes int           `json:"proposal_minutes"`
 	VotingMinutes   int           `json:"voting_minutes"`
 	NegativeWeight  int           `json:"negative_weight"`
@@ -324,9 +324,17 @@ type UkuProcess struct {
 	ReviewAt        string        `json:"review_at,omitempty"`
 	CreatedAt       string        `json:"created_at"`
 	UpdatedAt       string        `json:"updated_at"`
+	Options         []UkuOption   `json:"options,omitempty"`
 	Proposals       []UkuProposal `json:"proposals,omitempty"`
 	Votes           []UkuVote     `json:"votes,omitempty"`
 	Audit           []UkuAudit    `json:"audit,omitempty"`
+}
+
+type UkuOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Position    int    `json:"position"`
 }
 
 type UkuProposal struct {
@@ -359,25 +367,25 @@ type UkuAudit struct {
 }
 
 type UkuCreateProcessRequest struct {
-	UserIDHash      string `json:"user_id_hash"`
-	ID              string `json:"id,omitempty"`
-	Question        string `json:"question"`
-	Description     string `json:"description,omitempty"`
-	Visibility      string `json:"visibility,omitempty"`
-	DecisionType    string `json:"decision_type,omitempty"`
-	ProposalMinutes int    `json:"proposal_minutes"`
-	VotingMinutes   int    `json:"voting_minutes"`
-	NegativeWeight  int    `json:"negative_weight"`
-	QuorumPercent   int    `json:"quorum_percent,omitempty"`
-	RequireReason   bool   `json:"require_vote_reason,omitempty"`
+	UserIDHash      string      `json:"user_id_hash"`
+	ID              string      `json:"id,omitempty"`
+	Type            string      `json:"type"`
+	Title           string      `json:"title"`
+	Description     string      `json:"description,omitempty"`
+	Visibility      string      `json:"visibility,omitempty"`
+	ProposalMinutes int         `json:"proposal_minutes"`
+	VotingMinutes   int         `json:"voting_minutes"`
+	NegativeWeight  int         `json:"negative_weight"`
+	QuorumPercent   int         `json:"quorum_percent,omitempty"`
+	RequireReason   bool        `json:"require_vote_reason,omitempty"`
+	Options         []UkuOption `json:"options,omitempty"`
 }
 
 type UkuUpdateProcessRequest struct {
 	UserIDHash    string `json:"user_id_hash"`
-	Question      string `json:"question,omitempty"`
+	Title         string `json:"title,omitempty"`
 	Description   string `json:"description,omitempty"`
 	Visibility    string `json:"visibility,omitempty"`
-	DecisionType  string `json:"decision_type,omitempty"`
 	QuorumPercent *int   `json:"quorum_percent,omitempty"`
 	Outcome       string `json:"outcome,omitempty"`
 	ReviewAt      string `json:"review_at,omitempty"`

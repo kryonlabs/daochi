@@ -8,5 +8,5 @@ GMAKE ?= gmake
 all:
 	$(GMAKE) -f Makefile $@
 
-.DEFAULT:
+build test run clean liboqs:
 	$(GMAKE) -f Makefile $@

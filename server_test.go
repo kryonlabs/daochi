@@ -30,7 +30,7 @@ func (v *recordingVerifier) Verify(publicKey, message, signature []byte) bool {
 
 func testServer(t *testing.T) (*Server, *Store, *recordingVerifier) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "lyra-test.db")
+	dbPath := filepath.Join(t.TempDir(), "ksync-test.db")
 	store, err := OpenStore(dbPath)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestDocsEndpoints(t *testing.T) {
 	if root.Code != http.StatusOK {
 		t.Fatalf("root status = %d", root.Code)
 	}
-	if !strings.Contains(root.Body.String(), "Lyra Sync API") {
+	if !strings.Contains(root.Body.String(), "Ksync Sync API") {
 		t.Fatalf("root docs missing title: %s", root.Body.String())
 	}
 	for _, want := range []string{"Users", "Storage", "/"} {
@@ -146,8 +146,8 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	deleteBody := []byte(`{"user_id_hash":"` + userID + `"}`)
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/account", bytes.NewReader(deleteBody))
 	deleteReq.Header.Set("Content-Type", "application/json")
-	deleteReq.Header.Set("X-Inbe-User", userID)
-	deleteReq.Header.Set("X-Inbe-Signature", signature)
+	deleteReq.Header.Set("X-Ksync-User", userID)
+	deleteReq.Header.Set("X-Ksync-Signature", signature)
 	deleteRes := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRes, deleteReq)
 	if deleteRes.Code != http.StatusOK {
@@ -631,7 +631,7 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	aliasBody := []byte(`{"user_id_hash":"` + userID + `","alias":"@waozi"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("X-Ksync-User", userID)
 	req.Header.Set("Authorization", "Bearer "+token)
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
@@ -650,8 +650,8 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 		loginBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/sync/login", bytes.NewReader(loginBody))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Inbe-User", userID)
-		req.Header.Set("X-Inbe-Signature", signature)
+		req.Header.Set("X-Ksync-User", userID)
+		req.Header.Set("X-Ksync-Signature", signature)
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)
 		if res.Code != http.StatusOK {
@@ -679,7 +679,7 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	aliasBody = []byte(`{"user_id_hash":"` + userID + `","alias":"@new_waozi"}`)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("X-Ksync-User", userID)
 	req.Header.Set("Authorization", "Bearer "+token)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
@@ -707,7 +707,7 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	aliasBody = []byte(`{"user_id_hash":"` + otherID + `","alias":"waozi"}`)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", otherID)
+	req.Header.Set("X-Ksync-User", otherID)
 	req.Header.Set("Authorization", "Bearer "+otherToken)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
@@ -717,7 +717,7 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	aliasBody = []byte(`{"user_id_hash":"` + otherID + `","alias":"new_waozi"}`)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", otherID)
+	req.Header.Set("X-Ksync-User", otherID)
 	req.Header.Set("Authorization", "Bearer "+otherToken)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
@@ -738,7 +738,7 @@ func TestAccountProfileIconRegistersAndSyncs(t *testing.T) {
 	iconBody := []byte(`{"user_id_hash":"` + userID + `","profile_icon":` + strconv.Itoa(ProfileIconLotus) + `}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/profile-icon", bytes.NewReader(iconBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("X-Ksync-User", userID)
 	req.Header.Set("Authorization", "Bearer "+token)
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
@@ -758,8 +758,8 @@ func TestAccountProfileIconRegistersAndSyncs(t *testing.T) {
 		loginBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/sync/login", bytes.NewReader(loginBody))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Inbe-User", userID)
-		req.Header.Set("X-Inbe-Signature", signature)
+		req.Header.Set("X-Ksync-User", userID)
+		req.Header.Set("X-Ksync-Signature", signature)
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)
 		if res.Code != http.StatusOK {
@@ -786,7 +786,7 @@ func TestAccountProfileIconRegistersAndSyncs(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/profile-icon", bytes.NewReader([]byte(`{"user_id_hash":"`+userID+`","profile_icon":99}`)))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("X-Ksync-User", userID)
 	req.Header.Set("Authorization", "Bearer "+token)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
@@ -899,7 +899,7 @@ func TestFriendRequestsRejectMismatchedHeaderUser(t *testing.T) {
 		bytes.NewReader([]byte(`{"target":"`+bob.UserID+`"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+alice.Token)
-	req.Header.Set("X-Inbe-User", bob.UserID)
+	req.Header.Set("X-Ksync-User", bob.UserID)
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusUnauthorized {
@@ -1074,7 +1074,7 @@ func TestSocialCacheIsServerOwnedAndSynced(t *testing.T) {
 	upload := []byte(`{"protocol_version":2,"user_id_hash":"` + alice.UserID + `","client_id":"test-client-social","social_cache":[{"kind":"friends.list","json":{"friends":[{"user_id_hash":"hacked"}]},"updated_at":"2026-06-28T00:00:00Z"}]}`)
 	raw := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(upload))
 	raw.Header.Set("Content-Type", "application/json")
-	raw.Header.Set("X-Inbe-User", alice.UserID)
+	raw.Header.Set("X-Ksync-User", alice.UserID)
 	raw.Header.Set("Authorization", "Bearer "+alice.Token)
 	rejected := httptest.NewRecorder()
 	handler.ServeHTTP(rejected, raw)
@@ -1125,7 +1125,7 @@ func TestCrossAccountSyncIsolation(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(aliceBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", alice.UserID)
+	req.Header.Set("X-Ksync-User", alice.UserID)
 	req.Header.Set("Authorization", "Bearer "+bob.Token)
 	mismatch := httptest.NewRecorder()
 	handler.ServeHTTP(mismatch, req)
@@ -1135,7 +1135,7 @@ func TestCrossAccountSyncIsolation(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(bobBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", bob.UserID)
+	req.Header.Set("X-Ksync-User", bob.UserID)
 	req.Header.Set("Authorization", "Bearer "+alice.Token)
 	mismatch = httptest.NewRecorder()
 	handler.ServeHTTP(mismatch, req)
@@ -1188,7 +1188,7 @@ func TestMeditationLogsAreScopedPerUser(t *testing.T) {
 }
 
 func TestMigrateMeditationLogsToPerUserPrimaryKey(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "old-lyra.db")
+	dbPath := filepath.Join(t.TempDir(), "old-ksync.db")
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1262,7 +1262,7 @@ func TestAliasRejectsCrossAccountAndMissingAccount(t *testing.T) {
 	aliasBody := []byte(`{"user_id_hash":"` + alice.UserID + `","alias":"alice_alias"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", alice.UserID)
+	req.Header.Set("X-Ksync-User", alice.UserID)
 	req.Header.Set("Authorization", "Bearer "+bob.Token)
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
@@ -1278,7 +1278,7 @@ func TestAliasRejectsCrossAccountAndMissingAccount(t *testing.T) {
 	aliasBody = []byte(`{"user_id_hash":"` + missingUser + `","alias":"missing_alias"}`)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", missingUser)
+	req.Header.Set("X-Ksync-User", missingUser)
 	req.Header.Set("Authorization", "Bearer "+missingToken)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
@@ -1559,10 +1559,64 @@ func TestSyncWebSocketIsScopedToTokenUser(t *testing.T) {
 	}
 }
 
+func TestSyncWebSocketRejectsQueryToken(t *testing.T) {
+	server, _, _ := testServer(t)
+	ts := httptest.NewServer(server.Routes())
+	t.Cleanup(ts.Close)
+
+	identity := newTestIdentityAt(t, ts.Client(), ts.URL, 0x83)
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.Dial("tcp", u.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, err = conn.Write([]byte("GET /api/v1/sync/ws?token=" + identity.Token + " HTTP/1.1\r\n" +
+		"Host: " + u.Host + "\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+		"Sec-WebSocket-Version: 13\r\n\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	status, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, "401") {
+		t.Fatalf("websocket query-token status = %q", strings.TrimSpace(status))
+	}
+}
+
+func TestSyncWebSocketAcceptsBearerSubprotocol(t *testing.T) {
+	server, _, _ := testServer(t)
+	ts := httptest.NewServer(server.Routes())
+	t.Cleanup(ts.Close)
+
+	identity := newTestIdentityAt(t, ts.Client(), ts.URL, 0x84)
+	reader, conn := openSyncWebSocketWithProtocol(t, ts.URL, identity.Token)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	ready := readTestWebSocketEvent(t, reader)
+	if ready.Type != "sync_ready" || ready.UserIDHash != identity.UserID {
+		t.Fatalf("ready event = %#v", ready)
+	}
+}
+
 func TestParseExportedSyncKey(t *testing.T) {
 	privateKey := bytes.Repeat([]byte{0x64}, mlDSA44PrivateKeySize)
 	publicID := strings.Repeat("a", 64)
-	for _, header := range []string{"account-key-v1", "inbe-sync-key-v1"} {
+	for _, header := range []string{
+		"ksync-account-key-v1",
+		"lyra-account-key-v1",
+		"account-key-v1",
+		"inbe-sync-key-v1",
+	} {
 		keyText := header + "\nalgorithm=ML-DSA-44\npublic_id=" + publicID + "\nprivate_key=" + hex.EncodeToString(privateKey) + "\n"
 		parsed, err := parseExportedSyncKey(keyText)
 		if err != nil {
@@ -1655,7 +1709,7 @@ func TestDeleteWithExportedKeyDeletesAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := OpenStore(filepath.Join(t.TempDir(), "lyra-delete-key-test.db"))
+	store, err := OpenStore(filepath.Join(t.TempDir(), "ksync-delete-key-test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1814,8 +1868,8 @@ func TestUkuDataCascadesOnAccountDelete(t *testing.T) {
 	deleteBody := []byte(`{"user_id_hash":"` + identity.UserID + `"}`)
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/account", bytes.NewReader(deleteBody))
 	deleteReq.Header.Set("Content-Type", "application/json")
-	deleteReq.Header.Set("X-Inbe-User", identity.UserID)
-	deleteReq.Header.Set("X-Inbe-Signature", identity.Signature)
+	deleteReq.Header.Set("X-Ksync-User", identity.UserID)
+	deleteReq.Header.Set("X-Ksync-Signature", identity.Signature)
 	deleteRes := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRes, deleteReq)
 	if deleteRes.Code != http.StatusOK {
@@ -1970,8 +2024,8 @@ func loginWithKey(t *testing.T, target any, baseURL, userID, publicKeyHex, signa
 	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + publicKeyHex + `"}`)
 	req := newTestRequest(t, http.MethodPost, baseURL, "/api/v1/sync/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", userID)
-	req.Header.Set("X-Inbe-Signature", signature)
+	req.Header.Set("X-Ksync-User", userID)
+	req.Header.Set("X-Ksync-Signature", signature)
 	res := serveTestRequest(t, target, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("login status = %d body=%s", res.Code, res.Body.String())
@@ -1990,7 +2044,7 @@ func syncWithBody(t *testing.T, target any, baseURL, userID, token string, body 
 	t.Helper()
 	req := newTestRequest(t, http.MethodPost, baseURL, "/api/v1/sync", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", userID)
+	req.Header.Set("X-Ksync-User", userID)
 	req.Header.Set("Authorization", "Bearer "+token)
 	res := serveTestRequest(t, target, req)
 	if res.Code != http.StatusOK {
@@ -2004,7 +2058,7 @@ func ukuJSONRequest(t *testing.T, target any, method, path, userID, token string
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if userID != "" {
-		req.Header.Set("X-Inbe-User", userID)
+		req.Header.Set("X-Ksync-User", userID)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -2025,7 +2079,7 @@ func friendJSONRequest(t *testing.T, target any, method, path string, identity t
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Authorization", "Bearer "+identity.Token)
-	req.Header.Set("X-Inbe-User", identity.UserID)
+	req.Header.Set("X-Ksync-User", identity.UserID)
 	res := httptest.NewRecorder()
 	target.(http.Handler).ServeHTTP(res, req)
 	return res
@@ -2036,7 +2090,7 @@ func setAlias(t *testing.T, target any, identity testIdentity, alias string) {
 	body := []byte(`{"user_id_hash":"` + identity.UserID + `","alias":"` + alias + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", identity.UserID)
+	req.Header.Set("X-Ksync-User", identity.UserID)
 	req.Header.Set("Authorization", "Bearer "+identity.Token)
 	res := httptest.NewRecorder()
 	target.(http.Handler).ServeHTTP(res, req)
@@ -2103,6 +2157,16 @@ func serveTestRequest(t *testing.T, target any, req *http.Request) *httptest.Res
 
 func openSyncWebSocket(t *testing.T, baseURL, token string) (*bufio.Reader, net.Conn) {
 	t.Helper()
+	return openSyncWebSocketRaw(t, baseURL, "Authorization: Bearer "+token+"\r\n")
+}
+
+func openSyncWebSocketWithProtocol(t *testing.T, baseURL, token string) (*bufio.Reader, net.Conn) {
+	t.Helper()
+	return openSyncWebSocketRaw(t, baseURL, "Sec-WebSocket-Protocol: ksync-sync-v1, bearer."+token+"\r\n")
+}
+
+func openSyncWebSocketRaw(t *testing.T, baseURL, extraHeaders string) (*bufio.Reader, net.Conn) {
+	t.Helper()
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
 		t.Fatal(err)
@@ -2118,7 +2182,7 @@ func openSyncWebSocket(t *testing.T, baseURL, token string) (*bufio.Reader, net.
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
 		"Sec-WebSocket-Version: 13\r\n" +
-		"Authorization: Bearer " + token + "\r\n\r\n"))
+		extraHeaders + "\r\n"))
 	if err != nil {
 		conn.Close()
 		t.Fatal(err)
@@ -2167,8 +2231,8 @@ func TestSyncRejectsSignedRequestWithoutBearer(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", strings.NewReader(`{"user_id_hash":"`+userID+`","client_id":"test-client-1"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Inbe-User", userID)
-	req.Header.Set("X-Inbe-Signature", hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize)))
+	req.Header.Set("X-Ksync-User", userID)
+	req.Header.Set("X-Ksync-Signature", hex.EncodeToString(bytes.Repeat([]byte{0x33}, mlDSA44SignatureSize)))
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusUnauthorized {

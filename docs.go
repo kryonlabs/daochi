@@ -34,7 +34,7 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Lyra Sync API</title>
+<title>Ksync Sync API</title>
 <style>
 body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:880px;margin:40px auto;padding:0 20px;line-height:1.5;color:#18202a;background:#f7f8fb}
 main{background:white;border:1px solid #d9deea;padding:28px}
@@ -52,22 +52,22 @@ a{color:#254da8}
 </head>
 <body>
 <main>
-<h1>Lyra Sync API</h1>
-<p>Stateless post-quantum sync relay for Inner Breeze. The server stores public keys and mirrored app data, never client private keys.</p>
+<h1>Ksync Sync API</h1>
+<p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys.</p>
 <p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a></p>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
-<section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>ksync-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies signed local changes and returns remote changes newer than <code>since_server_version</code>.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Deletes all remote data for the signed sync account.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
 <h2>Signed Message</h2>
-<pre>inbe-sync-v1
+<pre>ksync-sync-v1
 &lt;HTTP_METHOD&gt;
 &lt;HTTP_PATH&gt;
 &lt;sha256 hex of exact raw request body bytes&gt;
 &lt;challenge nonce hex&gt;</pre>
-<p>Signed requests use <code>X-Inbe-User</code>, <code>X-Inbe-Signature</code>, and <code>Content-Type: application/json</code>.</p>
+<p>Signed requests use <code>X-Ksync-User</code>, <code>X-Ksync-Signature</code>, and <code>Content-Type: application/json</code>.</p>
 %s
 </main>
 </body>
@@ -84,9 +84,9 @@ func openAPISpec() map[string]any {
 	return map[string]any{
 		"openapi": "3.1.0",
 		"info": map[string]any{
-			"title":       "Lyra Sync API",
+			"title":       "Ksync Sync API",
 			"version":     "1.0.0",
-			"description": "Post-quantum sync relay for Inner Breeze.",
+			"description": "Post-quantum sync relay for Kryon apps.",
 		},
 		"paths": map[string]any{
 			"/healthz": map[string]any{
@@ -117,7 +117,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/sync": map[string]any{
 				"post": map[string]any{
 					"summary":     "Apply signed sync changes",
-					"description": "Body is signed through X-Inbe-Signature over the exact raw request body bytes.",
+					"description": "Body is signed through X-Ksync-Signature over the exact raw request body bytes.",
 					"parameters":  signedHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,
@@ -135,7 +135,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/sync/ws": map[string]any{
 				"get": map[string]any{
 					"summary":     "Subscribe to sync change events",
-					"description": "WebSocket endpoint. Send Authorization: Bearer <auth_token>. The server emits sync_ready after connect and sync_changed whenever another client applies changes.",
+					"description": "WebSocket endpoint. Send Authorization: Bearer <auth_token>. Browser clients may use Sec-WebSocket-Protocol: ksync-sync-v1, bearer.<auth_token>. The server emits sync_ready after connect and sync_changed whenever another client applies changes.",
 					"parameters": []map[string]any{
 						{
 							"name":        "Authorization",
@@ -173,7 +173,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/account/export": map[string]any{
 				"get": map[string]any{
 					"summary":     "Export authenticated account data",
-					"description": "Bearer-authenticated read-only dump of all Lyra rows owned by or directly attached to the authenticated account.",
+					"description": "Bearer-authenticated read-only dump of all Ksync rows owned by or directly attached to the authenticated account.",
 					"parameters":  bearerHeaderParameters(),
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Account data export"},
@@ -185,7 +185,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/account/delete-with-key": map[string]any{
 				"post": map[string]any{
 					"summary":     "Delete remote account using exported key",
-					"description": "Accepts exported account key text. Generic account-key-v1 keys and legacy inbe-sync-key-v1 keys are supported.",
+					"description": "Accepts exported account key text. Current ksync-account-key-v1 keys and legacy lyra-account-key-v1, account-key-v1, and inbe-sync-key-v1 keys are supported.",
 					"requestBody": map[string]any{
 						"required": true,
 						"content": map[string]any{
@@ -203,7 +203,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/friends": map[string]any{
 				"get": map[string]any{
 					"summary":     "List accepted friends",
-					"description": "Bearer-authenticated. Returns account-level Lyra friends.",
+					"description": "Bearer-authenticated. Returns account-level Ksync friends.",
 					"parameters":  bearerHeaderParameters(),
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Friends list"},
@@ -239,7 +239,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/profile/stats": map[string]any{
 				"put": map[string]any{
 					"summary":     "Publish app-neutral profile stats",
-					"description": "Bearer-authenticated aggregate stats. Lyra stores only app/practice/metric/value rows.",
+					"description": "Bearer-authenticated aggregate stats. Ksync stores only app/practice/metric/value rows.",
 					"parameters":  bearerHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,
@@ -466,14 +466,14 @@ func openAPISpec() map[string]any {
 func signedHeaderParameters() []map[string]any {
 	return []map[string]any{
 		{
-			"name":        "X-Inbe-User",
+			"name":        "X-Ksync-User",
 			"in":          "header",
 			"required":    true,
 			"description": "SHA-256 hash of the ML-DSA-44 public key.",
 			"schema":      map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 		},
 		{
-			"name":        "X-Inbe-Signature",
+			"name":        "X-Ksync-Signature",
 			"in":          "header",
 			"required":    true,
 			"description": "ML-DSA-44 signature as hex or base64.",

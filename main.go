@@ -56,7 +56,7 @@ func main() {
 		ErrorLog:          log.New(os.Stderr, "http: ", log.LstdFlags),
 	}
 
-	slog.Info("lyra sync server listening", "url", localHTTPURL(cfg.Addr), "addr", cfg.Addr, "base_url", cfg.BaseURL, "db", cfg.DBPath)
+	slog.Info("ksync sync server listening", "url", localHTTPURL(cfg.Addr), "addr", cfg.Addr, "base_url", cfg.BaseURL, "db", cfg.DBPath)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("serve: %v", err)
 	}

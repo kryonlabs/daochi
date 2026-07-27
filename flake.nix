@@ -1,5 +1,5 @@
 {
-  description = "Lyra sync server development shell";
+  description = "Ksync sync server development shell";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

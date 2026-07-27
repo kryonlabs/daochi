@@ -15,13 +15,14 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var userIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
 var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
 var ukuIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{4,128}$`)
-var lyraNamespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
+var ksyncNamespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
 
 type Server struct {
 	cfg        Config
@@ -29,6 +30,7 @@ type Server struct {
 	challenges *ChallengeStore
 	verifier   Verifier
 	syncHub    *syncHub
+	limiter    *RateLimiter
 }
 
 func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
@@ -38,6 +40,7 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 		challenges: NewChallengeStore(cfg.ChallengeTTL),
 		verifier:   verifier,
 		syncHub:    newSyncHub(),
+		limiter:    NewRateLimiter(),
 	}
 }
 
@@ -79,6 +82,11 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	userID := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("user_id")))
 	if !validUserID(userID) {
 		writeError(w, http.StatusBadRequest, "invalid user_id")
+		return
+	}
+	if !s.allowRequest(r, "challenge:ip:"+clientAddress(r), 60, time.Minute) ||
+		!s.allowRequest(r, "challenge:user:"+userID, 20, time.Minute) {
+		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
 	nonce, err := s.challenges.Issue(userID)
@@ -404,7 +412,7 @@ func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, boo
 		writeAuthError(w, err)
 		return "", false
 	}
-	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Inbe-User")))
+	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Ksync-User")))
 	if headerUser != "" && headerUser != userID {
 		writeAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
 		return "", false
@@ -586,7 +594,7 @@ func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
 	app := strings.TrimSpace(r.URL.Query().Get("app"))
 	practice := strings.TrimSpace(r.URL.Query().Get("practice"))
 	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
-	if !validLyraNamespace(app) || !validLyraNamespace(practice) || !validLyraNamespace(metric) ||
+	if !validKsyncNamespace(app) || !validKsyncNamespace(practice) || !validKsyncNamespace(metric) ||
 		!validLeaderboardMetric(practice, metric) {
 		writeError(w, http.StatusBadRequest, "invalid stats query")
 		return
@@ -861,8 +869,8 @@ func validProfileIcon(profileIcon int) bool {
 	return profileIcon >= ProfileIconNone && profileIcon <= ProfileIconTree5
 }
 
-func validLyraNamespace(value string) bool {
-	return lyraNamespacePattern.MatchString(value)
+func validKsyncNamespace(value string) bool {
+	return ksyncNamespacePattern.MatchString(value)
 }
 
 func validLeaderboardMetric(practice, metric string) bool {
@@ -892,7 +900,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid client_id")
 		return
 	}
-	publicKey, err := s.authenticateSignature(r.Context(), req.UserIDHash, req.PublicKey, r.Header.Get("X-Inbe-Signature"), r.Method, r.URL.Path, body)
+	if !s.allowRequest(r, "login:ip:"+clientAddress(r), 40, time.Minute) ||
+		!s.allowRequest(r, "login:user:"+req.UserIDHash, 20, time.Minute) {
+		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+		return
+	}
+	publicKey, err := s.authenticateSignature(r.Context(), req.UserIDHash, req.PublicKey, r.Header.Get("X-Ksync-Signature"), r.Method, r.URL.Path, body)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -944,7 +957,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err = s.authenticateSignature(r.Context(), req.UserIDHash, "", r.Header.Get("X-Inbe-Signature"), r.Method, r.URL.Path, body)
+	_, err = s.authenticateSignature(r.Context(), req.UserIDHash, "", r.Header.Get("X-Ksync-Signature"), r.Method, r.URL.Path, body)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -961,6 +974,11 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 	req, err := readDeleteWithKeyRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.allowRequest(r, "delete-key:ip:"+clientAddress(r), 8, time.Hour) ||
+		!s.allowRequest(r, "delete-key:user:"+req.UserIDHash, 4, time.Hour) {
+		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
 	publicKey, found, err := s.store.PublicKey(r.Context(), req.UserIDHash)
@@ -1057,9 +1075,9 @@ func (s *Server) authenticateToken(r *http.Request) (string, error) {
 }
 
 func applyHeaderUser(r *http.Request, bodyUser *string) error {
-	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Inbe-User")))
+	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Ksync-User")))
 	if headerUser == "" {
-		return errors.New("missing X-Inbe-User")
+		return errors.New("missing X-Ksync-User")
 	}
 	if *bodyUser == "" {
 		*bodyUser = headerUser
@@ -1067,7 +1085,7 @@ func applyHeaderUser(r *http.Request, bodyUser *string) error {
 	}
 	*bodyUser = strings.ToLower(strings.TrimSpace(*bodyUser))
 	if *bodyUser != headerUser {
-		return errors.New("X-Inbe-User does not match user_id_hash")
+		return errors.New("X-Ksync-User does not match user_id_hash")
 	}
 	return nil
 }
@@ -1168,7 +1186,7 @@ func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int
 		return req, errors.New("invalid json")
 	}
 	req.App = strings.TrimSpace(req.App)
-	if !validLyraNamespace(req.App) {
+	if !validKsyncNamespace(req.App) {
 		return req, errors.New("invalid app")
 	}
 	if len(req.Metrics) > 100 {
@@ -1178,7 +1196,7 @@ func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int
 		req.Metrics[i].Practice = strings.TrimSpace(req.Metrics[i].Practice)
 		req.Metrics[i].Metric = strings.TrimSpace(req.Metrics[i].Metric)
 		req.Metrics[i].Label = strings.TrimSpace(req.Metrics[i].Label)
-		if !validLyraNamespace(req.Metrics[i].Practice) || !validLyraNamespace(req.Metrics[i].Metric) {
+		if !validKsyncNamespace(req.Metrics[i].Practice) || !validKsyncNamespace(req.Metrics[i].Metric) {
 			return req, errors.New("invalid metric")
 		}
 	}
@@ -1497,7 +1515,9 @@ type exportedSyncKey struct {
 }
 
 const (
-	accountKeyHeader    = "account-key-v1"
+	accountKeyHeader    = "ksync-account-key-v1"
+	legacyLyraKeyHeader = "lyra-account-key-v1"
+	legacyUkuKeyHeader  = "account-key-v1"
 	legacyInbeKeyHeader = "inbe-sync-key-v1"
 )
 
@@ -1507,7 +1527,8 @@ func parseExportedSyncKey(text string) (exportedSyncKey, error) {
 		return exportedSyncKey{}, errors.New("invalid account key file")
 	}
 	header := strings.TrimSpace(lines[0])
-	if header != accountKeyHeader && header != legacyInbeKeyHeader {
+	if header != accountKeyHeader && header != legacyLyraKeyHeader &&
+		header != legacyUkuKeyHeader && header != legacyInbeKeyHeader {
 		return exportedSyncKey{}, errors.New("invalid account key file")
 	}
 	algorithmOK := false
@@ -1571,13 +1592,20 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Inbe-User, X-Inbe-Signature")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Ksync-User, X-Ksync-Signature")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) allowRequest(r *http.Request, key string, limit int, window time.Duration) bool {
+	if s.limiter == nil {
+		return true
+	}
+	return s.limiter.Allow(key, limit, window)
 }
 
 func allowedCORSOrigin(origin string) string {

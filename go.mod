@@ -1,4 +1,4 @@
-module meditation-sync
+module ksync
 
 go 1.24
 

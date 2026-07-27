@@ -1,18 +1,25 @@
 services:
-  lyra:
+  ksync:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      LYRA_ADDR: 0.0.0.0:8080
-      LYRA_BASE_URL: https://api.waozi.xyz
-      LYRA_DB: /data/lyra.db
-      LYRA_TOKEN_SECRET_HEX: ${LYRA_TOKEN_SECRET_HEX:?set LYRA_TOKEN_SECRET_HEX to a stable 32-byte hex secret}
+      KSYNC_ADDR: 0.0.0.0:8080
+      KSYNC_BASE_URL: https://api.waozi.xyz
+      KSYNC_DB: /data/ksync.db
+      KSYNC_TOKEN_SECRET_HEX: ${KSYNC_TOKEN_SECRET_HEX:?set KSYNC_TOKEN_SECRET_HEX to a stable 32-byte hex secret}
     volumes:
-      - lyra-data:/data
+      - ksync-data:/data
     ports:
       - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
-  lyra-data:
+  ksync-data:

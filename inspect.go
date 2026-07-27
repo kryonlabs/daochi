@@ -30,7 +30,7 @@ func runInspect(ctx context.Context, args []string, opts InspectOptions) error {
 		return err
 	}
 	if opts.DBPath == "" {
-		opts.DBPath = envString("LYRA_DB", "lyra.db")
+		opts.DBPath = envString("KSYNC_DB", "ksync.db")
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
@@ -50,7 +50,7 @@ func runInspect(ctx context.Context, args []string, opts InspectOptions) error {
 		return inspectUsers(ctx, db, opts.Out, opts.Full)
 	case "user":
 		if len(rest) != 2 {
-			return fmt.Errorf("usage: lyra inspect user <user_id_hash>")
+			return fmt.Errorf("usage: ksync inspect user <user_id_hash>")
 		}
 		return inspectUser(ctx, db, opts.Out, rest[1], opts.Full)
 	default:
@@ -80,7 +80,7 @@ func inspectSummary(ctx context.Context, db *sql.DB, out io.Writer) error {
 		"server_session_rounds",
 		"server_meditation_logs",
 	}
-	fmt.Fprintln(out, "Lyra data summary")
+	fmt.Fprintln(out, "Ksync data summary")
 	for _, table := range tables {
 		n, err := inspectCount(ctx, db, table, "")
 		if err != nil {

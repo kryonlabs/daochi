@@ -29,13 +29,13 @@ $(LIBOQS_A): $(LIBOQS_DIR)/CMakeLists.txt
 	$(CMAKE) --build $(LIBOQS_BUILD_DIR) --target install
 
 build: $(LIBOQS_A)
-	$(CGO_ENV) $(GO) build -o lyra .
+	$(CGO_ENV) $(GO) build -o ksync .
 
 test: $(LIBOQS_A)
-	$(CGO_ENV) GOCACHE=/tmp/inbe-lyra-gocache $(GO) test ./...
+	$(CGO_ENV) GOCACHE=/tmp/ksync-gocache $(GO) test ./...
 
 run: $(LIBOQS_A)
 	$(CGO_ENV) $(GO) run .
 
 clean:
-	rm -rf $(BUILD_DIR) lyra
+	rm -rf $(BUILD_DIR) ksync

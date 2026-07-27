@@ -11,15 +11,19 @@ RUN cmake -GNinja -S . -B build -DBUILD_SHARED_LIBS=ON -DOQS_BUILD_ONLY_LIB=ON -
 FROM golang:1.24-bookworm AS build
 COPY --from=liboqs /usr/local /usr/local
 WORKDIR /src
-COPY lyra .
+COPY . .
 ENV CGO_ENABLED=1
-RUN go build -o /out/lyra .
+RUN go build -o /out/ksync .
 
 FROM debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && useradd --system --uid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin ksync \
+    && mkdir -p /data \
+    && chown ksync:ksync /data \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=liboqs /usr/local/lib/liboqs.so* /usr/local/lib/
-COPY --from=build /out/lyra /usr/local/bin/lyra
+COPY --from=build /out/ksync /usr/local/bin/ksync
 ENV LD_LIBRARY_PATH=/usr/local/lib
 EXPOSE 8080
-CMD ["lyra"]
+USER ksync
+CMD ["ksync"]

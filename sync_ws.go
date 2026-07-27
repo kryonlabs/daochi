@@ -67,6 +67,12 @@ func (h *syncHub) publish(userID string, version int64) {
 	}
 }
 
+func (h *syncHub) count(userID string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.subs[userID])
+}
+
 func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -75,6 +81,15 @@ func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 	userID, err := s.authenticateWebSocket(r)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	if !s.allowRequest(r, "ws:ip:"+clientAddress(r), 120, time.Minute) ||
+		!s.allowRequest(r, "ws:user:"+userID, 40, time.Minute) {
+		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+		return
+	}
+	if s.syncHub.count(userID) >= 8 {
+		writeError(w, http.StatusTooManyRequests, "too many websocket connections")
 		return
 	}
 	conn, rw, err := acceptWebSocket(w, r)
@@ -94,7 +109,8 @@ func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	go func() {
 		for {
-			if _, _, err := readWebSocketFrame(rw.Reader); err != nil {
+			_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+			if _, _, err := readClientWebSocketFrame(rw.Reader); err != nil {
 				cancel()
 				return
 			}
@@ -108,10 +124,12 @@ func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case event := <-events:
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := writeWebSocketJSON(conn, event); err != nil {
 				return
 			}
 		case <-ticker.C:
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := writeWebSocketFrame(conn, 0x9, nil); err != nil {
 				return
 			}
@@ -120,7 +138,10 @@ func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authenticateWebSocket(r *http.Request) (string, error) {
-	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
+	if r.URL.Query().Get("token") != "" {
+		return "", authError{status: http.StatusUnauthorized, message: "websocket query tokens are not accepted"}
+	}
+	if token := bearerTokenFromWebSocketProtocol(r.Header.Get("Sec-WebSocket-Protocol")); token != "" {
 		userID, err := verifyAuthToken(s.cfg.TokenSecret, token)
 		if err != nil {
 			return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
@@ -137,7 +158,7 @@ func acceptWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, *bufio.R
 		return nil, nil, errors.New("missing upgrade")
 	}
 	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
-	if key == "" || r.Header.Get("Sec-WebSocket-Version") != "13" {
+	if !validWebSocketKey(key) || r.Header.Get("Sec-WebSocket-Version") != "13" {
 		writeError(w, http.StatusBadRequest, "invalid websocket handshake")
 		return nil, nil, errors.New("invalid handshake")
 	}
@@ -151,10 +172,15 @@ func acceptWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, *bufio.R
 		return nil, nil, err
 	}
 	accept := websocketAccept(key)
-	if _, err := rw.WriteString("HTTP/1.1 101 Switching Protocols\r\n" +
+	response := "HTTP/1.1 101 Switching Protocols\r\n" +
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
-		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"); err != nil {
+		"Sec-WebSocket-Accept: " + accept + "\r\n"
+	if websocketProtocolRequested(r.Header.Get("Sec-WebSocket-Protocol"), "ksync-sync-v1") {
+		response += "Sec-WebSocket-Protocol: ksync-sync-v1\r\n"
+	}
+	response += "\r\n"
+	if _, err := rw.WriteString(response); err != nil {
 		conn.Close()
 		return nil, nil, err
 	}
@@ -163,6 +189,30 @@ func acceptWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, *bufio.R
 		return nil, nil, err
 	}
 	return conn, rw, nil
+}
+
+func bearerTokenFromWebSocketProtocol(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if token, ok := strings.CutPrefix(part, "bearer."); ok && token != "" {
+			return token
+		}
+	}
+	return ""
+}
+
+func websocketProtocolRequested(header, protocol string) bool {
+	for _, part := range strings.Split(header, ",") {
+		if strings.TrimSpace(part) == protocol {
+			return true
+		}
+	}
+	return false
+}
+
+func validWebSocketKey(key string) bool {
+	decoded, err := base64.StdEncoding.DecodeString(key)
+	return err == nil && len(decoded) == 16
 }
 
 func headerContainsToken(header, token string) bool {
@@ -208,12 +258,23 @@ func writeWebSocketFrame(conn net.Conn, opcode byte, payload []byte) error {
 }
 
 func readWebSocketFrame(r *bufio.Reader) (byte, []byte, error) {
+	return readWebSocketFrameMasked(r, false)
+}
+
+func readClientWebSocketFrame(r *bufio.Reader) (byte, []byte, error) {
+	return readWebSocketFrameMasked(r, true)
+}
+
+func readWebSocketFrameMasked(r *bufio.Reader, requireMask bool) (byte, []byte, error) {
 	var first [2]byte
 	if _, err := io.ReadFull(r, first[:]); err != nil {
 		return 0, nil, err
 	}
 	opcode := first[0] & 0x0f
 	masked := first[1]&0x80 != 0
+	if requireMask && !masked {
+		return 0, nil, errors.New("websocket client frame not masked")
+	}
 	length := uint64(first[1] & 0x7f)
 	if length == 126 {
 		var ext [2]byte

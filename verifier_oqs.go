@@ -7,7 +7,7 @@ package main
 #include <stdlib.h>
 #include <oqs/oqs.h>
 
-static int inbe_mldsa44_verify(const unsigned char *message, size_t message_len,
+static int ksync_mldsa44_verify(const unsigned char *message, size_t message_len,
 	const unsigned char *signature, size_t signature_len,
 	const unsigned char *public_key) {
 	OQS_SIG *sig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_44);
@@ -22,7 +22,7 @@ static int inbe_mldsa44_verify(const unsigned char *message, size_t message_len,
 	return ok;
 }
 
-static int inbe_mldsa44_sign(const unsigned char *message, size_t message_len,
+static int ksync_mldsa44_sign(const unsigned char *message, size_t message_len,
 	const unsigned char *private_key,
 	unsigned char *signature, size_t *signature_len) {
 	OQS_SIG *sig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_44);
@@ -37,7 +37,7 @@ static int inbe_mldsa44_sign(const unsigned char *message, size_t message_len,
 	return ok;
 }
 
-static int inbe_mldsa44_keypair(unsigned char *public_key, unsigned char *private_key) {
+static int ksync_mldsa44_keypair(unsigned char *public_key, unsigned char *private_key) {
 	OQS_SIG *sig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_44);
 	int ok = 0;
 	if (sig == NULL) {
@@ -63,7 +63,7 @@ func (OQSVerifier) Verify(publicKey, message, signature []byte) bool {
 	if len(publicKey) != mlDSA44PublicKeySize || len(signature) != mlDSA44SignatureSize || len(message) == 0 {
 		return false
 	}
-	return C.inbe_mldsa44_verify(
+	return C.ksync_mldsa44_verify(
 		(*C.uchar)(unsafe.Pointer(&message[0])),
 		C.size_t(len(message)),
 		(*C.uchar)(unsafe.Pointer(&signature[0])),
@@ -78,7 +78,7 @@ func signWithPrivateKey(message, privateKey []byte) ([]byte, error) {
 	}
 	signature := make([]byte, mlDSA44SignatureSize)
 	signatureLen := C.size_t(len(signature))
-	ok := C.inbe_mldsa44_sign(
+	ok := C.ksync_mldsa44_sign(
 		(*C.uchar)(unsafe.Pointer(&message[0])),
 		C.size_t(len(message)),
 		(*C.uchar)(unsafe.Pointer(&privateKey[0])),
@@ -94,7 +94,7 @@ func signWithPrivateKey(message, privateKey []byte) ([]byte, error) {
 func generateMLDSA44Keypair() ([]byte, []byte, error) {
 	publicKey := make([]byte, mlDSA44PublicKeySize)
 	privateKey := make([]byte, mlDSA44PrivateKeySize)
-	ok := C.inbe_mldsa44_keypair(
+	ok := C.ksync_mldsa44_keypair(
 		(*C.uchar)(unsafe.Pointer(&publicKey[0])),
 		(*C.uchar)(unsafe.Pointer(&privateKey[0])),
 	) == 1

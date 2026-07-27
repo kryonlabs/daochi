@@ -11,7 +11,7 @@ import (
 )
 
 func TestInspectSummaryAndUser(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "lyra-inspect.db")
+	dbPath := filepath.Join(t.TempDir(), "ksync-inspect.db")
 	store, err := OpenStore(dbPath)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestInspectSummaryAndUser(t *testing.T) {
 }
 
 func TestInspectMissingUser(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "lyra-inspect.db")
+	dbPath := filepath.Join(t.TempDir(), "ksync-inspect.db")
 	store, err := OpenStore(dbPath)
 	if err != nil {
 		t.Fatal(err)

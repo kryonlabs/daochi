@@ -9,7 +9,7 @@ import (
 func canonicalMessage(nonce []byte, method, path string, signedPayload []byte) []byte {
 	sum := sha256.Sum256(signedPayload)
 	var b strings.Builder
-	b.WriteString("inbe-sync-v1\n")
+	b.WriteString("ksync-sync-v1\n")
 	b.WriteString(strings.ToUpper(method))
 	b.WriteByte('\n')
 	b.WriteString(path)

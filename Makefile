@@ -6,9 +6,10 @@ LIBOQS_A := $(LIBOQS_PREFIX)/lib/liboqs.a
 
 GO ?= go
 CMAKE ?= cmake
+GOFLAGS ?= -mod=mod
 
 CGO_ENV := CGO_ENABLED=1 \
-	GOFLAGS="-mod=mod" \
+	GOFLAGS="$(GOFLAGS)" \
 	CGO_CFLAGS="-I$(abspath $(LIBOQS_PREFIX))/include" \
 	CGO_LDFLAGS="-L$(abspath $(LIBOQS_PREFIX))/lib -loqs"
 

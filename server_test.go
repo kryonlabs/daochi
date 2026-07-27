@@ -164,6 +164,66 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	assertCount(t, store, "server_session_rounds", 0)
 }
 
+func TestLegacyInbeSignedLoginDeleteAndBearerHeaders(t *testing.T) {
+	server, store, verifier := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x45}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x55}, mlDSA44SignatureSize))
+
+	loginNonce := issueChallenge(t, handler, "", userID)
+	loginBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"legacy-inbe-client","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set("X-Inbe-User", userID)
+	loginReq.Header.Set("X-Inbe-Signature", signature)
+	loginRes := httptest.NewRecorder()
+	handler.ServeHTTP(loginRes, loginReq)
+	if loginRes.Code != http.StatusOK {
+		t.Fatalf("legacy login status = %d body=%s", loginRes.Code, loginRes.Body.String())
+	}
+	wantMessage := string(canonicalMessageWithContext("inbe-sync-v1", mustDecodeHex(t, loginNonce), http.MethodPost, "/api/v1/sync/login", loginBody))
+	if string(verifier.message) != wantMessage {
+		t.Fatalf("legacy login signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
+	}
+	var login LoginResponse
+	if err := json.Unmarshal(loginRes.Body.Bytes(), &login); err != nil {
+		t.Fatal(err)
+	}
+	if login.AuthToken == "" {
+		t.Fatal("missing legacy auth token")
+	}
+
+	syncBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"legacy-inbe-client","since_server_version":0}`)
+	syncReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(syncBody))
+	syncReq.Header.Set("Content-Type", "application/json")
+	syncReq.Header.Set("X-Inbe-User", userID)
+	syncReq.Header.Set("Authorization", "Bearer "+login.AuthToken)
+	syncRes := httptest.NewRecorder()
+	handler.ServeHTTP(syncRes, syncReq)
+	if syncRes.Code != http.StatusOK {
+		t.Fatalf("legacy sync status = %d body=%s", syncRes.Code, syncRes.Body.String())
+	}
+
+	deleteNonce := issueChallenge(t, handler, "", userID)
+	deleteBody := []byte(`{"user_id_hash":"` + userID + `"}`)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/account", bytes.NewReader(deleteBody))
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteReq.Header.Set("X-Inbe-User", userID)
+	deleteReq.Header.Set("X-Inbe-Signature", signature)
+	deleteRes := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRes, deleteReq)
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("legacy delete status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
+	}
+	wantMessage = string(canonicalMessageWithContext("inbe-sync-v1", mustDecodeHex(t, deleteNonce), http.MethodDelete, "/api/v1/account", deleteBody))
+	if string(verifier.message) != wantMessage {
+		t.Fatalf("legacy delete signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
+	}
+	assertCount(t, store, "server_users", 0)
+}
+
 func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -1608,6 +1668,21 @@ func TestSyncWebSocketAcceptsBearerSubprotocol(t *testing.T) {
 	}
 }
 
+func TestSyncWebSocketAcceptsLegacyInbeBearerSubprotocol(t *testing.T) {
+	server, _, _ := testServer(t)
+	ts := httptest.NewServer(server.Routes())
+	t.Cleanup(ts.Close)
+
+	identity := newTestIdentityAt(t, ts.Client(), ts.URL, 0x85)
+	reader, conn := openLegacyInbeSyncWebSocketWithProtocol(t, ts.URL, identity.Token)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	ready := readTestWebSocketEvent(t, reader)
+	if ready.Type != "sync_ready" || ready.UserIDHash != identity.UserID {
+		t.Fatalf("ready event = %#v", ready)
+	}
+}
+
 func TestParseExportedSyncKey(t *testing.T) {
 	privateKey := bytes.Repeat([]byte{0x64}, mlDSA44PrivateKeySize)
 	publicID := strings.Repeat("a", 64)
@@ -2163,6 +2238,11 @@ func openSyncWebSocket(t *testing.T, baseURL, token string) (*bufio.Reader, net.
 func openSyncWebSocketWithProtocol(t *testing.T, baseURL, token string) (*bufio.Reader, net.Conn) {
 	t.Helper()
 	return openSyncWebSocketRaw(t, baseURL, "Sec-WebSocket-Protocol: ksync-sync-v1, bearer."+token+"\r\n")
+}
+
+func openLegacyInbeSyncWebSocketWithProtocol(t *testing.T, baseURL, token string) (*bufio.Reader, net.Conn) {
+	t.Helper()
+	return openSyncWebSocketRaw(t, baseURL, "Sec-WebSocket-Protocol: inbe-sync-v1, bearer."+token+"\r\n")
 }
 
 func openSyncWebSocketRaw(t *testing.T, baseURL, extraHeaders string) (*bufio.Reader, net.Conn) {

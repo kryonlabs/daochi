@@ -7,9 +7,14 @@ import (
 )
 
 func canonicalMessage(nonce []byte, method, path string, signedPayload []byte) []byte {
+	return canonicalMessageWithContext("ksync-sync-v1", nonce, method, path, signedPayload)
+}
+
+func canonicalMessageWithContext(context string, nonce []byte, method, path string, signedPayload []byte) []byte {
 	sum := sha256.Sum256(signedPayload)
 	var b strings.Builder
-	b.WriteString("ksync-sync-v1\n")
+	b.WriteString(context)
+	b.WriteByte('\n')
 	b.WriteString(strings.ToUpper(method))
 	b.WriteByte('\n')
 	b.WriteString(path)

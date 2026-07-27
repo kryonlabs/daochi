@@ -24,6 +24,11 @@ var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
 var ukuIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{4,128}$`)
 var ksyncNamespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
 
+const (
+	ksyncSignatureContext      = "ksync-sync-v1"
+	legacyInbeSignatureContext = "inbe-sync-v1"
+)
+
 type Server struct {
 	cfg        Config
 	store      *Store
@@ -412,7 +417,7 @@ func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, boo
 		writeAuthError(w, err)
 		return "", false
 	}
-	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Ksync-User")))
+	headerUser, _ := requestUserHeader(r)
 	if headerUser != "" && headerUser != userID {
 		writeAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
 		return "", false
@@ -905,7 +910,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
-	publicKey, err := s.authenticateSignature(r.Context(), req.UserIDHash, req.PublicKey, r.Header.Get("X-Ksync-Signature"), r.Method, r.URL.Path, body)
+	signature, context := requestSignatureHeader(r)
+	publicKey, err := s.authenticateSignature(r.Context(), req.UserIDHash, req.PublicKey, signature, context, r.Method, r.URL.Path, body)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -957,7 +963,8 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err = s.authenticateSignature(r.Context(), req.UserIDHash, "", r.Header.Get("X-Ksync-Signature"), r.Method, r.URL.Path, body)
+	signature, context := requestSignatureHeader(r)
+	_, err = s.authenticateSignature(r.Context(), req.UserIDHash, "", signature, context, r.Method, r.URL.Path, body)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -1014,7 +1021,7 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyText, signatureText, method, path string, signedPayload []byte) ([]byte, error) {
+func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyText, signatureText, signatureContext, method, path string, signedPayload []byte) ([]byte, error) {
 	userID = strings.ToLower(strings.TrimSpace(userID))
 	if !validUserID(userID) {
 		return nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
@@ -1054,7 +1061,7 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 	if len(signature) != mlDSA44SignatureSize {
 		return nil, authError{status: http.StatusBadRequest, message: "wrong signature size"}
 	}
-	message := canonicalMessage(nonce, method, path, signedPayload)
+	message := canonicalMessageWithContext(signatureContext, nonce, method, path, signedPayload)
 	if !s.verifier.Verify(publicKey, message, signature) {
 		return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
 	}
@@ -1075,7 +1082,7 @@ func (s *Server) authenticateToken(r *http.Request) (string, error) {
 }
 
 func applyHeaderUser(r *http.Request, bodyUser *string) error {
-	headerUser := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Ksync-User")))
+	headerUser, headerName := requestUserHeader(r)
 	if headerUser == "" {
 		return errors.New("missing X-Ksync-User")
 	}
@@ -1085,9 +1092,29 @@ func applyHeaderUser(r *http.Request, bodyUser *string) error {
 	}
 	*bodyUser = strings.ToLower(strings.TrimSpace(*bodyUser))
 	if *bodyUser != headerUser {
-		return errors.New("X-Ksync-User does not match user_id_hash")
+		return errors.New(headerName + " does not match user_id_hash")
 	}
 	return nil
+}
+
+func requestUserHeader(r *http.Request) (string, string) {
+	if value := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Ksync-User"))); value != "" {
+		return value, "X-Ksync-User"
+	}
+	if value := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Inbe-User"))); value != "" {
+		return value, "X-Inbe-User"
+	}
+	return "", ""
+}
+
+func requestSignatureHeader(r *http.Request) (string, string) {
+	if value := strings.TrimSpace(r.Header.Get("X-Ksync-Signature")); value != "" {
+		return value, ksyncSignatureContext
+	}
+	if value := strings.TrimSpace(r.Header.Get("X-Inbe-Signature")); value != "" {
+		return value, legacyInbeSignatureContext
+	}
+	return "", ksyncSignatureContext
 }
 
 func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, SyncRequest, error) {
@@ -1592,7 +1619,7 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Ksync-User, X-Ksync-Signature")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Ksync-User, X-Ksync-Signature, X-Inbe-User, X-Inbe-Signature")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

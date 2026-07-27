@@ -178,6 +178,8 @@ func acceptWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, *bufio.R
 		"Sec-WebSocket-Accept: " + accept + "\r\n"
 	if websocketProtocolRequested(r.Header.Get("Sec-WebSocket-Protocol"), "ksync-sync-v1") {
 		response += "Sec-WebSocket-Protocol: ksync-sync-v1\r\n"
+	} else if websocketProtocolRequested(r.Header.Get("Sec-WebSocket-Protocol"), "inbe-sync-v1") {
+		response += "Sec-WebSocket-Protocol: inbe-sync-v1\r\n"
 	}
 	response += "\r\n"
 	if _, err := rw.WriteString(response); err != nil {

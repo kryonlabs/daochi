@@ -184,6 +184,14 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if fullSnapshotRequired && syncRequestHasLocalChanges(req) {
+		result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
+		if err != nil {
+			slog.Error("apply stale sync uploads", "user", req.UserIDHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "sync failed")
+			return
+		}
+	}
 
 	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, sinceVersion)
 	if err != nil {
@@ -316,6 +324,15 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func syncRequestHasLocalChanges(req SyncRequest) bool {
+	return req.FullSyncRequested ||
+		len(req.MeditationLogs) > 0 ||
+		len(req.Habits) > 0 ||
+		len(req.HabitDays) > 0 ||
+		len(req.Sessions) > 0 ||
+		len(req.Ops) > 0
 }
 
 func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {

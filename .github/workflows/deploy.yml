@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
@@ -43,7 +45,8 @@ jobs:
       - name: Sync source and build on origin
         run: |
           REMOTE="${{ secrets.KSYNC_USER }}@${{ secrets.KSYNC_HOST }}"
-          tar --exclude='.git' --exclude='build' --exclude='*.db' -czf - . | \
+          tar --exclude='.git' --exclude='build' --exclude='*.db' \
+              --exclude='vendor/liboqs' -czf - . | \
             ssh "$REMOTE" '
               set -e
               rm -rf /opt/ksync-src.new

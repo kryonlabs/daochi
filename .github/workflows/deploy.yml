@@ -1,0 +1,94 @@
+name: deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ksync-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Install cmake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Cache vendored liboqs build
+        uses: actions/cache@v4
+        with:
+          path: build/liboqs
+          key: liboqs-${{ runner.os }}-${{ hashFiles('vendor/liboqs/CMakeLists.txt') }}
+      - name: Build and test
+        run: make test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_ed25519
+          echo "${{ secrets.KSYNC_SSH_KEY }}" > ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.KSYNC_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync source and build on origin
+        run: |
+          REMOTE="${{ secrets.KSYNC_USER }}@${{ secrets.KSYNC_HOST }}"
+          tar --exclude='.git' --exclude='build' --exclude='*.db' -czf - . | \
+            ssh "$REMOTE" '
+              set -e
+              rm -rf /opt/ksync-src.new
+              mkdir -p /opt/ksync-src.new
+              tar -C /opt/ksync-src.new -xzf -
+              # keep the prebuilt vendored liboqs from the previous build
+              if [ -d /opt/ksync-src/build ]; then
+                cp -a /opt/ksync-src/build /opt/ksync-src.new/build
+              fi
+              rm -rf /opt/ksync-src.old
+              [ -d /opt/ksync-src ] && mv /opt/ksync-src /opt/ksync-src.old
+              mv /opt/ksync-src.new /opt/ksync-src
+              rm -rf /opt/ksync-src.old
+              cd /opt/ksync-src
+              make build
+            '
+
+      - name: Swap binary and restart
+        id: swap
+        run: |
+          REMOTE="${{ secrets.KSYNC_USER }}@${{ secrets.KSYNC_HOST }}"
+          STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"
+          ssh "$REMOTE" "
+            set -e
+            mkdir -p /var/lib/ksync/backups
+            cp /opt/ksync/ksync \"/var/lib/ksync/backups/ksync.pre-upgrade.$STAMP\"
+            sqlite3 /var/lib/ksync/ksync.db \".backup '/var/lib/ksync/backups/ksync.db.$STAMP'\" 2>/dev/null || true
+            cp /opt/ksync-src/ksync /opt/ksync/ksync.new
+            mv /opt/ksync/ksync.new /opt/ksync/ksync
+            systemctl restart ksync.service
+            sleep 3
+            systemctl is-active --quiet ksync.service
+          "
+
+      - name: Health check (rollback on failure)
+        run: |
+          REMOTE="${{ secrets.KSYNC_USER }}@${{ secrets.KSYNC_HOST }}"
+          STAMP=${{ steps.swap.outputs.stamp }}
+          code=$(ssh "$REMOTE" 'curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:8080/api/v1/sync/challenge?user_id=0000000000000000000000000000000000000000000000000000000000000000"')
+          echo "health check: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::health check failed ($code) - rolling back"
+            ssh "$REMOTE" "cp /var/lib/ksync/backups/ksync.pre-upgrade.$STAMP /opt/ksync/ksync && systemctl restart ksync.service"
+            exit 1
+          fi
+          pub=$(curl -s -o /dev/null -w "%{http_code}" "https://api.waozi.xyz/api/v1/sync/challenge?user_id=0000000000000000000000000000000000000000000000000000000000000000" || echo 000)
+          echo "public endpoint through Cloudflare: $pub"

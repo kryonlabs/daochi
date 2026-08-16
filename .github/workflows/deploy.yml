@@ -52,10 +52,15 @@ jobs:
               rm -rf /opt/ksync-src.new
               mkdir -p /opt/ksync-src.new
               tar -C /opt/ksync-src.new -xzf -
-              # keep the prebuilt vendored liboqs from the previous build
-              if [ -d /opt/ksync-src/build ]; then
-                cp -a /opt/ksync-src/build /opt/ksync-src.new/build
-              fi
+              # keep the prebuilt build dir and the vendored liboqs
+              # source from the previous tree (the origin cannot clone
+              # submodules itself)
+              for keep in build vendor/liboqs; do
+                if [ -d "/opt/ksync-src/$keep" ]; then
+                  mkdir -p "/opt/ksync-src.new/$(dirname "$keep")"
+                  cp -a "/opt/ksync-src/$keep" "/opt/ksync-src.new/$keep"
+                fi
+              done
               rm -rf /opt/ksync-src.old
               [ -d /opt/ksync-src ] && mv /opt/ksync-src /opt/ksync-src.old
               mv /opt/ksync-src.new /opt/ksync-src

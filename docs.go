@@ -54,10 +54,11 @@ a{color:#254da8}
 <main>
 <h1>Ksync Sync API</h1>
 <p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys.</p>
-<p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a></p>
+<p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a> · <a href="/readyz">Readiness</a> · <a href="/metrics">Metrics</a></p>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>ksync-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies signed local changes and returns remote changes newer than <code>since_server_version</code>.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/diagnostics</code><p>Returns bearer-authenticated sync state, table counts, compaction position, and legacy client hints.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Deletes all remote data for the signed sync account.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
@@ -94,6 +95,33 @@ func openAPISpec() map[string]any {
 					"summary": "Health check",
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Server is healthy"},
+					},
+				},
+			},
+			"/readyz": map[string]any{
+				"get": map[string]any{
+					"summary": "Readiness check",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Server is ready for production traffic"},
+						"503": map[string]any{"description": "Server is not ready"},
+					},
+				},
+			},
+			"/metrics": map[string]any{
+				"get": map[string]any{
+					"summary": "Prometheus metrics",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Prometheus text metrics"},
+					},
+				},
+			},
+			"/api/v1/sync/diagnostics": map[string]any{
+				"get": map[string]any{
+					"summary":  "Inspect sync state for the authenticated account",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Sync diagnostic report"},
+						"401": map[string]any{"description": "Invalid bearer token"},
 					},
 				},
 			},
@@ -310,6 +338,7 @@ func openAPISpec() map[string]any {
 						"habit_days":           map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/HabitDay"}},
 						"sessions":             map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Session"}},
 						"ops":                  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncOp"}},
+						"encrypted_records":    map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/EncryptedRecord"}},
 					},
 				},
 				"SyncResponse": map[string]any{
@@ -327,16 +356,18 @@ func openAPISpec() map[string]any {
 						"min_supported_protocol": map[string]any{"type": "integer"},
 						"latest_protocol":        map[string]any{"type": "integer"},
 						"legacy_clients":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"diagnostics":            map[string]any{"type": "object"},
 					},
 				},
 				"CleanData": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"habits":          map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Habit"}},
-						"habit_days":      map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/CleanHabitDay"}},
-						"sessions":        map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Session"}},
-						"meditation_logs": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/MeditationLog"}},
-						"social_cache":    map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SocialCache"}},
+						"habits":            map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Habit"}},
+						"habit_days":        map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/CleanHabitDay"}},
+						"sessions":          map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Session"}},
+						"meditation_logs":   map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/MeditationLog"}},
+						"social_cache":      map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SocialCache"}},
+						"encrypted_records": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/EncryptedRecord"}},
 					},
 				},
 				"DeleteRequest": map[string]any{
@@ -429,6 +460,18 @@ func openAPISpec() map[string]any {
 						"kind":       map[string]any{"type": "string"},
 						"json":       map[string]any{"type": "object"},
 						"updated_at": map[string]any{"type": "string", "format": "date-time"},
+					},
+				},
+				"EncryptedRecord": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"collection": map[string]any{"type": "string"},
+						"id":         map[string]any{"type": "string"},
+						"key_id":     map[string]any{"type": "string"},
+						"nonce":      map[string]any{"type": "string"},
+						"ciphertext": map[string]any{"type": "string"},
+						"updated_at": map[string]any{"type": "string", "format": "date-time"},
+						"deleted_at": map[string]any{"type": "integer"},
 					},
 				},
 				"SyncOp": map[string]any{

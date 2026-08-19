@@ -79,6 +79,7 @@ func inspectSummary(ctx context.Context, db *sql.DB, out io.Writer) error {
 		"server_sessions",
 		"server_session_rounds",
 		"server_meditation_logs",
+		"server_encrypted_records",
 	}
 	fmt.Fprintln(out, "Ksync data summary")
 	for _, table := range tables {
@@ -136,7 +137,7 @@ WHERE user_id_hash=?1`, userID).Scan(&publicKey, &createdAt, &lastSeenAt)
 	fmt.Fprintf(out, "public_key=%s\n", redactID(strings.ToLower(publicKey), full))
 	fmt.Fprintf(out, "created=%s\nlast_seen=%s\n", createdAt, lastSeenAt)
 
-	for _, table := range []string{"server_habits", "server_habit_days", "server_sessions", "server_session_rounds", "server_meditation_logs"} {
+	for _, table := range []string{"server_habits", "server_habit_days", "server_sessions", "server_session_rounds", "server_meditation_logs", "server_encrypted_records"} {
 		n, err := inspectCount(ctx, db, table, "WHERE user_id_hash=?1", userID)
 		if err != nil {
 			return err

@@ -12,17 +12,19 @@ import (
 )
 
 type Config struct {
-	Addr         string
-	BaseURL      string
-	DBPath       string
-	ChallengeTTL time.Duration
-	TokenTTL     time.Duration
-	TokenSecret  []byte
-	MaxBodyBytes int64
+	Addr                 string
+	BaseURL              string
+	DBPath               string
+	ChallengeTTL         time.Duration
+	TokenTTL             time.Duration
+	TokenSecret          []byte
+	TokenSecretEphemeral bool
+	MaxBodyBytes         int64
 }
 
 func loadConfig() Config {
 	secret := envBytesHex("KSYNC_TOKEN_SECRET_HEX", nil)
+	ephemeralSecret := false
 	if len(secret) < 32 {
 		if !envBool("KSYNC_ALLOW_EPHEMERAL_TOKEN_SECRET", false) {
 			log.Fatal("KSYNC_TOKEN_SECRET_HEX must be at least 32 bytes; set KSYNC_ALLOW_EPHEMERAL_TOKEN_SECRET=1 only for local development")
@@ -32,15 +34,17 @@ func loadConfig() Config {
 		if _, err := rand.Read(secret); err != nil {
 			panic(err)
 		}
+		ephemeralSecret = true
 	}
 	return Config{
-		Addr:         envString("KSYNC_ADDR", "127.0.0.1:8080"),
-		BaseURL:      envString("KSYNC_BASE_URL", "https://api.waozi.xyz"),
-		DBPath:       envString("KSYNC_DB", "ksync.db"),
-		ChallengeTTL: envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second),
-		TokenTTL:     envDurationSeconds("KSYNC_TOKEN_TTL_SECONDS", 3600*time.Second),
-		TokenSecret:  secret,
-		MaxBodyBytes: envInt64("KSYNC_MAX_BODY_BYTES", 1<<20),
+		Addr:                 envString("KSYNC_ADDR", "127.0.0.1:8080"),
+		BaseURL:              envString("KSYNC_BASE_URL", "https://api.waozi.xyz"),
+		DBPath:               envString("KSYNC_DB", "ksync.db"),
+		ChallengeTTL:         envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second),
+		TokenTTL:             envDurationSeconds("KSYNC_TOKEN_TTL_SECONDS", 3600*time.Second),
+		TokenSecret:          secret,
+		TokenSecretEphemeral: ephemeralSecret,
+		MaxBodyBytes:         envInt64("KSYNC_MAX_BODY_BYTES", 1<<20),
 	}
 }
 

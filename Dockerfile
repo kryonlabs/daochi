@@ -13,7 +13,7 @@ COPY --from=liboqs /usr/local /usr/local
 WORKDIR /src
 COPY . .
 ENV CGO_ENABLED=1
-RUN go build -o /out/ksync .
+RUN go build -mod=mod -o /out/ksync .
 
 FROM debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \

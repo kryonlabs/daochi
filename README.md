@@ -8,6 +8,8 @@ Ksync uses the client account key for identity and authentication. A client prov
 
 Ksync does not currently provide end-to-end encryption against the server. Mirrored app data is stored in SQLite as normal typed rows and JSON payloads so the service can sync, compact, export, derive friend leaderboard stats, and delete account data. This is intentional. Operational access to the server database or a valid bearer token can read the data those credentials allow.
 
+Protocol clients may also sync `encrypted_records`: opaque per-account private records identified by `collection` and `id`. Ksync stores and versions those blobs for relay, export, deletion, and diagnostics, but does not need to read their contents. Public/social projections such as aliases, friend requests, profile icons, and leaderboard stats remain readable server-side by design.
+
 API access is scoped by account, with explicit shared surfaces:
 
 - accepted friends can see the account alias and selected profile/leaderboard stats;
@@ -17,6 +19,7 @@ API access is scoped by account, with explicit shared surfaces:
 ## Endpoints
 
 - `GET /api/v1/sync/challenge?user_id=<sha256-public-key-hex>`
+- `GET /api/v1/sync/diagnostics`
 - `GET /api/v1/sync/ws`
 - `POST /api/v1/sync/login`
 - `POST /api/v1/sync`
@@ -40,6 +43,8 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/account/delete-with-key`
 - `GET /openapi.json`
 - `GET /healthz`
+- `GET /readyz`
+- `GET /metrics`
 - `GET /`
 
 `api.waozi.xyz` should terminate TLS at a reverse proxy and forward to `KSYNC_ADDR`, for example `127.0.0.1:8080`.

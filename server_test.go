@@ -335,6 +335,73 @@ func TestHashMismatchRequiresFullSnapshotAfterApplyingUpload(t *testing.T) {
 	}
 }
 
+func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x61)
+
+	ready := httptest.NewRecorder()
+	handler.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusOK {
+		t.Fatalf("readyz status = %d body=%s", ready.Code, ready.Body.String())
+	}
+
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"test-client-1","encrypted_records":[{"collection":"private","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-19T12:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
+	var first SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Applied.EncryptedRecords != 1 ||
+		len(first.Changes.EncryptedRecords) != 1 ||
+		first.Changes.EncryptedRecords[0].Ciphertext != "ciphertext-v1" {
+		t.Fatalf("unexpected encrypted sync response: %#v", first)
+	}
+	if first.Diagnostics == nil ||
+		first.Diagnostics.AppliedInput.EncryptedRecords != 1 ||
+		first.Diagnostics.ReturnedChanges.EncryptedRecords != 1 {
+		t.Fatalf("missing sync diagnostics: %#v", first.Diagnostics)
+	}
+
+	diagReq := httptest.NewRequest(http.MethodGet, "/api/v1/sync/diagnostics", nil)
+	diagReq.Header.Set("Authorization", "Bearer "+identity.Token)
+	diagReq.Header.Set("X-Ksync-User", identity.UserID)
+	diagRes := httptest.NewRecorder()
+	handler.ServeHTTP(diagRes, diagReq)
+	if diagRes.Code != http.StatusOK {
+		t.Fatalf("diagnostics status = %d body=%s", diagRes.Code, diagRes.Body.String())
+	}
+	var diag SyncDiagnosticReport
+	if err := json.Unmarshal(diagRes.Body.Bytes(), &diag); err != nil {
+		t.Fatal(err)
+	}
+	if diag.TableCounts["server_encrypted_records"] != 1 || diag.StateHash == "" {
+		t.Fatalf("unexpected diagnostics: %#v", diag)
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/api/v1/account/export", nil)
+	exportReq.Header.Set("Authorization", "Bearer "+identity.Token)
+	exportRes := httptest.NewRecorder()
+	handler.ServeHTTP(exportRes, exportReq)
+	if exportRes.Code != http.StatusOK {
+		t.Fatalf("export status = %d body=%s", exportRes.Code, exportRes.Body.String())
+	}
+	var export AccountExportResponse
+	if err := json.Unmarshal(exportRes.Body.Bytes(), &export); err != nil {
+		t.Fatal(err)
+	}
+	if len(export.Tables["encrypted_records"]) != 1 {
+		t.Fatalf("expected encrypted record in export: %#v", export.Tables["encrypted_records"])
+	}
+
+	metrics := httptest.NewRecorder()
+	handler.ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if metrics.Code != http.StatusOK ||
+		!strings.Contains(metrics.Body.String(), "ksync_sync_encrypted_records_applied_total 1") {
+		t.Fatalf("unexpected metrics status=%d body=%s", metrics.Code, metrics.Body.String())
+	}
+}
+
 func TestSyncV2AppliesOpsIdempotentlyAndReturnsRemoteOps(t *testing.T) {
 	server, store, _ := testServer(t)
 	handler := server.Routes()

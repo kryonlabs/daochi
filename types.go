@@ -46,64 +46,68 @@ type AccountExportResponse struct {
 }
 
 type SyncRequest struct {
-	ProtocolVersion     int             `json:"protocol_version,omitempty"`
-	UserIDHash          string          `json:"user_id_hash"`
-	ClientID            string          `json:"client_id"`
-	ClientClock         int64           `json:"client_clock,omitempty"`
-	PublicKey           string          `json:"public_key,omitempty"`
-	SinceServerVersion  int64           `json:"since_server_version,omitempty"`
-	ClientStateHash     string          `json:"client_state_hash,omitempty"`
-	LastServerStateHash string          `json:"last_server_state_hash,omitempty"`
-	FullSyncRequested   bool            `json:"full_sync_requested,omitempty"`
-	Bootstrap           bool            `json:"bootstrap,omitempty"`
-	Ops                 []SyncOp        `json:"ops,omitempty"`
-	MeditationLogs      []MeditationLog `json:"meditation_logs,omitempty"`
-	Habits              []Habit         `json:"habits,omitempty"`
-	HabitDays           []HabitDay      `json:"habit_days,omitempty"`
-	Sessions            []Session       `json:"sessions,omitempty"`
-	SocialCache         []SocialCache   `json:"social_cache,omitempty"`
+	ProtocolVersion     int               `json:"protocol_version,omitempty"`
+	UserIDHash          string            `json:"user_id_hash"`
+	ClientID            string            `json:"client_id"`
+	ClientClock         int64             `json:"client_clock,omitempty"`
+	PublicKey           string            `json:"public_key,omitempty"`
+	SinceServerVersion  int64             `json:"since_server_version,omitempty"`
+	ClientStateHash     string            `json:"client_state_hash,omitempty"`
+	LastServerStateHash string            `json:"last_server_state_hash,omitempty"`
+	FullSyncRequested   bool              `json:"full_sync_requested,omitempty"`
+	Bootstrap           bool              `json:"bootstrap,omitempty"`
+	Ops                 []SyncOp          `json:"ops,omitempty"`
+	MeditationLogs      []MeditationLog   `json:"meditation_logs,omitempty"`
+	Habits              []Habit           `json:"habits,omitempty"`
+	HabitDays           []HabitDay        `json:"habit_days,omitempty"`
+	Sessions            []Session         `json:"sessions,omitempty"`
+	SocialCache         []SocialCache     `json:"social_cache,omitempty"`
+	EncryptedRecords    []EncryptedRecord `json:"encrypted_records,omitempty"`
 }
 
 type SyncChanges struct {
-	Habits         []Habit         `json:"habits"`
-	HabitDays      []HabitDay      `json:"habit_days"`
-	Sessions       []Session       `json:"sessions"`
-	MeditationLogs []MeditationLog `json:"meditation_logs"`
-	SocialCache    []SocialCache   `json:"social_cache"`
+	Habits           []Habit           `json:"habits"`
+	HabitDays        []HabitDay        `json:"habit_days"`
+	Sessions         []Session         `json:"sessions"`
+	MeditationLogs   []MeditationLog   `json:"meditation_logs"`
+	SocialCache      []SocialCache     `json:"social_cache"`
+	EncryptedRecords []EncryptedRecord `json:"encrypted_records,omitempty"`
 }
 
 type SyncResponse struct {
-	ProtocolVersion      int         `json:"protocol_version,omitempty"`
-	Status               string      `json:"status"`
-	Applied              SyncResult  `json:"applied"`
-	AccountAlias         string      `json:"account_alias,omitempty"`
-	ProfileIcon          int         `json:"profile_icon,omitempty"`
-	ServerVersion        int64       `json:"server_version"`
-	ServerClock          int64       `json:"server_clock,omitempty"`
-	ServerStateHash      string      `json:"server_state_hash,omitempty"`
-	BaseStateHash        string      `json:"base_state_hash,omitempty"`
-	ChangesComplete      bool        `json:"changes_complete"`
-	FullSnapshotRequired bool        `json:"full_snapshot_required"`
-	AcceptedOps          []string    `json:"accepted_ops,omitempty"`
-	Ops                  []SyncOp    `json:"ops,omitempty"`
-	Changes              SyncChanges `json:"changes"`
-	Data                 *CleanData  `json:"data,omitempty"`
-	Logs                 []SyncLog   `json:"logs,omitempty"`
-	Deletes              []SyncLog   `json:"deletes,omitempty"`
-	UpgradeNotice        string      `json:"upgrade_notice,omitempty"`
-	MinSupportedProtocol int         `json:"min_supported_protocol,omitempty"`
-	LatestProtocol       int         `json:"latest_protocol,omitempty"`
-	LegacyClients        []string    `json:"legacy_clients,omitempty"`
+	ProtocolVersion      int              `json:"protocol_version,omitempty"`
+	Status               string           `json:"status"`
+	Applied              SyncResult       `json:"applied"`
+	AccountAlias         string           `json:"account_alias,omitempty"`
+	ProfileIcon          int              `json:"profile_icon,omitempty"`
+	ServerVersion        int64            `json:"server_version"`
+	ServerClock          int64            `json:"server_clock,omitempty"`
+	ServerStateHash      string           `json:"server_state_hash,omitempty"`
+	BaseStateHash        string           `json:"base_state_hash,omitempty"`
+	ChangesComplete      bool             `json:"changes_complete"`
+	FullSnapshotRequired bool             `json:"full_snapshot_required"`
+	AcceptedOps          []string         `json:"accepted_ops,omitempty"`
+	Ops                  []SyncOp         `json:"ops,omitempty"`
+	Changes              SyncChanges      `json:"changes"`
+	Data                 *CleanData       `json:"data,omitempty"`
+	Logs                 []SyncLog        `json:"logs,omitempty"`
+	Deletes              []SyncLog        `json:"deletes,omitempty"`
+	UpgradeNotice        string           `json:"upgrade_notice,omitempty"`
+	MinSupportedProtocol int              `json:"min_supported_protocol,omitempty"`
+	LatestProtocol       int              `json:"latest_protocol,omitempty"`
+	LegacyClients        []string         `json:"legacy_clients,omitempty"`
+	Diagnostics          *SyncDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type CleanData struct {
-	Habits         []Habit          `json:"habits"`
-	HabitDays      []CleanHabitDay  `json:"habit_days"`
-	Sessions       []Session        `json:"sessions"`
-	MeditationLogs []MeditationLog  `json:"meditation_logs"`
-	Social         []SocialSnapshot `json:"social,omitempty"`
-	Friends        json.RawMessage  `json:"friends,omitempty"`
-	FriendRequests json.RawMessage  `json:"friend_requests,omitempty"`
+	Habits           []Habit           `json:"habits"`
+	HabitDays        []CleanHabitDay   `json:"habit_days"`
+	Sessions         []Session         `json:"sessions"`
+	MeditationLogs   []MeditationLog   `json:"meditation_logs"`
+	Social           []SocialSnapshot  `json:"social,omitempty"`
+	EncryptedRecords []EncryptedRecord `json:"encrypted_records,omitempty"`
+	Friends          json.RawMessage   `json:"friends,omitempty"`
+	FriendRequests   json.RawMessage   `json:"friend_requests,omitempty"`
 }
 
 type CleanHabitDay struct {
@@ -145,6 +149,40 @@ type SocialSnapshot struct {
 }
 
 type SocialCache = SocialSnapshot
+
+type EncryptedRecord struct {
+	Collection string `json:"collection"`
+	ID         string `json:"id"`
+	KeyID      string `json:"key_id,omitempty"`
+	Nonce      string `json:"nonce,omitempty"`
+	Ciphertext string `json:"ciphertext,omitempty"`
+	UpdatedAt  string `json:"updated_at"`
+	DeletedAt  int64  `json:"deleted_at,omitempty"`
+}
+
+type SyncDiagnostics struct {
+	SnapshotReason              string     `json:"snapshot_reason,omitempty"`
+	RequestedSinceServerVersion int64      `json:"requested_since_server_version"`
+	EffectiveSinceServerVersion int64      `json:"effective_since_server_version"`
+	ClientClock                 int64      `json:"client_clock"`
+	CompactedThroughVersion     int64      `json:"compacted_through_version,omitempty"`
+	HasLocalChanges             bool       `json:"has_local_changes"`
+	AcceptedOps                 int        `json:"accepted_ops"`
+	RemoteOps                   int        `json:"remote_ops"`
+	AppliedInput                SyncResult `json:"applied_input"`
+	ReturnedChanges             SyncResult `json:"returned_changes"`
+}
+
+type SyncDiagnosticReport struct {
+	Status                   string         `json:"status"`
+	UserIDHash               string         `json:"user_id_hash"`
+	ServerVersion            int64          `json:"server_version"`
+	StateHash                string         `json:"state_hash"`
+	CompactedThroughVersion  int64          `json:"compacted_through_version"`
+	TableCounts              map[string]int `json:"table_counts"`
+	LegacyClients            []string       `json:"legacy_clients,omitempty"`
+	ActiveWebSocketSupported bool           `json:"active_websocket_supported"`
+}
 
 type DeleteRequest struct {
 	UserIDHash string `json:"user_id_hash"`
@@ -301,11 +339,12 @@ type SessionRound struct {
 }
 
 type SyncResult struct {
-	MeditationLogs int `json:"meditation_logs"`
-	Habits         int `json:"habits"`
-	HabitDays      int `json:"habit_days"`
-	Sessions       int `json:"sessions"`
-	SocialCache    int `json:"social_cache"`
+	MeditationLogs   int `json:"meditation_logs"`
+	Habits           int `json:"habits"`
+	HabitDays        int `json:"habit_days"`
+	Sessions         int `json:"sessions"`
+	SocialCache      int `json:"social_cache"`
+	EncryptedRecords int `json:"encrypted_records,omitempty"`
 }
 
 type UkuProcess struct {

@@ -134,6 +134,10 @@ WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 			jsonFields: map[string]bool{"json": true},
 		},
 		{
+			name:  "encrypted_records",
+			query: `SELECT collection, id, key_id, nonce, ciphertext, updated_at, deleted_at, server_version FROM server_encrypted_records WHERE user_id_hash=?1 ORDER BY collection, id`,
+		},
+		{
 			name:       "sync_ops",
 			query:      `SELECT op_id, client_id, seq, entity_type, entity_id, local_date, op_type, payload_json, created_at, server_version FROM server_sync_ops WHERE user_id_hash=?1 ORDER BY server_version, client_id, seq`,
 			jsonFields: map[string]bool{"payload_json": true},
@@ -372,6 +376,19 @@ CREATE TABLE IF NOT EXISTS server_social_snapshots (
 	updated_at TEXT NOT NULL,
 	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, kind)
+);
+
+CREATE TABLE IF NOT EXISTS server_encrypted_records (
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	collection TEXT NOT NULL,
+	id TEXT NOT NULL,
+	key_id TEXT NOT NULL DEFAULT '',
+	nonce TEXT NOT NULL DEFAULT '',
+	ciphertext TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL,
+	deleted_at INTEGER NOT NULL DEFAULT 0,
+	server_version INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(user_id_hash, collection, id)
 );
 
 CREATE TABLE IF NOT EXISTS server_sync_ops (
@@ -721,6 +738,11 @@ func (s *Store) ApplySyncDetailed(ctx context.Context, req SyncRequest, publicKe
 	if len(req.SocialCache) > 0 {
 		return SyncResult{}, nil, fmt.Errorf("social_cache is server-owned")
 	}
+	for _, item := range req.EncryptedRecords {
+		if !validEncryptedRecord(item) {
+			return SyncResult{}, nil, fmt.Errorf("invalid encrypted record")
+		}
+	}
 
 	result := SyncResult{}
 	deletedHabitIDs := map[string]bool{}
@@ -838,6 +860,13 @@ OR excluded.updated_at = server_habit_days.updated_at`,
 			return SyncResult{}, nil, err
 		}
 		result.Sessions += applied
+	}
+	for _, item := range req.EncryptedRecords {
+		applied, err := upsertEncryptedRecord(ctx, tx, req.UserIDHash, item)
+		if err != nil {
+			return SyncResult{}, nil, err
+		}
+		result.EncryptedRecords += applied
 	}
 	acceptedOps, err := applySyncOps(ctx, tx, req.UserIDHash, req.Ops, &result)
 	if err != nil {
@@ -2253,6 +2282,10 @@ func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion in
 	if err != nil {
 		return changes, 0, err
 	}
+	changes.EncryptedRecords, err = s.snapshotEncryptedRecords(ctx, userID, sinceVersion)
+	if err != nil {
+		return changes, 0, err
+	}
 	version, err := s.currentUserVersion(ctx, userID)
 	if err != nil {
 		return changes, 0, err
@@ -2308,6 +2341,10 @@ func (s *Store) CleanData(ctx context.Context, userID string) (*CleanData, error
 	if err != nil {
 		return nil, err
 	}
+	encryptedRecords, err := s.snapshotEncryptedRecords(ctx, userID, 0)
+	if err != nil {
+		return nil, err
+	}
 	friends := json.RawMessage(`{"friends":[]}`)
 	friendRequests := json.RawMessage(`{"incoming":[],"outgoing":[]}`)
 	for _, item := range social {
@@ -2319,13 +2356,14 @@ func (s *Store) CleanData(ctx context.Context, userID string) (*CleanData, error
 		}
 	}
 	return &CleanData{
-		Habits:         habits,
-		HabitDays:      habitDays,
-		Sessions:       sessions,
-		MeditationLogs: meditationLogs,
-		Social:         social,
-		Friends:        friends,
-		FriendRequests: friendRequests,
+		Habits:           habits,
+		HabitDays:        habitDays,
+		Sessions:         sessions,
+		MeditationLogs:   meditationLogs,
+		Social:           social,
+		EncryptedRecords: encryptedRecords,
+		Friends:          friends,
+		FriendRequests:   friendRequests,
 	}, nil
 }
 
@@ -3059,6 +3097,9 @@ func (s *Store) StateHash(ctx context.Context, userID string) (string, error) {
 	if err := s.hashSocialCache(ctx, h, userID); err != nil {
 		return "", err
 	}
+	if err := s.hashEncryptedRecords(ctx, h, userID); err != nil {
+		return "", err
+	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
@@ -3209,6 +3250,29 @@ ORDER BY kind`, userID)
 			return err
 		}
 		fmt.Fprintf(h, "social_cache\t%s\t%s\t%s\n", kind, payload, updatedAt)
+	}
+	return rows.Err()
+}
+
+func (s *Store) hashEncryptedRecords(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at
+FROM server_encrypted_records
+WHERE user_id_hash=?1
+ORDER BY collection,id`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var collection, id, keyID, nonce, ciphertext, updatedAt string
+		var deletedAt int64
+		if err := rows.Scan(&collection, &id, &keyID, &nonce, &ciphertext, &updatedAt, &deletedAt); err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "encrypted_record\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			collection, id, keyID, nonce, ciphertext, updatedAt, deletedAt)
 	}
 	return rows.Err()
 }
@@ -3391,6 +3455,29 @@ ORDER BY server_version,kind`, userID, sinceVersion)
 	return items, rows.Err()
 }
 
+func (s *Store) snapshotEncryptedRecords(ctx context.Context, userID string, sinceVersion int64) ([]EncryptedRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at
+FROM server_encrypted_records
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,collection,id`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []EncryptedRecord{}
+	for rows.Next() {
+		var item EncryptedRecord
+		if err := rows.Scan(&item.Collection, &item.ID, &item.KeyID, &item.Nonce,
+			&item.Ciphertext, &item.UpdatedAt, &item.DeletedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func upsertUser(ctx context.Context, tx *sql.Tx, userID string, publicKey []byte) error {
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_users(user_id_hash,public_key)
@@ -3429,6 +3516,7 @@ func replaceUserData(ctx context.Context, tx *sql.Tx, userID string) error {
 		`DELETE FROM server_habits WHERE user_id_hash=?1`,
 		`DELETE FROM server_meditation_logs WHERE user_id_hash=?1`,
 		`DELETE FROM server_social_snapshots WHERE user_id_hash=?1`,
+		`DELETE FROM server_encrypted_records WHERE user_id_hash=?1`,
 	} {
 		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
 			return err
@@ -3540,6 +3628,30 @@ func (s *Store) SetSocialCacheJSON(ctx context.Context, userID, kind string, pay
 	return applied, nil
 }
 
+func upsertEncryptedRecord(ctx context.Context, tx *sql.Tx, userID string, item EncryptedRecord) (int, error) {
+	version, err := nextUserVersion(ctx, tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `
+INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
+	key_id=excluded.key_id,
+	nonce=excluded.nonce,
+	ciphertext=excluded.ciphertext,
+	updated_at=excluded.updated_at,
+	deleted_at=excluded.deleted_at,
+	server_version=excluded.server_version
+WHERE excluded.updated_at >= server_encrypted_records.updated_at`,
+		userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
+		normalizeTime(item.UpdatedAt, ""), item.DeletedAt, version)
+	if err != nil {
+		return 0, err
+	}
+	return rowsAffected(res), nil
+}
+
 func deleteHabit(ctx context.Context, tx *sql.Tx, userID string, habit Habit) (int, error) {
 	updatedAt := normalizeTime(habit.UpdatedAt, "")
 	res, err := tx.ExecContext(ctx, `
@@ -3639,6 +3751,84 @@ WHERE user_id_hash=?1`, userID).Scan(&version)
 		return 0, nil
 	}
 	return version, err
+}
+
+func (s *Store) Health(ctx context.Context) error {
+	if err := s.db.PingContext(ctx); err != nil {
+		return err
+	}
+	var ok string
+	if err := s.db.QueryRowContext(ctx, `PRAGMA quick_check`).Scan(&ok); err != nil {
+		return err
+	}
+	if ok != "ok" {
+		return fmt.Errorf("sqlite quick_check: %s", ok)
+	}
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='server_users')`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return fmt.Errorf("schema not migrated")
+	}
+	return nil
+}
+
+func (s *Store) SyncDiagnosticReport(ctx context.Context, userID string) (SyncDiagnosticReport, error) {
+	version, err := s.currentUserVersion(ctx, userID)
+	if err != nil {
+		return SyncDiagnosticReport{}, err
+	}
+	hash, err := s.StateHash(ctx, userID)
+	if err != nil {
+		return SyncDiagnosticReport{}, err
+	}
+	_, compactedThrough, err := s.SyncOpsCompacted(ctx, userID, version)
+	if err != nil {
+		return SyncDiagnosticReport{}, err
+	}
+	counts, err := s.accountTableCounts(ctx, userID)
+	if err != nil {
+		return SyncDiagnosticReport{}, err
+	}
+	legacyClients, err := s.LegacyClients(ctx, userID, 3)
+	if err != nil {
+		return SyncDiagnosticReport{}, err
+	}
+	return SyncDiagnosticReport{
+		Status:                   "ok",
+		UserIDHash:               userID,
+		ServerVersion:            version,
+		StateHash:                hash,
+		CompactedThroughVersion:  compactedThrough,
+		TableCounts:              counts,
+		LegacyClients:            legacyClients,
+		ActiveWebSocketSupported: true,
+	}, nil
+}
+
+func (s *Store) accountTableCounts(ctx context.Context, userID string) (map[string]int, error) {
+	tables := []string{
+		"server_habits",
+		"server_habit_days",
+		"server_sessions",
+		"server_session_rounds",
+		"server_meditation_logs",
+		"server_social_snapshots",
+		"server_encrypted_records",
+		"server_sync_ops",
+		"server_clients",
+	}
+	counts := make(map[string]int, len(tables))
+	for _, table := range tables {
+		var n int
+		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE user_id_hash=?1", userID).Scan(&n); err != nil {
+			return nil, err
+		}
+		counts[table] = n
+	}
+	return counts, nil
 }
 
 func validateUserIDForPublicKey(userID string, publicKey []byte) error {

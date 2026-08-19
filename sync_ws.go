@@ -73,6 +73,16 @@ func (h *syncHub) count(userID string) int {
 	return len(h.subs[userID])
 }
 
+func (h *syncHub) total() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, subs := range h.subs {
+		n += len(subs)
+	}
+	return n
+}
+
 func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -80,22 +90,27 @@ func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := s.authenticateWebSocket(r)
 	if err != nil {
+		s.metrics.webSocketRejected.Add(1)
 		writeAuthError(w, err)
 		return
 	}
 	if !s.allowRequest(r, "ws:ip:"+clientAddress(r), 120, time.Minute) ||
 		!s.allowRequest(r, "ws:user:"+userID, 40, time.Minute) {
+		s.metrics.webSocketRejected.Add(1)
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
 	if s.syncHub.count(userID) >= 8 {
+		s.metrics.webSocketRejected.Add(1)
 		writeError(w, http.StatusTooManyRequests, "too many websocket connections")
 		return
 	}
 	conn, rw, err := acceptWebSocket(w, r)
 	if err != nil {
+		s.metrics.webSocketRejected.Add(1)
 		return
 	}
+	s.metrics.webSocketAccepted.Add(1)
 	defer conn.Close()
 
 	events := s.syncHub.subscribe(userID)

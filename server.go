@@ -23,6 +23,7 @@ var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
 var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
 var ukuIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{4,128}$`)
 var ksyncNamespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
+var encryptedRecordIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
 
 const (
 	ksyncSignatureContext      = "ksync-sync-v1"
@@ -36,6 +37,7 @@ type Server struct {
 	verifier   Verifier
 	syncHub    *syncHub
 	limiter    *RateLimiter
+	metrics    *ServerMetrics
 }
 
 func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
@@ -46,6 +48,7 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 		verifier:   verifier,
 		syncHub:    newSyncHub(),
 		limiter:    NewRateLimiter(),
+		metrics:    &ServerMetrics{},
 	}
 }
 
@@ -54,6 +57,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /", s.handleDocs)
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /readyz", s.handleReady)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	mux.HandleFunc("GET /api/v1/sync/diagnostics", s.handleSyncDiagnostics)
 	mux.HandleFunc("GET /api/v1/sync/challenge", s.handleChallenge)
 	mux.HandleFunc("GET /api/v1/sync/ws", s.handleSyncWebSocket)
 	mux.HandleFunc("POST /api/v1/sync/login", s.handleLogin)
@@ -83,6 +89,49 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	checks := map[string]string{
+		"database":     "ok",
+		"token_secret": "ok",
+		"verifier":     "ok",
+	}
+	status := http.StatusOK
+	if s.cfg.TokenSecretEphemeral || len(s.cfg.TokenSecret) < 32 {
+		checks["token_secret"] = "ephemeral"
+		status = http.StatusServiceUnavailable
+	}
+	if s.verifier == nil {
+		checks["verifier"] = "missing"
+		status = http.StatusServiceUnavailable
+	}
+	if err := s.store.Health(r.Context()); err != nil {
+		checks["database"] = err.Error()
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]any{
+		"status": statusText(status == http.StatusOK),
+		"checks": checks,
+	})
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	s.metrics.writePrometheus(w, s.syncHub.total())
+}
+
+func (s *Server) handleSyncDiagnostics(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	report, err := s.store.SyncDiagnosticReport(r.Context(), userID)
+	if err != nil {
+		slog.Error("sync diagnostics", "user", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "diagnostics failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	userID := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("user_id")))
 	if !validUserID(userID) {
@@ -108,6 +157,13 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
+	s.metrics.syncRequests.Add(1)
+	syncOK := false
+	defer func() {
+		if !syncOK {
+			s.metrics.syncFailures.Add(1)
+		}
+	}()
 	_, req, err := readSyncRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -151,23 +207,28 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	changesComplete := true
 	sinceVersion := req.SinceServerVersion
 	recordedClientClock := req.ClientClock
+	snapshotReason := ""
+	compactedThrough := int64(0)
 	if req.LastServerStateHash != "" &&
 		!strings.EqualFold(req.LastServerStateHash, baseHash) &&
 		!req.FullSyncRequested {
 		fullSnapshotRequired = true
 		changesComplete = false
 		sinceVersion = 0
+		snapshotReason = "state_hash_mismatch"
 	} else if req.ProtocolVersion >= 2 && !req.FullSyncRequested {
-		compacted, _, err := s.store.SyncOpsCompacted(r.Context(), req.UserIDHash, req.ClientClock)
+		compacted, through, err := s.store.SyncOpsCompacted(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
 			slog.Error("check sync op compaction", "user", req.UserIDHash, "error", err)
 			writeError(w, http.StatusInternalServerError, "compaction check failed")
 			return
 		}
+		compactedThrough = through
 		if compacted {
 			fullSnapshotRequired = true
 			changesComplete = false
 			sinceVersion = 0
+			snapshotReason = "sync_ops_compacted"
 		} else {
 			result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
 			if err != nil {
@@ -191,6 +252,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "sync failed")
 			return
 		}
+	}
+	if fullSnapshotRequired {
+		s.metrics.syncFullSnapshots.Add(1)
 	}
 
 	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, sinceVersion)
@@ -262,6 +326,18 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		Changes:              changes,
 		MinSupportedProtocol: 1,
 		LatestProtocol:       3,
+		Diagnostics: &SyncDiagnostics{
+			SnapshotReason:              snapshotReason,
+			RequestedSinceServerVersion: req.SinceServerVersion,
+			EffectiveSinceServerVersion: sinceVersion,
+			ClientClock:                 req.ClientClock,
+			CompactedThroughVersion:     compactedThrough,
+			HasLocalChanges:             syncRequestHasLocalChanges(req),
+			AcceptedOps:                 len(acceptedOps),
+			RemoteOps:                   len(remoteOps),
+			AppliedInput:                result,
+			ReturnedChanges:             syncChangesResult(changes),
+		},
 	}
 	if req.ProtocolVersion >= 3 {
 		if err := s.store.AutoMigrateAccountForProtocol(r.Context(), req.UserIDHash, req.ProtocolVersion); err != nil {
@@ -304,6 +380,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		response.Changes.Sessions = response.Data.Sessions
 		response.Changes.MeditationLogs = response.Data.MeditationLogs
 		response.Changes.SocialCache = response.Data.Social
+		response.Changes.EncryptedRecords = response.Data.EncryptedRecords
 		response.Logs, err = s.store.SyncLogs(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
 			slog.Error("load sync logs", "user", req.UserIDHash, "error", err)
@@ -323,6 +400,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if result.EncryptedRecords > 0 {
+		s.metrics.syncEncryptedRecords.Add(uint64(result.EncryptedRecords))
+	}
+	syncOK = true
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -332,6 +413,7 @@ func syncRequestHasLocalChanges(req SyncRequest) bool {
 		len(req.Habits) > 0 ||
 		len(req.HabitDays) > 0 ||
 		len(req.Sessions) > 0 ||
+		len(req.EncryptedRecords) > 0 ||
 		len(req.Ops) > 0
 }
 
@@ -858,7 +940,19 @@ func syncResultApplied(result SyncResult) bool {
 		result.Habits > 0 ||
 		result.HabitDays > 0 ||
 		result.Sessions > 0 ||
-		result.SocialCache > 0
+		result.SocialCache > 0 ||
+		result.EncryptedRecords > 0
+}
+
+func syncChangesResult(changes SyncChanges) SyncResult {
+	return SyncResult{
+		MeditationLogs:   len(changes.MeditationLogs),
+		Habits:           len(changes.Habits),
+		HabitDays:        len(changes.HabitDays),
+		Sessions:         len(changes.Sessions),
+		SocialCache:      len(changes.SocialCache),
+		EncryptedRecords: len(changes.EncryptedRecords),
+	}
 }
 
 func (s *Server) cacheSocialSnapshot(ctx context.Context, userID, kind string, value any) {
@@ -895,6 +989,22 @@ func validKsyncNamespace(value string) bool {
 	return ksyncNamespacePattern.MatchString(value)
 }
 
+func validEncryptedRecord(item EncryptedRecord) bool {
+	if !validKsyncNamespace(strings.TrimSpace(item.Collection)) ||
+		!encryptedRecordIDPattern.MatchString(strings.TrimSpace(item.ID)) {
+		return false
+	}
+	if strings.TrimSpace(item.UpdatedAt) == "" {
+		return false
+	}
+	if item.DeletedAt == 0 && strings.TrimSpace(item.Ciphertext) == "" {
+		return false
+	}
+	return len(item.Ciphertext) <= 262144 &&
+		len(item.Nonce) <= 256 &&
+		len(item.KeyID) <= 128
+}
+
 func validLeaderboardMetric(practice, metric string) bool {
 	switch practice {
 	case "whm":
@@ -906,6 +1016,13 @@ func validLeaderboardMetric(practice, metric string) bool {
 	default:
 		return false
 	}
+}
+
+func statusText(ok bool) string {
+	if ok {
+		return "ok"
+	}
+	return "not_ready"
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -1146,6 +1263,13 @@ func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]b
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
 	req.PublicKey = strings.TrimSpace(req.PublicKey)
 	req.ClientID = strings.TrimSpace(req.ClientID)
+	for i := range req.EncryptedRecords {
+		req.EncryptedRecords[i].Collection = strings.TrimSpace(req.EncryptedRecords[i].Collection)
+		req.EncryptedRecords[i].ID = strings.TrimSpace(req.EncryptedRecords[i].ID)
+		req.EncryptedRecords[i].KeyID = strings.TrimSpace(req.EncryptedRecords[i].KeyID)
+		req.EncryptedRecords[i].Nonce = strings.TrimSpace(req.EncryptedRecords[i].Nonce)
+		req.EncryptedRecords[i].UpdatedAt = strings.TrimSpace(req.EncryptedRecords[i].UpdatedAt)
+	}
 	return body, req, nil
 }
 
@@ -1635,7 +1759,7 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Ksync-User, X-Ksync-Signature, X-Inbe-User, X-Inbe-Signature")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -1649,7 +1773,11 @@ func (s *Server) allowRequest(r *http.Request, key string, limit int, window tim
 	if s.limiter == nil {
 		return true
 	}
-	return s.limiter.Allow(key, limit, window)
+	allowed := s.limiter.Allow(key, limit, window)
+	if !allowed {
+		s.metrics.rateLimitedRequests.Add(1)
+	}
+	return allowed
 }
 
 func allowedCORSOrigin(origin string) string {

@@ -327,6 +327,12 @@ type Session struct {
 	Activity   int            `json:"activity"`
 	Source     string         `json:"source"`
 	RoundsHash string         `json:"rounds_hash"`
+	MoodBefore int            `json:"mood_before"`
+	MoodAfter  int            `json:"mood_after"`
+	Energy     int            `json:"energy"`
+	Stress     int            `json:"stress"`
+	Note       string         `json:"note"`
+	Tags       string         `json:"tags"`
 	DeletedAt  int64          `json:"deleted_at"`
 	UpdatedAt  string         `json:"updated_at"`
 	Rounds     []SessionRound `json:"rounds,omitempty"`

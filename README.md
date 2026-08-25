@@ -142,7 +142,7 @@ SQLite tables mirror the app data:
 - `server_meditation_logs`
 - `server_habits`
 - `server_habit_days`
-- `server_sessions`
+- `server_sessions` including session check-in fields such as mood, energy, stress, notes, and tags
 - `server_session_rounds`
 - `server_friend_requests`
 - `server_friendships`

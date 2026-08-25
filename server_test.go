@@ -164,6 +164,87 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	assertCount(t, store, "server_session_rounds", 0)
 }
 
+func TestSessionCheckinFieldsSyncRoundTrip(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x43)
+
+	writeBody := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"client-a","sessions":[{"id":"session-mood-1","started_at":"2026-08-25T10:00:00Z","local_date":20260825,"topic":"0","activity":1,"source":"results","rounds_hash":"mood-hash","mood_before":2,"mood_after":5,"energy":4,"stress":1,"note":"calm and clear","tags":"breath,morning","deleted_at":0,"updated_at":"2026-08-25T10:15:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":900}]}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, writeBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("write status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	var stored struct {
+		moodBefore int
+		moodAfter  int
+		energy     int
+		stress     int
+		note       string
+		tags       string
+	}
+	if err := store.db.QueryRow(`
+	SELECT mood_before,mood_after,energy,stress,note,tags
+	FROM server_sessions
+	WHERE user_id_hash=?1 AND id='session-mood-1'`, identity.UserID).Scan(
+		&stored.moodBefore, &stored.moodAfter, &stored.energy, &stored.stress,
+		&stored.note, &stored.tags); err != nil {
+		t.Fatal(err)
+	}
+	if stored.moodBefore != 2 || stored.moodAfter != 5 || stored.energy != 4 ||
+		stored.stress != 1 || stored.note != "calm and clear" || stored.tags != "breath,morning" {
+		t.Fatalf("stored checkin fields = %#v", stored)
+	}
+
+	readBody := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"client-b","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, readBody)
+	if res.Code != http.StatusOK {
+		t.Fatalf("read status = %d body=%s", res.Code, res.Body.String())
+	}
+	var read SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Changes.Sessions) != 1 {
+		t.Fatalf("sessions = %#v", read.Changes.Sessions)
+	}
+	got := read.Changes.Sessions[0]
+	if got.MoodBefore != 2 || got.MoodAfter != 5 || got.Energy != 4 ||
+		got.Stress != 1 || got.Note != "calm and clear" || got.Tags != "breath,morning" {
+		t.Fatalf("legacy sync session checkin fields = %#v", got)
+	}
+
+	v3Body := []byte(`{"protocol_version":3,"user_id_hash":"` + identity.UserID + `","client_id":"client-c","since_server_version":0}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, v3Body)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v3 status = %d body=%s", res.Code, res.Body.String())
+	}
+	var v3 SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &v3); err != nil {
+		t.Fatal(err)
+	}
+	if v3.Data == nil || len(v3.Data.Sessions) != 1 {
+		t.Fatalf("v3 sessions = %#v body=%s", v3.Data, res.Body.String())
+	}
+	got = v3.Data.Sessions[0]
+	if got.MoodBefore != 2 || got.MoodAfter != 5 || got.Energy != 4 ||
+		got.Stress != 1 || got.Note != "calm and clear" || got.Tags != "breath,morning" {
+		t.Fatalf("v3 session checkin fields = %#v", got)
+	}
+
+	exported, err := store.ExportAccount(t.Context(), identity.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := exported.Tables["sessions"]
+	if len(sessions) != 1 || sessions[0]["mood_before"] != int64(2) ||
+		sessions[0]["mood_after"] != int64(5) || sessions[0]["energy"] != int64(4) ||
+		sessions[0]["stress"] != int64(1) || sessions[0]["note"] != "calm and clear" ||
+		sessions[0]["tags"] != "breath,morning" {
+		t.Fatalf("exported session fields = %#v", sessions)
+	}
+}
+
 func TestLegacyInbeSignedLoginDeleteAndBearerHeaders(t *testing.T) {
 	server, store, verifier := testServer(t)
 	handler := server.Routes()
@@ -1383,6 +1464,81 @@ CREATE TABLE server_meditation_logs (
 	}
 }
 
+func TestMigrateSessionCheckinColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "old-ksync-sessions.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID := strings.Repeat("a", 64)
+	_, err = db.Exec(`
+	CREATE TABLE server_users (
+		user_id_hash TEXT PRIMARY KEY,
+		public_key BLOB NOT NULL,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE server_sessions (
+		user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+		id TEXT NOT NULL,
+		started_at TEXT NOT NULL,
+		local_date INTEGER NOT NULL DEFAULT 0,
+		topic TEXT NOT NULL DEFAULT '',
+		activity INTEGER NOT NULL DEFAULT 0,
+		source TEXT NOT NULL DEFAULT '',
+		rounds_hash TEXT NOT NULL DEFAULT '',
+		deleted_at INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL,
+		server_version INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(user_id_hash, id)
+	);`)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_users(user_id_hash, public_key) VALUES(?1, X'01')`, userID); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+	INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at,server_version)
+	VALUES(?1,'legacy-session','2026-08-25T10:00:00Z',20260825,'0',1,'legacy','hash',0,'2026-08-25T10:00:00Z',1);`, userID)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	wantColumns := []string{"mood_before", "mood_after", "energy", "stress", "note", "tags"}
+	for _, column := range wantColumns {
+		if !testTableHasColumn(t, store, "server_sessions", column) {
+			t.Fatalf("server_sessions missing migrated column %q", column)
+		}
+	}
+
+	var session Session
+	rows, err := store.snapshotSessions(t.Context(), userID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("snapshot sessions = %#v", rows)
+	}
+	session = rows[0]
+	if session.MoodBefore != 0 || session.MoodAfter != 0 || session.Energy != 0 ||
+		session.Stress != 0 || session.Note != "" || session.Tags != "" {
+		t.Fatalf("legacy session defaults = %#v", session)
+	}
+}
+
 func TestAliasRejectsCrossAccountAndMissingAccount(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -2408,4 +2564,30 @@ func assertCount(t *testing.T, store *Store, table string, want int) {
 	if got != want {
 		t.Fatalf("%s count = %d, want %d", table, got, want)
 	}
+}
+
+func testTableHasColumn(t *testing.T, store *Store, table, column string) bool {
+	t.Helper()
+	rows, err := store.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatal(err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return false
 }

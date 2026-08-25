@@ -118,7 +118,7 @@ WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 		},
 		{
 			name:  "sessions",
-			query: `SELECT id, started_at, local_date, topic, activity, source, rounds_hash, deleted_at, updated_at, server_version FROM server_sessions WHERE user_id_hash=?1 ORDER BY started_at DESC, id`,
+			query: `SELECT id, started_at, local_date, topic, activity, source, rounds_hash, mood_before, mood_after, energy, stress, note, tags, deleted_at, updated_at, server_version FROM server_sessions WHERE user_id_hash=?1 ORDER BY started_at DESC, id`,
 		},
 		{
 			name:  "session_rounds",
@@ -344,20 +344,26 @@ CREATE TABLE IF NOT EXISTS server_habit_days (
 	PRIMARY KEY(user_id_hash, habit_id, local_date)
 );
 
-CREATE TABLE IF NOT EXISTS server_sessions (
-	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
-	id TEXT NOT NULL,
-	started_at TEXT NOT NULL,
-	local_date INTEGER NOT NULL DEFAULT 0,
-	topic TEXT NOT NULL DEFAULT '',
-	activity INTEGER NOT NULL DEFAULT 0,
-	source TEXT NOT NULL DEFAULT '',
-	rounds_hash TEXT NOT NULL DEFAULT '',
-	deleted_at INTEGER NOT NULL DEFAULT 0,
-	updated_at TEXT NOT NULL,
-	server_version INTEGER NOT NULL DEFAULT 0,
-	PRIMARY KEY(user_id_hash, id)
-);
+	CREATE TABLE IF NOT EXISTS server_sessions (
+		user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+		id TEXT NOT NULL,
+		started_at TEXT NOT NULL,
+		local_date INTEGER NOT NULL DEFAULT 0,
+		topic TEXT NOT NULL DEFAULT '',
+		activity INTEGER NOT NULL DEFAULT 0,
+		source TEXT NOT NULL DEFAULT '',
+		rounds_hash TEXT NOT NULL DEFAULT '',
+		mood_before INTEGER NOT NULL DEFAULT 0,
+		mood_after INTEGER NOT NULL DEFAULT 0,
+		energy INTEGER NOT NULL DEFAULT 0,
+		stress INTEGER NOT NULL DEFAULT 0,
+		note TEXT NOT NULL DEFAULT '',
+		tags TEXT NOT NULL DEFAULT '',
+		deleted_at INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL,
+		server_version INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(user_id_hash, id)
+	);
 
 CREATE TABLE IF NOT EXISTS server_session_rounds (
 	user_id_hash TEXT NOT NULL,
@@ -547,6 +553,12 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 		`ALTER TABLE server_habit_days ADD COLUMN count INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE server_habit_days SET count=CASE WHEN completed!=0 THEN 1 ELSE 0 END WHERE count=0`,
 		`ALTER TABLE server_sessions ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_sessions ADD COLUMN mood_before INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_sessions ADD COLUMN mood_after INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_sessions ADD COLUMN energy INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_sessions ADD COLUMN stress INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_sessions ADD COLUMN note TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE server_sessions ADD COLUMN tags TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE server_social_snapshots ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_users ADD COLUMN alias TEXT`,
 		`ALTER TABLE server_users ADD COLUMN profile_icon INTEGER NOT NULL DEFAULT 0`,
@@ -2424,10 +2436,11 @@ ORDER BY hd.local_date DESC,h.sort_order,hd.habit_id`, userID)
 
 func (s *Store) cleanSessions(ctx context.Context, userID string) ([]Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at
-FROM server_sessions
-WHERE user_id_hash=?1 AND deleted_at=0
-ORDER BY started_at DESC,id`, userID)
+	SELECT id,started_at,local_date,topic,activity,source,rounds_hash,
+	       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at
+	FROM server_sessions
+	WHERE user_id_hash=?1 AND deleted_at=0
+	ORDER BY started_at DESC,id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -2437,7 +2450,9 @@ ORDER BY started_at DESC,id`, userID)
 	for rows.Next() {
 		var item Session
 		if err := rows.Scan(&item.ID, &item.StartedAt, &item.LocalDate, &item.Topic,
-			&item.Activity, &item.Source, &item.RoundsHash, &item.DeletedAt, &item.UpdatedAt); err != nil {
+			&item.Activity, &item.Source, &item.RoundsHash, &item.MoodBefore,
+			&item.MoodAfter, &item.Energy, &item.Stress, &item.Note, &item.Tags,
+			&item.DeletedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -3155,25 +3170,28 @@ ORDER BY habit_id,local_date`, userID)
 func (s *Store) hashSessions(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
 	sessionIDs := []string{}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at
-FROM server_sessions
-WHERE user_id_hash=?1
-ORDER BY id`, userID)
+	SELECT id,started_at,local_date,topic,activity,source,rounds_hash,
+	       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at
+	FROM server_sessions
+	WHERE user_id_hash=?1
+	ORDER BY id`, userID)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var id, startedAt, topic, source, roundsHash, updatedAt string
-		var localDate, activity int
+		var id, startedAt, topic, source, roundsHash, note, tags, updatedAt string
+		var localDate, activity, moodBefore, moodAfter, energy, stress int
 		var deletedAt int64
 		if err := rows.Scan(&id, &startedAt, &localDate, &topic, &activity, &source,
-			&roundsHash, &deletedAt, &updatedAt); err != nil {
+			&roundsHash, &moodBefore, &moodAfter, &energy, &stress, &note, &tags,
+			&deletedAt, &updatedAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "session\t%s\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%s\n",
-			id, startedAt, localDate, topic, activity, source, roundsHash, deletedAt, updatedAt)
+		fmt.Fprintf(h, "session\t%s\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%d\t%s\n",
+			id, startedAt, localDate, topic, activity, source, roundsHash,
+			moodBefore, moodAfter, energy, stress, note, tags, deletedAt, updatedAt)
 		sessionIDs = append(sessionIDs, id)
 	}
 	if err := rows.Err(); err != nil {
@@ -3351,10 +3369,11 @@ ORDER BY server_version,habit_id,local_date`, userID, sinceVersion)
 
 func (s *Store) snapshotSessions(ctx context.Context, userID string, sinceVersion int64) ([]Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at
-FROM server_sessions
-WHERE user_id_hash=?1 AND server_version>?2
-ORDER BY server_version,started_at,id`, userID, sinceVersion)
+	SELECT id,started_at,local_date,topic,activity,source,rounds_hash,
+	       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at
+	FROM server_sessions
+	WHERE user_id_hash=?1 AND server_version>?2
+	ORDER BY server_version,started_at,id`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -3364,7 +3383,9 @@ ORDER BY server_version,started_at,id`, userID, sinceVersion)
 	for rows.Next() {
 		var item Session
 		if err := rows.Scan(&item.ID, &item.StartedAt, &item.LocalDate, &item.Topic,
-			&item.Activity, &item.Source, &item.RoundsHash, &item.DeletedAt, &item.UpdatedAt); err != nil {
+			&item.Activity, &item.Source, &item.RoundsHash, &item.MoodBefore,
+			&item.MoodAfter, &item.Energy, &item.Stress, &item.Note, &item.Tags,
+			&item.DeletedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -3532,21 +3553,30 @@ func upsertSession(ctx context.Context, tx *sql.Tx, userID string, session Sessi
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,rounds_hash,deleted_at,updated_at,server_version)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
-ON CONFLICT(user_id_hash,id) DO UPDATE SET
-	started_at=excluded.started_at,
-	local_date=excluded.local_date,
-	topic=excluded.topic,
-	activity=excluded.activity,
-	source=excluded.source,
-	rounds_hash=excluded.rounds_hash,
-	deleted_at=excluded.deleted_at,
-	updated_at=excluded.updated_at,
-	server_version=excluded.server_version
-WHERE excluded.updated_at >= server_sessions.updated_at`,
+	INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,
+		rounds_hash,mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at,server_version)
+	VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+	ON CONFLICT(user_id_hash,id) DO UPDATE SET
+		started_at=excluded.started_at,
+		local_date=excluded.local_date,
+		topic=excluded.topic,
+		activity=excluded.activity,
+		source=excluded.source,
+		rounds_hash=excluded.rounds_hash,
+		mood_before=excluded.mood_before,
+		mood_after=excluded.mood_after,
+		energy=excluded.energy,
+		stress=excluded.stress,
+		note=excluded.note,
+		tags=excluded.tags,
+		deleted_at=excluded.deleted_at,
+		updated_at=excluded.updated_at,
+		server_version=excluded.server_version
+	WHERE excluded.updated_at >= server_sessions.updated_at`,
 		userID, session.ID, normalizeTime(session.StartedAt, ""), session.LocalDate, session.Topic,
-		session.Activity, session.Source, session.RoundsHash, session.DeletedAt, normalizeTime(session.UpdatedAt, ""), version)
+		session.Activity, session.Source, session.RoundsHash, session.MoodBefore,
+		session.MoodAfter, session.Energy, session.Stress, session.Note, session.Tags,
+		session.DeletedAt, normalizeTime(session.UpdatedAt, ""), version)
 	if err != nil {
 		return 0, err
 	}

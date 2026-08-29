@@ -352,6 +352,44 @@ func TestSyncReturnsRemoteChangesSinceVersion(t *testing.T) {
 	}
 }
 
+func TestProtocolV4AdvertisesDualWriteTransition(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x4a)
+
+	body := []byte(`{"protocol_version":4,"user_id_hash":"` + identity.UserID + `","client_id":"test-client-v4","client_capabilities":["v4-encrypted-records"],"encrypted_records":[{"collection":"inbe.habits","id":"habit-1","key_id":"inbe-v4-main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
+	if res.Code != http.StatusOK {
+		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.LatestProtocol != ksyncLatestProtocol || payload.ProtocolVersion != 4 {
+		t.Fatalf("unexpected protocol response: %#v", payload)
+	}
+	if payload.TransitionMode != "dual_write" {
+		t.Fatalf("transition mode = %q, want dual_write", payload.TransitionMode)
+	}
+	if !containsString(payload.ServerCapabilities, "v4-encrypted-records") ||
+		!containsString(payload.ServerCapabilities, "v4-dual-write-transition") {
+		t.Fatalf("missing v4 capabilities: %#v", payload.ServerCapabilities)
+	}
+	if payload.Applied.EncryptedRecords != 1 || len(payload.Changes.EncryptedRecords) != 1 {
+		t.Fatalf("encrypted v4 record was not applied and returned: %#v", payload)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestHashMismatchRequiresFullSnapshotAfterApplyingUpload(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()

@@ -28,7 +28,15 @@ var encryptedRecordIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
 const (
 	ksyncSignatureContext      = "ksync-sync-v1"
 	legacyInbeSignatureContext = "inbe-sync-v1"
+	ksyncLatestProtocol        = 4
 )
+
+var ksyncServerCapabilities = []string{
+	"v3-typed-sync",
+	"v4-encrypted-records",
+	"v4-dual-write-transition",
+	"pub-relay",
+}
 
 type Server struct {
 	cfg        Config
@@ -312,6 +320,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	response := SyncResponse{
 		ProtocolVersion:      req.ProtocolVersion,
 		Status:               "ok",
+		ServerCapabilities:   ksyncServerCapabilities,
+		TransitionMode:       syncTransitionMode(req),
 		Applied:              result,
 		AccountAlias:         accountAlias,
 		ProfileIcon:          profileIcon,
@@ -325,7 +335,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		Ops:                  remoteOps,
 		Changes:              changes,
 		MinSupportedProtocol: 1,
-		LatestProtocol:       3,
+		LatestProtocol:       ksyncLatestProtocol,
 		Diagnostics: &SyncDiagnostics{
 			SnapshotReason:              snapshotReason,
 			RequestedSinceServerVersion: req.SinceServerVersion,
@@ -405,6 +415,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	syncOK = true
 	writeJSON(w, http.StatusOK, response)
+}
+
+func syncTransitionMode(req SyncRequest) string {
+	if req.ProtocolVersion >= 4 {
+		return "dual_write"
+	}
+	return ""
 }
 
 func syncRequestHasLocalChanges(req SyncRequest) bool {

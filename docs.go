@@ -328,7 +328,8 @@ func openAPISpec() map[string]any {
 					"type":     "object",
 					"required": []string{"user_id_hash"},
 					"properties": map[string]any{
-						"protocol_version":     map[string]any{"type": "integer", "description": "Use 3 for clean hierarchical data responses. Versions 1 and 2 remain supported for legacy clients."},
+						"protocol_version":     map[string]any{"type": "integer", "description": "Use 4 for encrypted-record dual-write transition support. Version 3 clean hierarchical data responses and versions 1-2 legacy clients remain supported."},
+						"client_capabilities":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 						"user_id_hash":         map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 						"client_id":            map[string]any{"type": "string"},
 						"client_clock":         map[string]any{"type": "integer"},
@@ -346,6 +347,8 @@ func openAPISpec() map[string]any {
 					"properties": map[string]any{
 						"protocol_version":       map[string]any{"type": "integer"},
 						"status":                 map[string]any{"type": "string"},
+						"server_capabilities":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"transition_mode":        map[string]any{"type": "string"},
 						"server_version":         map[string]any{"type": "integer"},
 						"server_clock":           map[string]any{"type": "integer"},
 						"changes":                map[string]any{"type": "object", "description": "Legacy v1/v2 table-array changes."},

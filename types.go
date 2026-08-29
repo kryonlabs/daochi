@@ -49,6 +49,7 @@ type SyncRequest struct {
 	ProtocolVersion     int               `json:"protocol_version,omitempty"`
 	UserIDHash          string            `json:"user_id_hash"`
 	ClientID            string            `json:"client_id"`
+	ClientCapabilities  []string          `json:"client_capabilities,omitempty"`
 	ClientClock         int64             `json:"client_clock,omitempty"`
 	PublicKey           string            `json:"public_key,omitempty"`
 	SinceServerVersion  int64             `json:"since_server_version,omitempty"`
@@ -77,6 +78,8 @@ type SyncChanges struct {
 type SyncResponse struct {
 	ProtocolVersion      int              `json:"protocol_version,omitempty"`
 	Status               string           `json:"status"`
+	ServerCapabilities   []string         `json:"server_capabilities,omitempty"`
+	TransitionMode       string           `json:"transition_mode,omitempty"`
 	Applied              SyncResult       `json:"applied"`
 	AccountAlias         string           `json:"account_alias,omitempty"`
 	ProfileIcon          int              `json:"profile_icon,omitempty"`

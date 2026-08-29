@@ -2635,3 +2635,40 @@ func testTableHasColumn(t *testing.T, store *Store, table, column string) bool {
 	}
 	return false
 }
+
+func TestUkuVoteDisplayNameUniqueness(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x61)
+	other := newTestIdentity(t, handler, 0x62)
+
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"name-process","type":"consent","title":"Pick a name?","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
+	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, body)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	vote := []byte(`{"user_id_hash":"` + identity.UserID + `","display_name":"wao","scores":{"status-quo":1},"reason":"fine"}`)
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/name-process/votes", identity.UserID, identity.Token, vote)
+	if res.Code != http.StatusOK {
+		t.Fatalf("first vote status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	duplicate := []byte(`{"user_id_hash":"` + other.UserID + `","display_name":"Wao","scores":{"status-quo":2},"reason":"also fine"}`)
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/name-process/votes", other.UserID, other.Token, duplicate)
+	if res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "display name taken") {
+		t.Fatalf("duplicate name status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	renamed := []byte(`{"user_id_hash":"` + other.UserID + `","display_name":"wao-2","scores":{"status-quo":2},"reason":"also fine"}`)
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/name-process/votes", other.UserID, other.Token, renamed)
+	if res.Code != http.StatusOK {
+		t.Fatalf("renamed vote status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	update := []byte(`{"user_id_hash":"` + identity.UserID + `","display_name":"wao","scores":{"status-quo":3},"reason":"still fine"}`)
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/name-process/votes", identity.UserID, identity.Token, update)
+	if res.Code != http.StatusOK {
+		t.Fatalf("own-name update status = %d body=%s", res.Code, res.Body.String())
+	}
+}

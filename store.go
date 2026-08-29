@@ -25,6 +25,7 @@ type Store struct {
 
 var ErrSyncUserNotFound = errors.New("sync user not found")
 var ErrUkuVoteReasonRequired = errors.New("vote reason required")
+var ErrUkuDisplayNameTaken = errors.New("display name taken")
 var ErrInvalidUkuProcessAction = errors.New("invalid process action")
 
 const syncClientActiveRetention = 90 * 24 * time.Hour
@@ -2143,6 +2144,14 @@ func (s *Store) UpsertUkuVote(ctx context.Context, processID string, req UkuVote
 	scores, err := json.Marshal(req.Scores)
 	if err != nil {
 		return UkuProcess{}, err
+	}
+	if name := strings.TrimSpace(req.DisplayName); name != "" {
+		for _, vote := range process.Votes {
+			if vote.VoterUserIDHash != req.UserIDHash &&
+				strings.EqualFold(strings.TrimSpace(vote.DisplayName), name) {
+				return UkuProcess{}, ErrUkuDisplayNameTaken
+			}
+		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	tx, err := s.db.BeginTx(ctx, nil)

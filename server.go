@@ -928,6 +928,10 @@ func writeUkuMutationError(w http.ResponseWriter, err error, fallback string) {
 		writeError(w, http.StatusBadRequest, "vote reason required")
 		return
 	}
+	if errors.Is(err, ErrUkuDisplayNameTaken) {
+		writeError(w, http.StatusConflict, "display name taken")
+		return
+	}
 	if errors.Is(err, ErrInvalidUkuProcessAction) {
 		writeError(w, http.StatusBadRequest, "invalid process action")
 		return

@@ -2225,7 +2225,7 @@ func TestUkuProcessMetadataVoteReasonAndExport(t *testing.T) {
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x42)
 
-	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"consent-process","type":"consent","title":"Adopt the policy?","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":5,"quorum_percent":60}`)
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"consent-process","type":"consent","title":"Adopt the policy?","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":5,"quorum_percent":60,"quorum_votes":3}`)
 	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, body)
 	if res.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
@@ -2234,8 +2234,14 @@ func TestUkuProcessMetadataVoteReasonAndExport(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
 		t.Fatal(err)
 	}
-	if process.Type != "consent" || process.Title != "Adopt the policy?" || process.QuorumPercent != 60 || !process.RequireReason {
+	if process.Type != "consent" || process.Title != "Adopt the policy?" || process.QuorumPercent != 60 || process.QuorumVotes != 3 || !process.RequireReason {
 		t.Fatalf("unexpected process metadata: %#v", process)
+	}
+
+	invalid := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"bad-quorum","type":"consent","title":"Bad","proposal_minutes":60,"voting_minutes":60,"quorum_votes":1001}`)
+	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, invalid)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "invalid quorum_votes") {
+		t.Fatalf("invalid quorum_votes status = %d body=%s", res.Code, res.Body.String())
 	}
 
 	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/consent-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"status-quo":1}}`))
@@ -2254,7 +2260,7 @@ func TestUkuProcessMetadataVoteReasonAndExport(t *testing.T) {
 		t.Fatalf("unexpected vote reason: %#v", process.Votes)
 	}
 
-	update := []byte(`{"user_id_hash":"` + identity.UserID + `","quorum_percent":0,"outcome":"accepted","review_at":"2026-08-01"}`)
+	update := []byte(`{"user_id_hash":"` + identity.UserID + `","quorum_percent":0,"quorum_votes":5,"outcome":"accepted","review_at":"2026-08-01"}`)
 	res = ukuJSONRequest(t, handler, http.MethodPatch, "/api/v1/processes/consent-process", identity.UserID, identity.Token, update)
 	if res.Code != http.StatusOK {
 		t.Fatalf("update status = %d body=%s", res.Code, res.Body.String())
@@ -2262,7 +2268,7 @@ func TestUkuProcessMetadataVoteReasonAndExport(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
 		t.Fatal(err)
 	}
-	if process.QuorumPercent != 0 || process.Outcome != "accepted" || process.ReviewAt != "2026-08-01" {
+	if process.QuorumPercent != 0 || process.QuorumVotes != 5 || process.Outcome != "accepted" || process.ReviewAt != "2026-08-01" {
 		t.Fatalf("unexpected update: %#v", process)
 	}
 
@@ -2278,7 +2284,7 @@ func TestUkuProcessMetadataVoteReasonAndExport(t *testing.T) {
 	if err := json.Unmarshal(export.Body.Bytes(), &packet); err != nil {
 		t.Fatal(err)
 	}
-	if packet.PacketType != "uku-process-packet-v1" || len(packet.Process.Audit) < 3 {
+	if packet.PacketType != "uku-process-packet-v1" || packet.Process.QuorumVotes != 5 || len(packet.Process.Audit) < 3 {
 		t.Fatalf("unexpected export packet: %#v", packet)
 	}
 }

@@ -367,6 +367,7 @@ type UkuProcess struct {
 	VotingMinutes   int           `json:"voting_minutes"`
 	NegativeWeight  int           `json:"negative_weight"`
 	QuorumPercent   int           `json:"quorum_percent"`
+	QuorumVotes     int           `json:"quorum_votes"`
 	RequireReason   bool          `json:"require_vote_reason"`
 	Outcome         string        `json:"outcome,omitempty"`
 	ReviewAt        string        `json:"review_at,omitempty"`
@@ -425,6 +426,7 @@ type UkuCreateProcessRequest struct {
 	VotingMinutes   int         `json:"voting_minutes"`
 	NegativeWeight  int         `json:"negative_weight"`
 	QuorumPercent   int         `json:"quorum_percent,omitempty"`
+	QuorumVotes     int         `json:"quorum_votes,omitempty"`
 	RequireReason   bool        `json:"require_vote_reason,omitempty"`
 	Options         []UkuOption `json:"options,omitempty"`
 }
@@ -435,6 +437,7 @@ type UkuUpdateProcessRequest struct {
 	Description   string `json:"description,omitempty"`
 	Visibility    string `json:"visibility,omitempty"`
 	QuorumPercent *int   `json:"quorum_percent,omitempty"`
+	QuorumVotes   *int   `json:"quorum_votes,omitempty"`
 	Outcome       string `json:"outcome,omitempty"`
 	ReviewAt      string `json:"review_at,omitempty"`
 }

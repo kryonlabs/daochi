@@ -1436,6 +1436,12 @@ func readUkuCreateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody
 	if req.QuorumPercent < 0 || req.QuorumPercent > 100 {
 		return req, errors.New("invalid quorum_percent")
 	}
+	if ukuProcessHasVoting(req.Type) && (req.QuorumVotes < 0 || req.QuorumVotes > 1000) {
+		return req, errors.New("invalid quorum_votes")
+	}
+	if !ukuProcessHasVoting(req.Type) {
+		req.QuorumVotes = 0
+	}
 	if ukuProcessUsesReason(req.Type) && !strings.Contains(string(body), `"require_vote_reason"`) {
 		req.RequireReason = true
 	}
@@ -1495,6 +1501,9 @@ func readUkuUpdateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody
 	}
 	if req.QuorumPercent != nil && (*req.QuorumPercent < 0 || *req.QuorumPercent > 100) {
 		return req, errors.New("invalid quorum_percent")
+	}
+	if req.QuorumVotes != nil && (*req.QuorumVotes < 0 || *req.QuorumVotes > 1000) {
+		return req, errors.New("invalid quorum_votes")
 	}
 	return req, nil
 }

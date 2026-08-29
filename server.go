@@ -1816,7 +1816,7 @@ func allowedCORSOrigin(origin string) string {
 		u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return ""
 	}
-	if origin == "https://inbe.waozi.xyz" {
+	if origin == "https://inbe.waozi.xyz" || origin == "https://uku.waozi.xyz" {
 		return origin
 	}
 	if u.Scheme == "chrome-extension" && validChromeExtensionID(u.Host) {

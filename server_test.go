@@ -2672,3 +2672,28 @@ func TestUkuVoteDisplayNameUniqueness(t *testing.T) {
 		t.Fatalf("own-name update status = %d body=%s", res.Code, res.Body.String())
 	}
 }
+
+func TestAllowedCORSOrigin(t *testing.T) {
+	allowed := []string{
+		"https://inbe.waozi.xyz",
+		"https://uku.waozi.xyz",
+		"http://localhost:8080",
+		"http://127.0.0.1",
+	}
+	for _, origin := range allowed {
+		if got := allowedCORSOrigin(origin); got != origin {
+			t.Fatalf("expected %q to be allowed, got %q", origin, got)
+		}
+	}
+	denied := []string{
+		"https://evil.example.com",
+		"https://uku.waozi.xyz.evil.com",
+		"https://uku.waozi.xyz/path",
+		"",
+	}
+	for _, origin := range denied {
+		if got := allowedCORSOrigin(origin); got != "" {
+			t.Fatalf("expected %q to be denied, got %q", origin, got)
+		}
+	}
+}

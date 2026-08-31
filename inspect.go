@@ -207,10 +207,66 @@ WHERE user_id_hash=?1`, userID).Scan(&compactedThrough)
 		}
 		fmt.Fprintf(out, "%-28s %d\n", table, n)
 	}
+	if err := inspectDoctorWarnings(ctx, db, out, userID); err != nil {
+		return err
+	}
 	if err := inspectDoctorClients(ctx, db, out, userID); err != nil {
 		return err
 	}
 	return inspectDoctorAudit(ctx, db, out, userID)
+}
+
+func inspectDoctorWarnings(ctx context.Context, db *sql.DB, out io.Writer, userID string) error {
+	warnings := []string{}
+	var legacyClients int
+	if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM server_clients
+WHERE user_id_hash=?1 AND protocol_version>0 AND protocol_version<5`, userID).Scan(&legacyClients); err != nil {
+		return err
+	}
+	if legacyClients > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d legacy clients below protocol 5 seen recently", legacyClients))
+	}
+	var payloadCount int
+	var payloadBytes sql.NullInt64
+	if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*),SUM(LENGTH(payload_json))
+FROM server_encrypted_payloads
+WHERE user_id_hash=?1`, userID).Scan(&payloadCount, &payloadBytes); err != nil {
+		return err
+	}
+	if payloadCount > 1000 {
+		warnings = append(warnings, fmt.Sprintf("%d encrypted payloads queued; consider pagination/retention tuning", payloadCount))
+	}
+	if payloadBytes.Valid && payloadBytes.Int64 > 64<<20 {
+		warnings = append(warnings, fmt.Sprintf("%d encrypted payload bytes stored; check account quota/retention", payloadBytes.Int64))
+	}
+	var fullSnapshots int
+	if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM (
+	SELECT full_snapshot_required
+	FROM server_sync_audit
+	WHERE user_id_hash=?1
+	ORDER BY id DESC
+	LIMIT 8
+)
+WHERE full_snapshot_required!=0`, userID).Scan(&fullSnapshots); err != nil {
+		return err
+	}
+	if fullSnapshots >= 3 {
+		warnings = append(warnings, fmt.Sprintf("%d recent syncs required full snapshots", fullSnapshots))
+	}
+	fmt.Fprintln(out, "\nWarnings")
+	if len(warnings) == 0 {
+		fmt.Fprintln(out, "- none")
+		return nil
+	}
+	for _, warning := range warnings {
+		fmt.Fprintf(out, "- %s\n", warning)
+	}
+	return nil
 }
 
 func inspectDoctorClients(ctx context.Context, db *sql.DB, out io.Writer, userID string) error {

@@ -1930,14 +1930,27 @@ VALUES(?1,?2,?3,?4)`, userID, clientID, string(payload), version); err != nil {
 	return version, tx.Commit()
 }
 
-func (s *Store) EncryptedPayloadsSince(ctx context.Context, userID string, sinceVersion int64) ([]EncryptedPayload, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *Store) EncryptedPayloadsSince(ctx context.Context, userID string, sinceVersion int64, limit int) ([]EncryptedPayload, bool, error) {
+	limitClause := ""
+	queryLimit := limit
+	if queryLimit > 0 {
+		queryLimit++
+		limitClause = " LIMIT ?3"
+	}
+	query := `
 SELECT id,client_id,payload_json,created_at,server_version
 FROM server_encrypted_payloads
 WHERE user_id_hash=?1 AND server_version>?2
-ORDER BY server_version,id`, userID, sinceVersion)
+ORDER BY server_version,id` + limitClause
+	var rows *sql.Rows
+	var err error
+	if queryLimit > 0 {
+		rows, err = s.db.QueryContext(ctx, query, userID, sinceVersion, queryLimit)
+	} else {
+		rows, err = s.db.QueryContext(ctx, query, userID, sinceVersion)
+	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 
@@ -1946,12 +1959,20 @@ ORDER BY server_version,id`, userID, sinceVersion)
 		var item EncryptedPayload
 		var payload string
 		if err := rows.Scan(&item.ID, &item.ClientID, &payload, &item.CreatedAt, &item.ServerVersion); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		item.Payload = json.RawMessage(payload)
 		payloads = append(payloads, item)
 	}
-	return payloads, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated := false
+	if limit > 0 && len(payloads) > limit {
+		truncated = true
+		payloads = payloads[:limit]
+	}
+	return payloads, truncated, nil
 }
 
 func (s *Store) RecentEncryptedPayloads(ctx context.Context, userID string, limit int) ([]EncryptedPayload, error) {
@@ -1980,6 +2001,79 @@ LIMIT ?2`, userID, limit)
 		payloads = append(payloads, item)
 	}
 	return payloads, rows.Err()
+}
+
+func (s *Store) EncryptedPayloadBytes(ctx context.Context, userID string) (int64, error) {
+	var bytes sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `
+SELECT SUM(LENGTH(payload_json))
+FROM server_encrypted_payloads
+WHERE user_id_hash=?1`, userID).Scan(&bytes); err != nil {
+		return 0, err
+	}
+	if !bytes.Valid {
+		return 0, nil
+	}
+	return bytes.Int64, nil
+}
+
+type EncryptedPayloadPruneResult struct {
+	Deleted int64
+}
+
+func (s *Store) PruneEncryptedPayloads(ctx context.Context, userID string, maxAge time.Duration, maxBytes int64) (EncryptedPayloadPruneResult, error) {
+	result := EncryptedPayloadPruneResult{}
+	if maxAge <= 0 && maxBytes <= 0 {
+		return result, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return result, err
+	}
+	defer tx.Rollback()
+	if maxAge > 0 {
+		cutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339)
+		res, err := tx.ExecContext(ctx, `
+DELETE FROM server_encrypted_payloads
+WHERE user_id_hash=?1 AND created_at<?2`, userID, cutoff)
+		if err != nil {
+			return result, err
+		}
+		deleted, _ := res.RowsAffected()
+		result.Deleted += deleted
+	}
+	if maxBytes > 0 {
+		for {
+			var total sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `
+SELECT SUM(LENGTH(payload_json))
+FROM server_encrypted_payloads
+WHERE user_id_hash=?1`, userID).Scan(&total); err != nil {
+				return result, err
+			}
+			if !total.Valid || total.Int64 <= maxBytes {
+				break
+			}
+			res, err := tx.ExecContext(ctx, `
+DELETE FROM server_encrypted_payloads
+WHERE id=(
+	SELECT id
+	FROM server_encrypted_payloads
+	WHERE user_id_hash=?1
+	ORDER BY server_version,id
+	LIMIT 1
+)`, userID)
+			if err != nil {
+				return result, err
+			}
+			deleted, _ := res.RowsAffected()
+			if deleted == 0 {
+				break
+			}
+			result.Deleted += deleted
+		}
+	}
+	return result, tx.Commit()
 }
 
 func (s *Store) RecordSyncAudit(ctx context.Context, entry SyncAuditEntry) error {
@@ -4177,6 +4271,10 @@ func (s *Store) SyncDiagnosticReport(ctx context.Context, userID string) (SyncDi
 	if err != nil {
 		return SyncDiagnosticReport{}, err
 	}
+	payloadBytes, err := s.EncryptedPayloadBytes(ctx, userID)
+	if err != nil {
+		return SyncDiagnosticReport{}, err
+	}
 	return SyncDiagnosticReport{
 		Status:                   "ok",
 		UserIDHash:               userID,
@@ -4184,6 +4282,7 @@ func (s *Store) SyncDiagnosticReport(ctx context.Context, userID string) (SyncDi
 		StateHash:                hash,
 		CompactedThroughVersion:  compactedThrough,
 		TableCounts:              counts,
+		EncryptedPayloadBytes:    payloadBytes,
 		LegacyClients:            legacyClients,
 		ActiveWebSocketSupported: true,
 		RecentSyncAudit:          recentAudit,

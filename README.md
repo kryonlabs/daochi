@@ -14,6 +14,8 @@ Clients that encrypt the whole sync payload may post an encrypted envelope to `P
 
 Ksync keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding Inbe behavior. `inbe` and `uku` are seeded automatically. Inbe remains the lead migration client and sends `app_id:"inbe"` in v5 compatibility mode; older clients without `app_id` continue to sync. Future protocol v6 requests must include a registered `app_id`, and encrypted record collections must belong to that registered app.
 
+Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01**. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid.
+
 API access is scoped by account, with explicit shared surfaces:
 
 - accepted friends can see the account alias and selected profile/leaderboard stats;
@@ -88,8 +90,9 @@ Encrypted envelope clients should send:
 - `X-Ksync-User: <sha256-public-key-hex>` or legacy `X-Inbe-User`
 - `X-Ksync-Client: <client-id>` when available
 - `X-Ksync-Since-Version: <last-seen-server-version>` when requesting only newer envelopes
+- `X-Ksync-Limit: <count>` when deliberately paging envelope deltas
 
-Envelope bodies are relayed as JSON `encrypted_payloads` in the sync response. Ksync does not parse the envelope contents beyond checking that `v` is `1` or `2` and `nonce` and `ciphertext` are non-empty.
+Envelope bodies are relayed as JSON `encrypted_payloads` in the sync response. Ksync does not parse the envelope contents beyond checking that `v` is `1` or `2` and `nonce` and `ciphertext` are non-empty. If a response is paged, `encrypted_payloads_truncated` is `true` and `encrypted_payloads_next_since_version` is the next value to send as `X-Ksync-Since-Version`.
 
 ## Signature Message
 
@@ -169,6 +172,9 @@ KSYNC_MONERO_WALLET_RPC_PASSWORD=<wallet rpc password>
 KSYNC_CHALLENGE_TTL_SECONDS=60
 KSYNC_TOKEN_TTL_SECONDS=3600
 KSYNC_MAX_BODY_BYTES=1048576
+KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN=0
+KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES=0
+KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS=0
 ```
 
 Generate a token secret once and keep it stable across restarts and every deployed instance:
@@ -178,6 +184,8 @@ openssl rand -hex 32
 ```
 
 If `KSYNC_TOKEN_SECRET_HEX` is missing, Ksync generates a random in-memory secret at startup. That is only suitable for single-process local development: existing bearer tokens become invalid after restart, and multi-instance deployments will reject tokens issued by another instance.
+
+Encrypted envelope limits are disabled by default to avoid surprising existing clients. Set `KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN` to cap each envelope response, `KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES` to reject writes that would exceed an account quota, and `KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS` only after clients can tolerate older envelope pruning.
 
 ## Waozi Tokens
 

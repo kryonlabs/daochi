@@ -34,7 +34,10 @@ var contentHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 const (
 	ksyncSignatureContext      = "ksync-sync-v1"
 	legacyInbeSignatureContext = "inbe-sync-v1"
+	ksyncMinSupportedProtocol  = 1
 	ksyncLatestProtocol        = 5
+	ksyncCompatibilityDeadline = "2027-09-01"
+	ksyncPreviousVersionGrace  = 365
 )
 
 var ksyncServerCapabilities = []string{
@@ -45,6 +48,7 @@ var ksyncServerCapabilities = []string{
 	"v5-private-hierarchy",
 	"v5-dual-read",
 	"v5-legacy-encrypted-collections",
+	"protocol-v1-v5-valid-through-2027-09-01",
 	"v6-waozi-tokens",
 	"pub-relay",
 }
@@ -396,7 +400,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		AcceptedOps:          acceptedOps,
 		Ops:                  remoteOps,
 		Changes:              changes,
-		MinSupportedProtocol: 1,
+		MinSupportedProtocol: ksyncMinSupportedProtocol,
 		LatestProtocol:       ksyncLatestProtocol,
 		Diagnostics: &SyncDiagnostics{
 			SnapshotReason:              snapshotReason,
@@ -539,6 +543,24 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		}
 		sinceVersion = parsed
 	}
+	limit, err := encryptedPayloadLimit(r, s.cfg.EncryptedPayloadMaxReturn)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	if s.cfg.EncryptedPayloadMaxAccountBytes > 0 {
+		currentBytes, err := s.store.EncryptedPayloadBytes(r.Context(), userID)
+		if err != nil {
+			slog.Error("load encrypted payload usage", "user", userID, "error", err)
+			writeError(w, http.StatusInternalServerError, "encrypted sync failed")
+			return false
+		}
+		if int64(len(body)) > s.cfg.EncryptedPayloadMaxAccountBytes ||
+			currentBytes+int64(len(body)) > s.cfg.EncryptedPayloadMaxAccountBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "encrypted payload quota exceeded")
+			return false
+		}
+	}
 	serverVersion, err := s.store.StoreEncryptedPayload(r.Context(), userID, clientID, body)
 	if err != nil {
 		if errors.Is(err, ErrSyncUserNotFound) {
@@ -549,7 +571,12 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "encrypted sync failed")
 		return false
 	}
-	payloads, err := s.store.EncryptedPayloadsSince(r.Context(), userID, sinceVersion)
+	if result, err := s.store.PruneEncryptedPayloads(r.Context(), userID, s.cfg.EncryptedPayloadRetention, 0); err != nil {
+		slog.Error("prune encrypted payloads", "user", userID, "error", err)
+	} else if result.Deleted > 0 {
+		slog.Info("pruned encrypted payloads", "user", userID, "deleted", result.Deleted)
+	}
+	payloads, truncated, err := s.store.EncryptedPayloadsSince(r.Context(), userID, sinceVersion, limit)
 	if err != nil {
 		slog.Error("load encrypted payloads", "user", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "encrypted sync failed")
@@ -572,7 +599,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 	}
 	s.metrics.syncEncryptedPayloads.Add(1)
 	s.syncHub.publish(userID, serverVersion)
-	writeJSON(w, http.StatusOK, SyncResponse{
+	response := SyncResponse{
 		ProtocolVersion:      ksyncLatestProtocol,
 		Status:               "ok",
 		ServerCapabilities:   ksyncServerCapabilities,
@@ -582,10 +609,30 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		ChangesComplete:      true,
 		Changes:              emptySyncChanges(),
 		EncryptedPayloads:    payloads,
-		MinSupportedProtocol: 1,
+		MinSupportedProtocol: ksyncMinSupportedProtocol,
 		LatestProtocol:       ksyncLatestProtocol,
-	})
+	}
+	if truncated {
+		response.EncryptedPayloadsTruncated = true
+		response.EncryptedPayloadsNextSinceVersion = payloads[len(payloads)-1].ServerVersion
+	}
+	writeJSON(w, http.StatusOK, response)
 	return true
+}
+
+func encryptedPayloadLimit(r *http.Request, configuredMax int) (int, error) {
+	limit := configuredMax
+	if text := strings.TrimSpace(r.Header.Get("X-Ksync-Limit")); text != "" {
+		parsed, err := strconv.Atoi(text)
+		if err != nil || parsed <= 0 {
+			return 0, errors.New("invalid X-Ksync-Limit")
+		}
+		limit = parsed
+	}
+	if configuredMax > 0 && (limit == 0 || limit > configuredMax) {
+		limit = configuredMax
+	}
+	return limit, nil
 }
 
 func syncTransitionMode(req SyncRequest) string {

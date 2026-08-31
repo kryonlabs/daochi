@@ -53,7 +53,7 @@ a{color:#254da8}
 <body>
 <main>
 <h1>Ksync Sync API</h1>
-<p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys. Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility, released Inbe v4 encrypted collections remain valid, and whole-payload encrypted envelopes can be relayed opaquely.</p>
+<p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys. Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility, released Inbe v4 encrypted collections remain valid, and whole-payload encrypted envelopes can be relayed opaquely. Protocol v1 through v5 remain valid through 2027-09-01.</p>
 <p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a> · <a href="/readyz">Readiness</a> · <a href="/metrics">Metrics</a></p>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/apps</code><p>Lists registered apps, collection prefixes, visibility classes, and capabilities. Built-in registrations include Inbe and Uku.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/apps</code><p>Registers or updates an app when <code>KSYNC_ADMIN_TOKEN</code> is set and <code>X-Ksync-Admin</code> matches it.</p></section>
@@ -99,7 +99,13 @@ func openAPISpec() map[string]any {
 		"info": map[string]any{
 			"title":       "Ksync Sync API",
 			"version":     "1.0.0",
-			"description": "Post-quantum sync relay for Kryon apps.",
+			"description": "Post-quantum sync relay for Kryon apps. Protocol v1 through v5 remain valid through 2027-09-01; after any future deprecation, the immediately previous version stays valid for at least one additional year.",
+			"x-ksync-protocol-policy": map[string]any{
+				"min_supported_protocol":          ksyncMinSupportedProtocol,
+				"latest_protocol":                 ksyncLatestProtocol,
+				"v1_v5_valid_through":             ksyncCompatibilityDeadline,
+				"previous_version_grace_days_min": ksyncPreviousVersionGrace,
+			},
 		},
 		"paths": map[string]any{
 			"/healthz": map[string]any{
@@ -637,22 +643,24 @@ func openAPISpec() map[string]any {
 				"SyncResponse": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"protocol_version":       map[string]any{"type": "integer"},
-						"status":                 map[string]any{"type": "string"},
-						"server_capabilities":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-						"transition_mode":        map[string]any{"type": "string"},
-						"server_version":         map[string]any{"type": "integer"},
-						"server_clock":           map[string]any{"type": "integer"},
-						"changes":                map[string]any{"type": "object", "description": "Legacy v1/v2 table-array changes."},
-						"data":                   map[string]any{"$ref": "#/components/schemas/CleanData"},
-						"logs":                   map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncLog"}},
-						"deletes":                map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncLog"}},
-						"encrypted_payloads":     map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/EncryptedPayload"}},
-						"upgrade_notice":         map[string]any{"type": "string"},
-						"min_supported_protocol": map[string]any{"type": "integer"},
-						"latest_protocol":        map[string]any{"type": "integer"},
-						"legacy_clients":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-						"diagnostics":            map[string]any{"$ref": "#/components/schemas/SyncDiagnostics"},
+						"protocol_version":                      map[string]any{"type": "integer"},
+						"status":                                map[string]any{"type": "string"},
+						"server_capabilities":                   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"transition_mode":                       map[string]any{"type": "string"},
+						"server_version":                        map[string]any{"type": "integer"},
+						"server_clock":                          map[string]any{"type": "integer"},
+						"changes":                               map[string]any{"type": "object", "description": "Legacy v1/v2 table-array changes."},
+						"data":                                  map[string]any{"$ref": "#/components/schemas/CleanData"},
+						"logs":                                  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncLog"}},
+						"deletes":                               map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncLog"}},
+						"encrypted_payloads":                    map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/EncryptedPayload"}},
+						"encrypted_payloads_next_since_version": map[string]any{"type": "integer"},
+						"encrypted_payloads_truncated":          map[string]any{"type": "boolean"},
+						"upgrade_notice":                        map[string]any{"type": "string"},
+						"min_supported_protocol":                map[string]any{"type": "integer"},
+						"latest_protocol":                       map[string]any{"type": "integer"},
+						"legacy_clients":                        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"diagnostics":                           map[string]any{"$ref": "#/components/schemas/SyncDiagnostics"},
 					},
 				},
 				"CleanData": map[string]any{
@@ -814,6 +822,7 @@ func openAPISpec() map[string]any {
 						"state_hash":                 map[string]any{"type": "string"},
 						"compacted_through_version":  map[string]any{"type": "integer"},
 						"table_counts":               map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "integer"}},
+						"encrypted_payload_bytes":    map[string]any{"type": "integer"},
 						"legacy_clients":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 						"active_websocket_supported": map[string]any{"type": "boolean"},
 						"recent_sync_audit":          map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncAuditEntry"}},
@@ -920,6 +929,13 @@ func syncHeaderParameters() []map[string]any {
 			"in":          "header",
 			"required":    false,
 			"description": "Optional last-seen server version for encrypted envelope delta reads.",
+			"schema":      map[string]any{"type": "integer"},
+		},
+		{
+			"name":        "X-Ksync-Limit",
+			"in":          "header",
+			"required":    false,
+			"description": "Optional encrypted envelope page size. The server may clamp this with KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN.",
 			"schema":      map[string]any{"type": "integer"},
 		},
 	}

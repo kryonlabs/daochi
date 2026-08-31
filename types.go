@@ -79,31 +79,33 @@ type SyncChanges struct {
 }
 
 type SyncResponse struct {
-	ProtocolVersion      int                `json:"protocol_version,omitempty"`
-	Status               string             `json:"status"`
-	ServerCapabilities   []string           `json:"server_capabilities,omitempty"`
-	TransitionMode       string             `json:"transition_mode,omitempty"`
-	Applied              SyncResult         `json:"applied"`
-	AccountAlias         string             `json:"account_alias,omitempty"`
-	ProfileIcon          int                `json:"profile_icon,omitempty"`
-	ServerVersion        int64              `json:"server_version"`
-	ServerClock          int64              `json:"server_clock,omitempty"`
-	ServerStateHash      string             `json:"server_state_hash,omitempty"`
-	BaseStateHash        string             `json:"base_state_hash,omitempty"`
-	ChangesComplete      bool               `json:"changes_complete"`
-	FullSnapshotRequired bool               `json:"full_snapshot_required"`
-	AcceptedOps          []string           `json:"accepted_ops,omitempty"`
-	Ops                  []SyncOp           `json:"ops,omitempty"`
-	Changes              SyncChanges        `json:"changes"`
-	Data                 *CleanData         `json:"data,omitempty"`
-	Logs                 []SyncLog          `json:"logs,omitempty"`
-	Deletes              []SyncLog          `json:"deletes,omitempty"`
-	EncryptedPayloads    []EncryptedPayload `json:"encrypted_payloads,omitempty"`
-	UpgradeNotice        string             `json:"upgrade_notice,omitempty"`
-	MinSupportedProtocol int                `json:"min_supported_protocol,omitempty"`
-	LatestProtocol       int                `json:"latest_protocol,omitempty"`
-	LegacyClients        []string           `json:"legacy_clients,omitempty"`
-	Diagnostics          *SyncDiagnostics   `json:"diagnostics,omitempty"`
+	ProtocolVersion                   int                `json:"protocol_version,omitempty"`
+	Status                            string             `json:"status"`
+	ServerCapabilities                []string           `json:"server_capabilities,omitempty"`
+	TransitionMode                    string             `json:"transition_mode,omitempty"`
+	Applied                           SyncResult         `json:"applied"`
+	AccountAlias                      string             `json:"account_alias,omitempty"`
+	ProfileIcon                       int                `json:"profile_icon,omitempty"`
+	ServerVersion                     int64              `json:"server_version"`
+	ServerClock                       int64              `json:"server_clock,omitempty"`
+	ServerStateHash                   string             `json:"server_state_hash,omitempty"`
+	BaseStateHash                     string             `json:"base_state_hash,omitempty"`
+	ChangesComplete                   bool               `json:"changes_complete"`
+	FullSnapshotRequired              bool               `json:"full_snapshot_required"`
+	AcceptedOps                       []string           `json:"accepted_ops,omitempty"`
+	Ops                               []SyncOp           `json:"ops,omitempty"`
+	Changes                           SyncChanges        `json:"changes"`
+	Data                              *CleanData         `json:"data,omitempty"`
+	Logs                              []SyncLog          `json:"logs,omitempty"`
+	Deletes                           []SyncLog          `json:"deletes,omitempty"`
+	EncryptedPayloads                 []EncryptedPayload `json:"encrypted_payloads,omitempty"`
+	EncryptedPayloadsNextSinceVersion int64              `json:"encrypted_payloads_next_since_version,omitempty"`
+	EncryptedPayloadsTruncated        bool               `json:"encrypted_payloads_truncated,omitempty"`
+	UpgradeNotice                     string             `json:"upgrade_notice,omitempty"`
+	MinSupportedProtocol              int                `json:"min_supported_protocol,omitempty"`
+	LatestProtocol                    int                `json:"latest_protocol,omitempty"`
+	LegacyClients                     []string           `json:"legacy_clients,omitempty"`
+	Diagnostics                       *SyncDiagnostics   `json:"diagnostics,omitempty"`
 }
 
 type CleanData struct {
@@ -198,6 +200,7 @@ type SyncDiagnosticReport struct {
 	StateHash                string             `json:"state_hash"`
 	CompactedThroughVersion  int64              `json:"compacted_through_version"`
 	TableCounts              map[string]int     `json:"table_counts"`
+	EncryptedPayloadBytes    int64              `json:"encrypted_payload_bytes,omitempty"`
 	LegacyClients            []string           `json:"legacy_clients,omitempty"`
 	ActiveWebSocketSupported bool               `json:"active_websocket_supported"`
 	RecentSyncAudit          []SyncAuditEntry   `json:"recent_sync_audit,omitempty"`

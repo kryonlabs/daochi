@@ -13,26 +13,29 @@ import (
 )
 
 type Config struct {
-	Addr                        string
-	BaseURL                     string
-	DBPath                      string
-	AdminToken                  string
-	ChallengeTTL                time.Duration
-	TokenTTL                    time.Duration
-	TokenSecret                 []byte
-	TokenSecretEphemeral        bool
-	MaxBodyBytes                int64
-	WaoziIssuerPublicKey        ed25519.PublicKey
-	WaoziIssuerPrivateKey       ed25519.PrivateKey
-	TokenProducts               map[string]TokenProduct
-	GooglePackageNames          map[string]bool
-	GoogleServiceAccountJSON    string
-	GoogleOAuthClientJSON       string
-	GoogleOAuthRefreshToken     string
-	MoneroWalletRPCURL          string
-	MoneroWalletRPCUser         string
-	MoneroWalletRPCPassword     string
-	TokenDirectPurchasesEnabled bool
+	Addr                            string
+	BaseURL                         string
+	DBPath                          string
+	AdminToken                      string
+	ChallengeTTL                    time.Duration
+	TokenTTL                        time.Duration
+	TokenSecret                     []byte
+	TokenSecretEphemeral            bool
+	MaxBodyBytes                    int64
+	EncryptedPayloadMaxReturn       int
+	EncryptedPayloadMaxAccountBytes int64
+	EncryptedPayloadRetention       time.Duration
+	WaoziIssuerPublicKey            ed25519.PublicKey
+	WaoziIssuerPrivateKey           ed25519.PrivateKey
+	TokenProducts                   map[string]TokenProduct
+	GooglePackageNames              map[string]bool
+	GoogleServiceAccountJSON        string
+	GoogleOAuthClientJSON           string
+	GoogleOAuthRefreshToken         string
+	MoneroWalletRPCURL              string
+	MoneroWalletRPCUser             string
+	MoneroWalletRPCPassword         string
+	TokenDirectPurchasesEnabled     bool
 }
 
 func loadConfig() Config {
@@ -61,26 +64,29 @@ func loadConfig() Config {
 		issuerPublic = issuerPrivate.Public().(ed25519.PublicKey)
 	}
 	return Config{
-		Addr:                        envString("KSYNC_ADDR", "127.0.0.1:8080"),
-		BaseURL:                     envString("KSYNC_BASE_URL", "https://api.waozi.xyz"),
-		DBPath:                      envString("KSYNC_DB", "ksync.db"),
-		AdminToken:                  envString("KSYNC_ADMIN_TOKEN", ""),
-		ChallengeTTL:                envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second),
-		TokenTTL:                    envDurationSeconds("KSYNC_TOKEN_TTL_SECONDS", 3600*time.Second),
-		TokenSecret:                 secret,
-		TokenSecretEphemeral:        ephemeralSecret,
-		MaxBodyBytes:                envInt64("KSYNC_MAX_BODY_BYTES", 1<<20),
-		WaoziIssuerPublicKey:        issuerPublic,
-		WaoziIssuerPrivateKey:       issuerPrivate,
-		TokenProducts:               envTokenProducts("KSYNC_TOKEN_PRODUCTS"),
-		GooglePackageNames:          envStringSet("KSYNC_GOOGLE_PACKAGE_NAMES"),
-		GoogleServiceAccountJSON:    envStringOrFile("KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON", "KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", ""),
-		GoogleOAuthClientJSON:       envStringOrFile("KSYNC_GOOGLE_OAUTH_CLIENT_JSON", "KSYNC_GOOGLE_OAUTH_CLIENT_JSON_FILE", ""),
-		GoogleOAuthRefreshToken:     envStringOrFile("KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN", "KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", ""),
-		MoneroWalletRPCURL:          envString("KSYNC_MONERO_WALLET_RPC_URL", ""),
-		MoneroWalletRPCUser:         envString("KSYNC_MONERO_WALLET_RPC_USER", ""),
-		MoneroWalletRPCPassword:     envString("KSYNC_MONERO_WALLET_RPC_PASSWORD", ""),
-		TokenDirectPurchasesEnabled: envBool("KSYNC_TOKEN_DIRECT_PURCHASES_ENABLED", false),
+		Addr:                            envString("KSYNC_ADDR", "127.0.0.1:8080"),
+		BaseURL:                         envString("KSYNC_BASE_URL", "https://api.waozi.xyz"),
+		DBPath:                          envString("KSYNC_DB", "ksync.db"),
+		AdminToken:                      envString("KSYNC_ADMIN_TOKEN", ""),
+		ChallengeTTL:                    envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second),
+		TokenTTL:                        envDurationSeconds("KSYNC_TOKEN_TTL_SECONDS", 3600*time.Second),
+		TokenSecret:                     secret,
+		TokenSecretEphemeral:            ephemeralSecret,
+		MaxBodyBytes:                    envInt64("KSYNC_MAX_BODY_BYTES", 1<<20),
+		EncryptedPayloadMaxReturn:       envInt("KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN", 0),
+		EncryptedPayloadMaxAccountBytes: envInt64("KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0),
+		EncryptedPayloadRetention:       envDurationDays("KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS", 0),
+		WaoziIssuerPublicKey:            issuerPublic,
+		WaoziIssuerPrivateKey:           issuerPrivate,
+		TokenProducts:                   envTokenProducts("KSYNC_TOKEN_PRODUCTS"),
+		GooglePackageNames:              envStringSet("KSYNC_GOOGLE_PACKAGE_NAMES"),
+		GoogleServiceAccountJSON:        envStringOrFile("KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON", "KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", ""),
+		GoogleOAuthClientJSON:           envStringOrFile("KSYNC_GOOGLE_OAUTH_CLIENT_JSON", "KSYNC_GOOGLE_OAUTH_CLIENT_JSON_FILE", ""),
+		GoogleOAuthRefreshToken:         envStringOrFile("KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN", "KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", ""),
+		MoneroWalletRPCURL:              envString("KSYNC_MONERO_WALLET_RPC_URL", ""),
+		MoneroWalletRPCUser:             envString("KSYNC_MONERO_WALLET_RPC_USER", ""),
+		MoneroWalletRPCPassword:         envString("KSYNC_MONERO_WALLET_RPC_PASSWORD", ""),
+		TokenDirectPurchasesEnabled:     envBool("KSYNC_TOKEN_DIRECT_PURCHASES_ENABLED", false),
 	}
 }
 
@@ -96,6 +102,26 @@ func envDurationSeconds(key string, fallback time.Duration) time.Duration {
 		seconds, err := strconv.Atoi(value)
 		if err == nil && seconds > 0 {
 			return time.Duration(seconds) * time.Second
+		}
+	}
+	return fallback
+}
+
+func envDurationDays(key string, fallback time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		days, err := strconv.Atoi(value)
+		if err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if value := os.Getenv(key); value != "" {
+		n, err := strconv.Atoi(value)
+		if err == nil && n > 0 {
+			return n
 		}
 	}
 	return fallback

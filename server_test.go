@@ -103,6 +103,7 @@ func TestDocsEndpoints(t *testing.T) {
 	if decoded["openapi"] != "3.1.0" {
 		t.Fatalf("unexpected openapi version: %#v", decoded["openapi"])
 	}
+	assertOpenAPIRefsResolve(t, decoded)
 }
 
 func TestWaoziTokenCreditSpendAndIdempotency(t *testing.T) {
@@ -782,6 +783,28 @@ func TestProtocolV5AcceptsReleasedV4InbeEncryptedCollections(t *testing.T) {
 	}
 }
 
+func TestProtocolV1ThroughV5RemainAcceptedThroughCompatibilityDeadline(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x4f)
+
+	for version := ksyncMinSupportedProtocol; version <= ksyncLatestProtocol; version++ {
+		clientID := "compat-client-" + strconv.Itoa(version)
+		body := []byte(`{"protocol_version":` + strconv.Itoa(version) + `,"user_id_hash":"` + identity.UserID + `","client_id":"` + clientID + `","since_server_version":0}`)
+		res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
+		var payload SyncResponse
+		if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Status != "ok" ||
+			payload.MinSupportedProtocol != ksyncMinSupportedProtocol ||
+			payload.LatestProtocol != ksyncLatestProtocol ||
+			!containsString(payload.ServerCapabilities, "protocol-v1-v5-valid-through-"+ksyncCompatibilityDeadline) {
+			t.Fatalf("protocol %d compatibility response = %#v", version, payload)
+		}
+	}
+}
+
 func TestProtocolV5RejectsInvalidEncryptedRecords(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -1202,6 +1225,42 @@ func TestEncryptedSyncEnvelopeRequiresMatchingBearerUser(t *testing.T) {
 	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), "token user mismatch") {
 		t.Fatalf("mismatched envelope status = %d body=%s", res.Code, res.Body.String())
 	}
+}
+
+func TestEncryptedSyncEnvelopePaginationAndQuota(t *testing.T) {
+	server, store, _ := testServer(t)
+	server.cfg.EncryptedPayloadMaxReturn = 1
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x65)
+
+	first := postEncryptedEnvelope(t, handler, identity, 0, []byte(`{"v":1,"nonce":"page-1","ciphertext":"ciphertext-1"}`))
+	if first.EncryptedPayloadsTruncated || first.EncryptedPayloadsNextSinceVersion != 0 ||
+		len(first.EncryptedPayloads) != 1 {
+		t.Fatalf("first envelope response = %#v", first)
+	}
+	second := postEncryptedEnvelope(t, handler, identity, 0, []byte(`{"v":1,"nonce":"page-2","ciphertext":"ciphertext-2"}`))
+	if !second.EncryptedPayloadsTruncated ||
+		second.EncryptedPayloadsNextSinceVersion != first.ServerVersion ||
+		len(second.EncryptedPayloads) != 1 ||
+		!bytes.Equal(second.EncryptedPayloads[0].Payload, first.EncryptedPayloads[0].Payload) {
+		t.Fatalf("paginated envelope response = %#v", second)
+	}
+	assertCount(t, store, "server_encrypted_payloads", 2)
+
+	limited, limitedStore, _ := testServer(t)
+	limited.cfg.EncryptedPayloadMaxAccountBytes = 16
+	limitedHandler := limited.Routes()
+	limitedIdentity := newTestIdentity(t, limitedHandler, 0x66)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", strings.NewReader(`{"v":1,"nonce":"too-large","ciphertext":"too-large"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Ksync-User", limitedIdentity.UserID)
+	req.Header.Set("Authorization", "Bearer "+limitedIdentity.Token)
+	res := httptest.NewRecorder()
+	limitedHandler.ServeHTTP(res, req)
+	if res.Code != http.StatusRequestEntityTooLarge || !strings.Contains(res.Body.String(), "quota exceeded") {
+		t.Fatalf("quota status = %d body=%s", res.Code, res.Body.String())
+	}
+	assertCount(t, limitedStore, "server_encrypted_payloads", 0)
 }
 
 func TestSyncV2AppliesOpsIdempotentlyAndReturnsRemoteOps(t *testing.T) {
@@ -3139,6 +3198,26 @@ func syncWithBody(t *testing.T, target any, baseURL, userID, token string, body 
 	return res
 }
 
+func postEncryptedEnvelope(t *testing.T, target http.Handler, identity testIdentity, sinceVersion int64, body []byte) SyncResponse {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Ksync-User", identity.UserID)
+	req.Header.Set("X-Ksync-Client", "envelope-client")
+	req.Header.Set("X-Ksync-Since-Version", strconv.FormatInt(sinceVersion, 10))
+	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	res := httptest.NewRecorder()
+	target.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("encrypted envelope status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
 func ukuJSONRequest(t *testing.T, target any, method, path, userID, token string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
@@ -3377,6 +3456,38 @@ func serveTestRequest(t *testing.T, target any, req *http.Request) *httptest.Res
 		t.Fatalf("unsupported test target %T", target)
 	}
 	return res
+}
+
+func assertOpenAPIRefsResolve(t *testing.T, spec map[string]any) {
+	t.Helper()
+	schemas := map[string]bool{}
+	if components, ok := spec["components"].(map[string]any); ok {
+		if rawSchemas, ok := components["schemas"].(map[string]any); ok {
+			for name := range rawSchemas {
+				schemas[name] = true
+			}
+		}
+	}
+	var walk func(any)
+	walk = func(value any) {
+		switch typed := value.(type) {
+		case map[string]any:
+			if ref, ok := typed["$ref"].(string); ok {
+				const prefix = "#/components/schemas/"
+				if !strings.HasPrefix(ref, prefix) || !schemas[strings.TrimPrefix(ref, prefix)] {
+					t.Fatalf("unresolved OpenAPI ref %q", ref)
+				}
+			}
+			for _, child := range typed {
+				walk(child)
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(spec)
 }
 
 func openSyncWebSocket(t *testing.T, baseURL, token string) (*bufio.Reader, net.Conn) {

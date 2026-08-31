@@ -57,6 +57,9 @@ func TestInspectSummaryAndUser(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.RecordClientSync(context.Background(), userID, "legacy-client", 0, 2, 2, 0); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +89,7 @@ func TestInspectSummaryAndUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = doctor.String()
-	for _, want := range []string{"Ksync doctor", "server_sync_audit", "server_encrypted_payloads", "protocol=5", "full_snapshot=true"} {
+	for _, want := range []string{"Ksync doctor", "Warnings", "legacy clients below protocol 5", "server_sync_audit", "server_encrypted_payloads", "protocol=5", "full_snapshot=true"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, got)
 		}

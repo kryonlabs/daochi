@@ -34,27 +34,50 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ksync Sync API</title>
+<title>Daochi</title>
 <style>
-body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:880px;margin:40px auto;padding:0 20px;line-height:1.5;color:#18202a;background:#f7f8fb}
-main{background:white;border:1px solid #d9deea;padding:28px}
-h1{margin-top:0}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;line-height:1.5;color:#18202a;background:#f5f1e8}
+main{max-width:1040px;margin:0 auto;padding:44px 20px 28px}
+.hero{padding:54px 0 42px;border-bottom:1px solid #d8cdbd}
+.eyebrow{margin:0 0 10px;color:#7b5b2a;font-size:.78rem;font-weight:750;letter-spacing:.15em;text-transform:uppercase}
+h1{margin:0;color:#14262b;font-size:clamp(4rem,12vw,8rem);line-height:.85;letter-spacing:0}
+.lead{max-width:760px;margin:22px 0 0;color:#4f5d62;font-size:1.22rem}
+.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+.button{display:inline-flex;align-items:center;min-height:40px;padding:0 15px;border:1px solid #19353b;border-radius:6px;background:#19353b;color:white;text-decoration:none;font-weight:750}
+.button.secondary{background:white;color:#19353b;border-color:#c9baa8}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:28px 0}
+.card,.endpoint{background:white;border:1px solid #d8cdbd;border-radius:8px;padding:18px}
+.card h2,.endpoint h2{margin:0 0 8px;font-size:1.05rem}
+.card p{margin:0;color:#59676c}
+.section-title{margin:38px 0 14px}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-pre{overflow:auto;background:#111827;color:#f9fafb;padding:16px}
-.endpoint{border-top:1px solid #e5e7eb;padding:14px 0}
+pre{overflow:auto;background:#14262b;color:#f9fafb;padding:16px;border-radius:8px}
+.endpoint{margin:10px 0}
 .method{display:inline-block;min-width:56px;font-weight:700}
-.status{border-top:1px solid #e5e7eb;margin-top:22px;padding-top:14px;display:flex;gap:18px;align-items:center;color:#5c6675;font-size:.9rem;flex-wrap:wrap}
+.status{border-top:1px solid #d8cdbd;margin-top:22px;padding-top:14px;display:flex;gap:18px;align-items:center;color:#5c6675;font-size:.9rem;flex-wrap:wrap}
 .status strong{color:#18202a;font-weight:650}
-.status-error{border-top:1px solid #e5e7eb;margin-top:22px;padding-top:14px;color:#5c6675}
-a{color:#254da8}
+.status-error{border-top:1px solid #d8cdbd;margin-top:22px;padding-top:14px;color:#5c6675}
+.footer{border-top:1px solid #d8cdbd;margin-top:28px;padding-top:18px;color:#667075;font-size:.9rem}
+a{color:#0b625d}
 @media (max-width:640px){.status{gap:10px}}
 </style>
 </head>
 <body>
 <main>
-<h1>Ksync Sync API</h1>
-<p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys. Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility, released Inbe v4 encrypted collections remain valid, and whole-payload encrypted envelopes can be relayed opaquely. Protocol v1 through v5 remain valid through 2027-09-01.</p>
-<p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a> · <a href="/readyz">Readiness</a> · <a href="/metrics">Metrics</a></p>
+<section class="hero">
+<p class="eyebrow">Mesh-native sync for app-owned data</p>
+<h1>Daochi</h1>
+<p class="lead">Signed identity, portable sync, encrypted records, and remote events for native and web apps. Server-assisted today, built toward a mesh-native network.</p>
+<div class="actions"><a class="button" href="/openapi.json">OpenAPI JSON</a><a class="button secondary" href="/healthz">Health check</a><a class="button secondary" href="/readyz">Readiness</a></div>
+</section>
+<section class="grid" aria-label="Daochi capabilities">
+<article class="card"><h2>Signed identity</h2><p>Accounts prove control with short-lived challenges and ML-DSA signatures. Private keys stay on the client.</p></article>
+<article class="card"><h2>App-owned records</h2><p>Applications keep ownership of their data while the relay stores versions, opaque encrypted payloads, and shared projections.</p></article>
+<article class="card"><h2>Remote events</h2><p>WebSocket events wake clients when fresh sync data is available without exposing bearer tokens through URLs.</p></article>
+<article class="card"><h2>Mesh roadmap</h2><p>The protocol is shaped for local-first and cross-device sync, with server relay as the current deployment path.</p></article>
+</section>
+<h2 class="section-title">API surface</h2>
+<p>Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility. Protocol v1 through v5 remain valid through 2027-09-01.</p>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/apps</code><p>Lists registered apps, collection prefixes, visibility classes, and capabilities. Built-in registrations include Inbe and Uku.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/apps</code><p>Registers or updates an app when <code>KSYNC_ADMIN_TOKEN</code> is set and <code>X-Ksync-Admin</code> matches it.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
@@ -82,6 +105,7 @@ a{color:#254da8}
 &lt;challenge nonce hex&gt;</pre>
 <p>Signed requests use <code>X-Ksync-User</code>, <code>X-Ksync-Signature</code>, and <code>Content-Type: application/json</code>.</p>
 %s
+<footer class="footer">&copy; 2026 <a href="https://kryonlabs.com">Kryon Labs</a></footer>
 </main>
 </body>
 </html>`, statusHTML)
@@ -97,9 +121,9 @@ func openAPISpec() map[string]any {
 	return map[string]any{
 		"openapi": "3.1.0",
 		"info": map[string]any{
-			"title":       "Ksync Sync API",
+			"title":       "Daochi API",
 			"version":     "1.0.0",
-			"description": "Post-quantum sync relay for Kryon apps. Protocol v1 through v5 remain valid through 2027-09-01; after any future deprecation, the immediately previous version stays valid for at least one additional year.",
+			"description": "Mesh-native sync API for app-owned data. Protocol v1 through v5 remain valid through 2027-09-01; after any future deprecation, the immediately previous version stays valid for at least one additional year.",
 			"x-ksync-protocol-policy": map[string]any{
 				"min_supported_protocol":          ksyncMinSupportedProtocol,
 				"latest_protocol":                 ksyncLatestProtocol,
@@ -389,7 +413,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/sync": map[string]any{
 				"post": map[string]any{
 					"summary":     "Apply sync changes",
-					"description": "Applies typed sync changes for existing clients. If the JSON body has v, nonce, and ciphertext fields, Ksync stores and relays it as an opaque encrypted envelope authenticated by bearer token.",
+					"description": "Applies typed sync changes for existing clients. If the JSON body has v, nonce, and ciphertext fields, Daochi stores and relays it as an opaque encrypted envelope authenticated by bearer token.",
 					"parameters":  syncHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,
@@ -466,7 +490,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/account/export": map[string]any{
 				"get": map[string]any{
 					"summary":     "Export authenticated account data",
-					"description": "Bearer-authenticated read-only dump of all Ksync rows owned by or directly attached to the authenticated account.",
+					"description": "Bearer-authenticated read-only dump of all Daochi rows owned by or directly attached to the authenticated account.",
 					"parameters":  bearerHeaderParameters(),
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Account data export"},
@@ -496,7 +520,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/friends": map[string]any{
 				"get": map[string]any{
 					"summary":     "List accepted friends",
-					"description": "Bearer-authenticated. Returns account-level Ksync friends.",
+					"description": "Bearer-authenticated. Returns account-level Daochi friends.",
 					"parameters":  bearerHeaderParameters(),
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Friends list"},
@@ -532,7 +556,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/profile/stats": map[string]any{
 				"put": map[string]any{
 					"summary":     "Publish app-neutral profile stats",
-					"description": "Bearer-authenticated aggregate stats. Ksync stores only app/practice/metric/value rows.",
+					"description": "Bearer-authenticated aggregate stats. Daochi stores only app/practice/metric/value rows.",
 					"parameters":  bearerHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,
@@ -620,7 +644,7 @@ func openAPISpec() map[string]any {
 				},
 				"EncryptedSyncEnvelope": map[string]any{
 					"type":        "object",
-					"description": "Opaque whole-payload encrypted sync envelope. Ksync authenticates the account and relays the JSON body unchanged as encrypted_payloads.",
+					"description": "Opaque whole-payload encrypted sync envelope. Daochi authenticates the account and relays the JSON body unchanged as encrypted_payloads.",
 					"required":    []string{"v", "nonce", "ciphertext"},
 					"properties": map[string]any{
 						"v":          map[string]any{"type": "integer", "enum": []int{1, 2}},

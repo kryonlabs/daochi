@@ -8,12 +8,12 @@ RUN cmake -GNinja -S . -B build -DBUILD_SHARED_LIBS=ON -DOQS_BUILD_ONLY_LIB=ON -
     && cmake --build build \
     && cmake --install build
 
-FROM golang:1.24-bookworm AS build
+FROM golang:1.26-bookworm AS build
 COPY --from=liboqs /usr/local /usr/local
 WORKDIR /src
 COPY . .
 ENV CGO_ENABLED=1
-RUN go build -mod=mod -o /out/ksync .
+RUN go build -mod=mod -o /out/daochi .
 
 FROM debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -22,8 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && chown ksync:ksync /data \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=liboqs /usr/local/lib/liboqs.so* /usr/local/lib/
-COPY --from=build /out/ksync /usr/local/bin/ksync
+COPY --from=build /out/daochi /usr/local/bin/daochi
+RUN ln -s /usr/local/bin/daochi /usr/local/bin/ksync
 ENV LD_LIBRARY_PATH=/usr/local/lib
 EXPOSE 8080
 USER ksync
-CMD ["ksync"]
+CMD ["daochi"]

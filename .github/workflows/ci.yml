@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ksync-ci-${{ github.ref }}
+  group: daochi-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
           cache: true
 
       - name: Install build dependencies
@@ -55,4 +55,4 @@ jobs:
           submodules: recursive
 
       - name: Build container image
-        run: docker build --pull -t ksync:ci .
+        run: docker build --pull -t daochi:ci .

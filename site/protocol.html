@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daochi Protocol</title>
+  <meta name="description" content="Daochi protocol details for signed identity, encrypted records, sync compatibility, and remote events.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Daochi</a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/protocol.html">Protocol</a>
+      <a href="/mesh.html">Mesh</a>
+      <a href="/apps.html">Apps</a>
+      <a href="/tokens.html">Tokens</a>
+      <a href="/openapi.json">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="page-hero">
+      <p class="eyebrow">Protocol</p>
+      <h1>Signed sync with a stable compatibility window.</h1>
+      <p class="lead">The protocol keeps shipped Ksync clients working while moving new clients toward encrypted private records, app-owned collection namespaces, and transport-neutral record envelopes.</p>
+    </section>
+
+    <section>
+      <div class="split">
+        <div>
+          <h2>Identity and authentication</h2>
+          <p>A client account is identified by the hash of its public account key. Login starts with a single-use challenge for that account, then the client signs a canonical request body with ML-DSA-44. Daochi verifies the signature and returns a bearer token for ordinary sync and social endpoints.</p>
+          <p>Bearer tokens are operational credentials, not the durable account identity. Clients should repeat the challenge and login flow when a token expires, receives a <code>401</code>, or the server restarts with a new development token secret.</p>
+        </div>
+        <div class="panel">
+          <div class="panel-row"><strong>Challenge</strong><span><code>GET /api/v1/sync/challenge?user_id=&lt;hash&gt;</code></span></div>
+          <div class="panel-row"><strong>Login</strong><span><code>POST /api/v1/sync/login</code> with signed JSON</span></div>
+          <div class="panel-row"><strong>Token</strong><span>HMAC bearer credential scoped to the account hash</span></div>
+          <div class="panel-row"><strong>Clock</strong><span>Responses include server Unix time for client expiry skew handling</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Sync surfaces</h2>
+      <p>The legacy typed sync surface stores rows and JSON payloads that the server can read and compact. It remains available for clients that shipped before encrypted private records were primary.</p>
+      <p>Encrypted records are keyed by <code>collection</code> and <code>id</code>. The server validates names, versions the records, relays them to newer clients, exports them, and deletes them with the account, but does not need to inspect the ciphertext. Protocol v5 treats encrypted records as the primary private-data surface and returns legacy private rows only when clients explicitly request them.</p>
+      <div class="grid">
+        <article class="card">
+          <h3>v4 transition</h3>
+          <p>Clients can dual-write legacy typed rows and encrypted records. Released Inbe v4 collections remain valid so users do not need an immediate second backfill.</p>
+        </article>
+        <article class="card">
+          <h3>v5 primary mode</h3>
+          <p>Private app data moves through encrypted hierarchical collections such as <code>private.inbe.v1.sessions</code> while social projections stay readable by design.</p>
+        </article>
+        <article class="card">
+          <h3>v6 direction</h3>
+          <p>Future strict requests must include a registered <code>app_id</code>, and encrypted record collections must belong to that app registration.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Remote event stream</h2>
+      <p><code>GET /api/v1/sync/ws</code> upgrades to a small event stream that tells clients when newer sync data is available. Native clients authenticate with <code>Authorization: Bearer &lt;token&gt;</code>. Browser clients can use <code>Sec-WebSocket-Protocol: ksync-sync-v1, bearer.&lt;token&gt;</code> because browser WebSocket APIs cannot set arbitrary headers.</p>
+      <p>Daochi rejects <code>?token=</code> WebSocket URLs so bearer tokens do not leak through request URLs, browser history, proxy logs, or crash reports.</p>
+      <pre>challenge
+sign canonical body
+login
+sync
+remote-event
+sync again</pre>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>&copy; 2026 <a href="https://kryonlabs.com">Kryon Labs</a></span>
+    <a href="https://github.com/kryonlabs/daochi">Source</a>
+  </footer>
+</body>
+</html>

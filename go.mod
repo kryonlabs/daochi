@@ -1,4 +1,4 @@
-module ksync
+module daochi
 
 go 1.24
 

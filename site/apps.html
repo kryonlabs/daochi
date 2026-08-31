@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daochi App Model</title>
+  <meta name="description" content="Daochi app registry, collection ownership, visibility classes, and app grants.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Daochi</a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/protocol.html">Protocol</a>
+      <a href="/mesh.html">Mesh</a>
+      <a href="/apps.html">Apps</a>
+      <a href="/tokens.html">Tokens</a>
+      <a href="/openapi.json">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="page-hero">
+      <p class="eyebrow">Apps</p>
+      <h1>Data belongs to apps, not to a hard-coded client.</h1>
+      <p class="lead">The registry lets Daochi understand which app owns which collection prefixes, what visibility class they use, and which capabilities the app expects from the relay.</p>
+    </section>
+
+    <section>
+      <h2>Registry</h2>
+      <p><code>GET /api/v1/apps</code> lists registered apps. Admin registration can add or update apps when <code>KSYNC_ADMIN_TOKEN</code> is configured and the request supplies <code>X-Ksync-Admin</code>.</p>
+      <p>Built-in registrations seed Inbe and Uku. Inbe carries released legacy encrypted collections plus future private, shared, friends, and public hierarchy prefixes. Uku carries decision-process collections for private, shared, and public records.</p>
+      <div class="grid">
+        <article class="card">
+          <h3>Private</h3>
+          <p>Account-owned encrypted data that should not be shared by the server without explicit client behavior.</p>
+        </article>
+        <article class="card">
+          <h3>Shared</h3>
+          <p>User-grantable collections that can be exposed to another registered app through an account grant.</p>
+        </article>
+        <article class="card">
+          <h3>Friends</h3>
+          <p>Records designed for friend-visible projections and social surfaces.</p>
+        </article>
+        <article class="card">
+          <h3>Public</h3>
+          <p>Records intended to be readable outside the private account sync path.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="split">
+        <div>
+          <h2>App grants</h2>
+          <p>App grants let an account allow a target app to read a selected shared collection prefix from a source app. Daochi validates the source app, target app, collection prefix, and permission before creating the grant.</p>
+          <p><code>GET /api/v1/account/app-records</code> returns authorized records for the account when the grant exists. Revocation deletes the grant without deleting the underlying app records.</p>
+        </div>
+        <div class="panel">
+          <div class="panel-row"><strong>Create</strong><span><code>POST /api/v1/account/app-grants</code></span></div>
+          <div class="panel-row"><strong>List</strong><span><code>GET /api/v1/account/app-grants</code></span></div>
+          <div class="panel-row"><strong>Read</strong><span><code>GET /api/v1/account/app-records</code></span></div>
+          <div class="panel-row"><strong>Revoke</strong><span><code>DELETE /api/v1/account/app-grants/{id}</code></span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>&copy; 2026 <a href="https://kryonlabs.com">Kryon Labs</a></span>
+    <a href="https://github.com/kryonlabs/daochi">Source</a>
+  </footer>
+</body>
+</html>

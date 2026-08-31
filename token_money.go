@@ -495,7 +495,7 @@ func (s *Server) handleTokenBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	balance, err := s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
 	if err != nil {
-		slog.Error("token balance", "user", userID, "error", err)
+		slog.Error("token balance", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token balance failed")
 		return
 	}
@@ -514,7 +514,7 @@ func (s *Server) handleTokenLedger(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("since")), 10, 64)
 	events, err := s.store.TokenLedger(r.Context(), userID, waoziTokenAssetID, since)
 	if err != nil {
-		slog.Error("token ledger", "user", userID, "error", err)
+		slog.Error("token ledger", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token ledger failed")
 		return
 	}
@@ -529,7 +529,7 @@ func (s *Server) handleTokenReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	receipt, found, err := s.store.TokenReceipt(r.Context(), receiptID)
 	if err != nil {
-		slog.Error("token receipt", "receipt", receiptID, "error", err)
+		slog.Error("token receipt", "receipt", logText(receiptID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token receipt failed")
 		return
 	}
@@ -560,7 +560,7 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
-		slog.Error("token spend app lookup", "app", req.AppID, "error", err)
+		slog.Error("token spend app lookup", "app", logText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token spend failed")
 		return
 	} else if !exists {
@@ -584,7 +584,7 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "insufficient balance")
 			return
 		}
-		slog.Error("token spend", "user", userID, "error", err)
+		slog.Error("token spend", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token spend failed")
 		return
 	}
@@ -612,7 +612,7 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
-		slog.Error("google token purchase app lookup", "app", req.AppID, "error", err)
+		slog.Error("google token purchase app lookup", "app", logText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token purchase failed")
 		return
 	} else if !exists {
@@ -637,12 +637,12 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		SourceRef:   paymentID,
 	})
 	if err != nil {
-		slog.Error("google token credit", "user", userID, "payment", paymentID, "error", err)
+		slog.Error("google token credit", "user", logText(userID), "payment", logText(paymentID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token credit failed")
 		return
 	}
 	if err := consumeGooglePlayPurchase(r.Context(), s.cfg, req); err != nil {
-		slog.Warn("google purchase consume failed after token credit", "user", userID, "payment", paymentID, "error", err)
+		slog.Warn("google purchase consume failed after token credit", "user", logText(userID), "payment", logText(paymentID), "error", err)
 	}
 	balance, err := s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
 	if err != nil {
@@ -672,7 +672,7 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
-		slog.Error("monero invoice app lookup", "app", req.AppID, "error", err)
+		slog.Error("monero invoice app lookup", "app", logText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	} else if !exists {
@@ -681,7 +681,7 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 	}
 	invoice, err := s.store.CreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.cfg)
 	if err != nil {
-		slog.Error("create monero invoice", "user", userID, "error", err)
+		slog.Error("create monero invoice", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	}
@@ -700,7 +700,7 @@ func (s *Server) handleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request
 	}
 	invoice, found, err := s.store.MoneroInvoice(r.Context(), userID, id)
 	if err != nil {
-		slog.Error("load monero invoice", "user", userID, "invoice", id, "error", err)
+		slog.Error("load monero invoice", "user", logText(userID), "invoice", logText(id), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	}
@@ -710,7 +710,7 @@ func (s *Server) handleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request
 	}
 	if invoice.Status == "pending" {
 		if updated, err := s.trySettleOrExpireMoneroInvoice(r.Context(), userID, invoice); err != nil {
-			slog.Warn("monero invoice settlement failed", "user", userID, "invoice", id, "error", err)
+			slog.Warn("monero invoice settlement failed", "user", logText(userID), "invoice", logText(id), "error", err)
 		} else if updated.ID != "" {
 			invoice = updated
 		}
@@ -785,8 +785,8 @@ func (s *Server) reconcileMoneroInvoices(ctx context.Context, limit int) error {
 	}
 	for _, item := range invoices {
 		if _, err := s.trySettleOrExpireMoneroInvoice(ctx, item.AccountID, item.Invoice); err != nil {
-			slog.Warn("monero invoice reconciliation item failed", "account", item.AccountID,
-				"invoice", item.Invoice.ID, "error", err)
+			slog.Warn("monero invoice reconciliation item failed", "account", logText(item.AccountID),
+				"invoice", logText(item.Invoice.ID), "error", err)
 		}
 	}
 	return nil

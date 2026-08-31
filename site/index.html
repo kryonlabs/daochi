@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daochi</title>
+  <meta name="description" content="Mesh-native sync for app-owned data, signed identity, encrypted records, remote events, and Waozi token receipts.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://daochi.net/">
+  <meta property="og:title" content="Daochi">
+  <meta property="og:description" content="Mesh-native sync for app-owned data.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Daochi">
+  <meta name="twitter:description" content="Mesh-native sync for app-owned data.">
+  <meta name="theme-color" content="#f7f8fb">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Daochi</a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/protocol.html">Protocol</a>
+      <a href="/mesh.html">Mesh</a>
+      <a href="/apps.html">Apps</a>
+      <a href="/tokens.html">Tokens</a>
+      <a href="/openapi.json">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Mesh-native sync for app-owned data</p>
+      <h1>Daochi</h1>
+      <p class="lead">A sync relay and protocol surface for native and web apps that need signed identity, encrypted private records, social projections, remote events, and portable app-owned data.</p>
+      <div class="actions">
+        <a class="button" href="/protocol.html">Protocol</a>
+        <a class="button secondary" href="/mesh.html">Mesh model</a>
+        <a class="button secondary" href="/tokens.html">Token receipts</a>
+      </div>
+    </section>
+
+    <section>
+      <p class="eyebrow">What it does</p>
+      <h2>Server-assisted today, designed for records that can move through more than one path.</h2>
+      <p>Daochi stores public keys, account metadata, app registrations, sync versions, encrypted records, and selected public or social projections. It never stores client private keys. Existing clients can keep using the compatibility wire names while the product name moves from Ksync to Daochi.</p>
+      <div class="grid">
+        <article class="card">
+          <h3>Signed accounts</h3>
+          <p>Clients prove account control by signing short-lived challenges. The server issues cacheable bearer tokens for normal sync and social calls.</p>
+        </article>
+        <article class="card">
+          <h3>Encrypted records</h3>
+          <p>Private data can be written as opaque versioned records. The relay stores and orders the blobs without parsing their contents.</p>
+        </article>
+        <article class="card">
+          <h3>App ownership</h3>
+          <p>Registered apps declare collection prefixes, visibility classes, and capabilities so data ownership is not hard-coded to one client.</p>
+        </article>
+        <article class="card">
+          <h3>Remote events</h3>
+          <p>WebSocket events notify clients when newer data exists while keeping bearer tokens out of request URLs.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="split">
+        <div>
+          <p class="eyebrow">Compatibility</p>
+          <h2>The public name changes; the shipped wire contract stays stable.</h2>
+          <p>Current server code still accepts the <code>ksync-sync-v1</code> signature context and <code>X-Ksync-*</code> headers. Protocol v1 through v5 remain valid through 2027-09-01. Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available when clients ask for compatibility data.</p>
+        </div>
+        <div class="panel" aria-label="Compatibility facts">
+          <div class="panel-row"><strong>Headers</strong><span><code>X-Ksync-User</code>, <code>X-Ksync-Signature</code>, <code>X-Ksync-Client</code>, <code>X-Ksync-Since-Version</code></span></div>
+          <div class="panel-row"><strong>Protocol</strong><span>v1-v5 supported through 2027-09-01</span></div>
+          <div class="panel-row"><strong>Records</strong><span>v5 private hierarchy plus released Inbe v4 collections</span></div>
+          <div class="panel-row"><strong>Events</strong><span><code>ksync-sync-v1, bearer.&lt;token&gt;</code> WebSocket subprotocol support</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>&copy; 2026 <a href="https://kryonlabs.com">Kryon Labs</a></span>
+    <a href="https://github.com/kryonlabs/daochi">Source</a>
+  </footer>
+</body>
+</html>

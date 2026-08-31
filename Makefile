@@ -30,13 +30,14 @@ $(LIBOQS_A): $(LIBOQS_DIR)/CMakeLists.txt
 	$(CMAKE) --build $(LIBOQS_BUILD_DIR) --target install
 
 build: $(LIBOQS_A)
-	$(CGO_ENV) $(GO) build -o ksync .
+	$(CGO_ENV) $(GO) build -o daochi .
+	ln -sf daochi ksync
 
 test: $(LIBOQS_A)
-	$(CGO_ENV) GOCACHE=/tmp/ksync-gocache $(GO) test ./...
+	$(CGO_ENV) GOCACHE=/tmp/daochi-gocache $(GO) test ./...
 
 run: $(LIBOQS_A)
 	$(CGO_ENV) $(GO) run .
 
 clean:
-	rm -rf $(BUILD_DIR) ksync
+	rm -rf $(BUILD_DIR) daochi ksync

@@ -440,14 +440,14 @@ func (s *Server) handleAppRoute(w http.ResponseWriter, r *http.Request) {
 		appID = strings.Trim(appID, "/")
 		collections, err := s.store.AppCollections(r.Context(), appID)
 		if err != nil {
-			slog.Error("app collections", "app", appID, "error", err)
+			slog.Error("app collections", "app", logText(appID), "error", err)
 			writeError(w, http.StatusInternalServerError, "apps failed")
 			return
 		}
 		if len(collections) == 0 {
 			if exists, err := s.store.AppExists(r.Context(), appID); err != nil || !exists {
 				if err != nil {
-					slog.Error("app exists", "app", appID, "error", err)
+					slog.Error("app exists", "app", logText(appID), "error", err)
 					writeError(w, http.StatusInternalServerError, "apps failed")
 					return
 				}
@@ -468,7 +468,7 @@ func (s *Server) handleAppRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	app, found, err := s.store.AppByID(r.Context(), appID)
 	if err != nil {
-		slog.Error("load app", "app", appID, "error", err)
+		slog.Error("load app", "app", logText(appID), "error", err)
 		writeError(w, http.StatusInternalServerError, "apps failed")
 		return
 	}
@@ -497,13 +497,13 @@ func (s *Server) handleAppRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.UpsertApp(r.Context(), req); err != nil {
-		slog.Error("register app", "app", req.AppID, "error", err)
+		slog.Error("register app", "app", logText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
 	app, _, err := s.store.AppByID(r.Context(), req.AppID)
 	if err != nil {
-		slog.Error("load registered app", "app", req.AppID, "error", err)
+		slog.Error("load registered app", "app", logText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
@@ -531,7 +531,7 @@ func (s *Server) handleAppGrants(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			slog.Error("create app grant", "user", userID, "error", err)
+			slog.Error("create app grant", "user", logText(userID), "error", err)
 			writeError(w, http.StatusInternalServerError, "app grant failed")
 			return
 		}
@@ -540,7 +540,7 @@ func (s *Server) handleAppGrants(w http.ResponseWriter, r *http.Request) {
 	}
 	grants, err := s.store.ListAppGrants(r.Context(), userID)
 	if err != nil {
-		slog.Error("list app grants", "user", userID, "error", err)
+		slog.Error("list app grants", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app grants failed")
 		return
 	}
@@ -562,7 +562,7 @@ func (s *Server) handleAppGrantRoute(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "app grant not found")
 			return
 		}
-		slog.Error("revoke app grant", "user", userID, "grant", id, "error", err)
+		slog.Error("revoke app grant", "user", logText(userID), "grant", logText(id), "error", err)
 		writeError(w, http.StatusInternalServerError, "app grant failed")
 		return
 	}
@@ -587,7 +587,7 @@ func (s *Server) handleAppRecords(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "app grant required")
 			return
 		}
-		slog.Error("read app records", "user", userID, "source_app", sourceAppID, "target_app", targetAppID, "error", err)
+		slog.Error("read app records", "user", logText(userID), "source_app", logText(sourceAppID), "target_app", logText(targetAppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app records failed")
 		return
 	}

@@ -82,7 +82,7 @@ func TestDocsEndpoints(t *testing.T) {
 	if root.Code != http.StatusOK {
 		t.Fatalf("root status = %d", root.Code)
 	}
-	if !strings.Contains(root.Body.String(), "Ksync Sync API") {
+	if !strings.Contains(root.Body.String(), "Daochi") {
 		t.Fatalf("root docs missing title: %s", root.Body.String())
 	}
 	for _, want := range []string{"Users", "Storage", "/"} {

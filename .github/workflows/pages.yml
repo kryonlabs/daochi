@@ -1,0 +1,42 @@
+name: Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daochi-pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Site
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Check Site
+        run: |
+          set -euo pipefail
+          test -f site/index.html
+          test -f site/protocol.html
+          test -f site/mesh.html
+          test -f site/apps.html
+          test -f site/tokens.html
+          test -f site/styles.css
+          test -f site/_headers
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=daochi --branch=${{ github.head_ref || github.ref_name }}

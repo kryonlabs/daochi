@@ -1,18 +1,18 @@
-# Ksync
+# Daochi
 
-Ksync is the stateless sync relay for Kryon apps. It stores public keys and mirrored app data, but never stores client private keys.
+Daochi is a mesh-native sync network for app-owned data. It stores public keys and mirrored app data, but never stores client private keys. The current implementation still uses `Ksync*` API symbols and `X-Ksync-*` wire headers for compatibility.
 
 ## Privacy Model
 
-Ksync uses the client account key for identity and authentication. A client proves control of the account by signing a short-lived challenge with ML-DSA-44, and Ksync then issues a bearer token for normal sync and social API calls.
+Daochi uses the client account key for identity and authentication. A client proves control of the account by signing a short-lived challenge with ML-DSA-44, and the server then issues a bearer token for normal sync and social API calls.
 
-Ksync's legacy typed sync surface is not end-to-end encrypted against the server. Mirrored app data is stored in SQLite as normal typed rows and JSON payloads so the service can sync, compact, export, derive friend leaderboard stats, and delete account data. This is intentional for compatibility. Operational access to the server database or a valid bearer token can read the typed data those credentials allow.
+The legacy typed sync surface is not end-to-end encrypted against the server. Mirrored app data is stored in SQLite as normal typed rows and JSON payloads so the service can sync, compact, export, derive friend leaderboard stats, and delete account data. This is intentional for compatibility. Operational access to the server database or a valid bearer token can read the typed data those credentials allow.
 
-Protocol clients may also sync `encrypted_records`: opaque per-account private records identified by `collection` and `id`. Ksync stores and versions those blobs for relay, export, deletion, and diagnostics, but does not need to read their contents. Protocol v4 advertises this as the dual-write transition path: upgraded clients can keep sending legacy typed rows for compatibility while also seeding encrypted private records for future mesh-capable clients. Protocol v5 makes encrypted records the primary private-data surface for upgraded clients while legacy typed rows remain available through `include_legacy_data` for compatibility. The released Inbe v4 encrypted collections remain valid in v5 so clients do not need an immediate second backfill migration. Public/social projections such as aliases, friend requests, profile icons, and leaderboard stats remain readable server-side by design.
+Protocol clients may also sync `encrypted_records`: opaque per-account private records identified by `collection` and `id`. Daochi stores and versions those blobs for relay, export, deletion, and diagnostics, but does not need to read their contents. Protocol v4 advertises this as the dual-write transition path: upgraded clients can keep sending legacy typed rows for compatibility while also seeding encrypted private records for future mesh-capable clients. Protocol v5 makes encrypted records the primary private-data surface for upgraded clients while legacy typed rows remain available through `include_legacy_data` for compatibility. The released Inbe v4 encrypted collections remain valid in v5 so clients do not need an immediate second backfill migration. Public/social projections such as aliases, friend requests, profile icons, and leaderboard stats remain readable server-side by design.
 
-Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Ksync authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Ksync-Since-Version`. Existing typed Inbe clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
+Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Ksync-Since-Version`. Existing typed Inbe clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
 
-Ksync keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding Inbe behavior. `inbe` and `uku` are seeded automatically. Inbe remains the lead migration client and sends `app_id:"inbe"` in v5 compatibility mode; older clients without `app_id` continue to sync. Future protocol v6 requests must include a registered `app_id`, and encrypted record collections must belong to that registered app.
+Daochi keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding Inbe behavior. `inbe` and `uku` are seeded automatically. Inbe remains the lead migration client and sends `app_id:"inbe"` in v5 compatibility mode; older clients without `app_id` continue to sync. Future protocol v6 requests must include a registered `app_id`, and encrypted record collections must belong to that registered app.
 
 Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01**. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid.
 
@@ -82,7 +82,7 @@ Set `KSYNC_TOKEN_SECRET_HEX` to at least 32 random bytes encoded as hex in produ
 
 Bearer tokens are intentionally cacheable client-side credentials, not the user's durable login state. Clients should silently run the challenge/sign/login flow again when a token expires or receives a `401`, as long as the local account key still exists. Login responses include `server_time` as Unix seconds so clients can compensate for local clock skew when caching token expiry. Older clients may ignore it. Only an explicit user logout, account deletion, or local account reset should remove the account key.
 
-The WebSocket endpoint accepts bearer auth through `Authorization: Bearer <token>`. Browser clients that cannot set custom WebSocket headers may send `Sec-WebSocket-Protocol: ksync-sync-v1, bearer.<token>`. Ksync rejects `?token=` WebSocket URLs so bearer tokens do not leak through request URLs, browser history, or proxy URL logs.
+The WebSocket endpoint accepts bearer auth through `Authorization: Bearer <token>`. Browser clients that cannot set custom WebSocket headers may send `Sec-WebSocket-Protocol: ksync-sync-v1, bearer.<token>`. Daochi rejects `?token=` WebSocket URLs so bearer tokens do not leak through request URLs, browser history, or proxy URL logs.
 
 Encrypted envelope clients should send:
 
@@ -92,7 +92,7 @@ Encrypted envelope clients should send:
 - `X-Ksync-Since-Version: <last-seen-server-version>` when requesting only newer envelopes
 - `X-Ksync-Limit: <count>` when deliberately paging envelope deltas
 
-Envelope bodies are relayed as JSON `encrypted_payloads` in the sync response. Ksync does not parse the envelope contents beyond checking that `v` is `1` or `2` and `nonce` and `ciphertext` are non-empty. If a response is paged, `encrypted_payloads_truncated` is `true` and `encrypted_payloads_next_since_version` is the next value to send as `X-Ksync-Since-Version`.
+Envelope bodies are relayed as JSON `encrypted_payloads` in the sync response. Daochi does not parse the envelope contents beyond checking that `v` is `1` or `2` and `nonce` and `ciphertext` are non-empty. If a response is paged, `encrypted_payloads_truncated` is `true` and `encrypted_payloads_next_since_version` is the next value to send as `X-Ksync-Since-Version`.
 
 ## Signature Message
 
@@ -120,7 +120,7 @@ Signed JSON bodies still include `user_id_hash`. The server accepts `public_key`
 
 The preferred account deletion endpoint is `POST /api/v1/account/delete`, using the same challenge/signature scheme as login and sync so the private key never leaves the device. `DELETE /api/v1/account` remains supported for older clients that already shipped with that wire shape.
 
-The website deletion endpoint `POST /api/v1/account/delete-with-key` accepts `user_id_hash` plus the full exported account key text. Current exports start with `ksync-account-key-v1`; legacy `lyra-account-key-v1`, `account-key-v1`, and `inbe-sync-key-v1` exports are still accepted. Current key exports include `public_id`, and Ksync rejects a request if that public ID does not match `user_id_hash`. Ksync signs a fixed deletion proof with that private key, verifies it against the registered public key, deletes the account, and does not store the uploaded key.
+The website deletion endpoint `POST /api/v1/account/delete-with-key` accepts `user_id_hash` plus the full exported account key text. Current exports start with `ksync-account-key-v1`; legacy `lyra-account-key-v1`, `account-key-v1`, and `inbe-sync-key-v1` exports are still accepted. Current key exports include `public_id`, and Daochi rejects a request if that public ID does not match `user_id_hash`. Daochi signs a fixed deletion proof with that private key, verifies it against the registered public key, deletes the account, and does not store the uploaded key.
 
 ## Build
 
@@ -135,8 +135,8 @@ The Makefile builds a minimal static liboqs from `vendor/liboqs` with `SIG_ml_ds
 Inspect a production database offline with:
 
 ```sh
-./ksync inspect --db /var/lib/ksync/ksync.db summary
-./ksync inspect --db /var/lib/ksync/ksync.db doctor <user_id_hash>
+./daochi inspect --db /var/lib/ksync/ksync.db summary
+./daochi inspect --db /var/lib/ksync/ksync.db doctor <user_id_hash>
 ```
 
 `inspect doctor` prints redacted account status, sync versions, table counts, recent client protocol hints, and recent sync audit metadata. Use `--full` only when you intentionally need unredacted IDs.
@@ -144,10 +144,10 @@ Inspect a production database offline with:
 Without Nix, install liboqs headers and library on the host, then:
 
 ```sh
-CGO_ENABLED=1 go build -o ksync .
+CGO_ENABLED=1 go build -o daochi .
 ```
 
-Runtime configuration:
+Runtime configuration. The current server keeps `KSYNC_*` environment variable names for compatibility:
 
 ```sh
 KSYNC_ADDR=127.0.0.1:8080
@@ -183,17 +183,19 @@ Generate a token secret once and keep it stable across restarts and every deploy
 openssl rand -hex 32
 ```
 
-If `KSYNC_TOKEN_SECRET_HEX` is missing, Ksync generates a random in-memory secret at startup. That is only suitable for single-process local development: existing bearer tokens become invalid after restart, and multi-instance deployments will reject tokens issued by another instance.
+If `KSYNC_TOKEN_SECRET_HEX` is missing, Daochi generates a random in-memory secret at startup. That is only suitable for single-process local development: existing bearer tokens become invalid after restart, and multi-instance deployments will reject tokens issued by another instance.
 
 Encrypted envelope limits are disabled by default to avoid surprising existing clients. Set `KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN` to cap each envelope response, `KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES` to reject writes that would exceed an account quota, and `KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS` only after clients can tolerate older envelope pruning.
 
 ## Waozi Tokens
 
-Ksync can issue `waozi:token` receipts for official Waozi apps. The server verifies Google Play or Monero payments, writes an append-only ledger event, and signs the receipt with the Waozi Ed25519 issuer key. Official clients must verify the issuer key and accept only `issuer_id=waozi` with `asset_id=waozi:token`.
+Daochi can issue `waozi:token` receipts for official Waozi apps. The server verifies Google Play or Monero payments, writes an append-only ledger event, and signs the receipt with the Waozi Ed25519 issuer key. Official clients must verify the issuer key and accept only `issuer_id=waozi` with `asset_id=waozi:token`.
 
-Self-hosted Ksync servers may use the same ledger shape for local assets later, but they cannot create official Waozi tokens without the Waozi private issuer key. If only `KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX` is configured, the server can expose and verify receipts but cannot credit or spend tokens.
+Self-hosted Daochi servers may use the same ledger shape for local assets later, but they cannot create official Waozi tokens without the Waozi private issuer key. If only `KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX` is configured, the server can expose and verify receipts but cannot credit or spend tokens.
 
 Token ledger and payment-intent rows are financial audit records. They are scoped by account for balance and receipt lookup, but they are not included in normal account data export and are not deleted by account-data cascade.
+
+Token purchases, spends, invoices, receipts, and spend nonces carry `app_id`, and spend or purchase flows validate that the app is registered. The current balance is still account-wide for `waozi:token`; Daochi does not yet maintain separate per-app token allocation pools. Add app-filtered balances, app-filtered ledger queries, and explicit account-to-app allocation events before treating per-app token distribution as complete.
 
 ## Encrypted Hierarchy
 

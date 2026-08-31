@@ -13,7 +13,7 @@ permissions:
   security-events: write
 
 concurrency:
-  group: ksync-security-${{ github.ref }}
+  group: daochi-security-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: true
 
       - name: Run govulncheck
@@ -35,7 +35,7 @@ jobs:
           CGO_ENABLED: "0"
           GOFLAGS: "-mod=mod"
         with:
-          go-version-input: "1.25"
+          go-version-input: "1.26"
           go-package: ./...
 
   dependency-review:
@@ -68,7 +68,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
           cache: true
 
       - name: Cache vendored liboqs build
@@ -100,12 +100,12 @@ jobs:
           submodules: recursive
 
       - name: Build image
-        run: docker build --pull -t ksync:security .
+        run: docker build --pull -t daochi:security .
 
       - name: Scan image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ksync:security
+          image-ref: daochi:security
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH

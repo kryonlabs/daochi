@@ -452,6 +452,39 @@ CREATE TABLE IF NOT EXISTS server_app_capabilities (
 	PRIMARY KEY(app_id, capability)
 );
 
+CREATE TABLE IF NOT EXISTS server_app_manifests (
+	app_id TEXT PRIMARY KEY REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	manifest_version INTEGER NOT NULL,
+	manifest_json TEXT NOT NULL,
+	manifest_hash TEXT NOT NULL UNIQUE,
+	manifest_signature TEXT NOT NULL,
+	approval_signature TEXT NOT NULL,
+	expires_at INTEGER NOT NULL DEFAULT 0,
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS server_app_keys (
+	app_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	key_id TEXT NOT NULL,
+	algorithm TEXT NOT NULL,
+	public_key TEXT NOT NULL,
+	purpose TEXT NOT NULL DEFAULT 'signing',
+	status TEXT NOT NULL DEFAULT 'active',
+	expires_at INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(app_id, key_id)
+);
+
+CREATE TABLE IF NOT EXISTS server_app_revocations (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	app_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	key_id TEXT NOT NULL DEFAULT '',
+	reason TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS server_app_grants (
 	id TEXT PRIMARY KEY,
 	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
@@ -472,6 +505,17 @@ CREATE TABLE IF NOT EXISTS server_app_grant_audit (
 	action TEXT NOT NULL,
 	payload_json TEXT NOT NULL DEFAULT '{}',
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS server_signed_transactions (
+	account_id TEXT NOT NULL,
+	tx_id TEXT NOT NULL,
+	app_id TEXT NOT NULL,
+	nonce TEXT NOT NULL,
+	expires_at INTEGER NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(account_id, tx_id),
+	UNIQUE(account_id, app_id, nonce)
 );
 
 CREATE TABLE IF NOT EXISTS server_sync_ops (
@@ -715,6 +759,16 @@ CREATE TABLE IF NOT EXISTS token_checkpoints (
 	signature TEXT NOT NULL,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS token_app_permissions (
+	app_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	asset_id TEXT NOT NULL REFERENCES token_assets(asset_id) ON DELETE CASCADE,
+	permission TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'active',
+	legacy_unsigned_until INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(app_id, asset_id, permission)
+);
 `)
 	if err != nil {
 		return err
@@ -748,6 +802,7 @@ CREATE TABLE IF NOT EXISTS token_checkpoints (
 		`ALTER TABLE server_encrypted_records ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_encrypted_records ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE token_payment_intents ADD COLUMN provider_payment_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE token_app_permissions ADD COLUMN legacy_unsigned_until INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE uku_processes ADD COLUMN quorum_votes INTEGER NOT NULL DEFAULT 0`,
@@ -770,12 +825,14 @@ WHERE alias IS NOT NULL AND alias<>''`); err != nil {
 		`CREATE INDEX IF NOT EXISTS server_app_grants_user_status ON server_app_grants(user_id_hash,status,updated_at)`,
 		`CREATE INDEX IF NOT EXISTS server_app_grants_lookup ON server_app_grants(user_id_hash,source_app_id,target_app_id,collection_prefix,status)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS server_app_grants_active_unique ON server_app_grants(user_id_hash,source_app_id,target_app_id,collection_prefix,permission) WHERE status='active'`,
+		`CREATE INDEX IF NOT EXISTS server_signed_transactions_expiry ON server_signed_transactions(expires_at)`,
 		`CREATE INDEX IF NOT EXISTS server_encrypted_records_collection ON server_encrypted_records(user_id_hash,collection,server_version)`,
 		`CREATE INDEX IF NOT EXISTS server_encrypted_payloads_user_version ON server_encrypted_payloads(user_id_hash,server_version,id)`,
 		`CREATE INDEX IF NOT EXISTS server_sync_audit_user_created ON server_sync_audit(user_id_hash,created_at,id)`,
 		`CREATE INDEX IF NOT EXISTS token_ledger_account_asset ON token_ledger(account_id,asset_id,ledger_seq)`,
 		`CREATE INDEX IF NOT EXISTS token_ledger_source ON token_ledger(source_type,source_ref)`,
 		`CREATE INDEX IF NOT EXISTS token_payment_intents_account ON token_payment_intents(account_id,provider,status,created_at)`,
+		`CREATE INDEX IF NOT EXISTS token_app_permissions_lookup ON token_app_permissions(asset_id,permission,status)`,
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err

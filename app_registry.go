@@ -58,50 +58,8 @@ func (s *Store) UpsertApp(ctx context.Context, app AppRegistration) error {
 		return err
 	}
 	defer tx.Rollback()
-
-	status := strings.TrimSpace(app.Status)
-	if status == "" {
-		status = appStatusActive
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status)
-VALUES(?1,?2,?3,?4,?5,?6,?7)
-ON CONFLICT(app_id) DO UPDATE SET
-	display_name=excluded.display_name,
-	description=excluded.description,
-	homepage_url=excluded.homepage_url,
-	source_url=excluded.source_url,
-	public_key=excluded.public_key,
-	status=excluded.status,
-	updated_at=CURRENT_TIMESTAMP`,
-		app.AppID, app.DisplayName, app.Description, app.HomepageURL, app.SourceURL, app.PublicKey, status); err != nil {
+	if err := upsertAppTx(ctx, tx, app); err != nil {
 		return err
-	}
-	if len(app.Collections) > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM server_app_collections WHERE app_id=?1`, app.AppID); err != nil {
-			return err
-		}
-		for _, collection := range app.Collections {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_app_collections(app_id,collection_prefix,visibility,schema_version,description)
-VALUES(?1,?2,?3,?4,?5)`,
-				app.AppID, collection.CollectionPrefix, collection.Visibility,
-				collection.SchemaVersion, collection.Description); err != nil {
-				return err
-			}
-		}
-	}
-	if len(app.Capabilities) > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM server_app_capabilities WHERE app_id=?1`, app.AppID); err != nil {
-			return err
-		}
-		for _, capability := range app.Capabilities {
-			if _, err := tx.ExecContext(ctx, `
-INSERT OR IGNORE INTO server_app_capabilities(app_id,capability)
-VALUES(?1,?2)`, app.AppID, capability); err != nil {
-				return err
-			}
-		}
 	}
 	return tx.Commit()
 }
@@ -137,6 +95,9 @@ ORDER BY app_id`)
 		if err != nil {
 			return nil, err
 		}
+		if err := s.HydrateAppManifestFields(ctx, &apps[i]); err != nil {
+			return nil, err
+		}
 	}
 	return apps, nil
 }
@@ -162,6 +123,9 @@ WHERE app_id=?1`, appID).Scan(&app.AppID, &app.DisplayName, &app.Description,
 	app.Capabilities, err2 = s.AppCapabilities(ctx, appID)
 	if err2 != nil {
 		return AppRegistration{}, false, err2
+	}
+	if err := s.HydrateAppManifestFields(ctx, &app); err != nil {
+		return AppRegistration{}, false, err
 	}
 	return app, true, nil
 }
@@ -547,6 +511,50 @@ func (s *Server) handleAppGrants(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, AppGrantsResponse{Grants: grants})
 }
 
+func (s *Server) handleSignedAppGrant(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.bearerUser(w, r)
+	if !ok {
+		return
+	}
+	req, body, err := readSignedAppGrantRequest(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	grantBody, err := canonicalJSON(req.Grant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid app grant")
+		return
+	}
+	if req.Tx.BodySHA256 != "" && req.Tx.BodySHA256 != sha256Hex(grantBody) {
+		writeError(w, http.StatusBadRequest, "signed transaction body hash must cover grant payload")
+		return
+	}
+	if req.Tx.BodySHA256 == "" {
+		req.Tx.BodySHA256 = sha256Hex(grantBody)
+	}
+	_ = body
+	if err := s.verifySignedTx(r.Context(), r, grantBody, req.Tx, userID, req.Grant.TargetAppID); err != nil {
+		s.writeAuthError(w, err)
+		return
+	}
+	grant, err := s.store.CreateAppGrant(r.Context(), userID, req.Grant)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "app not found")
+			return
+		}
+		if strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "registered") {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		slog.Error("create signed app grant", "user", logText(userID), "error", err)
+		writeError(w, http.StatusInternalServerError, "app grant failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, grant)
+}
+
 func (s *Server) handleAppGrantRoute(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.bearerUser(w, r)
 	if !ok {
@@ -680,6 +688,30 @@ func readAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) 
 		return req, errors.New("invalid app grant")
 	}
 	return req, nil
+}
+
+func readSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (SignedAppGrantRequest, []byte, error) {
+	var req SignedAppGrantRequest
+	body, err := readJSONBody(w, r, maxBody)
+	if err != nil {
+		return req, nil, err
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, nil, errors.New("invalid json")
+	}
+	normalizeSignedTx(&req.Tx)
+	req.Grant.SourceAppID = strings.TrimSpace(req.Grant.SourceAppID)
+	req.Grant.TargetAppID = strings.TrimSpace(req.Grant.TargetAppID)
+	req.Grant.CollectionPrefix = strings.TrimSpace(req.Grant.CollectionPrefix)
+	req.Grant.Permission = strings.TrimSpace(req.Grant.Permission)
+	if req.Grant.Permission == "" {
+		req.Grant.Permission = appGrantRead
+	}
+	if !validKsyncNamespace(req.Grant.SourceAppID) || !validKsyncNamespace(req.Grant.TargetAppID) ||
+		!validCollectionPrefix(req.Grant.CollectionPrefix) || req.Grant.Permission != appGrantRead {
+		return req, nil, errors.New("invalid app grant")
+	}
+	return req, body, nil
 }
 
 func validAppVisibility(value string) bool {

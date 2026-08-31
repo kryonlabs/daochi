@@ -25,6 +25,7 @@ type Config struct {
 	EncryptedPayloadMaxReturn       int
 	EncryptedPayloadMaxAccountBytes int64
 	EncryptedPayloadRetention       time.Duration
+	NodeRegistryPublicKey           ed25519.PublicKey
 	WaoziIssuerPublicKey            ed25519.PublicKey
 	WaoziIssuerPrivateKey           ed25519.PrivateKey
 	TokenProducts                   map[string]TokenProduct
@@ -52,6 +53,7 @@ func loadConfig() Config {
 		}
 		ephemeralSecret = true
 	}
+	nodeRegistryPublic := ed25519.PublicKey(envBytesHexOrFile("KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX", "KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE", nil))
 	issuerPublic := envBytesHexOrFile("KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX", "KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
 	if len(issuerPublic) == 0 {
 		issuerPublic = envBytesHexOrFile("KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX", "KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
@@ -82,6 +84,7 @@ func loadConfig() Config {
 		EncryptedPayloadMaxReturn:       envInt("KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN", 0),
 		EncryptedPayloadMaxAccountBytes: envInt64("KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0),
 		EncryptedPayloadRetention:       envDurationDays("KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS", 0),
+		NodeRegistryPublicKey:           nodeRegistryPublic,
 		WaoziIssuerPublicKey:            issuerPublic,
 		WaoziIssuerPrivateKey:           issuerPrivate,
 		TokenProducts:                   envTokenProducts("KSYNC_TOKEN_PRODUCTS"),

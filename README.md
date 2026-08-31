@@ -12,9 +12,9 @@ Protocol clients may also sync `encrypted_records`: opaque per-account private r
 
 Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Ksync-Since-Version`. Existing typed clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
 
-Daochi keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding product behavior. Registered apps can send `app_id` in v5 compatibility mode; older clients without `app_id` continue to sync. Future protocol v6 requests must include a registered `app_id`, and encrypted record collections must belong to that registered app.
+Daochi keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding product behavior. Registered apps can send `app_id` in v5 compatibility mode; older clients without `app_id` continue to sync. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections that belong to that registered app.
 
-Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01**. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid.
+Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01**. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid. App token policies may also declare a temporary unsigned legacy window, capped at 365 days, so released clients can migrate without sudden token-flow breakage.
 
 API access is scoped by account, with explicit shared surfaces:
 
@@ -33,13 +33,14 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/account/delete`
 - `GET /api/v1/apps`
 - `POST /api/v1/apps` with `X-Ksync-Admin` when `KSYNC_ADMIN_TOKEN` is set
+- `POST /api/v1/apps/register-signed`
 - `GET /api/v1/apps/{app_id}`
 - `GET /api/v1/apps/{app_id}/collections`
 - `GET /api/v1/tokens/assets`
 - `GET /api/v1/tokens/products`
 - `GET /api/v1/tokens/issuer`
-- `GET /api/v1/tokens/balance`
-- `GET /api/v1/tokens/ledger`
+- `GET /api/v1/tokens/balance?app_id=<optional-app-id>`
+- `GET /api/v1/tokens/ledger?since=<optional-seq>&app_id=<optional-app-id>`
 - `POST /api/v1/tokens/spend`
 - `POST /api/v1/tokens/purchases/google/verify`
 - `POST /api/v1/tokens/purchases/monero/invoices`
@@ -52,6 +53,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `GET /api/v1/account/export`
 - `GET /api/v1/account/app-grants`
 - `POST /api/v1/account/app-grants`
+- `POST /api/v1/account/app-grants/signed`
 - `DELETE /api/v1/account/app-grants/{id}`
 - `GET /api/v1/account/app-records?source_app_id=&target_app_id=&collection_prefix=`
 - `GET /api/v1/friends`
@@ -110,6 +112,34 @@ The challenge response returns `nonce` as lowercase hex. The challenge is single
 
 Bearer-authenticated `POST /api/v1/sync` requests must include `Authorization: Bearer <token>`, `X-Ksync-User: <sha256-public-key-hex>`, and `Content-Type: application/json`. The legacy account header remains accepted.
 
+Protocol v6 `POST /api/v1/sync` requests must also include `X-Daochi-Tx`. The header is either raw JSON or base64url JSON with:
+
+- `protocol_version: 6`
+- `tx_id` and `nonce`, both replay-protected per account
+- `account_id`, matching the bearer account
+- `app_id`, matching the request body app ID
+- `app_key_id`, matching an active key in the app manifest
+- `method`, `path`, and `body_sha256` for the exact HTTP request
+- `expires_at`, no more than 15 minutes in the future
+- `signature`, an ML-DSA-44 account signature over the canonical transaction message
+- `app_signature`, an Ed25519 app-key signature over the same canonical transaction message
+
+The canonical transaction message is:
+
+```text
+daochi-tx-v1
+<protocol_version>
+<tx_id>
+<account_id>
+<app_id>
+<app_key_id>
+<HTTP_METHOD>
+<HTTP_PATH>
+<sha256 hex of exact raw request body bytes>
+<nonce>
+<expires_at unix seconds>
+```
+
 Signed `POST /api/v1/account/delete` and legacy `DELETE /api/v1/account` requests must include:
 
 - `X-Ksync-User: <sha256-public-key-hex>`
@@ -155,6 +185,8 @@ KSYNC_BASE_URL=https://api.example.com
 KSYNC_DB=/var/lib/ksync/ksync.db
 KSYNC_ADMIN_TOKEN=<optional app registry write token>
 KSYNC_TOKEN_SECRET_HEX=<stable 64+ hex chars shared by every server instance>
+KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX=<ed25519 public key hex for signed app approvals>
+KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE=/run/secrets/node_registry_public.hex
 KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX=<ed25519 public key hex>
 KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE=/run/secrets/token_issuer_public.hex
 KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX=<ed25519 private key hex, issuer nodes only>
@@ -195,7 +227,21 @@ Self-hosted Daochi servers may use the same ledger shape for local assets later,
 
 Token ledger and payment-intent rows are financial audit records. They are scoped by account for balance and receipt lookup, but they are not included in normal account data export and are not deleted by account-data cascade.
 
-Token purchases, spends, invoices, receipts, and spend nonces carry `app_id`, and spend or purchase flows validate that the app is registered. The current balance is still account-wide per asset; Daochi does not yet maintain separate per-app token allocation pools. Add app-filtered balances, app-filtered ledger queries, and explicit account-to-app allocation events before treating per-app token distribution as complete.
+Token purchases, spends, invoices, receipts, and spend nonces carry `app_id`, and spend or purchase flows validate that the app is registered. `GET /api/v1/tokens/balance` and `GET /api/v1/tokens/ledger` stay account-wide by default for compatibility; adding `?app_id=<app>` returns the app-scoped balance or ledger view for that account and asset.
+
+Signed app manifests can publish token policies with `asset_id`, `permission`, `status`, and optional `legacy_unsigned_until`. If an app has no token policies, token endpoints keep the legacy registered-app behavior. If policies exist, spends and purchases require the matching policy, and unsigned legacy requests are accepted only until that policy's `legacy_unsigned_until` timestamp. The registration validator caps that unsigned grace window at 365 days.
+
+Daochi records app-scoped token events, but it does not yet move value between separate account and app allocation pools. Treat app-filtered balances as audit views over the ledger. Explicit account-to-app allocation events are still required before calling per-app token distribution fully complete.
+
+## Signed App Registration
+
+Nodes can accept self-contained app manifests through `POST /api/v1/apps/register-signed`. The request body contains:
+
+- `manifest`, including `manifest_version`, `app_id`, display metadata, Ed25519 app keys, collection prefixes, capabilities, and optional token policies;
+- `manifest_signature`, an Ed25519 signature from one active app key over `daochi-app-manifest-v1\n<canonical manifest json>`;
+- `approval_signature`, an Ed25519 signature from the node registry key over `daochi-app-approval-v1\n<app_id>\n<manifest_hash>\n`.
+
+Each node decides which registry approval key it trusts through `KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX` or `KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE`. That keeps registration cross-platform: CLI, TUI, web, mobile, and desktop apps all submit the same signed JSON manifest, and no platform-specific package name is the root of authority.
 
 ## Encrypted Hierarchy
 

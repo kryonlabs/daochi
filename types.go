@@ -286,17 +286,24 @@ type FriendStatsResponse struct {
 }
 
 type AppRegistration struct {
-	AppID        string          `json:"app_id"`
-	DisplayName  string          `json:"display_name"`
-	Description  string          `json:"description,omitempty"`
-	HomepageURL  string          `json:"homepage_url,omitempty"`
-	SourceURL    string          `json:"source_url,omitempty"`
-	PublicKey    string          `json:"public_key,omitempty"`
-	Status       string          `json:"status"`
-	CreatedAt    string          `json:"created_at,omitempty"`
-	UpdatedAt    string          `json:"updated_at,omitempty"`
-	Collections  []AppCollection `json:"collections,omitempty"`
-	Capabilities []string        `json:"capabilities,omitempty"`
+	AppID             string          `json:"app_id"`
+	DisplayName       string          `json:"display_name"`
+	Description       string          `json:"description,omitempty"`
+	HomepageURL       string          `json:"homepage_url,omitempty"`
+	SourceURL         string          `json:"source_url,omitempty"`
+	PublicKey         string          `json:"public_key,omitempty"`
+	Status            string          `json:"status"`
+	CreatedAt         string          `json:"created_at,omitempty"`
+	UpdatedAt         string          `json:"updated_at,omitempty"`
+	ManifestVersion   int             `json:"manifest_version,omitempty"`
+	ManifestHash      string          `json:"manifest_hash,omitempty"`
+	ManifestSignature string          `json:"manifest_signature,omitempty"`
+	ApprovalSignature string          `json:"approval_signature,omitempty"`
+	ManifestExpiresAt int64           `json:"manifest_expires_at,omitempty"`
+	Collections       []AppCollection `json:"collections,omitempty"`
+	Capabilities      []string        `json:"capabilities,omitempty"`
+	Keys              []AppKey        `json:"keys,omitempty"`
+	TokenPolicies     []TokenPolicy   `json:"token_policies,omitempty"`
 }
 
 type AppCollection struct {
@@ -372,6 +379,7 @@ type TokenIssuerResponse struct {
 type TokenBalanceResponse struct {
 	AccountID string `json:"account_id"`
 	AssetID   string `json:"asset_id"`
+	AppID     string `json:"app_id,omitempty"`
 	Balance   int64  `json:"balance"`
 }
 

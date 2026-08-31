@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -717,7 +718,7 @@ func TestProtocolV5EncryptedPrimaryHidesLegacyPrivateDataByDefault(t *testing.T)
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.LatestProtocol != 5 || payload.ProtocolVersion != 5 ||
+	if payload.LatestProtocol != ksyncLatestProtocol || payload.ProtocolVersion != 5 ||
 		payload.TransitionMode != "encrypted_primary" {
 		t.Fatalf("unexpected v5 response metadata: %#v", payload)
 	}
@@ -788,7 +789,7 @@ func TestProtocolV1ThroughV5RemainAcceptedThroughCompatibilityDeadline(t *testin
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x4f)
 
-	for version := ksyncMinSupportedProtocol; version <= ksyncLatestProtocol; version++ {
+	for version := ksyncMinSupportedProtocol; version <= 5; version++ {
 		clientID := "compat-client-" + strconv.Itoa(version)
 		body := []byte(`{"protocol_version":` + strconv.Itoa(version) + `,"user_id_hash":"` + identity.UserID + `","client_id":"` + clientID + `","since_server_version":0}`)
 		res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
@@ -802,6 +803,111 @@ func TestProtocolV1ThroughV5RemainAcceptedThroughCompatibilityDeadline(t *testin
 			!containsString(payload.ServerCapabilities, "protocol-v1-v5-valid-through-"+ksyncCompatibilityDeadline) {
 			t.Fatalf("protocol %d compatibility response = %#v", version, payload)
 		}
+	}
+}
+
+func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
+	server, _, _ := testServer(t)
+	nodePublic, nodePrivate, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.cfg.NodeRegistryPublicKey = nodePublic
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x50)
+	appPublic, appPrivate, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := AppManifest{
+		ManifestVersion: 1,
+		AppID:           "testapp",
+		DisplayName:     "Test App",
+		Keys: []AppKey{{
+			KeyID:     "key-main1",
+			Algorithm: "Ed25519",
+			PublicKey: hex.EncodeToString(appPublic),
+		}},
+		Collections: []AppCollection{{
+			CollectionPrefix: "private.testapp.v1.*",
+			Visibility:       "private",
+			SchemaVersion:    1,
+		}},
+		Capabilities: []string{"encrypted-records"},
+		TokenPolicies: []TokenPolicy{{
+			AssetID:             waoziTokenAssetID,
+			Permission:          tokenPermissionSpend,
+			LegacyUnsignedUntil: time.Now().Add(365 * 24 * time.Hour).Unix(),
+		}},
+	}
+	manifestBytes, manifestHash, err := formatAppManifestForTest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerBody, err := json.Marshal(SignedAppRegistrationRequest{
+		Manifest:          manifest,
+		ManifestSignature: hex.EncodeToString(ed25519.Sign(appPrivate, append([]byte(daochiAppManifestContext+"\n"), manifestBytes...))),
+		ApprovalSignature: hex.EncodeToString(ed25519.Sign(nodePrivate, appApprovalMessage("testapp", manifestHash))),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	register := httptest.NewRequest(http.MethodPost, "/api/v1/apps/register-signed", bytes.NewReader(registerBody))
+	register.Header.Set("Content-Type", "application/json")
+	registerRes := httptest.NewRecorder()
+	handler.ServeHTTP(registerRes, register)
+	if registerRes.Code != http.StatusOK {
+		t.Fatalf("signed register status = %d body=%s", registerRes.Code, registerRes.Body.String())
+	}
+	var registered AppRegistration
+	if err := json.Unmarshal(registerRes.Body.Bytes(), &registered); err != nil {
+		t.Fatal(err)
+	}
+	if registered.AppID != "testapp" || registered.ManifestHash != manifestHash ||
+		len(registered.Keys) != 1 || len(registered.TokenPolicies) != 1 {
+		t.Fatalf("registered app missing manifest fields: %#v", registered)
+	}
+
+	v6Body := []byte(`{"protocol_version":6,"app_id":"testapp","user_id_hash":"` + identity.UserID + `","client_id":"test-client-v6-good","encrypted_records":[{"collection":"private.testapp.v1.notes","id":"note-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z"}]}`)
+	unsigned := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(v6Body))
+	unsigned.Header.Set("Content-Type", "application/json")
+	unsigned.Header.Set("X-Ksync-User", identity.UserID)
+	unsigned.Header.Set("Authorization", "Bearer "+identity.Token)
+	unsignedRes := httptest.NewRecorder()
+	handler.ServeHTTP(unsignedRes, unsigned)
+	if unsignedRes.Code != http.StatusUnauthorized || !strings.Contains(unsignedRes.Body.String(), "signed transaction required") {
+		t.Fatalf("unsigned v6 status = %d body=%s", unsignedRes.Code, unsignedRes.Body.String())
+	}
+
+	signed := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(v6Body))
+	signed.Header.Set("Content-Type", "application/json")
+	signed.Header.Set("X-Ksync-User", identity.UserID)
+	signed.Header.Set("Authorization", "Bearer "+identity.Token)
+	signed.Header.Set("X-Daochi-Tx", signedTxHeader(t, identity.UserID, "testapp", "key-main1", http.MethodPost, "/api/v1/sync", v6Body, appPrivate, "tx-v6-good-1"))
+	signedRes := httptest.NewRecorder()
+	handler.ServeHTTP(signedRes, signed)
+	if signedRes.Code != http.StatusOK {
+		t.Fatalf("signed v6 status = %d body=%s", signedRes.Code, signedRes.Body.String())
+	}
+	var payload SyncResponse
+	if err := json.Unmarshal(signedRes.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ProtocolVersion != 6 || payload.Applied.EncryptedRecords != 1 ||
+		!containsString(payload.ServerCapabilities, "v6-signed-transactions") {
+		t.Fatalf("signed v6 response = %#v", payload)
+	}
+
+	replay := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(v6Body))
+	replay.Header.Set("Content-Type", "application/json")
+	replay.Header.Set("X-Ksync-User", identity.UserID)
+	replay.Header.Set("Authorization", "Bearer "+identity.Token)
+	replay.Header.Set("X-Daochi-Tx", signed.Header.Get("X-Daochi-Tx"))
+	replayRes := httptest.NewRecorder()
+	handler.ServeHTTP(replayRes, replay)
+	if replayRes.Code != http.StatusConflict || !strings.Contains(replayRes.Body.String(), "replay") {
+		t.Fatalf("replayed v6 status = %d body=%s", replayRes.Code, replayRes.Body.String())
 	}
 }
 
@@ -3196,6 +3302,29 @@ func syncWithBody(t *testing.T, target any, baseURL, userID, token string, body 
 		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
 	}
 	return res
+}
+
+func signedTxHeader(t *testing.T, accountID, appID, appKeyID, method, path string, body []byte, appPrivate ed25519.PrivateKey, txID string) string {
+	t.Helper()
+	tx := SignedTxEnvelope{
+		ProtocolVersion: 6,
+		TxID:            txID,
+		AccountID:       accountID,
+		AppID:           appID,
+		AppKeyID:        appKeyID,
+		Method:          method,
+		Path:            path,
+		BodySHA256:      sha256Hex(body),
+		Nonce:           txID + "-nonce",
+		ExpiresAt:       time.Now().Add(time.Minute).Unix(),
+		Signature:       hex.EncodeToString(bytes.Repeat([]byte{0x7a}, mlDSA44SignatureSize)),
+	}
+	tx.AppSignature = hex.EncodeToString(ed25519.Sign(appPrivate, canonicalSignedTxMessage(tx)))
+	data, err := json.Marshal(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(data)
 }
 
 func postEncryptedEnvelope(t *testing.T, target http.Handler, identity testIdentity, sinceVersion int64, body []byte) SyncResponse {

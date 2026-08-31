@@ -35,7 +35,7 @@ const (
 	ksyncSignatureContext      = "ksync-sync-v1"
 	legacyInbeSignatureContext = "inbe-sync-v1"
 	ksyncMinSupportedProtocol  = 1
-	ksyncLatestProtocol        = 5
+	ksyncLatestProtocol        = 6
 	ksyncCompatibilityDeadline = "2027-09-01"
 	ksyncPreviousVersionGrace  = 365
 )
@@ -49,7 +49,9 @@ var ksyncServerCapabilities = []string{
 	"v5-dual-read",
 	"v5-legacy-encrypted-collections",
 	"protocol-v1-v5-valid-through-2027-09-01",
-	"v6-waozi-tokens",
+	"protocol-previous-version-grace-days-365",
+	"v6-signed-transactions",
+	"v6-signed-app-manifests",
 	"pub-relay",
 }
 
@@ -84,6 +86,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/v1/apps", s.handleAppList)
 	mux.HandleFunc("POST /api/v1/apps", s.handleAppList)
+	mux.HandleFunc("POST /api/v1/apps/register-signed", s.handleSignedAppRegister)
 	mux.HandleFunc("GET /api/v1/apps/", s.handleAppRoute)
 	mux.HandleFunc("PUT /api/v1/apps/", s.handleAppRoute)
 	mux.HandleFunc("GET /api/v1/tokens/assets", s.handleTokenAssets)
@@ -109,6 +112,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/account/export", s.handleAccountExport)
 	mux.HandleFunc("GET /api/v1/account/app-grants", s.handleAppGrants)
 	mux.HandleFunc("POST /api/v1/account/app-grants", s.handleAppGrants)
+	mux.HandleFunc("POST /api/v1/account/app-grants/signed", s.handleSignedAppGrant)
 	mux.HandleFunc("DELETE /api/v1/account/app-grants/", s.handleAppGrantRoute)
 	mux.HandleFunc("GET /api/v1/account/app-records", s.handleAppRecords)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
@@ -264,6 +268,17 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if err := s.validateSyncRequest(r.Context(), req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if req.ProtocolVersion >= 6 {
+		tx, err := readSignedTxHeader(r)
+		if err != nil {
+			s.writeAuthError(w, err)
+			return
+		}
+		if err := s.verifySignedTx(r.Context(), r, body, tx, req.UserIDHash, req.AppID); err != nil {
+			s.writeAuthError(w, err)
+			return
+		}
 	}
 	normalizeMeditationDurations(req.MeditationLogs)
 

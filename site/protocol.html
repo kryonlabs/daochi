@@ -23,7 +23,7 @@
     <section class="page-hero">
       <p class="eyebrow">Protocol</p>
       <h1>Signed sync with a stable compatibility window.</h1>
-      <p class="lead">The protocol keeps shipped compatibility clients working while moving new clients toward encrypted private records, app-owned collection namespaces, and transport-neutral record envelopes.</p>
+      <p class="lead">The protocol keeps shipped compatibility clients working while moving new clients toward encrypted private records, app-owned collection namespaces, signed transaction envelopes, and transport-neutral record envelopes.</p>
     </section>
 
     <section>
@@ -56,10 +56,27 @@
           <p>Private app data moves through encrypted hierarchical collections such as <code>private.app.v1.records</code> while social projections stay readable by design.</p>
         </article>
         <article class="card">
-          <h3>v6 direction</h3>
-          <p>Future strict requests must include a registered <code>app_id</code>, and encrypted record collections must belong to that app registration.</p>
+          <h3>v6 signed mode</h3>
+          <p>Strict requests include a registered <code>app_id</code>, an app-owned collection prefix, and an <code>X-Daochi-Tx</code> envelope signed by both the account key and an active app key.</p>
         </article>
       </div>
+    </section>
+
+    <section>
+      <h2>Signed transactions</h2>
+      <p>Protocol v6 uses <code>X-Daochi-Tx</code> to bind the account, app, HTTP method, path, exact request body hash, nonce, and expiry into one replay-protected transaction. The account signature proves user authority. The app signature proves the request came from software holding an active key from the signed app manifest.</p>
+      <p>The envelope is JSON or base64url JSON. It is verified the same way for CLI, TUI, mobile, desktop, and browser clients because the signed material is protocol data, not a platform-specific package identifier. Transactions expire quickly and are stored by <code>tx_id</code> and nonce so replayed requests are rejected.</p>
+      <div class="panel">
+        <div class="panel-row"><strong>Header</strong><span><code>X-Daochi-Tx</code></span></div>
+        <div class="panel-row"><strong>Context</strong><span><code>daochi-tx-v1</code></span></div>
+        <div class="panel-row"><strong>Account</strong><span>ML-DSA-44 signature over the canonical transaction</span></div>
+        <div class="panel-row"><strong>App</strong><span>Ed25519 signature from an active manifest key</span></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Compatibility policy</h2>
+      <p>Protocol v1 through v5 remain valid through 2027-09-01. After that, protocol retirement is staged: the current protocol remains valid, and the immediately previous protocol remains valid for at least 365 days after any deprecation decision. Compatibility warnings are recorded server-side without blocking those older clients.</p>
     </section>
 
     <section>

@@ -31,7 +31,7 @@
     <section class="hero">
       <p class="eyebrow">Mesh-native sync for app-owned data</p>
       <h1>Daochi</h1>
-      <p class="lead">A sync relay and protocol surface for native and web apps that need signed identity, encrypted private records, social projections, remote events, and portable app-owned data.</p>
+      <p class="lead">A sync relay and protocol surface for native, web, desktop, mobile, and TUI apps that need signed identity, encrypted private records, signed app registration, remote events, and portable app-owned data.</p>
       <div class="actions">
         <a class="button" href="/protocol.html">Protocol</a>
         <a class="button secondary" href="/mesh.html">Mesh model</a>
@@ -54,7 +54,7 @@
         </article>
         <article class="card">
           <h3>App ownership</h3>
-          <p>Registered apps declare collection prefixes, visibility classes, and capabilities so data ownership is not hard-coded to one client.</p>
+          <p>Registered apps declare signing keys, collection prefixes, visibility classes, capabilities, and optional token policies so data ownership is not hard-coded to one client.</p>
         </article>
         <article class="card">
           <h3>Remote events</h3>
@@ -68,13 +68,13 @@
         <div>
           <p class="eyebrow">Compatibility</p>
           <h2>The public name changes; the shipped wire contract stays stable.</h2>
-          <p>Current server code still accepts the <code>ksync-sync-v1</code> signature context and <code>X-Ksync-*</code> headers. Protocol v1 through v5 remain valid through 2027-09-01. Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available when clients ask for compatibility data.</p>
+          <p>Current server code still accepts the <code>ksync-sync-v1</code> signature context and <code>X-Ksync-*</code> headers. Protocol v1 through v5 remain valid through 2027-09-01, and every future deprecation keeps the previous protocol valid for at least 365 days. Protocol v6 adds signed transaction envelopes for strict app-owned requests.</p>
         </div>
         <div class="panel" aria-label="Compatibility facts">
           <div class="panel-row"><strong>Headers</strong><span><code>X-Ksync-User</code>, <code>X-Ksync-Signature</code>, <code>X-Ksync-Client</code>, <code>X-Ksync-Since-Version</code></span></div>
-          <div class="panel-row"><strong>Protocol</strong><span>v1-v5 supported through 2027-09-01</span></div>
+          <div class="panel-row"><strong>Protocol</strong><span>v1-v5 supported through 2027-09-01; v6 signs strict transactions</span></div>
           <div class="panel-row"><strong>Records</strong><span>v5 private hierarchy plus legacy encrypted collections</span></div>
-          <div class="panel-row"><strong>Events</strong><span><code>ksync-sync-v1, bearer.&lt;token&gt;</code> WebSocket subprotocol support</span></div>
+          <div class="panel-row"><strong>Apps</strong><span>signed manifests with node-approved app keys</span></div>
         </div>
       </div>
     </section>

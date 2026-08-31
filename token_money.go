@@ -26,9 +26,11 @@ import (
 )
 
 const (
-	waoziIssuerID       = "waozi"
-	waoziTokenAssetID   = "waozi:token"
-	tokenReceiptContext = "ksync-token-receipt-v1"
+	waoziIssuerID           = "waozi"
+	waoziTokenAssetID       = "waozi:token"
+	tokenReceiptContext     = "ksync-token-receipt-v1"
+	tokenPermissionSpend    = "spend"
+	tokenPermissionPurchase = "purchase"
 )
 
 var (
@@ -101,6 +103,21 @@ WHERE account_id=?1 AND asset_id=?2`, accountID, assetID).Scan(&balance)
 	return balance.Int64, nil
 }
 
+func (s *Store) TokenAppBalance(ctx context.Context, accountID, assetID, appID string) (int64, error) {
+	var balance sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+SELECT SUM(amount_delta)
+FROM token_ledger
+WHERE account_id=?1 AND asset_id=?2 AND app_id=?3`, accountID, assetID, appID).Scan(&balance)
+	if err != nil {
+		return 0, err
+	}
+	if !balance.Valid {
+		return 0, nil
+	}
+	return balance.Int64, nil
+}
+
 func (s *Store) TokenLedger(ctx context.Context, accountID, assetID string, since int64) ([]TokenReceipt, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
@@ -108,6 +125,28 @@ SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,l
 FROM token_ledger
 WHERE account_id=?1 AND asset_id=?2 AND ledger_seq>?3
 ORDER BY ledger_seq`, accountID, assetID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TokenReceipt
+	for rows.Next() {
+		item, err := scanTokenReceipt(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) TokenAppLedger(ctx context.Context, accountID, assetID, appID string, since int64) ([]TokenReceipt, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
+	previous_hash,event_hash,created_at,source_type,source_ref,signature
+FROM token_ledger
+WHERE account_id=?1 AND asset_id=?2 AND app_id=?3 AND ledger_seq>?4
+ORDER BY ledger_seq`, accountID, assetID, appID, since)
 	if err != nil {
 		return nil, err
 	}
@@ -493,7 +532,17 @@ func (s *Server) handleTokenBalance(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	balance, err := s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
+	appID, appScoped, err := tokenAppFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var balance int64
+	if appScoped {
+		balance, err = s.store.TokenAppBalance(r.Context(), userID, waoziTokenAssetID, appID)
+	} else {
+		balance, err = s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
+	}
 	if err != nil {
 		slog.Error("token balance", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token balance failed")
@@ -502,6 +551,7 @@ func (s *Server) handleTokenBalance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, TokenBalanceResponse{
 		AccountID: userID,
 		AssetID:   waoziTokenAssetID,
+		AppID:     appID,
 		Balance:   balance,
 	})
 }
@@ -512,7 +562,17 @@ func (s *Server) handleTokenLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("since")), 10, 64)
-	events, err := s.store.TokenLedger(r.Context(), userID, waoziTokenAssetID, since)
+	appID, appScoped, err := tokenAppFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var events []TokenReceipt
+	if appScoped {
+		events, err = s.store.TokenAppLedger(r.Context(), userID, waoziTokenAssetID, appID, since)
+	} else {
+		events, err = s.store.TokenLedger(r.Context(), userID, waoziTokenAssetID, since)
+	}
 	if err != nil {
 		slog.Error("token ledger", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token ledger failed")
@@ -545,7 +605,7 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	req, err := readTokenSpendRequest(w, r, s.cfg.MaxBodyBytes)
+	req, body, err := readTokenSpendRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -565,6 +625,10 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !exists {
 		writeError(w, http.StatusBadRequest, "unknown app_id")
+		return
+	}
+	if err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, req.AssetID, tokenPermissionSpend); err != nil {
+		s.writeAuthError(w, err)
 		return
 	}
 	sourceRef := req.Action + ":" + req.IdempotencyKey
@@ -596,7 +660,7 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	req, err := readGooglePurchaseVerifyRequest(w, r, s.cfg.MaxBodyBytes)
+	req, body, err := readGooglePurchaseVerifyRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -617,6 +681,10 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		return
 	} else if !exists {
 		writeError(w, http.StatusBadRequest, "unknown app_id")
+		return
+	}
+	if err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase); err != nil {
+		s.writeAuthError(w, err)
 		return
 	}
 	if len(s.cfg.GooglePackageNames) > 0 && !s.cfg.GooglePackageNames[req.PackageName] {
@@ -657,7 +725,7 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	req, err := readMoneroInvoiceRequest(w, r, s.cfg.MaxBodyBytes)
+	req, body, err := readMoneroInvoiceRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -677,6 +745,10 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !exists {
 		writeError(w, http.StatusBadRequest, "unknown app_id")
+		return
+	}
+	if err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase); err != nil {
+		s.writeAuthError(w, err)
 		return
 	}
 	invoice, err := s.store.CreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.cfg)
@@ -886,14 +958,14 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (TokenSpendRequest, error) {
+func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (TokenSpendRequest, []byte, error) {
 	var req TokenSpendRequest
 	body, err := readJSONBody(w, r, maxBody)
 	if err != nil {
-		return req, err
+		return req, nil, err
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
+		return req, nil, errors.New("invalid json")
 	}
 	req.AppID = strings.TrimSpace(req.AppID)
 	req.AssetID = strings.TrimSpace(req.AssetID)
@@ -901,63 +973,117 @@ func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	req.Metadata = strings.TrimSpace(req.Metadata)
 	if !validKsyncNamespace(req.AppID) {
-		return req, errors.New("invalid app_id")
+		return req, nil, errors.New("invalid app_id")
 	}
 	if req.AssetID == "" {
 		req.AssetID = waoziTokenAssetID
 	}
 	if req.Amount <= 0 {
-		return req, errors.New("amount required")
+		return req, nil, errors.New("amount required")
 	}
 	if !validKsyncNamespace(req.Action) {
-		return req, errors.New("invalid action")
+		return req, nil, errors.New("invalid action")
 	}
 	if !validClientID(req.IdempotencyKey) {
-		return req, errors.New("invalid idempotency_key")
+		return req, nil, errors.New("invalid idempotency_key")
 	}
-	return req, nil
+	return req, body, nil
 }
 
-func readGooglePurchaseVerifyRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (GooglePurchaseVerifyRequest, error) {
+func readGooglePurchaseVerifyRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (GooglePurchaseVerifyRequest, []byte, error) {
 	var req GooglePurchaseVerifyRequest
 	body, err := readJSONBody(w, r, maxBody)
 	if err != nil {
-		return req, err
+		return req, nil, err
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
+		return req, nil, errors.New("invalid json")
 	}
 	req.AppID = strings.TrimSpace(req.AppID)
 	req.PackageName = strings.TrimSpace(req.PackageName)
 	req.ProductID = strings.TrimSpace(req.ProductID)
 	req.PurchaseToken = strings.TrimSpace(req.PurchaseToken)
 	if !validKsyncNamespace(req.AppID) {
-		return req, errors.New("invalid app_id")
+		return req, nil, errors.New("invalid app_id")
 	}
 	if req.PackageName == "" || req.ProductID == "" || req.PurchaseToken == "" {
-		return req, errors.New("purchase fields required")
+		return req, nil, errors.New("purchase fields required")
 	}
-	return req, nil
+	return req, body, nil
 }
 
-func readMoneroInvoiceRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (MoneroInvoiceRequest, error) {
+func readMoneroInvoiceRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (MoneroInvoiceRequest, []byte, error) {
 	var req MoneroInvoiceRequest
 	body, err := readJSONBody(w, r, maxBody)
 	if err != nil {
-		return req, err
+		return req, nil, err
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
+		return req, nil, errors.New("invalid json")
 	}
 	req.AppID = strings.TrimSpace(req.AppID)
 	req.ProductID = strings.TrimSpace(req.ProductID)
 	if !validKsyncNamespace(req.AppID) {
-		return req, errors.New("invalid app_id")
+		return req, nil, errors.New("invalid app_id")
 	}
 	if req.ProductID == "" {
-		return req, errors.New("product_id required")
+		return req, nil, errors.New("product_id required")
 	}
-	return req, nil
+	return req, body, nil
+}
+
+func tokenAppFilter(r *http.Request) (string, bool, error) {
+	appID := strings.TrimSpace(r.URL.Query().Get("app_id"))
+	if appID == "" {
+		return "", false, nil
+	}
+	if !validKsyncNamespace(appID) {
+		return "", false, errors.New("invalid app_id")
+	}
+	return appID, true, nil
+}
+
+func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []byte, accountID, appID, assetID, permission string) error {
+	hasSignedTx := strings.TrimSpace(r.Header.Get("X-Daochi-Tx")) != ""
+	if hasSignedTx {
+		tx, err := readSignedTxHeader(r)
+		if err != nil {
+			return err
+		}
+		if err := s.verifySignedTx(ctx, r, body, tx, accountID, appID); err != nil {
+			return err
+		}
+	}
+	if !validTokenPolicyPermission(permission) {
+		return authError{status: http.StatusBadRequest, message: "invalid token permission"}
+	}
+	hasPolicy, err := s.store.HasTokenPolicy(ctx, appID)
+	if err != nil {
+		return err
+	}
+	if !hasPolicy {
+		return nil
+	}
+	policy, ok, err := s.store.AppTokenPermission(ctx, appID, assetID, permission)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return authError{status: http.StatusForbidden, message: "app token permission denied"}
+	}
+	if hasSignedTx || (policy.LegacyUnsignedUntil > 0 && time.Now().Unix() <= policy.LegacyUnsignedUntil) {
+		return nil
+	}
+	return authError{status: http.StatusUnauthorized, message: "signed transaction required"}
+}
+
+func validTokenPolicyPermission(value string) bool {
+	switch value {
+	case tokenPermissionSpend, tokenPermissionPurchase:
+		return true
+	default:
+		return false
+	}
 }
 
 func writePaymentError(w http.ResponseWriter, err error) {

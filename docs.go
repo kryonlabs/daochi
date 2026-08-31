@@ -185,6 +185,9 @@ func openAPISpec() map[string]any {
 				"get": map[string]any{
 					"summary":  "Get authenticated token balance",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{"name": "app_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+					},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Token balance"},
 						"401": map[string]any{"description": "Invalid bearer token"},
@@ -195,6 +198,10 @@ func openAPISpec() map[string]any {
 				"get": map[string]any{
 					"summary":  "List authenticated token receipts",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{"name": "since", "in": "query", "required": false, "schema": map[string]any{"type": "integer"}},
+						{"name": "app_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+					},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Token ledger events"},
 					},
@@ -202,18 +209,21 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/tokens/spend": map[string]any{
 				"post": map[string]any{
-					"summary":  "Spend tokens",
-					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"summary":     "Spend tokens",
+					"description": "If the app has signed token policies, this endpoint requires the matching policy and requires X-Daochi-Tx after any policy-defined legacy unsigned grace deadline.",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Signed debit receipt"},
+						"401": map[string]any{"description": "Signed transaction required or rejected"},
 						"409": map[string]any{"description": "Insufficient balance"},
 					},
 				},
 			},
 			"/api/v1/tokens/purchases/google/verify": map[string]any{
 				"post": map[string]any{
-					"summary":  "Verify app-store purchase and credit tokens",
-					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"summary":     "Verify app-store purchase and credit tokens",
+					"description": "If the app has signed token policies, this endpoint requires a purchase policy and requires X-Daochi-Tx after any policy-defined legacy unsigned grace deadline.",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Signed credit receipt"},
 					},
@@ -221,8 +231,9 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/tokens/purchases/monero/invoices": map[string]any{
 				"post": map[string]any{
-					"summary":  "Create direct token invoice",
-					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"summary":     "Create direct token invoice",
+					"description": "If the app has signed token policies, this endpoint requires a purchase policy and requires X-Daochi-Tx after any policy-defined legacy unsigned grace deadline.",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"201": map[string]any{"description": "Direct payment invoice"},
 					},
@@ -299,6 +310,17 @@ func openAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/apps/register-signed": map[string]any{
+				"post": map[string]any{
+					"summary":     "Register or update an app with a signed manifest",
+					"description": "The manifest is signed by an active Ed25519 app key and approved by the node registry key configured on this node.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Registered app"},
+						"401": map[string]any{"description": "Manifest or node approval signature rejected"},
+						"403": map[string]any{"description": "Node registry approval key unavailable"},
+					},
+				},
+			},
 			"/api/v1/apps/{app_id}": map[string]any{
 				"get": map[string]any{
 					"summary": "Get registered app",
@@ -347,6 +369,18 @@ func openAPISpec() map[string]any {
 					"responses": map[string]any{
 						"201": map[string]any{"description": "Created app grant"},
 						"400": map[string]any{"description": "Invalid or private collection"},
+					},
+				},
+			},
+			"/api/v1/account/app-grants/signed": map[string]any{
+				"post": map[string]any{
+					"summary":     "Create cross-app grant with a signed transaction",
+					"description": "The grant payload is bound to an X-Daochi-Tx-equivalent transaction signed by the account key and target app key.",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"201": map[string]any{"description": "Created app grant"},
+						"401": map[string]any{"description": "Signed transaction rejected"},
+						"409": map[string]any{"description": "Signed transaction replay"},
 					},
 				},
 			},
@@ -413,7 +447,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/sync": map[string]any{
 				"post": map[string]any{
 					"summary":     "Apply sync changes",
-					"description": "Applies typed sync changes for existing clients. If the JSON body has v, nonce, and ciphertext fields, Daochi stores and relays it as an opaque encrypted envelope authenticated by bearer token.",
+					"description": "Applies typed sync changes for existing clients. Protocol v6 requires app_id plus X-Daochi-Tx. If the JSON body has v, nonce, and ciphertext fields, Daochi stores and relays it as an opaque encrypted envelope authenticated by bearer token.",
 					"parameters":  syncHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,

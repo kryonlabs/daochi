@@ -23,13 +23,13 @@
     <section class="page-hero">
       <p class="eyebrow">Apps</p>
       <h1>Data belongs to apps, not to a hard-coded client.</h1>
-      <p class="lead">The registry lets Daochi understand which app owns which collection prefixes, what visibility class they use, and which capabilities the app expects from the relay.</p>
+      <p class="lead">The registry lets Daochi understand which app owns which collection prefixes, which app keys can sign transactions, what visibility class records use, and which capabilities the app expects from the relay.</p>
     </section>
 
     <section>
       <h2>Registry</h2>
-      <p><code>GET /api/v1/apps</code> lists registered apps. Admin registration can add or update apps when <code>KSYNC_ADMIN_TOKEN</code> is configured and the request supplies <code>X-Ksync-Admin</code>.</p>
-      <p>Built-in registrations can seed shipped apps without making their product behavior part of the relay. App records should declare private, shared, friends, and public hierarchy prefixes according to the data they own.</p>
+      <p><code>GET /api/v1/apps</code> lists registered apps. Admin registration can add or update apps when <code>KSYNC_ADMIN_TOKEN</code> is configured and the request supplies <code>X-Ksync-Admin</code>. New clients should prefer <code>POST /api/v1/apps/register-signed</code>, which accepts a signed manifest plus a node registry approval signature.</p>
+      <p>Registrations describe protocol ownership only. Product UI, business rules, and app-specific behavior stay outside the relay. App records should declare private, shared, friends, and public hierarchy prefixes according to the data they own.</p>
       <div class="grid">
         <article class="card">
           <h3>Private</h3>
@@ -51,14 +51,27 @@
     </section>
 
     <section>
+      <h2>Signed manifests</h2>
+      <p>A signed manifest contains <code>manifest_version</code>, <code>app_id</code>, display metadata, active Ed25519 app keys, collection prefixes, capabilities, and optional token policies. The manifest is signed by one of its active app keys, then approved by the node registry key configured on that Daochi node.</p>
+      <p>Registration is per node. A node operator chooses which registry approval public key to trust, so a self-hosted node can accept a local registry while a public node can use a stricter review process. The same manifest format works across command-line, terminal UI, browser, mobile, and desktop clients.</p>
+      <div class="panel">
+        <div class="panel-row"><strong>Register</strong><span><code>POST /api/v1/apps/register-signed</code></span></div>
+        <div class="panel-row"><strong>Manifest</strong><span><code>daochi-app-manifest-v1</code> app-key signature</span></div>
+        <div class="panel-row"><strong>Approval</strong><span><code>daochi-app-approval-v1</code> node-registry signature</span></div>
+        <div class="panel-row"><strong>Rotation</strong><span>publish a new manifest with replacement active keys</span></div>
+      </div>
+    </section>
+
+    <section>
       <div class="split">
         <div>
           <h2>App grants</h2>
           <p>App grants let an account allow a target app to read a selected shared collection prefix from a source app. Daochi validates the source app, target app, collection prefix, and permission before creating the grant.</p>
-          <p><code>GET /api/v1/account/app-records</code> returns authorized records for the account when the grant exists. Revocation deletes the grant without deleting the underlying app records.</p>
+          <p><code>GET /api/v1/account/app-records</code> returns authorized records for the account when the grant exists. Revocation deletes the grant without deleting the underlying app records. New clients can use the signed grant endpoint so the account and app identity are both bound to the grant request.</p>
         </div>
         <div class="panel">
           <div class="panel-row"><strong>Create</strong><span><code>POST /api/v1/account/app-grants</code></span></div>
+          <div class="panel-row"><strong>Signed</strong><span><code>POST /api/v1/account/app-grants/signed</code></span></div>
           <div class="panel-row"><strong>List</strong><span><code>GET /api/v1/account/app-grants</code></span></div>
           <div class="panel-row"><strong>Read</strong><span><code>GET /api/v1/account/app-records</code></span></div>
           <div class="panel-row"><strong>Revoke</strong><span><code>DELETE /api/v1/account/app-grants/{id}</code></span></div>

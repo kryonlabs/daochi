@@ -29,7 +29,7 @@
     <section>
       <h2>Current relay role</h2>
       <p>The server gives apps a reliable rendezvous point: account discovery, durable version ordering, sync compaction, export, deletion, social projections, and event notification. This keeps existing products practical while clients migrate toward encrypted record ownership.</p>
-      <p>Server-readable data is limited to the compatibility and public surfaces that intentionally need it: aliases, friend requests, selected profile stats, public Uku processes, app registrations, token ledger metadata, and legacy typed rows for old clients.</p>
+      <p>Server-readable data is limited to the compatibility and public surfaces that intentionally need it: aliases, friend requests, selected profile stats, public records, app registrations, token ledger metadata, and legacy typed rows for old clients.</p>
     </section>
 
     <section>
@@ -47,7 +47,7 @@
         </div>
       </div>
       <div class="callout">
-        <p>The important boundary is that Kapsule, Inbe, Uku, and future apps keep their product behavior outside the relay. Daochi should provide reusable sync primitives, not app-specific UI or domain rules.</p>
+        <p>The important boundary is that product behavior stays outside the relay. Daochi should provide reusable sync primitives, not app-specific UI or domain rules.</p>
       </div>
     </section>
   </main>

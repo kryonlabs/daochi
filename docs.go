@@ -78,7 +78,7 @@ a{color:#0b625d}
 </section>
 <h2 class="section-title">API surface</h2>
 <p>Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility. Protocol v1 through v5 remain valid through 2027-09-01.</p>
-<section class="endpoint"><span class="method">GET</span><code>/api/v1/apps</code><p>Lists registered apps, collection prefixes, visibility classes, and capabilities. Built-in registrations include Inbe and Uku.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/apps</code><p>Lists registered apps, collection prefixes, visibility classes, and capabilities.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/apps</code><p>Registers or updates an app when <code>KSYNC_ADMIN_TOKEN</code> is set and <code>X-Ksync-Admin</code> matches it.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync/login</code><p>Verifies the challenge signature and returns a cacheable bearer token plus server clock time.</p></section>
@@ -502,7 +502,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/account/delete-with-key": map[string]any{
 				"post": map[string]any{
 					"summary":     "Delete remote account using exported key",
-					"description": "Accepts exported account key text. Current ksync-account-key-v1 keys and legacy lyra-account-key-v1, account-key-v1, and inbe-sync-key-v1 keys are supported.",
+					"description": "Accepts exported account key text. Current ksync-account-key-v1 keys and legacy account key export formats are supported.",
 					"requestBody": map[string]any{
 						"required": true,
 						"content": map[string]any{
@@ -938,7 +938,7 @@ func syncHeaderParameters() []map[string]any {
 			"name":        "X-Ksync-User",
 			"in":          "header",
 			"required":    true,
-			"description": "SHA-256 hash of the ML-DSA-44 public key. Legacy X-Inbe-User is also accepted.",
+			"description": "SHA-256 hash of the ML-DSA-44 public key. A legacy account header is also accepted.",
 			"schema":      map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 		},
 		{

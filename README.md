@@ -8,11 +8,11 @@ Daochi uses the client account key for identity and authentication. A client pro
 
 The legacy typed sync surface is not end-to-end encrypted against the server. Mirrored app data is stored in SQLite as normal typed rows and JSON payloads so the service can sync, compact, export, derive friend leaderboard stats, and delete account data. This is intentional for compatibility. Operational access to the server database or a valid bearer token can read the typed data those credentials allow.
 
-Protocol clients may also sync `encrypted_records`: opaque per-account private records identified by `collection` and `id`. Daochi stores and versions those blobs for relay, export, deletion, and diagnostics, but does not need to read their contents. Protocol v4 advertises this as the dual-write transition path: upgraded clients can keep sending legacy typed rows for compatibility while also seeding encrypted private records for future mesh-capable clients. Protocol v5 makes encrypted records the primary private-data surface for upgraded clients while legacy typed rows remain available through `include_legacy_data` for compatibility. The released Inbe v4 encrypted collections remain valid in v5 so clients do not need an immediate second backfill migration. Public/social projections such as aliases, friend requests, profile icons, and leaderboard stats remain readable server-side by design.
+Protocol clients may also sync `encrypted_records`: opaque per-account private records identified by `collection` and `id`. Daochi stores and versions those blobs for relay, export, deletion, and diagnostics, but does not need to read their contents. Protocol v4 advertises this as the dual-write transition path: upgraded clients can keep sending legacy typed rows for compatibility while also seeding encrypted private records for future mesh-capable clients. Protocol v5 makes encrypted records the primary private-data surface for upgraded clients while legacy typed rows remain available through `include_legacy_data` for compatibility. Released legacy encrypted collections remain valid in v5 so clients do not need an immediate second backfill migration. Public/social projections such as aliases, friend requests, profile icons, and leaderboard stats remain readable server-side by design.
 
-Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Ksync-Since-Version`. Existing typed Inbe clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
+Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Ksync-Since-Version`. Existing typed clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
 
-Daochi keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding Inbe behavior. `inbe` and `uku` are seeded automatically. Inbe remains the lead migration client and sends `app_id:"inbe"` in v5 compatibility mode; older clients without `app_id` continue to sync. Future protocol v6 requests must include a registered `app_id`, and encrypted record collections must belong to that registered app.
+Daochi keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding product behavior. Registered apps can send `app_id` in v5 compatibility mode; older clients without `app_id` continue to sync. Future protocol v6 requests must include a registered `app_id`, and encrypted record collections must belong to that registered app.
 
 Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01**. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid.
 
@@ -87,7 +87,7 @@ The WebSocket endpoint accepts bearer auth through `Authorization: Bearer <token
 Encrypted envelope clients should send:
 
 - `Authorization: Bearer <token>`
-- `X-Ksync-User: <sha256-public-key-hex>` or legacy `X-Inbe-User`
+- `X-Ksync-User: <sha256-public-key-hex>` or the legacy account header
 - `X-Ksync-Client: <client-id>` when available
 - `X-Ksync-Since-Version: <last-seen-server-version>` when requesting only newer envelopes
 - `X-Ksync-Limit: <count>` when deliberately paging envelope deltas
@@ -108,7 +108,7 @@ ksync-sync-v1
 
 The challenge response returns `nonce` as lowercase hex. The challenge is single-use and expires after 60 seconds by default.
 
-Bearer-authenticated `POST /api/v1/sync` requests must include `Authorization: Bearer <token>`, `X-Ksync-User: <sha256-public-key-hex>`, and `Content-Type: application/json`. Legacy `X-Inbe-User` remains accepted.
+Bearer-authenticated `POST /api/v1/sync` requests must include `Authorization: Bearer <token>`, `X-Ksync-User: <sha256-public-key-hex>`, and `Content-Type: application/json`. The legacy account header remains accepted.
 
 Signed `POST /api/v1/account/delete` and legacy `DELETE /api/v1/account` requests must include:
 
@@ -120,7 +120,7 @@ Signed JSON bodies still include `user_id_hash`. The server accepts `public_key`
 
 The preferred account deletion endpoint is `POST /api/v1/account/delete`, using the same challenge/signature scheme as login and sync so the private key never leaves the device. `DELETE /api/v1/account` remains supported for older clients that already shipped with that wire shape.
 
-The website deletion endpoint `POST /api/v1/account/delete-with-key` accepts `user_id_hash` plus the full exported account key text. Current exports start with `ksync-account-key-v1`; legacy `lyra-account-key-v1`, `account-key-v1`, and `inbe-sync-key-v1` exports are still accepted. Current key exports include `public_id`, and Daochi rejects a request if that public ID does not match `user_id_hash`. Daochi signs a fixed deletion proof with that private key, verifies it against the registered public key, deletes the account, and does not store the uploaded key.
+The website deletion endpoint `POST /api/v1/account/delete-with-key` accepts `user_id_hash` plus the full exported account key text. Current exports start with `ksync-account-key-v1`, and legacy account key exports are still accepted. Current key exports include `public_id`, and Daochi rejects a request if that public ID does not match `user_id_hash`. Daochi signs a fixed deletion proof with that private key, verifies it against the registered public key, deletes the account, and does not store the uploaded key.
 
 ## Build
 
@@ -160,7 +160,7 @@ KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX_FILE=/run/secrets/waozi_issuer_public.hex
 KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX=<ed25519 private key hex, issuer nodes only>
 KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX_FILE=/run/secrets/waozi_issuer_private.hex
 KSYNC_TOKEN_PRODUCTS=waozi_tokens_small:5000000:1000000000000
-KSYNC_GOOGLE_PACKAGE_NAMES=xyz.waozi.inbe
+KSYNC_GOOGLE_PACKAGE_NAMES=com.example.app
 KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON=<google service account json>
 KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON_FILE=/run/secrets/google_play_service_account.json
 KSYNC_GOOGLE_OAUTH_CLIENT_JSON_FILE=/run/secrets/google_play_oauth_client.json
@@ -199,11 +199,7 @@ Token purchases, spends, invoices, receipts, and spend nonces carry `app_id`, an
 
 ## Encrypted Hierarchy
 
-Protocol v5 clients should put all new private app data in `encrypted_records` and use typed sync only as a backward-compatibility mirror. Existing released Inbe v4 collections are grandfathered:
-
-- `inbe.habits`;
-- `inbe.habit_days`;
-- `inbe.sessions`.
+Protocol v5 clients should put all new private app data in `encrypted_records` and use typed sync only as a backward-compatibility mirror. Existing released legacy encrypted collections are grandfathered.
 
 New v5 collection names use a dotted hierarchy:
 

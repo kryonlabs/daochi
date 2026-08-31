@@ -29,7 +29,7 @@
     <section>
       <h2>Registry</h2>
       <p><code>GET /api/v1/apps</code> lists registered apps. Admin registration can add or update apps when <code>KSYNC_ADMIN_TOKEN</code> is configured and the request supplies <code>X-Ksync-Admin</code>.</p>
-      <p>Built-in registrations seed Inbe and Uku. Inbe carries released legacy encrypted collections plus future private, shared, friends, and public hierarchy prefixes. Uku carries decision-process collections for private, shared, and public records.</p>
+      <p>Built-in registrations can seed shipped apps without making their product behavior part of the relay. App records should declare private, shared, friends, and public hierarchy prefixes according to the data they own.</p>
       <div class="grid">
         <article class="card">
           <h3>Private</h3>

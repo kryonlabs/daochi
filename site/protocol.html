@@ -23,7 +23,7 @@
     <section class="page-hero">
       <p class="eyebrow">Protocol</p>
       <h1>Signed sync with a stable compatibility window.</h1>
-      <p class="lead">The protocol keeps shipped Ksync clients working while moving new clients toward encrypted private records, app-owned collection namespaces, and transport-neutral record envelopes.</p>
+      <p class="lead">The protocol keeps shipped compatibility clients working while moving new clients toward encrypted private records, app-owned collection namespaces, and transport-neutral record envelopes.</p>
     </section>
 
     <section>
@@ -49,11 +49,11 @@
       <div class="grid">
         <article class="card">
           <h3>v4 transition</h3>
-          <p>Clients can dual-write legacy typed rows and encrypted records. Released Inbe v4 collections remain valid so users do not need an immediate second backfill.</p>
+          <p>Clients can dual-write legacy typed rows and encrypted records. Released legacy encrypted collections remain valid so users do not need an immediate second backfill.</p>
         </article>
         <article class="card">
           <h3>v5 primary mode</h3>
-          <p>Private app data moves through encrypted hierarchical collections such as <code>private.inbe.v1.sessions</code> while social projections stay readable by design.</p>
+          <p>Private app data moves through encrypted hierarchical collections such as <code>private.app.v1.records</code> while social projections stay readable by design.</p>
         </article>
         <article class="card">
           <h3>v6 direction</h3>

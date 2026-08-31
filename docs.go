@@ -53,15 +53,15 @@ a{color:#254da8}
 <body>
 <main>
 <h1>Ksync Sync API</h1>
-<p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys. Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility, and released Inbe v4 encrypted collections remain valid.</p>
+<p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys. Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility, released Inbe v4 encrypted collections remain valid, and whole-payload encrypted envelopes can be relayed opaquely.</p>
 <p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a> · <a href="/readyz">Readiness</a> · <a href="/metrics">Metrics</a></p>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/apps</code><p>Lists registered apps, collection prefixes, visibility classes, and capabilities. Built-in registrations include Inbe and Uku.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/apps</code><p>Registers or updates an app when <code>KSYNC_ADMIN_TOKEN</code> is set and <code>X-Ksync-Admin</code> matches it.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync/login</code><p>Verifies the challenge signature and returns a cacheable bearer token plus server clock time.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>ksync-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies signed local changes and returns remote changes newer than <code>since_server_version</code>.</p></section>
-<section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/diagnostics</code><p>Returns bearer-authenticated sync state, table counts, compaction position, and legacy client hints.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies typed local changes or stores an encrypted envelope, then returns remote changes newer than the requested server version.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/diagnostics</code><p>Returns bearer-authenticated sync state, table counts, compaction position, legacy client hints, and recent sync audit metadata.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the Waozi token issuer key. Official apps accept only Waozi-signed <code>waozi:token</code> receipts.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct Monero prices when direct purchases are enabled.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's Waozi token balance computed from signed ledger events.</p></section>
@@ -340,7 +340,7 @@ func openAPISpec() map[string]any {
 					"summary":  "Inspect sync state for the authenticated account",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Sync diagnostic report"},
+						"200": map[string]any{"description": "Sync diagnostic report", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/SyncDiagnosticReport"}}}},
 						"401": map[string]any{"description": "Invalid bearer token"},
 					},
 				},
@@ -382,19 +382,22 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/sync": map[string]any{
 				"post": map[string]any{
-					"summary":     "Apply signed sync changes",
-					"description": "Body is signed through X-Ksync-Signature over the exact raw request body bytes.",
-					"parameters":  signedHeaderParameters(),
+					"summary":     "Apply sync changes",
+					"description": "Applies typed sync changes for existing clients. If the JSON body has v, nonce, and ciphertext fields, Ksync stores and relays it as an opaque encrypted envelope authenticated by bearer token.",
+					"parameters":  syncHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,
 						"content": map[string]any{
-							"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/SyncRequest"}},
+							"application/json": map[string]any{"schema": map[string]any{"oneOf": []map[string]any{
+								{"$ref": "#/components/schemas/SyncRequest"},
+								{"$ref": "#/components/schemas/EncryptedSyncEnvelope"},
+							}}},
 						},
 					},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Changes applied"},
+						"200": map[string]any{"description": "Changes applied", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/SyncResponse"}}}},
 						"400": map[string]any{"description": "Invalid request or missing challenge"},
-						"401": map[string]any{"description": "Signature rejected"},
+						"401": map[string]any{"description": "Bearer token rejected"},
 					},
 				},
 			},
@@ -609,6 +612,17 @@ func openAPISpec() map[string]any {
 						"encrypted_records":    map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/EncryptedRecord"}},
 					},
 				},
+				"EncryptedSyncEnvelope": map[string]any{
+					"type":        "object",
+					"description": "Opaque whole-payload encrypted sync envelope. Ksync authenticates the account and relays the JSON body unchanged as encrypted_payloads.",
+					"required":    []string{"v", "nonce", "ciphertext"},
+					"properties": map[string]any{
+						"v":          map[string]any{"type": "integer", "enum": []int{1, 2}},
+						"nonce":      map[string]any{"type": "string"},
+						"ciphertext": map[string]any{"type": "string"},
+					},
+					"additionalProperties": true,
+				},
 				"LoginResponse": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -633,11 +647,12 @@ func openAPISpec() map[string]any {
 						"data":                   map[string]any{"$ref": "#/components/schemas/CleanData"},
 						"logs":                   map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncLog"}},
 						"deletes":                map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncLog"}},
+						"encrypted_payloads":     map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/EncryptedPayload"}},
 						"upgrade_notice":         map[string]any{"type": "string"},
 						"min_supported_protocol": map[string]any{"type": "integer"},
 						"latest_protocol":        map[string]any{"type": "integer"},
 						"legacy_clients":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-						"diagnostics":            map[string]any{"type": "object"},
+						"diagnostics":            map[string]any{"$ref": "#/components/schemas/SyncDiagnostics"},
 					},
 				},
 				"CleanData": map[string]any{
@@ -764,6 +779,68 @@ func openAPISpec() map[string]any {
 						"parent_id":      map[string]any{"type": "string"},
 					},
 				},
+				"EncryptedPayload": map[string]any{
+					"type":        "object",
+					"description": "Opaque encrypted envelope stored and relayed by server version.",
+					"properties": map[string]any{
+						"id":             map[string]any{"type": "integer"},
+						"client_id":      map[string]any{"type": "string"},
+						"payload":        map[string]any{"$ref": "#/components/schemas/EncryptedSyncEnvelope"},
+						"created_at":     map[string]any{"type": "string", "format": "date-time"},
+						"server_version": map[string]any{"type": "integer"},
+					},
+				},
+				"SyncDiagnostics": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"snapshot_reason":                map[string]any{"type": "string"},
+						"requested_since_server_version": map[string]any{"type": "integer"},
+						"effective_since_server_version": map[string]any{"type": "integer"},
+						"client_clock":                   map[string]any{"type": "integer"},
+						"compacted_through_version":      map[string]any{"type": "integer"},
+						"has_local_changes":              map[string]any{"type": "boolean"},
+						"accepted_ops":                   map[string]any{"type": "integer"},
+						"remote_ops":                     map[string]any{"type": "integer"},
+						"applied_input":                  map[string]any{"type": "object"},
+						"returned_changes":               map[string]any{"type": "object"},
+					},
+				},
+				"SyncDiagnosticReport": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"status":                     map[string]any{"type": "string"},
+						"user_id_hash":               map[string]any{"type": "string"},
+						"server_version":             map[string]any{"type": "integer"},
+						"state_hash":                 map[string]any{"type": "string"},
+						"compacted_through_version":  map[string]any{"type": "integer"},
+						"table_counts":               map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "integer"}},
+						"legacy_clients":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"active_websocket_supported": map[string]any{"type": "boolean"},
+						"recent_sync_audit":          map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncAuditEntry"}},
+						"recent_encrypted_payloads":  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/EncryptedPayload"}},
+					},
+				},
+				"SyncAuditEntry": map[string]any{
+					"type":        "object",
+					"description": "Metadata-only recent sync summary. It does not include typed payload contents or decrypted envelope contents.",
+					"properties": map[string]any{
+						"id":                      map[string]any{"type": "integer"},
+						"user_id_hash":            map[string]any{"type": "string"},
+						"client_id":               map[string]any{"type": "string"},
+						"app_id":                  map[string]any{"type": "string"},
+						"protocol_version":        map[string]any{"type": "integer"},
+						"since_server_version":    map[string]any{"type": "integer"},
+						"client_clock":            map[string]any{"type": "integer"},
+						"server_version":          map[string]any{"type": "integer"},
+						"applied":                 map[string]any{"type": "object"},
+						"remote_ops":              map[string]any{"type": "integer"},
+						"full_snapshot_required":  map[string]any{"type": "boolean"},
+						"snapshot_reason":         map[string]any{"type": "string"},
+						"encrypted_payload":       map[string]any{"type": "boolean"},
+						"encrypted_payload_bytes": map[string]any{"type": "integer"},
+						"created_at":              map[string]any{"type": "string", "format": "date-time"},
+					},
+				},
 				"SyncOp": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -811,6 +888,39 @@ func signedHeaderParameters() []map[string]any {
 			"required":    true,
 			"description": "ML-DSA-44 signature as hex or base64.",
 			"schema":      map[string]any{"type": "string"},
+		},
+	}
+}
+
+func syncHeaderParameters() []map[string]any {
+	return []map[string]any{
+		{
+			"name":        "Authorization",
+			"in":          "header",
+			"required":    true,
+			"description": "Bearer auth token returned by POST /api/v1/sync/login.",
+			"schema":      map[string]any{"type": "string"},
+		},
+		{
+			"name":        "X-Ksync-User",
+			"in":          "header",
+			"required":    true,
+			"description": "SHA-256 hash of the ML-DSA-44 public key. Legacy X-Inbe-User is also accepted.",
+			"schema":      map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+		},
+		{
+			"name":        "X-Ksync-Client",
+			"in":          "header",
+			"required":    false,
+			"description": "Optional client ID for encrypted envelope metadata.",
+			"schema":      map[string]any{"type": "string"},
+		},
+		{
+			"name":        "X-Ksync-Since-Version",
+			"in":          "header",
+			"required":    false,
+			"description": "Optional last-seen server version for encrypted envelope delta reads.",
+			"schema":      map[string]any{"type": "integer"},
 		},
 	}
 }

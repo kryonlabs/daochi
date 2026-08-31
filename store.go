@@ -144,6 +144,16 @@ WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 			jsonFields: map[string]bool{"payload_json": true},
 		},
 		{
+			name:       "encrypted_payloads",
+			query:      `SELECT id, client_id, payload_json, created_at, server_version FROM server_encrypted_payloads WHERE user_id_hash=?1 ORDER BY server_version, id`,
+			jsonFields: map[string]bool{"payload_json": true},
+		},
+		{
+			name:       "sync_audit",
+			query:      `SELECT id, client_id, app_id, protocol_version, since_server_version, client_clock, server_version, applied_json, remote_ops, full_snapshot_required, snapshot_reason, encrypted_payload, encrypted_payload_bytes, created_at FROM server_sync_audit WHERE user_id_hash=?1 ORDER BY id DESC LIMIT 200`,
+			jsonFields: map[string]bool{"applied_json": true},
+		},
+		{
 			name:  "friend_requests",
 			query: `SELECT id, requester_user_id_hash, target_user_id_hash, status, created_at, updated_at FROM server_friend_requests WHERE requester_user_id_hash=?1 OR target_user_id_hash=?1 ORDER BY updated_at DESC, id`,
 		},
@@ -480,6 +490,33 @@ CREATE TABLE IF NOT EXISTS server_sync_ops (
 	UNIQUE(user_id_hash, client_id, seq)
 );
 
+CREATE TABLE IF NOT EXISTS server_encrypted_payloads (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	client_id TEXT NOT NULL DEFAULT '',
+	payload_json TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	server_version INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS server_sync_audit (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	client_id TEXT NOT NULL DEFAULT '',
+	app_id TEXT NOT NULL DEFAULT '',
+	protocol_version INTEGER NOT NULL DEFAULT 0,
+	since_server_version INTEGER NOT NULL DEFAULT 0,
+	client_clock INTEGER NOT NULL DEFAULT 0,
+	server_version INTEGER NOT NULL DEFAULT 0,
+	applied_json TEXT NOT NULL DEFAULT '{}',
+	remote_ops INTEGER NOT NULL DEFAULT 0,
+	full_snapshot_required INTEGER NOT NULL DEFAULT 0,
+	snapshot_reason TEXT NOT NULL DEFAULT '',
+	encrypted_payload INTEGER NOT NULL DEFAULT 0,
+	encrypted_payload_bytes INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS server_habit_id_migrations (
 	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
 	old_id TEXT NOT NULL,
@@ -734,6 +771,8 @@ WHERE alias IS NOT NULL AND alias<>''`); err != nil {
 		`CREATE INDEX IF NOT EXISTS server_app_grants_lookup ON server_app_grants(user_id_hash,source_app_id,target_app_id,collection_prefix,status)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS server_app_grants_active_unique ON server_app_grants(user_id_hash,source_app_id,target_app_id,collection_prefix,permission) WHERE status='active'`,
 		`CREATE INDEX IF NOT EXISTS server_encrypted_records_collection ON server_encrypted_records(user_id_hash,collection,server_version)`,
+		`CREATE INDEX IF NOT EXISTS server_encrypted_payloads_user_version ON server_encrypted_payloads(user_id_hash,server_version,id)`,
+		`CREATE INDEX IF NOT EXISTS server_sync_audit_user_created ON server_sync_audit(user_id_hash,created_at,id)`,
 		`CREATE INDEX IF NOT EXISTS token_ledger_account_asset ON token_ledger(account_id,asset_id,ledger_seq)`,
 		`CREATE INDEX IF NOT EXISTS token_ledger_source ON token_ledger(source_type,source_ref)`,
 		`CREATE INDEX IF NOT EXISTS token_payment_intents_account ON token_payment_intents(account_id,provider,status,created_at)`,
@@ -1868,6 +1907,134 @@ ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
 	protocol_version=excluded.protocol_version,
 	last_client_clock=excluded.last_client_clock`, userID, clientID, sinceVersion, serverVersion, protocolVersion, clientClock)
 	return err
+}
+
+func (s *Store) StoreEncryptedPayload(ctx context.Context, userID, clientID string, payload []byte) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if err := touchUser(ctx, tx, userID); err != nil {
+		return 0, err
+	}
+	version, err := nextUserVersion(ctx, tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO server_encrypted_payloads(user_id_hash,client_id,payload_json,server_version)
+VALUES(?1,?2,?3,?4)`, userID, clientID, string(payload), version); err != nil {
+		return 0, err
+	}
+	return version, tx.Commit()
+}
+
+func (s *Store) EncryptedPayloadsSince(ctx context.Context, userID string, sinceVersion int64) ([]EncryptedPayload, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,client_id,payload_json,created_at,server_version
+FROM server_encrypted_payloads
+WHERE user_id_hash=?1 AND server_version>?2
+ORDER BY server_version,id`, userID, sinceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	payloads := []EncryptedPayload{}
+	for rows.Next() {
+		var item EncryptedPayload
+		var payload string
+		if err := rows.Scan(&item.ID, &item.ClientID, &payload, &item.CreatedAt, &item.ServerVersion); err != nil {
+			return nil, err
+		}
+		item.Payload = json.RawMessage(payload)
+		payloads = append(payloads, item)
+	}
+	return payloads, rows.Err()
+}
+
+func (s *Store) RecentEncryptedPayloads(ctx context.Context, userID string, limit int) ([]EncryptedPayload, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,client_id,payload_json,created_at,server_version
+FROM server_encrypted_payloads
+WHERE user_id_hash=?1
+ORDER BY id DESC
+LIMIT ?2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	payloads := []EncryptedPayload{}
+	for rows.Next() {
+		var item EncryptedPayload
+		var payload string
+		if err := rows.Scan(&item.ID, &item.ClientID, &payload, &item.CreatedAt, &item.ServerVersion); err != nil {
+			return nil, err
+		}
+		item.Payload = json.RawMessage(payload)
+		payloads = append(payloads, item)
+	}
+	return payloads, rows.Err()
+}
+
+func (s *Store) RecordSyncAudit(ctx context.Context, entry SyncAuditEntry) error {
+	applied, err := json.Marshal(entry.Applied)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO server_sync_audit(
+	user_id_hash,client_id,app_id,protocol_version,since_server_version,client_clock,
+	server_version,applied_json,remote_ops,full_snapshot_required,snapshot_reason,
+	encrypted_payload,encrypted_payload_bytes)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)`,
+		entry.UserIDHash, entry.ClientID, entry.AppID, entry.ProtocolVersion,
+		entry.SinceServerVersion, entry.ClientClock, entry.ServerVersion,
+		string(applied), entry.RemoteOps, boolInt(entry.FullSnapshotRequired),
+		entry.SnapshotReason, boolInt(entry.EncryptedPayload), entry.EncryptedPayloadBytes)
+	return err
+}
+
+func (s *Store) RecentSyncAudit(ctx context.Context, userID string, limit int) ([]SyncAuditEntry, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id,user_id_hash,client_id,app_id,protocol_version,since_server_version,client_clock,
+       server_version,applied_json,remote_ops,full_snapshot_required,snapshot_reason,
+       encrypted_payload,encrypted_payload_bytes,created_at
+FROM server_sync_audit
+WHERE user_id_hash=?1
+ORDER BY id DESC
+LIMIT ?2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []SyncAuditEntry{}
+	for rows.Next() {
+		var item SyncAuditEntry
+		var applied string
+		var fullSnapshot, encryptedPayload int
+		if err := rows.Scan(&item.ID, &item.UserIDHash, &item.ClientID, &item.AppID,
+			&item.ProtocolVersion, &item.SinceServerVersion, &item.ClientClock,
+			&item.ServerVersion, &applied, &item.RemoteOps, &fullSnapshot,
+			&item.SnapshotReason, &encryptedPayload, &item.EncryptedPayloadBytes,
+			&item.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(applied), &item.Applied)
+		item.FullSnapshotRequired = fullSnapshot != 0
+		item.EncryptedPayload = encryptedPayload != 0
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (s *Store) SyncOpsCompacted(ctx context.Context, userID string, clientClock int64) (bool, int64, error) {
@@ -3709,6 +3876,7 @@ func replaceUserData(ctx context.Context, tx *sql.Tx, userID string) error {
 		`DELETE FROM server_meditation_logs WHERE user_id_hash=?1`,
 		`DELETE FROM server_social_snapshots WHERE user_id_hash=?1`,
 		`DELETE FROM server_encrypted_records WHERE user_id_hash=?1`,
+		`DELETE FROM server_encrypted_payloads WHERE user_id_hash=?1`,
 	} {
 		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
 			return err
@@ -4001,6 +4169,14 @@ func (s *Store) SyncDiagnosticReport(ctx context.Context, userID string) (SyncDi
 	if err != nil {
 		return SyncDiagnosticReport{}, err
 	}
+	recentAudit, err := s.RecentSyncAudit(ctx, userID, 10)
+	if err != nil {
+		return SyncDiagnosticReport{}, err
+	}
+	recentPayloads, err := s.RecentEncryptedPayloads(ctx, userID, 5)
+	if err != nil {
+		return SyncDiagnosticReport{}, err
+	}
 	return SyncDiagnosticReport{
 		Status:                   "ok",
 		UserIDHash:               userID,
@@ -4010,6 +4186,8 @@ func (s *Store) SyncDiagnosticReport(ctx context.Context, userID string) (SyncDi
 		TableCounts:              counts,
 		LegacyClients:            legacyClients,
 		ActiveWebSocketSupported: true,
+		RecentSyncAudit:          recentAudit,
+		RecentEncryptedPayloads:  recentPayloads,
 	}, nil
 }
 
@@ -4024,6 +4202,8 @@ func (s *Store) accountTableCounts(ctx context.Context, userID string) (map[stri
 		"server_encrypted_records",
 		"server_sync_ops",
 		"server_clients",
+		"server_encrypted_payloads",
+		"server_sync_audit",
 	}
 	counts := make(map[string]int, len(tables))
 	for _, table := range tables {

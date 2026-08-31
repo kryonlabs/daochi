@@ -1087,6 +1087,9 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 	if diag.TableCounts["server_encrypted_records"] != 1 || diag.StateHash == "" {
 		t.Fatalf("unexpected diagnostics: %#v", diag)
 	}
+	if len(diag.RecentSyncAudit) == 0 || diag.RecentSyncAudit[0].Applied.EncryptedRecords != 1 {
+		t.Fatalf("missing sync audit metadata: %#v", diag.RecentSyncAudit)
+	}
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/api/v1/account/export", nil)
 	exportReq.Header.Set("Authorization", "Bearer "+identity.Token)
@@ -1106,8 +1109,98 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 	metrics := httptest.NewRecorder()
 	handler.ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if metrics.Code != http.StatusOK ||
-		!strings.Contains(metrics.Body.String(), "ksync_sync_encrypted_records_applied_total 1") {
+		!strings.Contains(metrics.Body.String(), "ksync_sync_encrypted_records_applied_total 1") ||
+		!strings.Contains(metrics.Body.String(), `ksync_http_requests_total{method="POST",route="/api/v1/sync",status="200"} 1`) {
 		t.Fatalf("unexpected metrics status=%d body=%s", metrics.Code, metrics.Body.String())
+	}
+}
+
+func TestEncryptedSyncEnvelopeStoresAndRelaysOpaquely(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x62)
+
+	body := []byte(`{"v":1,"nonce":"nonce-1","ciphertext":"ciphertext-1","aad":{"app":"inbe"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Ksync-User", identity.UserID)
+	req.Header.Set("X-Ksync-Client", "envelope-client-1")
+	req.Header.Set("X-Ksync-Since-Version", "0")
+	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("encrypted envelope status = %d body=%s", res.Code, res.Body.String())
+	}
+	var first SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Status != "ok" || first.TransitionMode != "encrypted_payload" ||
+		first.ProtocolVersion != ksyncLatestProtocol || first.ServerVersion == 0 ||
+		len(first.EncryptedPayloads) != 1 {
+		t.Fatalf("unexpected encrypted envelope response: %#v", first)
+	}
+	if !bytes.Equal(first.EncryptedPayloads[0].Payload, body) {
+		t.Fatalf("payload was not relayed opaquely: %s", first.EncryptedPayloads[0].Payload)
+	}
+	assertCount(t, store, "server_encrypted_payloads", 1)
+	assertCount(t, store, "server_sync_audit", 1)
+
+	secondBody := []byte(`{"v":1,"nonce":"nonce-2","ciphertext":"ciphertext-2"}`)
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(secondBody))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondReq.Header.Set("X-Ksync-User", identity.UserID)
+	secondReq.Header.Set("X-Ksync-Client", "envelope-client-2")
+	secondReq.Header.Set("X-Ksync-Since-Version", strconv.FormatInt(first.ServerVersion, 10))
+	secondReq.Header.Set("Authorization", "Bearer "+identity.Token)
+	secondRes := httptest.NewRecorder()
+	handler.ServeHTTP(secondRes, secondReq)
+	if secondRes.Code != http.StatusOK {
+		t.Fatalf("second envelope status = %d body=%s", secondRes.Code, secondRes.Body.String())
+	}
+	var second SyncResponse
+	if err := json.Unmarshal(secondRes.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.EncryptedPayloads) != 1 || !bytes.Equal(second.EncryptedPayloads[0].Payload, secondBody) {
+		t.Fatalf("unexpected delta encrypted payloads: %#v", second.EncryptedPayloads)
+	}
+
+	diagReq := httptest.NewRequest(http.MethodGet, "/api/v1/sync/diagnostics", nil)
+	diagReq.Header.Set("Authorization", "Bearer "+identity.Token)
+	diagReq.Header.Set("X-Ksync-User", identity.UserID)
+	diagRes := httptest.NewRecorder()
+	handler.ServeHTTP(diagRes, diagReq)
+	if diagRes.Code != http.StatusOK {
+		t.Fatalf("diagnostics status = %d body=%s", diagRes.Code, diagRes.Body.String())
+	}
+	var diag SyncDiagnosticReport
+	if err := json.Unmarshal(diagRes.Body.Bytes(), &diag); err != nil {
+		t.Fatal(err)
+	}
+	if diag.TableCounts["server_encrypted_payloads"] != 2 ||
+		len(diag.RecentEncryptedPayloads) != 2 ||
+		len(diag.RecentSyncAudit) != 2 ||
+		!diag.RecentSyncAudit[0].EncryptedPayload {
+		t.Fatalf("unexpected encrypted diagnostics: %#v", diag)
+	}
+}
+
+func TestEncryptedSyncEnvelopeRequiresMatchingBearerUser(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x63)
+	bob := newTestIdentity(t, handler, 0x64)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", strings.NewReader(`{"v":1,"nonce":"n","ciphertext":"c"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Ksync-User", bob.UserID)
+	req.Header.Set("Authorization", "Bearer "+alice.Token)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), "token user mismatch") {
+		t.Fatalf("mismatched envelope status = %d body=%s", res.Code, res.Body.String())
 	}
 }
 
@@ -2537,6 +2630,61 @@ func TestSyncWebSocketAcceptsLegacyInbeBearerSubprotocol(t *testing.T) {
 	}
 }
 
+func TestClientWebSocketFrameValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{
+			name: "unmasked client frame",
+			data: []byte{0x81, 0x02, 'o', 'k'},
+			want: "not masked",
+		},
+		{
+			name: "reserved bits",
+			data: appendMaskedWebSocketFrame(0xc1, []byte("ok")),
+			want: "reserved bits",
+		},
+		{
+			name: "unsupported opcode",
+			data: appendMaskedWebSocketFrame(0x83, []byte("ok")),
+			want: "unsupported opcode",
+		},
+		{
+			name: "fragmented data frame",
+			data: appendMaskedWebSocketFrame(0x01, []byte("ok")),
+			want: "fragmented",
+		},
+		{
+			name: "oversized control frame",
+			data: appendMaskedWebSocketFrame(0x89, bytes.Repeat([]byte("x"), 126)),
+			want: "invalid control frame",
+		},
+		{
+			name: "valid masked text frame",
+			data: appendMaskedWebSocketFrame(0x81, []byte("ok")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opcode, payload, err := readClientWebSocketFrame(bufio.NewReader(bytes.NewReader(tt.data)))
+			if tt.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("error = %v, want %q", err, tt.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opcode != 0x1 || string(payload) != "ok" {
+				t.Fatalf("frame opcode=%x payload=%q", opcode, payload)
+			}
+		})
+	}
+}
+
 func TestParseExportedSyncKey(t *testing.T) {
 	privateKey := bytes.Repeat([]byte{0x64}, mlDSA44PrivateKeySize)
 	publicID := strings.Repeat("a", 64)
@@ -3244,6 +3392,24 @@ func openSyncWebSocketWithProtocol(t *testing.T, baseURL, token string) (*bufio.
 func openLegacyInbeSyncWebSocketWithProtocol(t *testing.T, baseURL, token string) (*bufio.Reader, net.Conn) {
 	t.Helper()
 	return openSyncWebSocketRaw(t, baseURL, "Sec-WebSocket-Protocol: inbe-sync-v1, bearer."+token+"\r\n")
+}
+
+func appendMaskedWebSocketFrame(first byte, payload []byte) []byte {
+	mask := []byte{0x11, 0x22, 0x33, 0x44}
+	frame := []byte{first}
+	switch {
+	case len(payload) < 126:
+		frame = append(frame, 0x80|byte(len(payload)))
+	case len(payload) <= 0xffff:
+		frame = append(frame, 0x80|126, byte(len(payload)>>8), byte(len(payload)))
+	default:
+		frame = append(frame, 0x80|127, 0, 0, 0, 0, byte(len(payload)>>24), byte(len(payload)>>16), byte(len(payload)>>8), byte(len(payload)))
+	}
+	frame = append(frame, mask...)
+	for i, b := range payload {
+		frame = append(frame, b^mask[i%len(mask)])
+	}
+	return frame
 }
 
 func openSyncWebSocketRaw(t *testing.T, baseURL, extraHeaders string) (*bufio.Reader, net.Conn) {

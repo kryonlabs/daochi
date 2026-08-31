@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -11,9 +12,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -216,7 +219,18 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			s.metrics.syncFailures.Add(1)
 		}
 	}()
-	_, req, err := readSyncRequest(w, r, s.cfg.MaxBodyBytes)
+	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if isEncryptedSyncEnvelope(body) {
+		if s.handleEncryptedSyncEnvelope(w, r, body) {
+			syncOK = true
+		}
+		return
+	}
+	req, err := parseSyncRequestBody(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -231,7 +245,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenUser, err := s.authenticateToken(r)
 	if err != nil {
-		writeAuthError(w, err)
+		s.writeAuthError(w, err)
 		return
 	}
 	if tokenUser != req.UserIDHash {
@@ -310,7 +324,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if fullSnapshotRequired {
-		s.metrics.syncFullSnapshots.Add(1)
+		s.metrics.recordFullSnapshot(snapshotReason)
 	}
 
 	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, sinceVersion)
@@ -463,6 +477,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "legacy clients failed")
 			return
 		}
+		if len(response.LegacyClients) > 0 {
+			s.metrics.legacyClientHints.Add(uint64(len(response.LegacyClients)))
+		}
 	}
 	if response.Diagnostics != nil {
 		response.Diagnostics.ReturnedChanges = syncChangesResult(response.Changes)
@@ -470,8 +487,105 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if result.EncryptedRecords > 0 {
 		s.metrics.syncEncryptedRecords.Add(uint64(result.EncryptedRecords))
 	}
+	if err := s.store.RecordSyncAudit(r.Context(), SyncAuditEntry{
+		UserIDHash:           req.UserIDHash,
+		ClientID:             req.ClientID,
+		AppID:                req.AppID,
+		ProtocolVersion:      req.ProtocolVersion,
+		SinceServerVersion:   req.SinceServerVersion,
+		ClientClock:          req.ClientClock,
+		ServerVersion:        response.ServerVersion,
+		Applied:              result,
+		RemoteOps:            len(remoteOps),
+		FullSnapshotRequired: fullSnapshotRequired,
+		SnapshotReason:       snapshotReason,
+	}); err != nil {
+		slog.Error("record sync audit", "user", req.UserIDHash, "client", req.ClientID, "error", err)
+	}
 	syncOK = true
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Request, body []byte) bool {
+	userID, headerName := requestUserHeader(r)
+	if userID == "" {
+		writeError(w, http.StatusBadRequest, "missing X-Ksync-User")
+		return false
+	}
+	if !validUserID(userID) {
+		writeError(w, http.StatusBadRequest, "invalid "+headerName)
+		return false
+	}
+	tokenUser, err := s.authenticateToken(r)
+	if err != nil {
+		s.writeAuthError(w, err)
+		return false
+	}
+	if tokenUser != userID {
+		s.writeAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
+		return false
+	}
+	clientID := strings.TrimSpace(r.Header.Get("X-Ksync-Client"))
+	if clientID != "" && !validClientID(clientID) {
+		writeError(w, http.StatusBadRequest, "invalid X-Ksync-Client")
+		return false
+	}
+	sinceVersion := int64(0)
+	if text := strings.TrimSpace(r.Header.Get("X-Ksync-Since-Version")); text != "" {
+		parsed, err := strconv.ParseInt(text, 10, 64)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "invalid X-Ksync-Since-Version")
+			return false
+		}
+		sinceVersion = parsed
+	}
+	serverVersion, err := s.store.StoreEncryptedPayload(r.Context(), userID, clientID, body)
+	if err != nil {
+		if errors.Is(err, ErrSyncUserNotFound) {
+			writeError(w, http.StatusNotFound, "sync account not found")
+			return false
+		}
+		slog.Error("store encrypted payload", "user", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "encrypted sync failed")
+		return false
+	}
+	payloads, err := s.store.EncryptedPayloadsSince(r.Context(), userID, sinceVersion)
+	if err != nil {
+		slog.Error("load encrypted payloads", "user", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "encrypted sync failed")
+		return false
+	}
+	if err := s.store.RecordClientSync(r.Context(), userID, clientID, sinceVersion, serverVersion, ksyncLatestProtocol, serverVersion); err != nil {
+		slog.Error("record encrypted sync client", "user", userID, "client", clientID, "error", err)
+	}
+	if err := s.store.RecordSyncAudit(r.Context(), SyncAuditEntry{
+		UserIDHash:            userID,
+		ClientID:              clientID,
+		ProtocolVersion:       ksyncLatestProtocol,
+		SinceServerVersion:    sinceVersion,
+		ClientClock:           sinceVersion,
+		ServerVersion:         serverVersion,
+		EncryptedPayload:      true,
+		EncryptedPayloadBytes: int64(len(body)),
+	}); err != nil {
+		slog.Error("record encrypted sync audit", "user", userID, "client", clientID, "error", err)
+	}
+	s.metrics.syncEncryptedPayloads.Add(1)
+	s.syncHub.publish(userID, serverVersion)
+	writeJSON(w, http.StatusOK, SyncResponse{
+		ProtocolVersion:      ksyncLatestProtocol,
+		Status:               "ok",
+		ServerCapabilities:   ksyncServerCapabilities,
+		TransitionMode:       "encrypted_payload",
+		ServerVersion:        serverVersion,
+		ServerClock:          serverVersion,
+		ChangesComplete:      true,
+		Changes:              emptySyncChanges(),
+		EncryptedPayloads:    payloads,
+		MinSupportedProtocol: 1,
+		LatestProtocol:       ksyncLatestProtocol,
+	})
+	return true
 }
 
 func syncTransitionMode(req SyncRequest) string {
@@ -510,7 +624,7 @@ func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenUser, err := s.authenticateToken(r)
 	if err != nil {
-		writeAuthError(w, err)
+		s.writeAuthError(w, err)
 		return
 	}
 	if tokenUser != req.UserIDHash {
@@ -550,7 +664,7 @@ func (s *Server) handleProfileIcon(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenUser, err := s.authenticateToken(r)
 	if err != nil {
-		writeAuthError(w, err)
+		s.writeAuthError(w, err)
 		return
 	}
 	if tokenUser != req.UserIDHash {
@@ -594,12 +708,12 @@ func (s *Server) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, bool) {
 	userID, err := s.authenticateToken(r)
 	if err != nil {
-		writeAuthError(w, err)
+		s.writeAuthError(w, err)
 		return "", false
 	}
 	headerUser, _ := requestUserHeader(r)
 	if headerUser != "" && headerUser != userID {
-		writeAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
+		s.writeAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
 		return "", false
 	}
 	return userID, true
@@ -813,7 +927,7 @@ func (s *Server) handleProcessCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
-		writeAuthError(w, err)
+		s.writeAuthError(w, err)
 		return
 	}
 	if req.ID == "" {
@@ -877,7 +991,7 @@ func (s *Server) handleProcessRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
-			writeAuthError(w, err)
+			s.writeAuthError(w, err)
 			return
 		}
 		process, err := s.store.UpdateUkuProcess(r.Context(), processID, req)
@@ -907,7 +1021,7 @@ func (s *Server) handleProcessRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
-			writeAuthError(w, err)
+			s.writeAuthError(w, err)
 			return
 		}
 		if req.ID == "" {
@@ -951,7 +1065,7 @@ func (s *Server) handleProcessRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
-			writeAuthError(w, err)
+			s.writeAuthError(w, err)
 			return
 		}
 		process, err := s.store.UpsertUkuVote(r.Context(), processID, req)
@@ -1219,7 +1333,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	signature, context := requestSignatureHeader(r)
 	publicKey, err := s.authenticateSignature(r.Context(), req.UserIDHash, req.PublicKey, signature, context, r.Method, r.URL.Path, body)
 	if err != nil {
-		writeAuthError(w, err)
+		s.writeAuthError(w, err)
 		return
 	}
 	if err := s.store.RegisterUser(r.Context(), req.UserIDHash, publicKey); err != nil {
@@ -1273,7 +1387,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	signature, context := requestSignatureHeader(r)
 	_, err = s.authenticateSignature(r.Context(), req.UserIDHash, "", signature, context, r.Method, r.URL.Path, body)
 	if err != nil {
-		writeAuthError(w, err)
+		s.writeAuthError(w, err)
 		return
 	}
 	if err := s.store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
@@ -1425,13 +1539,18 @@ func requestSignatureHeader(r *http.Request) (string, string) {
 }
 
 func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, SyncRequest, error) {
-	var req SyncRequest
 	body, err := readJSONBody(w, r, maxBody)
 	if err != nil {
-		return nil, req, err
+		return nil, SyncRequest{}, err
 	}
+	req, err := parseSyncRequestBody(body)
+	return body, req, err
+}
+
+func parseSyncRequestBody(body []byte) (SyncRequest, error) {
+	var req SyncRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, req, errors.New("invalid json")
+		return req, errors.New("invalid json")
 	}
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
 	req.AppID = strings.TrimSpace(req.AppID)
@@ -1446,7 +1565,32 @@ func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]b
 		req.EncryptedRecords[i].ContentHash = strings.ToLower(strings.TrimSpace(req.EncryptedRecords[i].ContentHash))
 		req.EncryptedRecords[i].ParentID = strings.TrimSpace(req.EncryptedRecords[i].ParentID)
 	}
-	return body, req, nil
+	return req, nil
+}
+
+func isEncryptedSyncEnvelope(body []byte) bool {
+	var envelope struct {
+		V          int    `json:"v"`
+		Nonce      string `json:"nonce"`
+		Ciphertext string `json:"ciphertext"`
+	}
+	if !json.Valid(body) || json.Unmarshal(body, &envelope) != nil {
+		return false
+	}
+	return (envelope.V == 1 || envelope.V == 2) &&
+		strings.TrimSpace(envelope.Nonce) != "" &&
+		strings.TrimSpace(envelope.Ciphertext) != ""
+}
+
+func emptySyncChanges() SyncChanges {
+	return SyncChanges{
+		Habits:           []Habit{},
+		HabitDays:        []HabitDay{},
+		Sessions:         []Session{},
+		MeditationLogs:   []MeditationLog{},
+		SocialCache:      []SocialCache{},
+		EncryptedRecords: []EncryptedRecord{},
+	}
 }
 
 func readLoginRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, LoginRequest, error) {
@@ -1926,18 +2070,58 @@ func (e authError) Error() string {
 	return e.message
 }
 
-func writeAuthError(w http.ResponseWriter, err error) {
+func (s *Server) writeAuthError(w http.ResponseWriter, err error) {
 	var ae authError
 	if errors.As(err, &ae) {
+		s.metrics.recordAuthFailure(ae.status, ae.message)
 		writeError(w, ae.status, ae.message)
 		return
 	}
 	slog.Error("auth", "error", err)
+	s.metrics.recordAuthFailure(http.StatusInternalServerError, "authentication failed")
 	writeError(w, http.StatusInternalServerError, "authentication failed")
+}
+
+type metricsResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *metricsResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *metricsResponseWriter) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *metricsResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("hijack unsupported")
+	}
+	if w.status == 0 {
+		w.status = http.StatusSwitchingProtocols
+	}
+	return hijacker.Hijack()
 }
 
 func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		mw := &metricsResponseWriter{ResponseWriter: w}
+		defer func() {
+			status := mw.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			s.metrics.recordHTTP(r.Method, r.URL.Path, status, time.Since(start))
+		}()
+		w = mw
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
 		if origin := allowedCORSOrigin(r.Header.Get("Origin")); origin != "" {

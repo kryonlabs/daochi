@@ -90,24 +90,24 @@ func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := s.authenticateWebSocket(r)
 	if err != nil {
-		s.metrics.webSocketRejected.Add(1)
-		writeAuthError(w, err)
+		s.metrics.recordWebSocketReject("auth")
+		s.writeAuthError(w, err)
 		return
 	}
 	if !s.allowRequest(r, "ws:ip:"+clientAddress(r), 120, time.Minute) ||
 		!s.allowRequest(r, "ws:user:"+userID, 40, time.Minute) {
-		s.metrics.webSocketRejected.Add(1)
+		s.metrics.recordWebSocketReject("rate_limited")
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
 	if s.syncHub.count(userID) >= 8 {
-		s.metrics.webSocketRejected.Add(1)
+		s.metrics.recordWebSocketReject("too_many_connections")
 		writeError(w, http.StatusTooManyRequests, "too many websocket connections")
 		return
 	}
 	conn, rw, err := acceptWebSocket(w, r)
 	if err != nil {
-		s.metrics.webSocketRejected.Add(1)
+		s.metrics.recordWebSocketReject("handshake")
 		return
 	}
 	s.metrics.webSocketAccepted.Add(1)
@@ -287,7 +287,14 @@ func readWebSocketFrameMasked(r *bufio.Reader, requireMask bool) (byte, []byte, 
 	if _, err := io.ReadFull(r, first[:]); err != nil {
 		return 0, nil, err
 	}
+	fin := first[0]&0x80 != 0
+	if first[0]&0x70 != 0 {
+		return 0, nil, errors.New("websocket reserved bits set")
+	}
 	opcode := first[0] & 0x0f
+	if !validWebSocketOpcode(opcode) {
+		return 0, nil, errors.New("websocket unsupported opcode")
+	}
 	masked := first[1]&0x80 != 0
 	if requireMask && !masked {
 		return 0, nil, errors.New("websocket client frame not masked")
@@ -305,6 +312,15 @@ func readWebSocketFrameMasked(r *bufio.Reader, requireMask bool) (byte, []byte, 
 			return 0, nil, err
 		}
 		length = binary.BigEndian.Uint64(ext[:])
+		if length&(1<<63) != 0 {
+			return 0, nil, errors.New("websocket invalid length")
+		}
+	}
+	if opcode >= 0x8 && (!fin || length > 125) {
+		return 0, nil, errors.New("websocket invalid control frame")
+	}
+	if !fin {
+		return 0, nil, errors.New("websocket fragmented frames unsupported")
 	}
 	if length > 1<<20 {
 		return 0, nil, errors.New("websocket frame too large")
@@ -328,4 +344,13 @@ func readWebSocketFrameMasked(r *bufio.Reader, requireMask bool) (byte, []byte, 
 		return opcode, payload, io.EOF
 	}
 	return opcode, payload, nil
+}
+
+func validWebSocketOpcode(opcode byte) bool {
+	switch opcode {
+	case 0x0, 0x1, 0x2, 0x8, 0x9, 0xa:
+		return true
+	default:
+		return false
+	}
 }

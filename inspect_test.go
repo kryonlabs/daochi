@@ -40,6 +40,23 @@ func TestInspectSummaryAndUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.StoreEncryptedPayload(context.Background(), userID, "inspect-client", []byte(`{"v":1,"nonce":"n","ciphertext":"c"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordSyncAudit(context.Background(), SyncAuditEntry{
+		UserIDHash:           userID,
+		ClientID:             "inspect-client",
+		AppID:                "inbe",
+		ProtocolVersion:      5,
+		ServerVersion:        2,
+		Applied:              SyncResult{EncryptedRecords: 1},
+		RemoteOps:            3,
+		FullSnapshotRequired: true,
+		SnapshotReason:       "test",
+		EncryptedPayload:     true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +79,20 @@ func TestInspectSummaryAndUser(t *testing.T) {
 	}
 	if strings.Contains(got, userID) {
 		t.Fatalf("user id should be redacted by default:\n%s", got)
+	}
+
+	var doctor bytes.Buffer
+	if err := runInspect(context.Background(), []string{"--db", dbPath, "doctor", userID}, InspectOptions{Out: &doctor}); err != nil {
+		t.Fatal(err)
+	}
+	got = doctor.String()
+	for _, want := range []string{"Ksync doctor", "server_sync_audit", "server_encrypted_payloads", "protocol=5", "full_snapshot=true"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, userID) {
+		t.Fatalf("doctor user id should be redacted by default:\n%s", got)
 	}
 }
 

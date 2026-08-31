@@ -79,30 +79,31 @@ type SyncChanges struct {
 }
 
 type SyncResponse struct {
-	ProtocolVersion      int              `json:"protocol_version,omitempty"`
-	Status               string           `json:"status"`
-	ServerCapabilities   []string         `json:"server_capabilities,omitempty"`
-	TransitionMode       string           `json:"transition_mode,omitempty"`
-	Applied              SyncResult       `json:"applied"`
-	AccountAlias         string           `json:"account_alias,omitempty"`
-	ProfileIcon          int              `json:"profile_icon,omitempty"`
-	ServerVersion        int64            `json:"server_version"`
-	ServerClock          int64            `json:"server_clock,omitempty"`
-	ServerStateHash      string           `json:"server_state_hash,omitempty"`
-	BaseStateHash        string           `json:"base_state_hash,omitempty"`
-	ChangesComplete      bool             `json:"changes_complete"`
-	FullSnapshotRequired bool             `json:"full_snapshot_required"`
-	AcceptedOps          []string         `json:"accepted_ops,omitempty"`
-	Ops                  []SyncOp         `json:"ops,omitempty"`
-	Changes              SyncChanges      `json:"changes"`
-	Data                 *CleanData       `json:"data,omitempty"`
-	Logs                 []SyncLog        `json:"logs,omitempty"`
-	Deletes              []SyncLog        `json:"deletes,omitempty"`
-	UpgradeNotice        string           `json:"upgrade_notice,omitempty"`
-	MinSupportedProtocol int              `json:"min_supported_protocol,omitempty"`
-	LatestProtocol       int              `json:"latest_protocol,omitempty"`
-	LegacyClients        []string         `json:"legacy_clients,omitempty"`
-	Diagnostics          *SyncDiagnostics `json:"diagnostics,omitempty"`
+	ProtocolVersion      int                `json:"protocol_version,omitempty"`
+	Status               string             `json:"status"`
+	ServerCapabilities   []string           `json:"server_capabilities,omitempty"`
+	TransitionMode       string             `json:"transition_mode,omitempty"`
+	Applied              SyncResult         `json:"applied"`
+	AccountAlias         string             `json:"account_alias,omitempty"`
+	ProfileIcon          int                `json:"profile_icon,omitempty"`
+	ServerVersion        int64              `json:"server_version"`
+	ServerClock          int64              `json:"server_clock,omitempty"`
+	ServerStateHash      string             `json:"server_state_hash,omitempty"`
+	BaseStateHash        string             `json:"base_state_hash,omitempty"`
+	ChangesComplete      bool               `json:"changes_complete"`
+	FullSnapshotRequired bool               `json:"full_snapshot_required"`
+	AcceptedOps          []string           `json:"accepted_ops,omitempty"`
+	Ops                  []SyncOp           `json:"ops,omitempty"`
+	Changes              SyncChanges        `json:"changes"`
+	Data                 *CleanData         `json:"data,omitempty"`
+	Logs                 []SyncLog          `json:"logs,omitempty"`
+	Deletes              []SyncLog          `json:"deletes,omitempty"`
+	EncryptedPayloads    []EncryptedPayload `json:"encrypted_payloads,omitempty"`
+	UpgradeNotice        string             `json:"upgrade_notice,omitempty"`
+	MinSupportedProtocol int                `json:"min_supported_protocol,omitempty"`
+	LatestProtocol       int                `json:"latest_protocol,omitempty"`
+	LegacyClients        []string           `json:"legacy_clients,omitempty"`
+	Diagnostics          *SyncDiagnostics   `json:"diagnostics,omitempty"`
 }
 
 type CleanData struct {
@@ -169,6 +170,14 @@ type EncryptedRecord struct {
 	ParentID      string `json:"parent_id,omitempty"`
 }
 
+type EncryptedPayload struct {
+	ID            int64           `json:"id"`
+	ClientID      string          `json:"client_id,omitempty"`
+	Payload       json.RawMessage `json:"payload"`
+	CreatedAt     string          `json:"created_at,omitempty"`
+	ServerVersion int64           `json:"server_version"`
+}
+
 type SyncDiagnostics struct {
 	SnapshotReason              string     `json:"snapshot_reason,omitempty"`
 	RequestedSinceServerVersion int64      `json:"requested_since_server_version"`
@@ -183,14 +192,34 @@ type SyncDiagnostics struct {
 }
 
 type SyncDiagnosticReport struct {
-	Status                   string         `json:"status"`
-	UserIDHash               string         `json:"user_id_hash"`
-	ServerVersion            int64          `json:"server_version"`
-	StateHash                string         `json:"state_hash"`
-	CompactedThroughVersion  int64          `json:"compacted_through_version"`
-	TableCounts              map[string]int `json:"table_counts"`
-	LegacyClients            []string       `json:"legacy_clients,omitempty"`
-	ActiveWebSocketSupported bool           `json:"active_websocket_supported"`
+	Status                   string             `json:"status"`
+	UserIDHash               string             `json:"user_id_hash"`
+	ServerVersion            int64              `json:"server_version"`
+	StateHash                string             `json:"state_hash"`
+	CompactedThroughVersion  int64              `json:"compacted_through_version"`
+	TableCounts              map[string]int     `json:"table_counts"`
+	LegacyClients            []string           `json:"legacy_clients,omitempty"`
+	ActiveWebSocketSupported bool               `json:"active_websocket_supported"`
+	RecentSyncAudit          []SyncAuditEntry   `json:"recent_sync_audit,omitempty"`
+	RecentEncryptedPayloads  []EncryptedPayload `json:"recent_encrypted_payloads,omitempty"`
+}
+
+type SyncAuditEntry struct {
+	ID                    int64      `json:"id,omitempty"`
+	UserIDHash            string     `json:"user_id_hash,omitempty"`
+	ClientID              string     `json:"client_id,omitempty"`
+	AppID                 string     `json:"app_id,omitempty"`
+	ProtocolVersion       int        `json:"protocol_version"`
+	SinceServerVersion    int64      `json:"since_server_version"`
+	ClientClock           int64      `json:"client_clock"`
+	ServerVersion         int64      `json:"server_version"`
+	Applied               SyncResult `json:"applied"`
+	RemoteOps             int        `json:"remote_ops"`
+	FullSnapshotRequired  bool       `json:"full_snapshot_required"`
+	SnapshotReason        string     `json:"snapshot_reason,omitempty"`
+	EncryptedPayload      bool       `json:"encrypted_payload"`
+	EncryptedPayloadBytes int64      `json:"encrypted_payload_bytes,omitempty"`
+	CreatedAt             string     `json:"created_at,omitempty"`
 }
 
 type DeleteRequest struct {

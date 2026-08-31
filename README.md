@@ -6,9 +6,11 @@ Ksync is the stateless sync relay for Kryon apps. It stores public keys and mirr
 
 Ksync uses the client account key for identity and authentication. A client proves control of the account by signing a short-lived challenge with ML-DSA-44, and Ksync then issues a bearer token for normal sync and social API calls.
 
-Ksync does not currently provide end-to-end encryption against the server. Mirrored app data is stored in SQLite as normal typed rows and JSON payloads so the service can sync, compact, export, derive friend leaderboard stats, and delete account data. This is intentional. Operational access to the server database or a valid bearer token can read the data those credentials allow.
+Ksync's legacy typed sync surface is not end-to-end encrypted against the server. Mirrored app data is stored in SQLite as normal typed rows and JSON payloads so the service can sync, compact, export, derive friend leaderboard stats, and delete account data. This is intentional for compatibility. Operational access to the server database or a valid bearer token can read the typed data those credentials allow.
 
 Protocol clients may also sync `encrypted_records`: opaque per-account private records identified by `collection` and `id`. Ksync stores and versions those blobs for relay, export, deletion, and diagnostics, but does not need to read their contents. Protocol v4 advertises this as the dual-write transition path: upgraded clients can keep sending legacy typed rows for compatibility while also seeding encrypted private records for future mesh-capable clients. Protocol v5 makes encrypted records the primary private-data surface for upgraded clients while legacy typed rows remain available through `include_legacy_data` for compatibility. The released Inbe v4 encrypted collections remain valid in v5 so clients do not need an immediate second backfill migration. Public/social projections such as aliases, friend requests, profile icons, and leaderboard stats remain readable server-side by design.
+
+Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Ksync authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Ksync-Since-Version`. Existing typed Inbe clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
 
 Ksync keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding Inbe behavior. `inbe` and `uku` are seeded automatically. Inbe remains the lead migration client and sends `app_id:"inbe"` in v5 compatibility mode; older clients without `app_id` continue to sync. Future protocol v6 requests must include a registered `app_id`, and encrypted record collections must belong to that registered app.
 
@@ -80,6 +82,15 @@ Bearer tokens are intentionally cacheable client-side credentials, not the user'
 
 The WebSocket endpoint accepts bearer auth through `Authorization: Bearer <token>`. Browser clients that cannot set custom WebSocket headers may send `Sec-WebSocket-Protocol: ksync-sync-v1, bearer.<token>`. Ksync rejects `?token=` WebSocket URLs so bearer tokens do not leak through request URLs, browser history, or proxy URL logs.
 
+Encrypted envelope clients should send:
+
+- `Authorization: Bearer <token>`
+- `X-Ksync-User: <sha256-public-key-hex>` or legacy `X-Inbe-User`
+- `X-Ksync-Client: <client-id>` when available
+- `X-Ksync-Since-Version: <last-seen-server-version>` when requesting only newer envelopes
+
+Envelope bodies are relayed as JSON `encrypted_payloads` in the sync response. Ksync does not parse the envelope contents beyond checking that `v` is `1` or `2` and `nonce` and `ciphertext` are non-empty.
+
 ## Signature Message
 
 Clients must sign this exact byte string with ML-DSA-44:
@@ -94,13 +105,15 @@ ksync-sync-v1
 
 The challenge response returns `nonce` as lowercase hex. The challenge is single-use and expires after 60 seconds by default.
 
-Signed `POST /api/v1/sync`, `POST /api/v1/account/delete`, and legacy `DELETE /api/v1/account` requests must include:
+Bearer-authenticated `POST /api/v1/sync` requests must include `Authorization: Bearer <token>`, `X-Ksync-User: <sha256-public-key-hex>`, and `Content-Type: application/json`. Legacy `X-Inbe-User` remains accepted.
+
+Signed `POST /api/v1/account/delete` and legacy `DELETE /api/v1/account` requests must include:
 
 - `X-Ksync-User: <sha256-public-key-hex>`
 - `X-Ksync-Signature: <ML-DSA-44 signature>`
 - `Content-Type: application/json`
 
-The JSON body still includes `user_id_hash`, and first sync includes `public_key`. The server accepts `public_key` and `X-Ksync-Signature` as either base64 or lowercase/uppercase hex. This matches the current C client account storage, which keeps ML-DSA-44 keys as hex strings.
+Signed JSON bodies still include `user_id_hash`. The server accepts `public_key` and `X-Ksync-Signature` as either base64 or lowercase/uppercase hex. This matches the current C client account storage, which keeps ML-DSA-44 keys as hex strings.
 
 The preferred account deletion endpoint is `POST /api/v1/account/delete`, using the same challenge/signature scheme as login and sync so the private key never leaves the device. `DELETE /api/v1/account` remains supported for older clients that already shipped with that wire shape.
 
@@ -115,6 +128,15 @@ make build
 ```
 
 The Makefile builds a minimal static liboqs from `vendor/liboqs` with `SIG_ml_dsa_44` enabled, then passes the right cgo include/library flags to Go. Use `make test` for the same setup in tests.
+
+Inspect a production database offline with:
+
+```sh
+./ksync inspect --db /var/lib/ksync/ksync.db summary
+./ksync inspect --db /var/lib/ksync/ksync.db doctor <user_id_hash>
+```
+
+`inspect doctor` prints redacted account status, sync versions, table counts, recent client protocol hints, and recent sync audit metadata. Use `--full` only when you intentionally need unredacted IDs.
 
 Without Nix, install liboqs headers and library on the host, then:
 
@@ -219,6 +241,8 @@ SQLite tables mirror the app data:
 - `server_app_capabilities`
 - `server_app_grants`
 - `server_app_grant_audit`
+- `server_encrypted_payloads`
+- `server_sync_audit`
 - `server_profile_stats`
 - `token_assets`
 - `token_ledger`

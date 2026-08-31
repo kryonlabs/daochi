@@ -48,6 +48,11 @@ func runInspect(ctx context.Context, args []string, opts InspectOptions) error {
 		return inspectSummary(ctx, db, opts.Out)
 	case "users":
 		return inspectUsers(ctx, db, opts.Out, opts.Full)
+	case "doctor":
+		if len(rest) != 2 {
+			return fmt.Errorf("usage: ksync inspect doctor <user_id_hash>")
+		}
+		return inspectDoctor(ctx, db, opts.Out, rest[1], opts.Full)
 	case "user":
 		if len(rest) != 2 {
 			return fmt.Errorf("usage: ksync inspect user <user_id_hash>")
@@ -80,6 +85,8 @@ func inspectSummary(ctx context.Context, db *sql.DB, out io.Writer) error {
 		"server_session_rounds",
 		"server_meditation_logs",
 		"server_encrypted_records",
+		"server_encrypted_payloads",
+		"server_sync_audit",
 	}
 	fmt.Fprintln(out, "Ksync data summary")
 	for _, table := range tables {
@@ -150,6 +157,122 @@ WHERE user_id_hash=?1`, userID).Scan(&publicKey, &createdAt, &lastSeenAt)
 	return inspectUserSessions(ctx, db, out, userID)
 }
 
+func inspectDoctor(ctx context.Context, db *sql.DB, out io.Writer, userID string, full bool) error {
+	userID = strings.ToLower(strings.TrimSpace(userID))
+	if !validUserID(userID) {
+		return fmt.Errorf("invalid user_id_hash")
+	}
+
+	var createdAt, lastSeenAt string
+	err := db.QueryRowContext(ctx, `
+SELECT created_at,last_seen_at
+FROM server_users
+WHERE user_id_hash=?1`, userID).Scan(&createdAt, &lastSeenAt)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return err
+	}
+
+	var version int64
+	_ = db.QueryRowContext(ctx, `
+SELECT server_version
+FROM server_sync_state
+WHERE user_id_hash=?1`, userID).Scan(&version)
+	var compactedThrough int64
+	_ = db.QueryRowContext(ctx, `
+SELECT compacted_through_version
+FROM server_sync_compaction
+WHERE user_id_hash=?1`, userID).Scan(&compactedThrough)
+
+	fmt.Fprintf(out, "Ksync doctor %s\n", redactID(userID, full))
+	fmt.Fprintf(out, "status=ok server_version=%d compacted_through=%d\n", version, compactedThrough)
+	fmt.Fprintf(out, "created=%s last_seen=%s\n", createdAt, lastSeenAt)
+
+	for _, table := range []string{
+		"server_habits",
+		"server_habit_days",
+		"server_sessions",
+		"server_meditation_logs",
+		"server_encrypted_records",
+		"server_encrypted_payloads",
+		"server_sync_ops",
+		"server_clients",
+		"server_sync_audit",
+	} {
+		n, err := inspectCount(ctx, db, table, "WHERE user_id_hash=?1", userID)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%-28s %d\n", table, n)
+	}
+	if err := inspectDoctorClients(ctx, db, out, userID); err != nil {
+		return err
+	}
+	return inspectDoctorAudit(ctx, db, out, userID)
+}
+
+func inspectDoctorClients(ctx context.Context, db *sql.DB, out io.Writer, userID string) error {
+	rows, err := db.QueryContext(ctx, `
+SELECT client_id,protocol_version,last_login_at,last_sync_at,last_seen_server_version,last_client_clock
+FROM server_clients
+WHERE user_id_hash=?1
+ORDER BY last_seen_at DESC,client_id
+LIMIT 12`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	fmt.Fprintln(out, "\nClients")
+	for rows.Next() {
+		var clientID string
+		var loginAt, syncAt sql.NullString
+		var protocol int
+		var seenVersion, clientClock int64
+		if err := rows.Scan(&clientID, &protocol, &loginAt, &syncAt, &seenVersion, &clientClock); err != nil {
+			return err
+		}
+		status := "current"
+		if protocol > 0 && protocol < 5 {
+			status = "legacy"
+		}
+		fmt.Fprintf(out, "%s protocol=%d status=%s last_login=%s last_sync=%s seen=%d clock=%d\n",
+			clientID, protocol, status, nullText(loginAt), nullText(syncAt), seenVersion, clientClock)
+	}
+	return rows.Err()
+}
+
+func inspectDoctorAudit(ctx context.Context, db *sql.DB, out io.Writer, userID string) error {
+	rows, err := db.QueryContext(ctx, `
+SELECT client_id,protocol_version,server_version,remote_ops,full_snapshot_required,
+       snapshot_reason,encrypted_payload,encrypted_payload_bytes,created_at
+FROM server_sync_audit
+WHERE user_id_hash=?1
+ORDER BY id DESC
+LIMIT 8`, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	fmt.Fprintln(out, "\nRecent sync audit")
+	for rows.Next() {
+		var clientID, snapshotReason, createdAt string
+		var protocol, remoteOps, fullSnapshot, encryptedPayload int
+		var version, encryptedBytes int64
+		if err := rows.Scan(&clientID, &protocol, &version, &remoteOps, &fullSnapshot,
+			&snapshotReason, &encryptedPayload, &encryptedBytes, &createdAt); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s protocol=%d version=%d remote_ops=%d full_snapshot=%t reason=%s encrypted_payload=%t bytes=%d at=%s\n",
+			clientID, protocol, version, remoteOps, fullSnapshot != 0, emptyText(snapshotReason, "-"),
+			encryptedPayload != 0, encryptedBytes, createdAt)
+	}
+	return rows.Err()
+}
+
 func inspectUserHabits(ctx context.Context, db *sql.DB, out io.Writer, userID string) error {
 	rows, err := db.QueryContext(ctx, `
 SELECT id, name, sync_mode, sync_activity, deleted_at, updated_at
@@ -215,4 +338,18 @@ func redactID(value string, full bool) string {
 		return value
 	}
 	return value[:12] + "..." + value[len(value)-8:]
+}
+
+func nullText(value sql.NullString) string {
+	if !value.Valid || value.String == "" {
+		return "-"
+	}
+	return value.String
+}
+
+func emptyText(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }

@@ -34,7 +34,7 @@
 
     <section>
       <h2>Registry</h2>
-      <p><code>GET /api/v1/apps</code> lists registered apps. Admin registration can add or update apps when <code>KSYNC_ADMIN_TOKEN</code> is configured and the request supplies <code>X-Ksync-Admin</code>. New clients should prefer <code>POST /api/v1/apps/register-signed</code>, which accepts a signed manifest plus a node registry approval signature.</p>
+      <p><code>GET /api/v1/apps</code> lists registered apps. Admin registration can add or update apps when the server admin token is configured and the request supplies <code>X-Daochi-Admin</code>. <code>X-Ksync-Admin</code> remains accepted for shipped clients. New clients should prefer <code>POST /api/v1/apps/register-signed</code>, which accepts a signed manifest plus a node registry approval signature.</p>
       <p>Registrations describe protocol ownership only. Product UI, business rules, and app-specific behavior stay outside the relay. App records should declare private, shared, friends, and public hierarchy prefixes according to the data they own.</p>
       <div class="grid">
         <article class="card">

@@ -32,6 +32,7 @@ var encryptedRecordIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
 var contentHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const (
+	daochiSignatureContext     = "daochi-sync-v1"
 	ksyncSignatureContext      = "ksync-sync-v1"
 	legacyInbeSignatureContext = "inbe-sync-v1"
 	ksyncMinSupportedProtocol  = 1
@@ -528,7 +529,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Request, body []byte) bool {
 	userID, headerName := requestUserHeader(r)
 	if userID == "" {
-		writeError(w, http.StatusBadRequest, "missing X-Ksync-User")
+		writeError(w, http.StatusBadRequest, "missing X-Daochi-User")
 		return false
 	}
 	if !validUserID(userID) {
@@ -544,16 +545,16 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		s.writeAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
 		return false
 	}
-	clientID := strings.TrimSpace(r.Header.Get("X-Ksync-Client"))
+	clientID := requestHeaderAlias(r, "X-Daochi-Client", "X-Ksync-Client")
 	if clientID != "" && !validClientID(clientID) {
-		writeError(w, http.StatusBadRequest, "invalid X-Ksync-Client")
+		writeError(w, http.StatusBadRequest, "invalid X-Daochi-Client")
 		return false
 	}
 	sinceVersion := int64(0)
-	if text := strings.TrimSpace(r.Header.Get("X-Ksync-Since-Version")); text != "" {
+	if text := requestHeaderAlias(r, "X-Daochi-Since-Version", "X-Ksync-Since-Version"); text != "" {
 		parsed, err := strconv.ParseInt(text, 10, 64)
 		if err != nil || parsed < 0 {
-			writeError(w, http.StatusBadRequest, "invalid X-Ksync-Since-Version")
+			writeError(w, http.StatusBadRequest, "invalid X-Daochi-Since-Version")
 			return false
 		}
 		sinceVersion = parsed
@@ -637,10 +638,10 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 
 func encryptedPayloadLimit(r *http.Request, configuredMax int) (int, error) {
 	limit := configuredMax
-	if text := strings.TrimSpace(r.Header.Get("X-Ksync-Limit")); text != "" {
+	if text := requestHeaderAlias(r, "X-Daochi-Limit", "X-Ksync-Limit"); text != "" {
 		parsed, err := strconv.Atoi(text)
 		if err != nil || parsed <= 0 {
-			return 0, errors.New("invalid X-Ksync-Limit")
+			return 0, errors.New("invalid X-Daochi-Limit")
 		}
 		limit = parsed
 	}
@@ -955,7 +956,7 @@ func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
 	app := strings.TrimSpace(r.URL.Query().Get("app"))
 	practice := strings.TrimSpace(r.URL.Query().Get("practice"))
 	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
-	if !validKsyncNamespace(app) || !validKsyncNamespace(practice) || !validKsyncNamespace(metric) ||
+	if !validNamespace(app) || !validNamespace(practice) || !validNamespace(metric) ||
 		!validLeaderboardMetric(practice, metric) {
 		writeError(w, http.StatusBadRequest, "invalid stats query")
 		return
@@ -1198,7 +1199,7 @@ func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
 
 func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error {
 	if req.AppID != "" {
-		if !validKsyncNamespace(req.AppID) {
+		if !validNamespace(req.AppID) {
 			return errors.New("invalid app_id")
 		}
 		exists, err := s.store.AppExists(ctx, req.AppID)
@@ -1285,12 +1286,12 @@ func validProfileIcon(profileIcon int) bool {
 	return profileIcon >= ProfileIconNone && profileIcon <= ProfileIconTree5
 }
 
-func validKsyncNamespace(value string) bool {
+func validNamespace(value string) bool {
 	return ksyncNamespacePattern.MatchString(value)
 }
 
 func validEncryptedRecord(item EncryptedRecord) bool {
-	if !validKsyncNamespace(strings.TrimSpace(item.Collection)) ||
+	if !validNamespace(strings.TrimSpace(item.Collection)) ||
 		!encryptedRecordIDPattern.MatchString(strings.TrimSpace(item.ID)) {
 		return false
 	}
@@ -1567,7 +1568,7 @@ func (s *Server) authenticateToken(r *http.Request) (string, error) {
 func applyHeaderUser(r *http.Request, bodyUser *string) error {
 	headerUser, headerName := requestUserHeader(r)
 	if headerUser == "" {
-		return errors.New("missing X-Ksync-User")
+		return errors.New("missing X-Daochi-User")
 	}
 	if *bodyUser == "" {
 		*bodyUser = headerUser
@@ -1580,7 +1581,19 @@ func applyHeaderUser(r *http.Request, bodyUser *string) error {
 	return nil
 }
 
+func requestHeaderAlias(r *http.Request, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(r.Header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func requestUserHeader(r *http.Request) (string, string) {
+	if value := strings.ToLower(requestHeaderAlias(r, "X-Daochi-User")); value != "" {
+		return value, "X-Daochi-User"
+	}
 	if value := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Ksync-User"))); value != "" {
 		return value, "X-Ksync-User"
 	}
@@ -1591,6 +1604,9 @@ func requestUserHeader(r *http.Request) (string, string) {
 }
 
 func requestSignatureHeader(r *http.Request) (string, string) {
+	if value := strings.TrimSpace(r.Header.Get("X-Daochi-Signature")); value != "" {
+		return value, daochiSignatureContext
+	}
 	if value := strings.TrimSpace(r.Header.Get("X-Ksync-Signature")); value != "" {
 		return value, ksyncSignatureContext
 	}
@@ -1736,7 +1752,7 @@ func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int
 		return req, errors.New("invalid json")
 	}
 	req.App = strings.TrimSpace(req.App)
-	if !validKsyncNamespace(req.App) {
+	if !validNamespace(req.App) {
 		return req, errors.New("invalid app")
 	}
 	if len(req.Metrics) > 100 {
@@ -1746,7 +1762,7 @@ func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int
 		req.Metrics[i].Practice = strings.TrimSpace(req.Metrics[i].Practice)
 		req.Metrics[i].Metric = strings.TrimSpace(req.Metrics[i].Metric)
 		req.Metrics[i].Label = strings.TrimSpace(req.Metrics[i].Label)
-		if !validKsyncNamespace(req.Metrics[i].Practice) || !validKsyncNamespace(req.Metrics[i].Metric) {
+		if !validNamespace(req.Metrics[i].Practice) || !validNamespace(req.Metrics[i].Metric) {
 			return req, errors.New("invalid metric")
 		}
 	}
@@ -2074,10 +2090,10 @@ type exportedSyncKey struct {
 }
 
 const (
-	accountKeyHeader    = "ksync-account-key-v1"
-	legacyLyraKeyHeader = "lyra-account-key-v1"
-	legacyUkuKeyHeader  = "account-key-v1"
-	legacyInbeKeyHeader = "inbe-sync-key-v1"
+	accountKeyHeader       = "ksync-account-key-v1"
+	legacyAccountKeyHeader = "lyra-account-key-v1"
+	legacyUkuKeyHeader     = "account-key-v1"
+	legacyInbeKeyHeader    = "inbe-sync-key-v1"
 )
 
 func parseExportedSyncKey(text string) (exportedSyncKey, error) {
@@ -2086,7 +2102,7 @@ func parseExportedSyncKey(text string) (exportedSyncKey, error) {
 		return exportedSyncKey{}, errors.New("invalid account key file")
 	}
 	header := strings.TrimSpace(lines[0])
-	if header != accountKeyHeader && header != legacyLyraKeyHeader &&
+	if header != accountKeyHeader && header != legacyAccountKeyHeader &&
 		header != legacyUkuKeyHeader && header != legacyInbeKeyHeader {
 		return exportedSyncKey{}, errors.New("invalid account key file")
 	}
@@ -2191,7 +2207,7 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Ksync-User, X-Ksync-Signature, X-Inbe-User, X-Inbe-Signature")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Daochi-User, X-Daochi-Signature, X-Daochi-Client, X-Daochi-Since-Version, X-Daochi-Limit, X-Daochi-Admin, X-Ksync-User, X-Ksync-Signature, X-Ksync-Client, X-Ksync-Since-Version, X-Ksync-Limit, X-Ksync-Admin, X-Inbe-User, X-Inbe-Signature")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

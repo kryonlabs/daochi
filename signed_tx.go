@@ -129,7 +129,7 @@ func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byt
 	if !validUserID(tx.AccountID) || tx.AccountID != accountID {
 		return authError{status: http.StatusUnauthorized, message: "signed transaction account mismatch"}
 	}
-	if !validKsyncNamespace(tx.AppID) || tx.AppID != appID {
+	if !validNamespace(tx.AppID) || tx.AppID != appID {
 		return authError{status: http.StatusUnauthorized, message: "signed transaction app mismatch"}
 	}
 	if tx.Method != r.Method || tx.Path != r.URL.Path {

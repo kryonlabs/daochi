@@ -1,6 +1,6 @@
 # Daochi
 
-Daochi is a mesh-native sync network for app-owned data. It stores public keys and mirrored app data, but never stores client private keys. The current implementation still uses `Ksync*` API symbols and `X-Ksync-*` wire headers for compatibility.
+Daochi is a mesh-native sync network for app-owned data. It stores public keys and mirrored app data, but never stores client private keys. New clients should use the `X-Daochi-*` wire headers. The server still accepts shipped `X-Ksync-*` and `X-Inbe-*` compatibility headers.
 
 ## Privacy Model
 
@@ -10,7 +10,7 @@ The legacy typed sync surface is not end-to-end encrypted against the server. Mi
 
 Protocol clients may also sync `encrypted_records`: opaque per-account private records identified by `collection` and `id`. Daochi stores and versions those blobs for relay, export, deletion, and diagnostics, but does not need to read their contents. Protocol v4 advertises this as the dual-write transition path: upgraded clients can keep sending legacy typed rows for compatibility while also seeding encrypted private records for future mesh-capable clients. Protocol v5 makes encrypted records the primary private-data surface for upgraded clients while legacy typed rows remain available through `include_legacy_data` for compatibility. Released legacy encrypted collections remain valid in v5 so clients do not need an immediate second backfill migration. Public/social projections such as aliases, friend requests, profile icons, and leaderboard stats remain readable server-side by design.
 
-Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Ksync-Since-Version`. Existing typed clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
+Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Daochi-Since-Version`. Existing typed clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
 
 Daochi keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding product behavior. Registered apps can send `app_id` in v5 compatibility mode; older clients without `app_id` continue to sync. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections that belong to that registered app.
 
@@ -32,7 +32,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/sync`
 - `POST /api/v1/account/delete`
 - `GET /api/v1/apps`
-- `POST /api/v1/apps` with `X-Ksync-Admin` when `KSYNC_ADMIN_TOKEN` is set
+- `POST /api/v1/apps` with `X-Daochi-Admin` when `KSYNC_ADMIN_TOKEN` is set
 - `POST /api/v1/apps/register-signed`
 - `GET /api/v1/apps/{app_id}`
 - `GET /api/v1/apps/{app_id}/collections`
@@ -84,33 +84,35 @@ Set `KSYNC_TOKEN_SECRET_HEX` to at least 32 random bytes encoded as hex in produ
 
 Bearer tokens are intentionally cacheable client-side credentials, not the user's durable login state. Clients should silently run the challenge/sign/login flow again when a token expires or receives a `401`, as long as the local account key still exists. Login responses include `server_time` as Unix seconds so clients can compensate for local clock skew when caching token expiry. Older clients may ignore it. Only an explicit user logout, account deletion, or local account reset should remove the account key.
 
-The WebSocket endpoint accepts bearer auth through `Authorization: Bearer <token>`. Browser clients that cannot set custom WebSocket headers may send `Sec-WebSocket-Protocol: ksync-sync-v1, bearer.<token>`. Daochi rejects `?token=` WebSocket URLs so bearer tokens do not leak through request URLs, browser history, or proxy URL logs.
+The WebSocket endpoint accepts bearer auth through `Authorization: Bearer <token>`. Browser clients that cannot set custom WebSocket headers may send `Sec-WebSocket-Protocol: daochi-sync-v1, bearer.<token>`. Legacy `ksync-sync-v1` and `inbe-sync-v1` subprotocols remain accepted. Daochi rejects `?token=` WebSocket URLs so bearer tokens do not leak through request URLs, browser history, or proxy URL logs.
 
 Encrypted envelope clients should send:
 
 - `Authorization: Bearer <token>`
-- `X-Ksync-User: <sha256-public-key-hex>` or the legacy account header
-- `X-Ksync-Client: <client-id>` when available
-- `X-Ksync-Since-Version: <last-seen-server-version>` when requesting only newer envelopes
-- `X-Ksync-Limit: <count>` when deliberately paging envelope deltas
+- `X-Daochi-User: <sha256-public-key-hex>`
+- `X-Daochi-Client: <client-id>` when available
+- `X-Daochi-Since-Version: <last-seen-server-version>` when requesting only newer envelopes
+- `X-Daochi-Limit: <count>` when deliberately paging envelope deltas
 
-Envelope bodies are relayed as JSON `encrypted_payloads` in the sync response. Daochi does not parse the envelope contents beyond checking that `v` is `1` or `2` and `nonce` and `ciphertext` are non-empty. If a response is paged, `encrypted_payloads_truncated` is `true` and `encrypted_payloads_next_since_version` is the next value to send as `X-Ksync-Since-Version`.
+`X-Ksync-*` header names remain accepted as compatibility aliases. Envelope bodies are relayed as JSON `encrypted_payloads` in the sync response. Daochi does not parse the envelope contents beyond checking that `v` is `1` or `2` and `nonce` and `ciphertext` are non-empty. If a response is paged, `encrypted_payloads_truncated` is `true` and `encrypted_payloads_next_since_version` is the next value to send as `X-Daochi-Since-Version`.
 
 ## Signature Message
 
 Clients must sign this exact byte string with ML-DSA-44:
 
 ```text
-ksync-sync-v1
+daochi-sync-v1
 <HTTP_METHOD>
 <HTTP_PATH>
 <sha256 hex of exact raw request body bytes>
 <challenge nonce hex>
 ```
 
+Legacy `ksync-sync-v1` and `inbe-sync-v1` signed-message contexts remain accepted with their matching legacy signature headers.
+
 The challenge response returns `nonce` as lowercase hex. The challenge is single-use and expires after 60 seconds by default.
 
-Bearer-authenticated `POST /api/v1/sync` requests must include `Authorization: Bearer <token>`, `X-Ksync-User: <sha256-public-key-hex>`, and `Content-Type: application/json`. The legacy account header remains accepted.
+Bearer-authenticated `POST /api/v1/sync` requests must include `Authorization: Bearer <token>`, `X-Daochi-User: <sha256-public-key-hex>`, and `Content-Type: application/json`. Legacy account headers remain accepted.
 
 Protocol v6 `POST /api/v1/sync` requests must also include `X-Daochi-Tx`. The header is either raw JSON or base64url JSON with:
 
@@ -142,11 +144,11 @@ daochi-tx-v1
 
 Signed `POST /api/v1/account/delete` and legacy `DELETE /api/v1/account` requests must include:
 
-- `X-Ksync-User: <sha256-public-key-hex>`
-- `X-Ksync-Signature: <ML-DSA-44 signature>`
+- `X-Daochi-User: <sha256-public-key-hex>`
+- `X-Daochi-Signature: <ML-DSA-44 signature>`
 - `Content-Type: application/json`
 
-Signed JSON bodies still include `user_id_hash`. The server accepts `public_key` and `X-Ksync-Signature` as either base64 or lowercase/uppercase hex. This matches the current C client account storage, which keeps ML-DSA-44 keys as hex strings.
+Signed JSON bodies still include `user_id_hash` for compatibility. The server accepts `public_key` and signatures as either base64 or lowercase/uppercase hex. This matches the current C client account storage, which keeps ML-DSA-44 keys as hex strings.
 
 The preferred account deletion endpoint is `POST /api/v1/account/delete`, using the same challenge/signature scheme as login and sync so the private key never leaves the device. `DELETE /api/v1/account` remains supported for older clients that already shipped with that wire shape.
 

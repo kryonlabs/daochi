@@ -359,7 +359,7 @@ func validateTokenEventInput(input tokenEventInput) error {
 	if !validUserID(input.AccountID) {
 		return errors.New("invalid account_id")
 	}
-	if input.AppID != "" && !validKsyncNamespace(input.AppID) {
+	if input.AppID != "" && !validNamespace(input.AppID) {
 		return errors.New("invalid app_id")
 	}
 	if input.EventType != "credit" && input.EventType != "debit" {
@@ -374,7 +374,7 @@ func validateTokenEventInput(input tokenEventInput) error {
 	if input.EventType == "debit" && input.AmountDelta > 0 {
 		return errors.New("debit amount must be negative")
 	}
-	if !validKsyncNamespace(input.SourceType) || strings.TrimSpace(input.SourceRef) == "" || len(input.SourceRef) > 256 {
+	if !validNamespace(input.SourceType) || strings.TrimSpace(input.SourceRef) == "" || len(input.SourceRef) > 256 {
 		return errors.New("invalid source")
 	}
 	return nil
@@ -951,7 +951,7 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		writeError(w, http.StatusForbidden, "admin disabled")
 		return false
 	}
-	if strings.TrimSpace(r.Header.Get("X-Ksync-Admin")) != s.cfg.AdminToken {
+	if requestHeaderAlias(r, "X-Daochi-Admin", "X-Ksync-Admin") != s.cfg.AdminToken {
 		writeError(w, http.StatusUnauthorized, "admin token required")
 		return false
 	}
@@ -972,7 +972,7 @@ func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64
 	req.Action = strings.TrimSpace(req.Action)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	req.Metadata = strings.TrimSpace(req.Metadata)
-	if !validKsyncNamespace(req.AppID) {
+	if !validNamespace(req.AppID) {
 		return req, nil, errors.New("invalid app_id")
 	}
 	if req.AssetID == "" {
@@ -981,7 +981,7 @@ func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64
 	if req.Amount <= 0 {
 		return req, nil, errors.New("amount required")
 	}
-	if !validKsyncNamespace(req.Action) {
+	if !validNamespace(req.Action) {
 		return req, nil, errors.New("invalid action")
 	}
 	if !validClientID(req.IdempotencyKey) {
@@ -1003,7 +1003,7 @@ func readGooglePurchaseVerifyRequest(w http.ResponseWriter, r *http.Request, max
 	req.PackageName = strings.TrimSpace(req.PackageName)
 	req.ProductID = strings.TrimSpace(req.ProductID)
 	req.PurchaseToken = strings.TrimSpace(req.PurchaseToken)
-	if !validKsyncNamespace(req.AppID) {
+	if !validNamespace(req.AppID) {
 		return req, nil, errors.New("invalid app_id")
 	}
 	if req.PackageName == "" || req.ProductID == "" || req.PurchaseToken == "" {
@@ -1023,7 +1023,7 @@ func readMoneroInvoiceRequest(w http.ResponseWriter, r *http.Request, maxBody in
 	}
 	req.AppID = strings.TrimSpace(req.AppID)
 	req.ProductID = strings.TrimSpace(req.ProductID)
-	if !validKsyncNamespace(req.AppID) {
+	if !validNamespace(req.AppID) {
 		return req, nil, errors.New("invalid app_id")
 	}
 	if req.ProductID == "" {
@@ -1037,7 +1037,7 @@ func tokenAppFilter(r *http.Request) (string, bool, error) {
 	if appID == "" {
 		return "", false, nil
 	}
-	if !validKsyncNamespace(appID) {
+	if !validNamespace(appID) {
 		return "", false, errors.New("invalid app_id")
 	}
 	return appID, true, nil

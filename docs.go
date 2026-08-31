@@ -90,10 +90,10 @@ a{color:#0b625d}
 <h2 class="section-title">API surface</h2>
 <p>Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility. Protocol v1 through v5 remain valid through 2027-09-01.</p>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/apps</code><p>Lists registered apps, collection prefixes, visibility classes, and capabilities.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/apps</code><p>Registers or updates an app when <code>KSYNC_ADMIN_TOKEN</code> is set and <code>X-Ksync-Admin</code> matches it.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/apps</code><p>Registers or updates an app when the admin token is set and <code>X-Daochi-Admin</code> matches it. <code>X-Ksync-Admin</code> remains accepted for compatibility.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync/login</code><p>Verifies the challenge signature and returns a cacheable bearer token plus server clock time.</p></section>
-<section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>ksync-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>daochi-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies typed local changes or stores an encrypted envelope, then returns remote changes newer than the requested server version.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/diagnostics</code><p>Returns bearer-authenticated sync state, table counts, compaction position, legacy client hints, and recent sync audit metadata.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the configured token issuer key.</p></section>
@@ -109,12 +109,12 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Legacy signed deletion endpoint kept for older clients.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
 <h2>Signed Message</h2>
-<pre>ksync-sync-v1
+<pre>daochi-sync-v1
 &lt;HTTP_METHOD&gt;
 &lt;HTTP_PATH&gt;
 &lt;sha256 hex of exact raw request body bytes&gt;
 &lt;challenge nonce hex&gt;</pre>
-<p>Signed requests use <code>X-Ksync-User</code>, <code>X-Ksync-Signature</code>, and <code>Content-Type: application/json</code>.</p>
+<p>Signed requests use <code>X-Daochi-User</code>, <code>X-Daochi-Signature</code>, and <code>Content-Type: application/json</code>. The older Ksync and Inbe signature headers remain accepted for shipped clients.</p>
 %s
 <footer class="footer">&copy; 2026 <a href="https://kryonlabs.com">Kryon Labs</a></footer>
 </main>
@@ -313,7 +313,7 @@ func openAPISpec() map[string]any {
 				},
 				"post": map[string]any{
 					"summary":     "Register or update an app",
-					"description": "Requires KSYNC_ADMIN_TOKEN on the server and matching X-Ksync-Admin header.",
+					"description": "Requires the server admin token and matching X-Daochi-Admin header. X-Ksync-Admin remains accepted for compatibility.",
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Registered app"},
 						"401": map[string]any{"description": "Invalid admin token"},
@@ -345,7 +345,7 @@ func openAPISpec() map[string]any {
 				},
 				"put": map[string]any{
 					"summary":     "Register or update an app",
-					"description": "Requires KSYNC_ADMIN_TOKEN on the server and matching X-Ksync-Admin header.",
+					"description": "Requires the server admin token and matching X-Daochi-Admin header. X-Ksync-Admin remains accepted for compatibility.",
 					"parameters": []map[string]any{
 						{"name": "app_id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
 					},
@@ -440,7 +440,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/sync/login": map[string]any{
 				"post": map[string]any{
 					"summary":     "Create bearer token",
-					"description": "Body is signed through X-Ksync-Signature over the exact raw request body bytes. The response includes server_time for client token-expiry clock skew compensation.",
+					"description": "Body is signed through X-Daochi-Signature over the exact raw request body bytes. Legacy X-Ksync-Signature and X-Inbe-Signature headers remain accepted. The response includes server_time for client token-expiry clock skew compensation.",
 					"parameters":  signedHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,
@@ -479,7 +479,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/sync/ws": map[string]any{
 				"get": map[string]any{
 					"summary":     "Subscribe to sync change events",
-					"description": "WebSocket endpoint. Send Authorization: Bearer <auth_token>. Browser clients may use Sec-WebSocket-Protocol: ksync-sync-v1, bearer.<auth_token>. The server emits sync_ready after connect and sync_changed whenever another client applies changes.",
+					"description": "WebSocket endpoint. Send Authorization: Bearer <auth_token>. Browser clients may use Sec-WebSocket-Protocol: daochi-sync-v1, bearer.<auth_token>. Legacy ksync-sync-v1 and inbe-sync-v1 remain accepted. The server emits sync_ready after connect and sync_changed whenever another client applies changes.",
 					"parameters": []map[string]any{
 						{
 							"name":        "Authorization",
@@ -954,17 +954,17 @@ func openAPISpec() map[string]any {
 func signedHeaderParameters() []map[string]any {
 	return []map[string]any{
 		{
-			"name":        "X-Ksync-User",
+			"name":        "X-Daochi-User",
 			"in":          "header",
 			"required":    true,
-			"description": "SHA-256 hash of the ML-DSA-44 public key.",
+			"description": "SHA-256 hash of the ML-DSA-44 public key. Legacy X-Ksync-User and X-Inbe-User are also accepted.",
 			"schema":      map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 		},
 		{
-			"name":        "X-Ksync-Signature",
+			"name":        "X-Daochi-Signature",
 			"in":          "header",
 			"required":    true,
-			"description": "ML-DSA-44 signature as hex or base64.",
+			"description": "ML-DSA-44 signature as hex or base64. Legacy X-Ksync-Signature and X-Inbe-Signature are also accepted.",
 			"schema":      map[string]any{"type": "string"},
 		},
 	}
@@ -980,31 +980,31 @@ func syncHeaderParameters() []map[string]any {
 			"schema":      map[string]any{"type": "string"},
 		},
 		{
-			"name":        "X-Ksync-User",
+			"name":        "X-Daochi-User",
 			"in":          "header",
 			"required":    true,
-			"description": "SHA-256 hash of the ML-DSA-44 public key. A legacy account header is also accepted.",
+			"description": "SHA-256 hash of the ML-DSA-44 public key. Legacy X-Ksync-User and X-Inbe-User are also accepted.",
 			"schema":      map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 		},
 		{
-			"name":        "X-Ksync-Client",
+			"name":        "X-Daochi-Client",
 			"in":          "header",
 			"required":    false,
-			"description": "Optional client ID for encrypted envelope metadata.",
+			"description": "Optional client ID for encrypted envelope metadata. X-Ksync-Client remains accepted.",
 			"schema":      map[string]any{"type": "string"},
 		},
 		{
-			"name":        "X-Ksync-Since-Version",
+			"name":        "X-Daochi-Since-Version",
 			"in":          "header",
 			"required":    false,
-			"description": "Optional last-seen server version for encrypted envelope delta reads.",
+			"description": "Optional last-seen server version for encrypted envelope delta reads. X-Ksync-Since-Version remains accepted.",
 			"schema":      map[string]any{"type": "integer"},
 		},
 		{
-			"name":        "X-Ksync-Limit",
+			"name":        "X-Daochi-Limit",
 			"in":          "header",
 			"required":    false,
-			"description": "Optional encrypted envelope page size. The server may clamp this with KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN.",
+			"description": "Optional encrypted envelope page size. X-Ksync-Limit remains accepted. The server may clamp this with KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN.",
 			"schema":      map[string]any{"type": "integer"},
 		},
 	}

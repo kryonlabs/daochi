@@ -390,7 +390,7 @@ func validateAppManifest(manifest AppManifest) error {
 	if manifest.ManifestVersion != 1 {
 		return errors.New("unsupported manifest_version")
 	}
-	if !validKsyncNamespace(manifest.AppID) {
+	if !validNamespace(manifest.AppID) {
 		return errors.New("invalid app_id")
 	}
 	if manifest.DisplayName == "" || len(manifest.DisplayName) > 80 {
@@ -423,7 +423,7 @@ func validateAppManifest(manifest AppManifest) error {
 		}
 	}
 	for _, capability := range manifest.Capabilities {
-		if !validKsyncNamespace(capability) {
+		if !validNamespace(capability) {
 			return errors.New("invalid capability")
 		}
 	}

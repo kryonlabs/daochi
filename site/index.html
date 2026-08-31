@@ -98,22 +98,96 @@
       <h2>From compatible sync to a mesh-native post-quantum proof standard.</h2>
       <p>Daochi keeps older clients working while moving each protocol generation away from server-owned trust. The shipped post-quantum claim is account authority: the durable account key is ML-DSA-44. Full post-quantum record confidentiality still needs a specified client encryption profile.</p>
 
-      <div class="milestone-shell compact">
-        <div class="milestone-rail" role="tablist" aria-label="Protocol milestones">
-          <button class="milestone-step" type="button" role="tab" aria-selected="true" data-id="v1"><b>v1</b><span>signed base</span></button>
-          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v2"><b>v2</b><span>operation log</span></button>
-          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v3"><b>v3</b><span>clean reads</span></button>
-          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v4"><b>v4</b><span>encrypted records</span></button>
-          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v5"><b>v5</b><span>encrypted primary</span></button>
-          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v6"><b>v6</b><span>signed tx</span></button>
-          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="next"><b>next</b><span>mesh standard</span></button>
+      <div class="milestone-shell">
+        <div class="timeline-topline">
+          <div>
+            <span class="timeline-label">Current release</span>
+            <strong>Protocol v6</strong>
+          </div>
+          <div class="timeline-controls" aria-label="Timeline controls">
+            <button class="timeline-control" type="button" data-timeline-move="-1" aria-label="Previous milestone">&#8592;</button>
+            <button class="timeline-control" type="button" data-timeline-move="1" aria-label="Next milestone">&#8594;</button>
+          </div>
+        </div>
+
+        <div class="timeline-viewport">
+          <div class="milestone-rail" role="tablist" aria-label="Protocol release timeline">
+            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v1">
+              <span class="timeline-dot">v1</span>
+              <span class="timeline-version">v1</span>
+              <span class="timeline-name">signed base</span>
+              <span class="timeline-date">2026-06-19</span>
+              <code>5e3f0b1</code>
+            </button>
+            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v2">
+              <span class="timeline-dot">v2</span>
+              <span class="timeline-version">v2</span>
+              <span class="timeline-name">operation log</span>
+              <span class="timeline-date">2026-06-28</span>
+              <code>046490d</code>
+            </button>
+            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v3">
+              <span class="timeline-dot">v3</span>
+              <span class="timeline-version">v3</span>
+              <span class="timeline-name">clean reads</span>
+              <span class="timeline-date">2026-07-01</span>
+              <code>1db0206</code>
+            </button>
+            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v4">
+              <span class="timeline-dot">v4</span>
+              <span class="timeline-version">v4</span>
+              <span class="timeline-name">encrypted transition</span>
+              <span class="timeline-date">2026-08-29</span>
+              <code>bfa46f9</code>
+            </button>
+            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v5">
+              <span class="timeline-dot">v5</span>
+              <span class="timeline-version">v5</span>
+              <span class="timeline-name">encrypted primary</span>
+              <span class="timeline-date">2026-08-31</span>
+              <code>57f54a1</code>
+            </button>
+            <button class="milestone-step" type="button" role="tab" aria-selected="true" data-id="v6">
+              <span class="timeline-dot">v6</span>
+              <span class="timeline-version">v6</span>
+              <span class="timeline-name">signed tx</span>
+              <span class="timeline-date">2026-08-31</span>
+              <code>11a70e9</code>
+            </button>
+            <button class="milestone-step target" type="button" role="tab" aria-selected="false" data-id="next">
+              <span class="timeline-dot">+</span>
+              <span class="timeline-version">next</span>
+              <span class="timeline-name">mesh standard</span>
+              <span class="timeline-date">target</span>
+              <code>unreleased</code>
+            </button>
+          </div>
         </div>
 
         <article class="milestone-detail" aria-live="polite">
-          <div class="version" id="milestone-version">v1</div>
-          <h3 id="milestone-title">Signed compatibility base</h3>
-          <p id="milestone-summary">Account control is proven by the client account key instead of a server password.</p>
-          <div class="standard-note" id="milestone-note"><span>root authority: post-quantum account proof</span></div>
+          <div class="version" id="milestone-version">Protocol v6</div>
+          <h3 id="milestone-title">Strict signed transactions</h3>
+          <p id="milestone-summary">X-Daochi-Tx binds account authority, app authority, body hash, path, nonce, and expiry.</p>
+          <dl class="release-facts">
+            <div>
+              <dt>Released</dt>
+              <dd id="milestone-date">2026-08-31</dd>
+            </div>
+            <div>
+              <dt>Commit</dt>
+              <dd><code id="milestone-hash">11a70e9</code></dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd id="milestone-source">Add signed app manifests and v6 transactions</dd>
+            </div>
+          </dl>
+          <ul class="release-list" id="milestone-list">
+            <li>Registered app identity is required for strict protocol v6 sync.</li>
+            <li>Requests carry signed transaction envelopes and app-owned collection checks.</li>
+            <li>Account authority remains ML-DSA-44; app manifest authority is Ed25519.</li>
+          </ul>
+          <div class="standard-note" id="milestone-note"><span>current shipped milestone</span></div>
         </article>
       </div>
     </section>
@@ -126,7 +200,7 @@
           <p>Current server code still accepts the <code>ksync-sync-v1</code> signature context and <code>X-Ksync-*</code> headers. Protocol v1 through v5 remain valid through 2027-09-01, and every future deprecation keeps the previous protocol valid for at least 365 days. Protocol v6 adds signed transaction envelopes for strict app-owned requests.</p>
         </div>
         <div class="panel" aria-label="Compatibility facts">
-          <div class="panel-row"><strong>Headers</strong><span><code>X-Ksync-User</code>, <code>X-Ksync-Signature</code>, <code>X-Ksync-Client</code>, <code>X-Ksync-Since-Version</code></span></div>
+          <div class="panel-row"><strong>Headers</strong><span><code>X-Daochi-User</code>, <code>X-Daochi-Signature</code>, <code>X-Daochi-Client</code>, <code>X-Daochi-Since-Version</code></span></div>
           <div class="panel-row"><strong>Protocol</strong><span>v1-v5 supported through 2027-09-01; v6 signs strict transactions</span></div>
           <div class="panel-row"><strong>Records</strong><span>v5 private hierarchy plus legacy encrypted collections</span></div>
           <div class="panel-row"><strong>Apps</strong><span>signed manifests with node-approved app keys</span></div>
@@ -142,31 +216,166 @@
 
   <script>
     const milestones = {
-      v1: ["v1", "Signed compatibility base", "Account control is proven by the client account key instead of a server password.", "root authority: post-quantum account proof"],
-      v2: ["v2", "Operation log", "Clients can retry and converge through operation IDs, server versions, and idempotent writes.", "compatibility retained"],
-      v3: ["v3", "Clean hierarchical reads", "Newer clients get cleaner typed data while older compatibility clients continue to sync.", "prepares private/public split"],
-      v4: ["v4", "Encrypted-record transition", "Clients can dual-write legacy rows and opaque encrypted records while the relay stores versions.", "record confidentiality moves client-side"],
-      v5: ["v5", "Encrypted records become primary", "Private app data moves into encrypted hierarchical collections; legacy private rows are opt-in.", "private default: encrypted record surface"],
-      v6: ["v6", "Strict signed transactions", "X-Daochi-Tx binds account authority, app authority, body hash, path, nonce, and expiry.", "account authority remains post-quantum"],
-      next: ["next", "Mesh-native proof standard", "Specify device lifecycle, peer transports, and classical, hybrid, or post-quantum record encryption profiles.", "target, not yet a shipped confidentiality claim"]
+      v1: {
+        version: "Protocol v1",
+        title: "Signed compatibility base",
+        summary: "Initial shipped relay with ML-DSA-44 account signatures, challenge login, bearer sync credentials, and typed server-versioned rows.",
+        date: "2026-06-19",
+        hash: "5e3f0b1",
+        source: "Initial sync server",
+        note: "first signed account authority release",
+        released: [
+          "Client account control is proven by signing a server challenge.",
+          "The relay stores typed sync rows and orders them with server versions.",
+          "Public keys, account hashes, and sync credentials establish the compatibility base."
+        ]
+      },
+      v2: {
+        version: "Protocol v2",
+        title: "Operation log convergence",
+        summary: "The sync surface gains operation IDs, client clocks, idempotent writes, and server acknowledgement so clients can retry without duplicating state.",
+        date: "2026-06-28",
+        hash: "046490d",
+        source: "improve sync",
+        note: "release hash from first operation-log support",
+        released: [
+          "Clients can submit ordered operations with stable operation IDs.",
+          "Responses acknowledge accepted operations and expose server clock/version state.",
+          "Older typed sync clients stay compatible with the same endpoint."
+        ]
+      },
+      v3: {
+        version: "Protocol v3",
+        title: "Clean hierarchical reads",
+        summary: "New clients get normalized clean sync data while compatibility clients keep using the legacy typed row shape.",
+        date: "2026-07-01",
+        hash: "1db0206",
+        source: "Add protocol v3 clean sync data",
+        note: "prepares the private/public data split",
+        released: [
+          "Protocol v3 clients can read clean materialized sync state.",
+          "Legacy habits and habit days are migrated into the newer read model.",
+          "The server can bridge old client data into newer sync changes."
+        ]
+      },
+      v4: {
+        version: "Protocol v4",
+        title: "Encrypted-record transition",
+        summary: "Upgraded clients can dual-write legacy typed data and opaque encrypted records while the relay stores versions without reading plaintext.",
+        date: "2026-08-29",
+        hash: "bfa46f9",
+        source: "Advertise ksync protocol v4 transition",
+        note: "encrypted records become a shipped compatibility surface",
+        released: [
+          "The protocol advertises encrypted records as the transition path.",
+          "Records are addressed by collection and id, then versioned by the relay.",
+          "Legacy encrypted collections remain valid for existing released clients."
+        ]
+      },
+      v5: {
+        version: "Protocol v5",
+        title: "Encrypted records become primary",
+        summary: "Private app data moves to encrypted hierarchical collections by default while legacy rows are returned only when requested.",
+        date: "2026-08-31",
+        hash: "57f54a1",
+        source: "Advance ksync protocol compatibility",
+        note: "current private-data default before strict app signatures",
+        released: [
+          "Encrypted records are the primary private sync surface.",
+          "App IDs and app-owned collection prefixes are introduced in compatibility mode.",
+          "Protocol v1 through v5 stay valid through the published compatibility deadline."
+        ]
+      },
+      v6: {
+        version: "Protocol v6",
+        title: "Strict signed transactions",
+        summary: "X-Daochi-Tx binds account authority, app authority, body hash, path, nonce, and expiry.",
+        date: "2026-08-31",
+        hash: "11a70e9",
+        source: "Add signed app manifests and v6 transactions",
+        note: "current shipped milestone",
+        released: [
+          "Registered app identity is required for strict protocol v6 sync.",
+          "Requests carry signed transaction envelopes and app-owned collection checks.",
+          "Account authority remains ML-DSA-44; app manifest authority is Ed25519."
+        ]
+      },
+      next: {
+        version: "Next",
+        title: "Mesh-native proof standard",
+        summary: "Specify device lifecycle, peer transports, and classical, hybrid, or post-quantum record encryption profiles.",
+        date: "target",
+        hash: "unreleased",
+        source: "planned standardization work",
+        note: "target, not yet a shipped confidentiality claim",
+        released: [
+          "Define device lifecycle and peer transport rules.",
+          "Specify client encryption profiles for record confidentiality claims.",
+          "Keep the relay contract transport-neutral for server, local-network, and peer paths."
+        ]
+      }
     };
 
     const steps = Array.from(document.querySelectorAll(".milestone-step"));
+    const rail = document.querySelector(".milestone-rail");
     const version = document.getElementById("milestone-version");
     const title = document.getElementById("milestone-title");
     const summary = document.getElementById("milestone-summary");
+    const date = document.getElementById("milestone-date");
+    const hash = document.getElementById("milestone-hash");
+    const source = document.getElementById("milestone-source");
+    const list = document.getElementById("milestone-list");
     const note = document.getElementById("milestone-note");
+    let selectedMilestone = "v6";
 
-    function showMilestone(id) {
-      const item = milestones[id] || milestones.v1;
-      version.textContent = item[0];
-      title.textContent = item[1];
-      summary.textContent = item[2];
-      note.firstElementChild.textContent = item[3];
+    function centerStep(step, behavior = "smooth") {
+      const railRect = rail.getBoundingClientRect();
+      const stepRect = step.getBoundingClientRect();
+      const targetLeft = rail.scrollLeft + stepRect.left - railRect.left + stepRect.width / 2 - railRect.width / 2;
+      const left = Math.max(0, targetLeft);
+      if (behavior === "auto") {
+        rail.scrollLeft = left;
+      } else {
+        rail.scrollTo({ left, behavior });
+      }
+    }
+
+    function showMilestone(id, behavior = "smooth") {
+      const item = milestones[id] || milestones.v6;
+      selectedMilestone = id;
+      version.textContent = item.version;
+      title.textContent = item.title;
+      summary.textContent = item.summary;
+      date.textContent = item.date;
+      hash.textContent = item.hash;
+      source.textContent = item.source;
+      list.replaceChildren(...item.released.map(text => {
+        const li = document.createElement("li");
+        li.textContent = text;
+        return li;
+      }));
+      note.firstElementChild.textContent = item.note;
       steps.forEach(step => step.setAttribute("aria-selected", String(step.dataset.id === id)));
+      const step = steps.find(item => item.dataset.id === id);
+      if (step) centerStep(step, behavior);
     }
 
     steps.forEach(step => step.addEventListener("click", () => showMilestone(step.dataset.id)));
+    document.querySelectorAll("[data-timeline-move]").forEach(button => {
+      button.addEventListener("click", () => {
+        const current = steps.findIndex(step => step.dataset.id === selectedMilestone);
+        const next = Math.max(0, Math.min(steps.length - 1, current + Number(button.dataset.timelineMove)));
+        showMilestone(steps[next].dataset.id);
+      });
+    });
+    function showCurrentMilestone() {
+      showMilestone("v6", "auto");
+      requestAnimationFrame(() => showMilestone("v6", "auto"));
+      window.setTimeout(() => showMilestone("v6", "auto"), 120);
+    }
+
+    showCurrentMilestone();
+    window.addEventListener("load", showCurrentMilestone);
   </script>
 </body>
 </html>

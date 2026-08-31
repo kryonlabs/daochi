@@ -95,7 +95,7 @@
 
     <section>
       <h2>Remote event stream</h2>
-      <p><code>GET /api/v1/sync/ws</code> upgrades to a small event stream that tells clients when newer sync data is available. Native clients authenticate with <code>Authorization: Bearer &lt;token&gt;</code>. Browser clients can use <code>Sec-WebSocket-Protocol: ksync-sync-v1, bearer.&lt;token&gt;</code> because browser WebSocket APIs cannot set arbitrary headers.</p>
+      <p><code>GET /api/v1/sync/ws</code> upgrades to a small event stream that tells clients when newer sync data is available. Native clients authenticate with <code>Authorization: Bearer &lt;token&gt;</code>. Browser clients can use <code>Sec-WebSocket-Protocol: daochi-sync-v1, bearer.&lt;token&gt;</code> because browser WebSocket APIs cannot set arbitrary headers. Legacy Ksync and Inbe subprotocols remain accepted.</p>
       <p>Daochi rejects <code>?token=</code> WebSocket URLs so bearer tokens do not leak through request URLs, browser history, proxy logs, or crash reports.</p>
       <pre>challenge
 sign canonical body

@@ -426,7 +426,7 @@ func (s *Server) handleAppRoute(w http.ResponseWriter, r *http.Request) {
 		s.handleAppRegister(w, r)
 		return
 	}
-	if !validKsyncNamespace(appID) {
+	if !validNamespace(appID) {
 		writeError(w, http.StatusNotFound, "app not found")
 		return
 	}
@@ -585,7 +585,7 @@ func (s *Server) handleAppRecords(w http.ResponseWriter, r *http.Request) {
 	sourceAppID := strings.TrimSpace(r.URL.Query().Get("source_app_id"))
 	targetAppID := strings.TrimSpace(r.URL.Query().Get("target_app_id"))
 	collectionPrefix := strings.TrimSpace(r.URL.Query().Get("collection_prefix"))
-	if !validKsyncNamespace(sourceAppID) || !validKsyncNamespace(targetAppID) || !validCollectionPrefix(collectionPrefix) {
+	if !validNamespace(sourceAppID) || !validNamespace(targetAppID) || !validCollectionPrefix(collectionPrefix) {
 		writeError(w, http.StatusBadRequest, "invalid app records query")
 		return
 	}
@@ -607,7 +607,7 @@ func (s *Server) authenticateAdmin(w http.ResponseWriter, r *http.Request) bool 
 		writeError(w, http.StatusForbidden, "admin registration disabled")
 		return false
 	}
-	if strings.TrimSpace(r.Header.Get("X-Ksync-Admin")) != s.cfg.AdminToken {
+	if requestHeaderAlias(r, "X-Daochi-Admin", "X-Ksync-Admin") != s.cfg.AdminToken {
 		writeError(w, http.StatusUnauthorized, "admin token required")
 		return false
 	}
@@ -633,7 +633,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 	if req.Status == "" {
 		req.Status = appStatusActive
 	}
-	if !validKsyncNamespace(req.AppID) {
+	if !validNamespace(req.AppID) {
 		return req, errors.New("invalid app_id")
 	}
 	if req.DisplayName == "" || len(req.DisplayName) > 80 {
@@ -660,7 +660,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 	}
 	for i := range req.Capabilities {
 		req.Capabilities[i] = strings.TrimSpace(req.Capabilities[i])
-		if !validKsyncNamespace(req.Capabilities[i]) {
+		if !validNamespace(req.Capabilities[i]) {
 			return req, errors.New("invalid capability")
 		}
 	}
@@ -683,7 +683,7 @@ func readAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) 
 	if req.Permission == "" {
 		req.Permission = appGrantRead
 	}
-	if !validKsyncNamespace(req.SourceAppID) || !validKsyncNamespace(req.TargetAppID) ||
+	if !validNamespace(req.SourceAppID) || !validNamespace(req.TargetAppID) ||
 		!validCollectionPrefix(req.CollectionPrefix) || req.Permission != appGrantRead {
 		return req, errors.New("invalid app grant")
 	}
@@ -707,7 +707,7 @@ func readSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody i
 	if req.Grant.Permission == "" {
 		req.Grant.Permission = appGrantRead
 	}
-	if !validKsyncNamespace(req.Grant.SourceAppID) || !validKsyncNamespace(req.Grant.TargetAppID) ||
+	if !validNamespace(req.Grant.SourceAppID) || !validNamespace(req.Grant.TargetAppID) ||
 		!validCollectionPrefix(req.Grant.CollectionPrefix) || req.Grant.Permission != appGrantRead {
 		return req, nil, errors.New("invalid app grant")
 	}

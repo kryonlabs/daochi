@@ -489,6 +489,70 @@ func TestPostAccountDeleteRouteMatchesKryonClient(t *testing.T) {
 	assertCount(t, store, "server_users", 0)
 }
 
+func TestDaochiHeaderAliases(t *testing.T) {
+	server, _, verifier := testServer(t)
+	server.cfg.AdminToken = "admin-test-token"
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x72}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x27}, mlDSA44SignatureSize))
+
+	nonce := issueChallenge(t, handler, "", userID)
+	loginBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set("X-Daochi-User", userID)
+	loginReq.Header.Set("X-Daochi-Signature", signature)
+	loginRes := httptest.NewRecorder()
+	handler.ServeHTTP(loginRes, loginReq)
+	if loginRes.Code != http.StatusOK {
+		t.Fatalf("daochi login status = %d body=%s", loginRes.Code, loginRes.Body.String())
+	}
+	wantMessage := string(canonicalMessageWithContext(daochiSignatureContext, mustDecodeHex(t, nonce), http.MethodPost, "/api/v1/sync/login", loginBody))
+	if string(verifier.message) != wantMessage {
+		t.Fatalf("daochi signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
+	}
+	var login LoginResponse
+	if err := json.Unmarshal(loginRes.Body.Bytes(), &login); err != nil {
+		t.Fatal(err)
+	}
+
+	processBody := []byte(`{"user_id_hash":"` + userID + `","id":"daochi-alias-process","type":"consent","title":"Daochi aliases","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
+	processReq := httptest.NewRequest(http.MethodPost, "/api/v1/processes", bytes.NewReader(processBody))
+	processReq.Header.Set("Content-Type", "application/json")
+	processReq.Header.Set("X-Daochi-User", userID)
+	processReq.Header.Set("Authorization", "Bearer "+login.AuthToken)
+	processRes := httptest.NewRecorder()
+	handler.ServeHTTP(processRes, processReq)
+	if processRes.Code != http.StatusCreated {
+		t.Fatalf("daochi process create status = %d body=%s", processRes.Code, processRes.Body.String())
+	}
+
+	envelopeReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader([]byte(`{"v":1,"nonce":"n1","ciphertext":"payload"}`)))
+	envelopeReq.Header.Set("Content-Type", "application/json")
+	envelopeReq.Header.Set("X-Daochi-User", userID)
+	envelopeReq.Header.Set("X-Daochi-Client", "test-client-1")
+	envelopeReq.Header.Set("X-Daochi-Since-Version", "0")
+	envelopeReq.Header.Set("X-Daochi-Limit", "10")
+	envelopeReq.Header.Set("Authorization", "Bearer "+login.AuthToken)
+	envelopeRes := httptest.NewRecorder()
+	handler.ServeHTTP(envelopeRes, envelopeReq)
+	if envelopeRes.Code != http.StatusOK {
+		t.Fatalf("daochi encrypted envelope status = %d body=%s", envelopeRes.Code, envelopeRes.Body.String())
+	}
+
+	registerBody := []byte(`{"app_id":"daochialias","display_name":"Daochi Alias","status":"active","collections":[{"collection_prefix":"private.daochialias.v1.*","visibility":"private","schema_version":1}],"capabilities":["encrypted-records"]}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/v1/apps", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerReq.Header.Set("X-Daochi-Admin", "admin-test-token")
+	registerRes := httptest.NewRecorder()
+	handler.ServeHTTP(registerRes, registerReq)
+	if registerRes.Code != http.StatusOK {
+		t.Fatalf("daochi admin register status = %d body=%s", registerRes.Code, registerRes.Body.String())
+	}
+}
+
 func TestSessionCheckinFieldsSyncRoundTrip(t *testing.T) {
 	server, store, _ := testServer(t)
 	handler := server.Routes()

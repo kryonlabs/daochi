@@ -1194,7 +1194,7 @@ func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error
 			if req.ProtocolVersion >= 6 {
 				return errors.New("unknown app_id")
 			}
-			slog.Warn("sync request used unknown app_id", "app_id", logText(req.AppID), "protocol", req.ProtocolVersion)
+			slog.Warn("sync request used unknown app_id", "app_id", logText(req.AppID), "mode", "compat")
 		}
 	}
 	if req.ProtocolVersion >= 6 && req.AppID == "" {
@@ -1213,7 +1213,7 @@ func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error
 				if req.ProtocolVersion >= 6 {
 					return errors.New("encrypted record collection is not registered for app_id")
 				}
-				slog.Warn("sync request used unregistered app collection", "app_id", logText(req.AppID), "collection", logText(item.Collection), "protocol", req.ProtocolVersion)
+				slog.Warn("sync request used unregistered app collection", "app_id", logText(req.AppID), "collection", logText(item.Collection), "mode", "compat")
 			}
 		}
 	}

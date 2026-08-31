@@ -27,7 +27,7 @@ jobs:
           cache: true
 
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake gcc libc6-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake
 
       - name: Cache vendored liboqs build
         uses: actions/cache@v4

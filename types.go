@@ -33,6 +33,7 @@ type LoginResponse struct {
 	Status       string `json:"status"`
 	AuthToken    string `json:"auth_token"`
 	ExpiresIn    int64  `json:"expires_in_seconds"`
+	ServerTime   int64  `json:"server_time,omitempty"`
 	AccountAlias string `json:"account_alias,omitempty"`
 	ProfileIcon  int    `json:"profile_icon,omitempty"`
 }
@@ -47,9 +48,11 @@ type AccountExportResponse struct {
 
 type SyncRequest struct {
 	ProtocolVersion     int               `json:"protocol_version,omitempty"`
+	AppID               string            `json:"app_id,omitempty"`
 	UserIDHash          string            `json:"user_id_hash"`
 	ClientID            string            `json:"client_id"`
 	ClientCapabilities  []string          `json:"client_capabilities,omitempty"`
+	IncludeLegacyData   bool              `json:"include_legacy_data,omitempty"`
 	ClientClock         int64             `json:"client_clock,omitempty"`
 	PublicKey           string            `json:"public_key,omitempty"`
 	SinceServerVersion  int64             `json:"since_server_version,omitempty"`
@@ -154,13 +157,16 @@ type SocialSnapshot struct {
 type SocialCache = SocialSnapshot
 
 type EncryptedRecord struct {
-	Collection string `json:"collection"`
-	ID         string `json:"id"`
-	KeyID      string `json:"key_id,omitempty"`
-	Nonce      string `json:"nonce,omitempty"`
-	Ciphertext string `json:"ciphertext,omitempty"`
-	UpdatedAt  string `json:"updated_at"`
-	DeletedAt  int64  `json:"deleted_at,omitempty"`
+	Collection    string `json:"collection"`
+	ID            string `json:"id"`
+	KeyID         string `json:"key_id,omitempty"`
+	Nonce         string `json:"nonce,omitempty"`
+	Ciphertext    string `json:"ciphertext,omitempty"`
+	UpdatedAt     string `json:"updated_at"`
+	DeletedAt     int64  `json:"deleted_at,omitempty"`
+	ContentHash   string `json:"content_hash,omitempty"`
+	SchemaVersion int    `json:"schema_version,omitempty"`
+	ParentID      string `json:"parent_id,omitempty"`
 }
 
 type SyncDiagnostics struct {
@@ -245,6 +251,174 @@ type ProfileStatsResponse struct {
 
 type FriendStatsResponse struct {
 	Rows []FriendStatRow `json:"rows"`
+}
+
+type AppRegistration struct {
+	AppID        string          `json:"app_id"`
+	DisplayName  string          `json:"display_name"`
+	Description  string          `json:"description,omitempty"`
+	HomepageURL  string          `json:"homepage_url,omitempty"`
+	SourceURL    string          `json:"source_url,omitempty"`
+	PublicKey    string          `json:"public_key,omitempty"`
+	Status       string          `json:"status"`
+	CreatedAt    string          `json:"created_at,omitempty"`
+	UpdatedAt    string          `json:"updated_at,omitempty"`
+	Collections  []AppCollection `json:"collections,omitempty"`
+	Capabilities []string        `json:"capabilities,omitempty"`
+}
+
+type AppCollection struct {
+	AppID            string `json:"app_id,omitempty"`
+	CollectionPrefix string `json:"collection_prefix"`
+	Visibility       string `json:"visibility"`
+	SchemaVersion    int    `json:"schema_version,omitempty"`
+	Description      string `json:"description,omitempty"`
+	CreatedAt        string `json:"created_at,omitempty"`
+}
+
+type AppRegistryResponse struct {
+	Apps []AppRegistration `json:"apps"`
+}
+
+type AppGrant struct {
+	ID               string `json:"id"`
+	UserIDHash       string `json:"user_id_hash,omitempty"`
+	SourceAppID      string `json:"source_app_id"`
+	TargetAppID      string `json:"target_app_id"`
+	CollectionPrefix string `json:"collection_prefix"`
+	Permission       string `json:"permission"`
+	Status           string `json:"status"`
+	CreatedAt        string `json:"created_at,omitempty"`
+	UpdatedAt        string `json:"updated_at,omitempty"`
+	RevokedAt        string `json:"revoked_at,omitempty"`
+}
+
+type AppGrantRequest struct {
+	SourceAppID      string `json:"source_app_id"`
+	TargetAppID      string `json:"target_app_id"`
+	CollectionPrefix string `json:"collection_prefix"`
+	Permission       string `json:"permission,omitempty"`
+}
+
+type AppGrantsResponse struct {
+	Grants []AppGrant `json:"grants"`
+}
+
+type AppRecordsResponse struct {
+	Records []EncryptedRecord `json:"records"`
+}
+
+type TokenProduct struct {
+	ProductID          string `json:"product_id"`
+	TokenUnits         int64  `json:"token_units"`
+	MoneroAtomicAmount int64  `json:"monero_atomic_amount,omitempty"`
+}
+
+type TokenAsset struct {
+	IssuerID    string `json:"issuer_id"`
+	AssetID     string `json:"asset_id"`
+	DisplayName string `json:"display_name"`
+	Decimals    int    `json:"decimals"`
+	Status      string `json:"status"`
+}
+
+type TokenAssetsResponse struct {
+	Assets []TokenAsset `json:"assets"`
+}
+
+type TokenProductsResponse struct {
+	Products []TokenProduct `json:"products"`
+}
+
+type TokenIssuerResponse struct {
+	IssuerID  string `json:"issuer_id"`
+	PublicKey string `json:"public_key"`
+	Algorithm string `json:"algorithm"`
+	Status    string `json:"status"`
+}
+
+type TokenBalanceResponse struct {
+	AccountID string `json:"account_id"`
+	AssetID   string `json:"asset_id"`
+	Balance   int64  `json:"balance"`
+}
+
+type TokenLedgerResponse struct {
+	Events []TokenReceipt `json:"events"`
+}
+
+type TokenReceipt struct {
+	ReceiptID    string `json:"receipt_id"`
+	IssuerID     string `json:"issuer_id"`
+	AssetID      string `json:"asset_id"`
+	AccountID    string `json:"account_id"`
+	AppID        string `json:"app_id,omitempty"`
+	EventType    string `json:"event_type"`
+	AmountDelta  int64  `json:"amount_delta"`
+	LedgerSeq    int64  `json:"ledger_seq"`
+	PreviousHash string `json:"previous_hash"`
+	EventHash    string `json:"event_hash"`
+	CreatedAt    string `json:"created_at"`
+	SourceType   string `json:"source_type"`
+	SourceRef    string `json:"source_ref"`
+	Signature    string `json:"signature"`
+}
+
+type TokenSpendRequest struct {
+	AppID          string `json:"app_id"`
+	AssetID        string `json:"asset_id"`
+	Amount         int64  `json:"amount"`
+	Action         string `json:"action"`
+	IdempotencyKey string `json:"idempotency_key"`
+	Metadata       string `json:"metadata,omitempty"`
+}
+
+type TokenSpendResponse struct {
+	Status  string       `json:"status"`
+	Balance int64        `json:"balance"`
+	Receipt TokenReceipt `json:"receipt"`
+}
+
+type GooglePurchaseVerifyRequest struct {
+	AppID         string `json:"app_id"`
+	PackageName   string `json:"package_name"`
+	ProductID     string `json:"product_id"`
+	PurchaseToken string `json:"purchase_token"`
+}
+
+type TokenPurchaseResponse struct {
+	Status  string       `json:"status"`
+	Balance int64        `json:"balance"`
+	Receipt TokenReceipt `json:"receipt"`
+}
+
+type MoneroInvoiceRequest struct {
+	AppID     string `json:"app_id"`
+	ProductID string `json:"product_id"`
+}
+
+type MoneroInvoiceResponse struct {
+	ID           string        `json:"id"`
+	AppID        string        `json:"app_id,omitempty"`
+	Status       string        `json:"status"`
+	ProductID    string        `json:"product_id"`
+	AssetID      string        `json:"asset_id"`
+	TokenUnits   int64         `json:"token_units"`
+	AtomicAmount int64         `json:"atomic_amount"`
+	Address      string        `json:"address"`
+	AddressIndex int           `json:"address_index,omitempty"`
+	PaymentID    string        `json:"payment_id,omitempty"`
+	ExpiresAt    string        `json:"expires_at"`
+	Receipt      *TokenReceipt `json:"receipt,omitempty"`
+}
+
+type TokenCheckpoint struct {
+	LedgerSeq  int64  `json:"ledger_seq"`
+	IssuerID   string `json:"issuer_id"`
+	AssetID    string `json:"asset_id"`
+	LedgerRoot string `json:"ledger_root"`
+	Signature  string `json:"signature"`
+	CreatedAt  string `json:"created_at"`
 }
 
 type FriendRequest struct {

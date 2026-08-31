@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -15,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -102,6 +105,296 @@ func TestDocsEndpoints(t *testing.T) {
 	}
 }
 
+func TestWaoziTokenCreditSpendAndIdempotency(t *testing.T) {
+	server, _, _ := testServer(t)
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.cfg.AdminToken = "admin-test-token"
+	server.cfg.WaoziIssuerPublicKey = publicKey
+	server.cfg.WaoziIssuerPrivateKey = privateKey
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x61)
+
+	issuer := httptest.NewRecorder()
+	handler.ServeHTTP(issuer, httptest.NewRequest(http.MethodGet, "/api/v1/tokens/issuer", nil))
+	if issuer.Code != http.StatusOK || !strings.Contains(issuer.Body.String(), `"status":"ok"`) {
+		t.Fatalf("issuer status = %d body=%s", issuer.Code, issuer.Body.String())
+	}
+
+	creditBody := []byte(`{"account_id":"` + identity.UserID + `","app_id":"inbe","amount":5000000,"source_ref":"test-credit-1"}`)
+	credit := httptest.NewRequest(http.MethodPost, "/api/v1/admin/tokens/manual-credit", bytes.NewReader(creditBody))
+	credit.Header.Set("Content-Type", "application/json")
+	credit.Header.Set("X-Ksync-Admin", "admin-test-token")
+	creditRes := httptest.NewRecorder()
+	handler.ServeHTTP(creditRes, credit)
+	if creditRes.Code != http.StatusOK {
+		t.Fatalf("credit status = %d body=%s", creditRes.Code, creditRes.Body.String())
+	}
+	var creditPayload TokenPurchaseResponse
+	if err := json.Unmarshal(creditRes.Body.Bytes(), &creditPayload); err != nil {
+		t.Fatal(err)
+	}
+	if creditPayload.Balance != 5000000 ||
+		creditPayload.Receipt.AssetID != waoziTokenAssetID ||
+		!validTokenReceiptSignature(publicKey, creditPayload.Receipt) {
+		t.Fatalf("unexpected credit payload: %#v", creditPayload)
+	}
+
+	spendBody := []byte(`{"app_id":"inbe","asset_id":"waozi:token","amount":2000000,"action":"feature_unlock","idempotency_key":"test-spend-1"}`)
+	spend := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/tokens/spend", identity.Token, spendBody)
+	if spend.Code != http.StatusOK {
+		t.Fatalf("spend status = %d body=%s", spend.Code, spend.Body.String())
+	}
+	var spendPayload TokenSpendResponse
+	if err := json.Unmarshal(spend.Body.Bytes(), &spendPayload); err != nil {
+		t.Fatal(err)
+	}
+	if spendPayload.Balance != 3000000 || spendPayload.Receipt.AmountDelta != -2000000 ||
+		!validTokenReceiptSignature(publicKey, spendPayload.Receipt) {
+		t.Fatalf("unexpected spend payload: %#v", spendPayload)
+	}
+
+	spendAgain := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/tokens/spend", identity.Token, spendBody)
+	if spendAgain.Code != http.StatusOK {
+		t.Fatalf("repeat spend status = %d body=%s", spendAgain.Code, spendAgain.Body.String())
+	}
+	var repeatPayload TokenSpendResponse
+	if err := json.Unmarshal(spendAgain.Body.Bytes(), &repeatPayload); err != nil {
+		t.Fatal(err)
+	}
+	if repeatPayload.Balance != 3000000 || repeatPayload.Receipt.ReceiptID != spendPayload.Receipt.ReceiptID {
+		t.Fatalf("spend was not idempotent: first=%#v repeat=%#v", spendPayload, repeatPayload)
+	}
+
+	tooMuch := []byte(`{"app_id":"inbe","asset_id":"waozi:token","amount":4000000,"action":"feature_unlock","idempotency_key":"test-spend-2"}`)
+	rejected := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/tokens/spend", identity.Token, tooMuch)
+	if rejected.Code != http.StatusConflict || !strings.Contains(rejected.Body.String(), "insufficient balance") {
+		t.Fatalf("insufficient spend status = %d body=%s", rejected.Code, rejected.Body.String())
+	}
+	balance := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/balance", identity.Token, nil)
+	if balance.Code != http.StatusOK || !strings.Contains(balance.Body.String(), `"balance":3000000`) {
+		t.Fatalf("balance status = %d body=%s", balance.Code, balance.Body.String())
+	}
+}
+
+func TestTokenProductsAndMoneroInvoiceSettlement(t *testing.T) {
+	server, _, _ := testServer(t)
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet := newFakeMoneroWalletRPC(t)
+	server.cfg.WaoziIssuerPublicKey = publicKey
+	server.cfg.WaoziIssuerPrivateKey = privateKey
+	server.cfg.TokenProducts = map[string]TokenProduct{
+		"waozi_tokens_small": {
+			ProductID:          "waozi_tokens_small",
+			TokenUnits:         5000000,
+			MoneroAtomicAmount: 1000000000000,
+		},
+	}
+	server.cfg.TokenDirectPurchasesEnabled = true
+	server.cfg.MoneroWalletRPCURL = wallet.URL
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x71)
+
+	products := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/products", "", nil)
+	if products.Code != http.StatusOK || !strings.Contains(products.Body.String(), `"monero_atomic_amount":1000000000000`) {
+		t.Fatalf("products status = %d body=%s", products.Code, products.Body.String())
+	}
+
+	body := []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`)
+	res := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/tokens/purchases/monero/invoices", identity.Token, body)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("invoice status = %d body=%s", res.Code, res.Body.String())
+	}
+	var invoice MoneroInvoiceResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &invoice); err != nil {
+		t.Fatal(err)
+	}
+	if invoice.Status != "pending" || invoice.AddressIndex != 7 || invoice.Address == "" {
+		t.Fatalf("unexpected invoice: %#v", invoice)
+	}
+
+	pending := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/invoices/"+invoice.ID, identity.Token, nil)
+	if pending.Code != http.StatusOK || !strings.Contains(pending.Body.String(), `"status":"pending"`) {
+		t.Fatalf("pending poll status = %d body=%s", pending.Code, pending.Body.String())
+	}
+
+	wallet.setTransfer(moneroTransfer{
+		TxID:          "tx-small",
+		Amount:        invoice.AtomicAmount,
+		Confirmations: 10,
+		Major:         0,
+		Minor:         invoice.AddressIndex,
+	})
+	paid := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/invoices/"+invoice.ID, identity.Token, nil)
+	if paid.Code != http.StatusOK {
+		t.Fatalf("paid poll status = %d body=%s", paid.Code, paid.Body.String())
+	}
+	var paidInvoice MoneroInvoiceResponse
+	if err := json.Unmarshal(paid.Body.Bytes(), &paidInvoice); err != nil {
+		t.Fatal(err)
+	}
+	if paidInvoice.Status != "paid" || paidInvoice.PaymentID != "tx-small:0:7" ||
+		paidInvoice.Receipt == nil || !validTokenReceiptSignature(publicKey, *paidInvoice.Receipt) {
+		t.Fatalf("unexpected paid invoice: %#v", paidInvoice)
+	}
+
+	again := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/invoices/"+invoice.ID, identity.Token, nil)
+	if again.Code != http.StatusOK || !strings.Contains(again.Body.String(), paidInvoice.Receipt.ReceiptID) {
+		t.Fatalf("repeat paid poll status = %d body=%s", again.Code, again.Body.String())
+	}
+	balance := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/balance", identity.Token, nil)
+	if balance.Code != http.StatusOK || !strings.Contains(balance.Body.String(), `"balance":5000000`) {
+		t.Fatalf("balance status = %d body=%s", balance.Code, balance.Body.String())
+	}
+}
+
+func TestMoneroPaymentIDAllowsSameTxAcrossSubaddresses(t *testing.T) {
+	server, _, _ := testServer(t)
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet := newFakeMoneroWalletRPC(t)
+	server.cfg.WaoziIssuerPrivateKey = privateKey
+	server.cfg.TokenProducts = map[string]TokenProduct{
+		"waozi_tokens_small": {
+			ProductID:          "waozi_tokens_small",
+			TokenUnits:         5000000,
+			MoneroAtomicAmount: 1000000000000,
+		},
+	}
+	server.cfg.TokenDirectPurchasesEnabled = true
+	server.cfg.MoneroWalletRPCURL = wallet.URL
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x72)
+	body := []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`)
+
+	first := createTestMoneroInvoice(t, handler, identity.Token, body)
+	second := createTestMoneroInvoice(t, handler, identity.Token, body)
+	wallet.setTransfer(
+		moneroTransfer{TxID: "tx-batch", Amount: first.AtomicAmount, Confirmations: 10, Major: 0, Minor: first.AddressIndex},
+		moneroTransfer{TxID: "tx-batch", Amount: second.AtomicAmount, Confirmations: 10, Major: 0, Minor: second.AddressIndex},
+	)
+
+	for _, invoice := range []MoneroInvoiceResponse{first, second} {
+		res := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/invoices/"+invoice.ID, identity.Token, nil)
+		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"status":"paid"`) {
+			t.Fatalf("poll invoice %s status = %d body=%s", invoice.ID, res.Code, res.Body.String())
+		}
+	}
+	balance := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/balance", identity.Token, nil)
+	if balance.Code != http.StatusOK || !strings.Contains(balance.Body.String(), `"balance":10000000`) {
+		t.Fatalf("balance status = %d body=%s", balance.Code, balance.Body.String())
+	}
+}
+
+func TestMoneroInvoiceExpiresWithoutPayment(t *testing.T) {
+	server, store, _ := testServer(t)
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet := newFakeMoneroWalletRPC(t)
+	server.cfg.WaoziIssuerPrivateKey = privateKey
+	server.cfg.TokenProducts = map[string]TokenProduct{
+		"waozi_tokens_small": {
+			ProductID:          "waozi_tokens_small",
+			TokenUnits:         5000000,
+			MoneroAtomicAmount: 1000000000000,
+		},
+	}
+	server.cfg.TokenDirectPurchasesEnabled = true
+	server.cfg.MoneroWalletRPCURL = wallet.URL
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x73)
+	invoice := createTestMoneroInvoice(t, handler, identity.Token, []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`))
+
+	_, err = store.db.Exec(`UPDATE token_payment_intents SET expires_at=?1 WHERE id=?2`,
+		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339), invoice.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/invoices/"+invoice.ID, identity.Token, nil)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"status":"expired"`) {
+		t.Fatalf("expired poll status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestMoneroInvoiceReconcilerSettlesPendingInvoice(t *testing.T) {
+	server, _, _ := testServer(t)
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet := newFakeMoneroWalletRPC(t)
+	server.cfg.WaoziIssuerPrivateKey = privateKey
+	server.cfg.TokenProducts = map[string]TokenProduct{
+		"waozi_tokens_small": {
+			ProductID:          "waozi_tokens_small",
+			TokenUnits:         5000000,
+			MoneroAtomicAmount: 1000000000000,
+		},
+	}
+	server.cfg.TokenDirectPurchasesEnabled = true
+	server.cfg.MoneroWalletRPCURL = wallet.URL
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x74)
+	invoice := createTestMoneroInvoice(t, handler, identity.Token, []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`))
+
+	wallet.setTransfer(moneroTransfer{
+		TxID:          "tx-reconciled",
+		Amount:        invoice.AtomicAmount,
+		Confirmations: 10,
+		Major:         0,
+		Minor:         invoice.AddressIndex,
+	})
+	if err := server.reconcileMoneroInvoices(context.Background(), 100); err != nil {
+		t.Fatal(err)
+	}
+	paid := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/invoices/"+invoice.ID, identity.Token, nil)
+	if paid.Code != http.StatusOK || !strings.Contains(paid.Body.String(), `"status":"paid"`) ||
+		!strings.Contains(paid.Body.String(), "tx-reconciled:0:7") {
+		t.Fatalf("reconciled invoice status = %d body=%s", paid.Code, paid.Body.String())
+	}
+}
+
+func TestProcessedPaymentCollisionRejected(t *testing.T) {
+	_, store, _ := testServer(t)
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := strings.Repeat("a", 64)
+	second := strings.Repeat("b", 64)
+	_, _, err = store.CreditTokenPayment(context.Background(), privateKey, "monero", "tx:0:7", tokenEventInput{
+		AccountID:   first,
+		AppID:       "inbe",
+		EventType:   "credit",
+		AmountDelta: 5000000,
+		SourceType:  "monero",
+		SourceRef:   "tx:0:7",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = store.CreditTokenPayment(context.Background(), privateKey, "monero", "tx:0:7", tokenEventInput{
+		AccountID:   second,
+		AppID:       "inbe",
+		EventType:   "credit",
+		AmountDelta: 5000000,
+		SourceType:  "monero",
+		SourceRef:   "tx:0:7",
+	})
+	if err == nil || !strings.Contains(err.Error(), "collision") {
+		t.Fatalf("expected collision, got %v", err)
+	}
+}
+
 func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	server, store, verifier := testServer(t)
 	handler := server.Routes()
@@ -162,6 +455,36 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	assertCount(t, store, "server_habit_days", 0)
 	assertCount(t, store, "server_sessions", 0)
 	assertCount(t, store, "server_session_rounds", 0)
+}
+
+func TestPostAccountDeleteRouteMatchesKryonClient(t *testing.T) {
+	server, store, verifier := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x44}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	publicKeyHex := hex.EncodeToString(publicKey)
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x45}, mlDSA44SignatureSize))
+
+	loginWithKey(t, handler, "", userID, publicKeyHex, signature)
+	assertCount(t, store, "server_users", 1)
+
+	nonce := issueChallenge(t, handler, "", userID)
+	deleteBody := []byte(`{"user_id_hash":"` + userID + `","public_key":"` + publicKeyHex + `"}`)
+	deleteReq := httptest.NewRequest(http.MethodPost, "/api/v1/account/delete", bytes.NewReader(deleteBody))
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteReq.Header.Set("X-Ksync-User", userID)
+	deleteReq.Header.Set("X-Ksync-Signature", signature)
+	deleteRes := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRes, deleteReq)
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("post delete status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
+	}
+	wantMessage := string(canonicalMessage(mustDecodeHex(t, nonce), http.MethodPost, "/api/v1/account/delete", deleteBody))
+	if string(verifier.message) != wantMessage {
+		t.Fatalf("post delete signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
+	}
+	assertCount(t, store, "server_users", 0)
 }
 
 func TestSessionCheckinFieldsSyncRoundTrip(t *testing.T) {
@@ -378,6 +701,273 @@ func TestProtocolV4AdvertisesDualWriteTransition(t *testing.T) {
 	}
 	if payload.Applied.EncryptedRecords != 1 || len(payload.Changes.EncryptedRecords) != 1 {
 		t.Fatalf("encrypted v4 record was not applied and returned: %#v", payload)
+	}
+}
+
+func TestProtocolV5EncryptedPrimaryHidesLegacyPrivateDataByDefault(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x4b)
+	contentHash := strings.Repeat("a", 64)
+
+	body := []byte(`{"protocol_version":5,"user_id_hash":"` + identity.UserID + `","client_id":"test-client-v5","client_capabilities":["encrypted-primary","private-hierarchy-v1"],"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-08-29T12:00:00Z"}],"encrypted_records":[{"collection":"private.inbe.v1.habits","id":"habit-1","key_id":"inbe-v5-main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z","content_hash":"` + contentHash + `","schema_version":1,"parent_id":"manifest"}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.LatestProtocol != 5 || payload.ProtocolVersion != 5 ||
+		payload.TransitionMode != "encrypted_primary" {
+		t.Fatalf("unexpected v5 response metadata: %#v", payload)
+	}
+	if !containsString(payload.ServerCapabilities, "v5-encrypted-primary") ||
+		!containsString(payload.ServerCapabilities, "v5-private-hierarchy") ||
+		!containsString(payload.ServerCapabilities, "v5-dual-read") ||
+		!containsString(payload.ServerCapabilities, "v5-legacy-encrypted-collections") {
+		t.Fatalf("missing v5 capabilities: %#v", payload.ServerCapabilities)
+	}
+	if payload.Applied.Habits != 1 || payload.Applied.EncryptedRecords != 1 {
+		t.Fatalf("dual-write input was not applied: %#v", payload.Applied)
+	}
+	if len(payload.Changes.Habits) != 0 || payload.Data == nil || len(payload.Data.Habits) != 0 {
+		t.Fatalf("v5 should hide legacy private data by default: changes=%#v data=%#v", payload.Changes, payload.Data)
+	}
+	if len(payload.Changes.EncryptedRecords) != 1 ||
+		payload.Changes.EncryptedRecords[0].Collection != "private.inbe.v1.habits" ||
+		payload.Changes.EncryptedRecords[0].ContentHash != contentHash ||
+		payload.Changes.EncryptedRecords[0].SchemaVersion != 1 ||
+		payload.Changes.EncryptedRecords[0].ParentID != "manifest" {
+		t.Fatalf("v5 encrypted record missing metadata: %#v", payload.Changes.EncryptedRecords)
+	}
+	if payload.Diagnostics == nil || payload.Diagnostics.ReturnedChanges.Habits != 0 ||
+		payload.Diagnostics.ReturnedChanges.EncryptedRecords != 1 {
+		t.Fatalf("v5 diagnostics should reflect filtered response: %#v", payload.Diagnostics)
+	}
+}
+
+func TestProtocolV5IncludesLegacyPrivateDataWhenRequested(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x4c)
+
+	writeBody := []byte(`{"protocol_version":5,"user_id_hash":"` + identity.UserID + `","client_id":"test-client-v5","habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-08-29T12:00:00Z"}],"encrypted_records":[{"collection":"account.v1.manifest","id":"manifest","key_id":"main","nonce":"n1","ciphertext":"manifest-ciphertext","updated_at":"2026-08-29T12:00:00Z","schema_version":1}]}`)
+	_ = syncWithBody(t, handler, "", identity.UserID, identity.Token, writeBody)
+
+	readBody := []byte(`{"protocol_version":5,"include_legacy_data":true,"user_id_hash":"` + identity.UserID + `","client_id":"test-client-v5-reader","since_server_version":0}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, readBody)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data == nil || len(payload.Data.Habits) != 1 || payload.Data.Habits[0].Name != "Meditate" ||
+		len(payload.Changes.Habits) != 1 || len(payload.Changes.EncryptedRecords) != 1 {
+		t.Fatalf("v5 include_legacy_data did not return both views: %#v", payload)
+	}
+}
+
+func TestProtocolV5AcceptsReleasedV4InbeEncryptedCollections(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x4e)
+
+	body := []byte(`{"protocol_version":5,"user_id_hash":"` + identity.UserID + `","client_id":"test-client-v5","encrypted_records":[{"collection":"inbe.habits","id":"habit-1","key_id":"inbe-v4-main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Applied.EncryptedRecords != 1 || len(payload.Changes.EncryptedRecords) != 1 ||
+		payload.Changes.EncryptedRecords[0].Collection != "inbe.habits" {
+		t.Fatalf("v5 should grandfather released v4 collection: %#v", payload)
+	}
+}
+
+func TestProtocolV5RejectsInvalidEncryptedRecords(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x4d)
+
+	cases := []struct {
+		name   string
+		record string
+	}{
+		{
+			name:   "non-hierarchical collection",
+			record: `{"collection":"private","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z"}`,
+		},
+		{
+			name:   "malformed content hash",
+			record: `{"collection":"private.inbe.v1.habits","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z","content_hash":"not-a-sha256"}`,
+		},
+	}
+	for _, tc := range cases {
+		body := []byte(`{"protocol_version":5,"user_id_hash":"` + identity.UserID + `","client_id":"test-client-v5","encrypted_records":[` + tc.record + `]}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Ksync-User", identity.UserID)
+		req.Header.Set("Authorization", "Bearer "+identity.Token)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d body=%s", tc.name, res.Code, res.Body.String())
+		}
+	}
+}
+
+func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/apps", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("app list status = %d body=%s", list.Code, list.Body.String())
+	}
+	var registry AppRegistryResponse
+	if err := json.Unmarshal(list.Body.Bytes(), &registry); err != nil {
+		t.Fatal(err)
+	}
+	foundInbe := false
+	for _, app := range registry.Apps {
+		if app.AppID == "inbe" {
+			foundInbe = true
+			if !containsString(app.Capabilities, "encrypted-records") {
+				t.Fatalf("inbe capabilities missing encrypted-records: %#v", app)
+			}
+			hasReleasedV4 := false
+			hasShared := false
+			for _, collection := range app.Collections {
+				hasReleasedV4 = hasReleasedV4 || collection.CollectionPrefix == "inbe.habits"
+				hasShared = hasShared || collection.CollectionPrefix == "shared.inbe.v1.*"
+			}
+			if !hasReleasedV4 || !hasShared {
+				t.Fatalf("inbe collections missing v4/shared entries: %#v", app.Collections)
+			}
+		}
+	}
+	if !foundInbe {
+		t.Fatalf("inbe app not seeded: %#v", registry.Apps)
+	}
+
+	detail := httptest.NewRecorder()
+	handler.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/api/v1/apps/inbe", nil))
+	if detail.Code != http.StatusOK {
+		t.Fatalf("app detail status = %d body=%s", detail.Code, detail.Body.String())
+	}
+	var app AppRegistration
+	if err := json.Unmarshal(detail.Body.Bytes(), &app); err != nil {
+		t.Fatal(err)
+	}
+	if app.AppID != "inbe" || len(app.Collections) == 0 {
+		t.Fatalf("unexpected inbe app detail: %#v", app)
+	}
+}
+
+func TestProtocolV5AppIDCompatibilityAndProtocolV6StrictRegistry(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x5a)
+
+	v5Body := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"test-client-v5-app","encrypted_records":[{"collection":"inbe.habits","id":"habit-1","key_id":"inbe-v4-main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z"}]}`)
+	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, v5Body)
+	var payload SyncResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Applied.EncryptedRecords != 1 || payload.Changes.EncryptedRecords[0].Collection != "inbe.habits" {
+		t.Fatalf("v5 app_id did not accept released Inbe v4 record: %#v", payload)
+	}
+
+	v6MissingApp := []byte(`{"protocol_version":6,"user_id_hash":"` + identity.UserID + `","client_id":"test-client-v6-missing"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(v6MissingApp))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Ksync-User", identity.UserID)
+	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, req)
+	if missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), "app_id required") {
+		t.Fatalf("v6 missing app status = %d body=%s", missing.Code, missing.Body.String())
+	}
+
+	v6WrongCollection := []byte(`{"protocol_version":6,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"test-client-v6-wrong","encrypted_records":[{"collection":"private.uku.v1.processes","id":"process-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z"}]}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(v6WrongCollection))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Ksync-User", identity.UserID)
+	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	wrong := httptest.NewRecorder()
+	handler.ServeHTTP(wrong, req)
+	if wrong.Code != http.StatusBadRequest || !strings.Contains(wrong.Body.String(), "not registered") {
+		t.Fatalf("v6 wrong collection status = %d body=%s", wrong.Code, wrong.Body.String())
+	}
+}
+
+func TestAppGrantsGateCrossAppEncryptedRecords(t *testing.T) {
+	server, _, _ := testServer(t)
+	server.cfg.AdminToken = "admin-test-token"
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x5b)
+
+	registerBody := []byte(`{"app_id":"habitreader","display_name":"Habit Reader","status":"active","collections":[{"collection_prefix":"private.habitreader.v1.*","visibility":"private","schema_version":1}],"capabilities":["encrypted-records"]}`)
+	register := httptest.NewRequest(http.MethodPost, "/api/v1/apps", bytes.NewReader(registerBody))
+	register.Header.Set("Content-Type", "application/json")
+	register.Header.Set("X-Ksync-Admin", "admin-test-token")
+	registerRes := httptest.NewRecorder()
+	handler.ServeHTTP(registerRes, register)
+	if registerRes.Code != http.StatusOK {
+		t.Fatalf("register app status = %d body=%s", registerRes.Code, registerRes.Body.String())
+	}
+
+	writeBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"test-client-v5-shared","encrypted_records":[{"collection":"shared.inbe.v1.habits","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"shared-ciphertext","updated_at":"2026-08-29T12:00:00Z"}]}`)
+	_ = syncWithBody(t, handler, "", identity.UserID, identity.Token, writeBody)
+
+	queryPath := "/api/v1/account/app-records?source_app_id=inbe&target_app_id=habitreader&collection_prefix=shared.inbe.v1.*"
+	denied := httptest.NewRequest(http.MethodGet, queryPath, nil)
+	denied.Header.Set("Authorization", "Bearer "+identity.Token)
+	denied.Header.Set("X-Ksync-User", identity.UserID)
+	deniedRes := httptest.NewRecorder()
+	handler.ServeHTTP(deniedRes, denied)
+	if deniedRes.Code != http.StatusForbidden {
+		t.Fatalf("records without grant status = %d body=%s", deniedRes.Code, deniedRes.Body.String())
+	}
+
+	grantBody := []byte(`{"source_app_id":"inbe","target_app_id":"habitreader","collection_prefix":"shared.inbe.v1.*"}`)
+	grant := httptest.NewRequest(http.MethodPost, "/api/v1/account/app-grants", bytes.NewReader(grantBody))
+	grant.Header.Set("Content-Type", "application/json")
+	grant.Header.Set("Authorization", "Bearer "+identity.Token)
+	grant.Header.Set("X-Ksync-User", identity.UserID)
+	grantRes := httptest.NewRecorder()
+	handler.ServeHTTP(grantRes, grant)
+	if grantRes.Code != http.StatusCreated {
+		t.Fatalf("grant status = %d body=%s", grantRes.Code, grantRes.Body.String())
+	}
+	var created AppGrant
+	if err := json.Unmarshal(grantRes.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	allowed := httptest.NewRequest(http.MethodGet, queryPath, nil)
+	allowed.Header.Set("Authorization", "Bearer "+identity.Token)
+	allowed.Header.Set("X-Ksync-User", identity.UserID)
+	allowedRes := httptest.NewRecorder()
+	handler.ServeHTTP(allowedRes, allowed)
+	if allowedRes.Code != http.StatusOK {
+		t.Fatalf("records with grant status = %d body=%s", allowedRes.Code, allowedRes.Body.String())
+	}
+	var records AppRecordsResponse
+	if err := json.Unmarshal(allowedRes.Body.Bytes(), &records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records.Records) != 1 || records.Records[0].Ciphertext != "shared-ciphertext" {
+		t.Fatalf("unexpected shared records: %#v", records)
+	}
+
+	revoke := httptest.NewRequest(http.MethodDelete, "/api/v1/account/app-grants/"+created.ID, nil)
+	revoke.Header.Set("Authorization", "Bearer "+identity.Token)
+	revoke.Header.Set("X-Ksync-User", identity.UserID)
+	revokeRes := httptest.NewRecorder()
+	handler.ServeHTTP(revokeRes, revoke)
+	if revokeRes.Code != http.StatusOK {
+		t.Fatalf("revoke status = %d body=%s", revokeRes.Code, revokeRes.Body.String())
 	}
 }
 
@@ -2382,6 +2972,9 @@ func loginWithKey(t *testing.T, target any, baseURL, userID, publicKeyHex, signa
 	if payload.AuthToken == "" {
 		t.Fatal("missing auth token")
 	}
+	if payload.ServerTime == 0 {
+		t.Fatal("missing server time")
+	}
 	return payload.AuthToken, nonce
 }
 
@@ -2411,6 +3004,144 @@ func ukuJSONRequest(t *testing.T, target any, method, path, userID, token string
 	res := httptest.NewRecorder()
 	target.(http.Handler).ServeHTTP(res, req)
 	return res
+}
+
+func tokenJSONRequest(t *testing.T, target any, method, path, token string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	res := httptest.NewRecorder()
+	target.(http.Handler).ServeHTTP(res, req)
+	return res
+}
+
+type moneroTransfer struct {
+	TxID          string
+	Amount        int64
+	Confirmations int64
+	Major         int
+	Minor         int
+}
+
+type fakeMoneroWalletRPC struct {
+	URL string
+
+	mu        sync.Mutex
+	nextIndex int
+	transfers []moneroTransfer
+}
+
+func newFakeMoneroWalletRPC(t *testing.T) *fakeMoneroWalletRPC {
+	t.Helper()
+	wallet := &fakeMoneroWalletRPC{nextIndex: 7}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode monero rpc: %v", err)
+			writeFakeMoneroError(w, "invalid json")
+			return
+		}
+		switch req.Method {
+		case "create_address":
+			wallet.mu.Lock()
+			index := wallet.nextIndex
+			wallet.nextIndex++
+			wallet.mu.Unlock()
+			writeFakeMoneroResult(w, map[string]any{
+				"address":       "8fakeMoneroSubaddress" + strconv.Itoa(index),
+				"address_index": index,
+			})
+		case "get_transfers":
+			var params struct {
+				SubaddrIndices []int `json:"subaddr_indices"`
+			}
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				t.Errorf("decode get_transfers params: %v", err)
+				writeFakeMoneroError(w, "invalid params")
+				return
+			}
+			minor := -1
+			if len(params.SubaddrIndices) > 0 {
+				minor = params.SubaddrIndices[0]
+			}
+			wallet.mu.Lock()
+			items := make([]map[string]any, 0, len(wallet.transfers))
+			for _, transfer := range wallet.transfers {
+				if transfer.Minor != minor {
+					continue
+				}
+				items = append(items, map[string]any{
+					"txid":          transfer.TxID,
+					"amount":        transfer.Amount,
+					"confirmations": transfer.Confirmations,
+					"subaddr_index": map[string]any{
+						"major": transfer.Major,
+						"minor": transfer.Minor,
+					},
+				})
+			}
+			wallet.mu.Unlock()
+			writeFakeMoneroResult(w, map[string]any{"in": items})
+		default:
+			t.Errorf("unexpected monero rpc method %q", req.Method)
+			writeFakeMoneroError(w, "unexpected method")
+		}
+	}))
+	t.Cleanup(server.Close)
+	wallet.URL = server.URL
+	return wallet
+}
+
+func (w *fakeMoneroWalletRPC) setTransfer(transfers ...moneroTransfer) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.transfers = append(w.transfers[:0], transfers...)
+}
+
+func writeFakeMoneroResult(w http.ResponseWriter, result any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "0",
+		"result":  result,
+	})
+}
+
+func writeFakeMoneroError(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "0",
+		"error": map[string]any{
+			"code":    -1,
+			"message": message,
+		},
+	})
+}
+
+func createTestMoneroInvoice(t *testing.T, handler http.Handler, token string, body []byte) MoneroInvoiceResponse {
+	t.Helper()
+	res := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/tokens/purchases/monero/invoices", token, body)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("invoice status = %d body=%s", res.Code, res.Body.String())
+	}
+	var invoice MoneroInvoiceResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &invoice); err != nil {
+		t.Fatal(err)
+	}
+	return invoice
 }
 
 func friendJSONRequest(t *testing.T, target any, method, path string, identity testIdentity, body []byte) *httptest.ResponseRecorder {

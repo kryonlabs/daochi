@@ -23,18 +23,26 @@ var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
 var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
 var ukuIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{4,128}$`)
 var ksyncNamespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
+var ksyncNamespaceSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9_:-]{1,64}$`)
+var ksyncVersionSegmentPattern = regexp.MustCompile(`^v[1-9][0-9]{0,3}$`)
 var encryptedRecordIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
+var contentHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const (
 	ksyncSignatureContext      = "ksync-sync-v1"
 	legacyInbeSignatureContext = "inbe-sync-v1"
-	ksyncLatestProtocol        = 4
+	ksyncLatestProtocol        = 5
 )
 
 var ksyncServerCapabilities = []string{
 	"v3-typed-sync",
 	"v4-encrypted-records",
 	"v4-dual-write-transition",
+	"v5-encrypted-primary",
+	"v5-private-hierarchy",
+	"v5-dual-read",
+	"v5-legacy-encrypted-collections",
+	"v6-waozi-tokens",
 	"pub-relay",
 }
 
@@ -67,6 +75,23 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	mux.HandleFunc("GET /api/v1/apps", s.handleAppList)
+	mux.HandleFunc("POST /api/v1/apps", s.handleAppList)
+	mux.HandleFunc("GET /api/v1/apps/", s.handleAppRoute)
+	mux.HandleFunc("PUT /api/v1/apps/", s.handleAppRoute)
+	mux.HandleFunc("GET /api/v1/tokens/assets", s.handleTokenAssets)
+	mux.HandleFunc("GET /api/v1/tokens/products", s.handleTokenProducts)
+	mux.HandleFunc("GET /api/v1/tokens/issuer", s.handleTokenIssuer)
+	mux.HandleFunc("GET /api/v1/tokens/balance", s.handleTokenBalance)
+	mux.HandleFunc("GET /api/v1/tokens/ledger", s.handleTokenLedger)
+	mux.HandleFunc("POST /api/v1/tokens/spend", s.handleTokenSpend)
+	mux.HandleFunc("POST /api/v1/tokens/purchases/google/verify", s.handleGooglePurchaseVerify)
+	mux.HandleFunc("POST /api/v1/tokens/purchases/monero/invoices", s.handleMoneroInvoices)
+	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/invoices/", s.handleMoneroInvoiceRoute)
+	mux.HandleFunc("GET /api/v1/tokens/checkpoints/latest", s.handleTokenCheckpointLatest)
+	mux.HandleFunc("GET /api/v1/tokens/receipts/", s.handleTokenReceipt)
+	mux.HandleFunc("POST /api/v1/admin/tokens/manual-credit", s.handleAdminManualCredit)
+	mux.HandleFunc("POST /api/v1/admin/tokens/checkpoint", s.handleAdminTokenCheckpoint)
 	mux.HandleFunc("GET /api/v1/sync/diagnostics", s.handleSyncDiagnostics)
 	mux.HandleFunc("GET /api/v1/sync/challenge", s.handleChallenge)
 	mux.HandleFunc("GET /api/v1/sync/ws", s.handleSyncWebSocket)
@@ -75,7 +100,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
 	mux.HandleFunc("POST /api/v1/account/profile-icon", s.handleProfileIcon)
 	mux.HandleFunc("GET /api/v1/account/export", s.handleAccountExport)
+	mux.HandleFunc("GET /api/v1/account/app-grants", s.handleAppGrants)
+	mux.HandleFunc("POST /api/v1/account/app-grants", s.handleAppGrants)
+	mux.HandleFunc("DELETE /api/v1/account/app-grants/", s.handleAppGrantRoute)
+	mux.HandleFunc("GET /api/v1/account/app-records", s.handleAppRecords)
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
+	mux.HandleFunc("POST /api/v1/account/delete", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
 	mux.HandleFunc("GET /api/v1/friends", s.handleFriends)
 	mux.HandleFunc("DELETE /api/v1/friends/", s.handleFriendRoute)
@@ -102,6 +132,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"database":     "ok",
 		"token_secret": "ok",
 		"verifier":     "ok",
+		"token_issuer": s.tokenIssuerStatus(),
 	}
 	status := http.StatusOK
 	if s.cfg.TokenSecretEphemeral || len(s.cfg.TokenSecret) < 32 {
@@ -111,6 +142,19 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if s.verifier == nil {
 		checks["verifier"] = "missing"
 		status = http.StatusServiceUnavailable
+	}
+	if s.cfg.TokenDirectPurchasesEnabled {
+		checks["token_direct_purchases"] = "ok"
+		if s.tokenIssuerStatus() != "ok" {
+			checks["token_direct_purchases"] = "issuer_private_key_missing"
+			status = http.StatusServiceUnavailable
+		} else if !hasMoneroTokenProduct(s.cfg.TokenProducts) {
+			checks["token_direct_purchases"] = "monero_product_missing"
+			status = http.StatusServiceUnavailable
+		} else if strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
+			checks["token_direct_purchases"] = "monero_wallet_rpc_missing"
+			status = http.StatusServiceUnavailable
+		}
 	}
 	if err := s.store.Health(r.Context()); err != nil {
 		checks["database"] = err.Error()
@@ -196,6 +240,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	publicKey, err := syncRequestPublicKey(req)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.validateSyncRequest(r.Context(), req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -376,6 +424,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "clean data failed")
 			return
 		}
+		if !includeLegacyPrivateData(req) {
+			response.Data.Habits = []Habit{}
+			response.Data.HabitDays = []CleanHabitDay{}
+			response.Data.Sessions = []Session{}
+			response.Data.MeditationLogs = []MeditationLog{}
+		}
 		response.Changes.Habits = response.Data.Habits
 		response.Changes.HabitDays = make([]HabitDay, 0, len(response.Data.HabitDays))
 		for _, day := range response.Data.HabitDays {
@@ -410,6 +464,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if response.Diagnostics != nil {
+		response.Diagnostics.ReturnedChanges = syncChangesResult(response.Changes)
+	}
 	if result.EncryptedRecords > 0 {
 		s.metrics.syncEncryptedRecords.Add(uint64(result.EncryptedRecords))
 	}
@@ -418,10 +475,17 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func syncTransitionMode(req SyncRequest) string {
+	if req.ProtocolVersion >= 5 {
+		return "encrypted_primary"
+	}
 	if req.ProtocolVersion >= 4 {
 		return "dual_write"
 	}
 	return ""
+}
+
+func includeLegacyPrivateData(req SyncRequest) bool {
+	return req.ProtocolVersion < 5 || req.IncludeLegacyData
 }
 
 func syncRequestHasLocalChanges(req SyncRequest) bool {
@@ -956,6 +1020,45 @@ func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
 	return publicKey, nil
 }
 
+func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error {
+	if req.AppID != "" {
+		if !validKsyncNamespace(req.AppID) {
+			return errors.New("invalid app_id")
+		}
+		exists, err := s.store.AppExists(ctx, req.AppID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if req.ProtocolVersion >= 6 {
+				return errors.New("unknown app_id")
+			}
+			slog.Warn("sync request used unknown app_id", "app_id", req.AppID, "protocol", req.ProtocolVersion)
+		}
+	}
+	if req.ProtocolVersion >= 6 && req.AppID == "" {
+		return errors.New("app_id required")
+	}
+	for _, item := range req.EncryptedRecords {
+		if !validEncryptedRecordForProtocol(item, req.ProtocolVersion) {
+			return errors.New("invalid encrypted record")
+		}
+		if req.AppID != "" {
+			owns, err := s.store.AppOwnsCollection(ctx, req.AppID, item.Collection)
+			if err != nil {
+				return err
+			}
+			if !owns {
+				if req.ProtocolVersion >= 6 {
+					return errors.New("encrypted record collection is not registered for app_id")
+				}
+				slog.Warn("sync request used unregistered app collection", "app_id", req.AppID, "collection", item.Collection, "protocol", req.ProtocolVersion)
+			}
+		}
+	}
+	return nil
+}
+
 func syncResultApplied(result SyncResult) bool {
 	return result.MeditationLogs > 0 ||
 		result.Habits > 0 ||
@@ -1023,7 +1126,55 @@ func validEncryptedRecord(item EncryptedRecord) bool {
 	}
 	return len(item.Ciphertext) <= 262144 &&
 		len(item.Nonce) <= 256 &&
-		len(item.KeyID) <= 128
+		len(item.KeyID) <= 128 &&
+		validEncryptedRecordMetadata(item)
+}
+
+func validEncryptedRecordForProtocol(item EncryptedRecord, protocolVersion int) bool {
+	if !validEncryptedRecord(item) {
+		return false
+	}
+	if protocolVersion >= 5 {
+		return validEncryptedHierarchyCollection(item.Collection) ||
+			validLegacyEncryptedCollection(item.Collection)
+	}
+	return true
+}
+
+func validEncryptedRecordMetadata(item EncryptedRecord) bool {
+	contentHash := strings.TrimSpace(item.ContentHash)
+	parentID := strings.TrimSpace(item.ParentID)
+	if contentHash != "" && !contentHashPattern.MatchString(contentHash) {
+		return false
+	}
+	if parentID != "" && !encryptedRecordIDPattern.MatchString(parentID) {
+		return false
+	}
+	return item.SchemaVersion >= 0 && item.SchemaVersion <= 65535
+}
+
+func validEncryptedHierarchyCollection(collection string) bool {
+	parts := strings.Split(strings.TrimSpace(collection), ".")
+	if len(parts) == 3 && parts[0] == "account" {
+		return ksyncVersionSegmentPattern.MatchString(parts[1]) &&
+			ksyncNamespaceSegmentPattern.MatchString(parts[2])
+	}
+	if len(parts) == 4 && (parts[0] == "private" || parts[0] == "shared" ||
+		parts[0] == "friends" || parts[0] == "public") {
+		return ksyncNamespaceSegmentPattern.MatchString(parts[1]) &&
+			ksyncVersionSegmentPattern.MatchString(parts[2]) &&
+			ksyncNamespaceSegmentPattern.MatchString(parts[3])
+	}
+	return false
+}
+
+func validLegacyEncryptedCollection(collection string) bool {
+	switch strings.TrimSpace(collection) {
+	case "inbe.habits", "inbe.habit_days", "inbe.sessions":
+		return true
+	default:
+		return false
+	}
 }
 
 func validLeaderboardMetric(practice, metric string) bool {
@@ -1103,6 +1254,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Status:       "ok",
 		AuthToken:    token,
 		ExpiresIn:    int64(s.cfg.TokenTTL.Seconds()),
+		ServerTime:   time.Now().Unix(),
 		AccountAlias: accountAlias,
 		ProfileIcon:  profileIcon,
 	})
@@ -1282,6 +1434,7 @@ func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]b
 		return nil, req, errors.New("invalid json")
 	}
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
+	req.AppID = strings.TrimSpace(req.AppID)
 	req.PublicKey = strings.TrimSpace(req.PublicKey)
 	req.ClientID = strings.TrimSpace(req.ClientID)
 	for i := range req.EncryptedRecords {
@@ -1290,6 +1443,8 @@ func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]b
 		req.EncryptedRecords[i].KeyID = strings.TrimSpace(req.EncryptedRecords[i].KeyID)
 		req.EncryptedRecords[i].Nonce = strings.TrimSpace(req.EncryptedRecords[i].Nonce)
 		req.EncryptedRecords[i].UpdatedAt = strings.TrimSpace(req.EncryptedRecords[i].UpdatedAt)
+		req.EncryptedRecords[i].ContentHash = strings.ToLower(strings.TrimSpace(req.EncryptedRecords[i].ContentHash))
+		req.EncryptedRecords[i].ParentID = strings.TrimSpace(req.EncryptedRecords[i].ParentID)
 	}
 	return body, req, nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"log"
@@ -12,14 +13,26 @@ import (
 )
 
 type Config struct {
-	Addr                 string
-	BaseURL              string
-	DBPath               string
-	ChallengeTTL         time.Duration
-	TokenTTL             time.Duration
-	TokenSecret          []byte
-	TokenSecretEphemeral bool
-	MaxBodyBytes         int64
+	Addr                        string
+	BaseURL                     string
+	DBPath                      string
+	AdminToken                  string
+	ChallengeTTL                time.Duration
+	TokenTTL                    time.Duration
+	TokenSecret                 []byte
+	TokenSecretEphemeral        bool
+	MaxBodyBytes                int64
+	WaoziIssuerPublicKey        ed25519.PublicKey
+	WaoziIssuerPrivateKey       ed25519.PrivateKey
+	TokenProducts               map[string]TokenProduct
+	GooglePackageNames          map[string]bool
+	GoogleServiceAccountJSON    string
+	GoogleOAuthClientJSON       string
+	GoogleOAuthRefreshToken     string
+	MoneroWalletRPCURL          string
+	MoneroWalletRPCUser         string
+	MoneroWalletRPCPassword     string
+	TokenDirectPurchasesEnabled bool
 }
 
 func loadConfig() Config {
@@ -36,15 +49,38 @@ func loadConfig() Config {
 		}
 		ephemeralSecret = true
 	}
+	issuerPublic := envBytesHexOrFile("KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX", "KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
+	issuerPrivateBytes := envBytesHexOrFile("KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX", "KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX_FILE", nil)
+	var issuerPrivate ed25519.PrivateKey
+	if len(issuerPrivateBytes) == ed25519.SeedSize {
+		issuerPrivate = ed25519.NewKeyFromSeed(issuerPrivateBytes)
+	} else if len(issuerPrivateBytes) == ed25519.PrivateKeySize {
+		issuerPrivate = ed25519.PrivateKey(issuerPrivateBytes)
+	}
+	if len(issuerPrivate) == ed25519.PrivateKeySize && len(issuerPublic) == 0 {
+		issuerPublic = issuerPrivate.Public().(ed25519.PublicKey)
+	}
 	return Config{
-		Addr:                 envString("KSYNC_ADDR", "127.0.0.1:8080"),
-		BaseURL:              envString("KSYNC_BASE_URL", "https://api.waozi.xyz"),
-		DBPath:               envString("KSYNC_DB", "ksync.db"),
-		ChallengeTTL:         envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second),
-		TokenTTL:             envDurationSeconds("KSYNC_TOKEN_TTL_SECONDS", 3600*time.Second),
-		TokenSecret:          secret,
-		TokenSecretEphemeral: ephemeralSecret,
-		MaxBodyBytes:         envInt64("KSYNC_MAX_BODY_BYTES", 1<<20),
+		Addr:                        envString("KSYNC_ADDR", "127.0.0.1:8080"),
+		BaseURL:                     envString("KSYNC_BASE_URL", "https://api.waozi.xyz"),
+		DBPath:                      envString("KSYNC_DB", "ksync.db"),
+		AdminToken:                  envString("KSYNC_ADMIN_TOKEN", ""),
+		ChallengeTTL:                envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second),
+		TokenTTL:                    envDurationSeconds("KSYNC_TOKEN_TTL_SECONDS", 3600*time.Second),
+		TokenSecret:                 secret,
+		TokenSecretEphemeral:        ephemeralSecret,
+		MaxBodyBytes:                envInt64("KSYNC_MAX_BODY_BYTES", 1<<20),
+		WaoziIssuerPublicKey:        issuerPublic,
+		WaoziIssuerPrivateKey:       issuerPrivate,
+		TokenProducts:               envTokenProducts("KSYNC_TOKEN_PRODUCTS"),
+		GooglePackageNames:          envStringSet("KSYNC_GOOGLE_PACKAGE_NAMES"),
+		GoogleServiceAccountJSON:    envStringOrFile("KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON", "KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", ""),
+		GoogleOAuthClientJSON:       envStringOrFile("KSYNC_GOOGLE_OAUTH_CLIENT_JSON", "KSYNC_GOOGLE_OAUTH_CLIENT_JSON_FILE", ""),
+		GoogleOAuthRefreshToken:     envStringOrFile("KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN", "KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", ""),
+		MoneroWalletRPCURL:          envString("KSYNC_MONERO_WALLET_RPC_URL", ""),
+		MoneroWalletRPCUser:         envString("KSYNC_MONERO_WALLET_RPC_USER", ""),
+		MoneroWalletRPCPassword:     envString("KSYNC_MONERO_WALLET_RPC_PASSWORD", ""),
+		TokenDirectPurchasesEnabled: envBool("KSYNC_TOKEN_DIRECT_PURCHASES_ENABLED", false),
 	}
 }
 
@@ -90,4 +126,68 @@ func envBytesHex(key string, fallback []byte) []byte {
 		}
 	}
 	return fallback
+}
+
+func envStringOrFile(key, fileKey, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	if path := strings.TrimSpace(os.Getenv(fileKey)); path != "" {
+		bytes, err := os.ReadFile(path)
+		if err == nil {
+			return strings.TrimSpace(string(bytes))
+		}
+		slog.Warn("failed to read config file", "env", fileKey, "path", path, "error", err)
+	}
+	return fallback
+}
+
+func envBytesHexOrFile(key, fileKey string, fallback []byte) []byte {
+	if value := os.Getenv(key); value != "" {
+		decoded, err := hex.DecodeString(strings.TrimSpace(value))
+		if err == nil {
+			return decoded
+		}
+	}
+	if value := envStringOrFile("", fileKey, ""); value != "" {
+		decoded, err := hex.DecodeString(strings.TrimSpace(value))
+		if err == nil {
+			return decoded
+		}
+	}
+	return fallback
+}
+
+func envStringSet(key string) map[string]bool {
+	out := map[string]bool{}
+	for _, item := range strings.Split(os.Getenv(key), ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out[item] = true
+		}
+	}
+	return out
+}
+
+func envTokenProducts(key string) map[string]TokenProduct {
+	out := map[string]TokenProduct{}
+	for _, item := range strings.Split(os.Getenv(key), ",") {
+		parts := strings.Split(strings.TrimSpace(item), ":")
+		if len(parts) < 2 || len(parts) > 3 || parts[0] == "" {
+			continue
+		}
+		units, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || units <= 0 {
+			continue
+		}
+		product := TokenProduct{ProductID: parts[0], TokenUnits: units}
+		if len(parts) == 3 {
+			atomic, err := strconv.ParseInt(parts[2], 10, 64)
+			if err == nil && atomic > 0 {
+				product.MoneroAtomicAmount = atomic
+			}
+		}
+		out[product.ProductID] = product
+	}
+	return out
 }

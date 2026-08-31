@@ -136,7 +136,7 @@ WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 		},
 		{
 			name:  "encrypted_records",
-			query: `SELECT collection, id, key_id, nonce, ciphertext, updated_at, deleted_at, server_version FROM server_encrypted_records WHERE user_id_hash=?1 ORDER BY collection, id`,
+			query: `SELECT collection, id, key_id, nonce, ciphertext, updated_at, deleted_at, content_hash, schema_version, parent_id, server_version FROM server_encrypted_records WHERE user_id_hash=?1 ORDER BY collection, id`,
 		},
 		{
 			name:       "sync_ops",
@@ -158,6 +158,10 @@ WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 		{
 			name:  "leaderboard_stats",
 			query: `SELECT app, practice, metric, source_version, calc_version, value, label, local_date, updated_at FROM server_leaderboard_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric`,
+		},
+		{
+			name:  "app_grants",
+			query: `SELECT id, source_app_id, target_app_id, collection_prefix, permission, status, created_at, updated_at, revoked_at FROM server_app_grants WHERE user_id_hash=?1 ORDER BY updated_at DESC, id`,
 		},
 		{
 			name:  "uku_processes",
@@ -251,6 +255,14 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := store.AutoMigrateAllAccounts(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.SeedBuiltinApps(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.SeedTokenAssets(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -394,8 +406,62 @@ CREATE TABLE IF NOT EXISTS server_encrypted_records (
 	ciphertext TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL,
 	deleted_at INTEGER NOT NULL DEFAULT 0,
+	content_hash TEXT NOT NULL DEFAULT '',
+	schema_version INTEGER NOT NULL DEFAULT 0,
+	parent_id TEXT NOT NULL DEFAULT '',
 	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, collection, id)
+);
+
+CREATE TABLE IF NOT EXISTS server_apps (
+	app_id TEXT PRIMARY KEY,
+	display_name TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	homepage_url TEXT NOT NULL DEFAULT '',
+	source_url TEXT NOT NULL DEFAULT '',
+	public_key TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS server_app_collections (
+	app_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	collection_prefix TEXT NOT NULL,
+	visibility TEXT NOT NULL DEFAULT 'private',
+	schema_version INTEGER NOT NULL DEFAULT 0,
+	description TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(app_id, collection_prefix)
+);
+
+CREATE TABLE IF NOT EXISTS server_app_capabilities (
+	app_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	capability TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(app_id, capability)
+);
+
+CREATE TABLE IF NOT EXISTS server_app_grants (
+	id TEXT PRIMARY KEY,
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	source_app_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	target_app_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	collection_prefix TEXT NOT NULL,
+	permission TEXT NOT NULL DEFAULT 'read',
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	revoked_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS server_app_grant_audit (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	grant_id TEXT NOT NULL,
+	user_id_hash TEXT NOT NULL,
+	action TEXT NOT NULL,
+	payload_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS server_sync_ops (
@@ -537,6 +603,81 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY(user_id_hash,app,practice,metric)
 );
+
+CREATE TABLE IF NOT EXISTS token_assets (
+	issuer_id TEXT NOT NULL,
+	asset_id TEXT PRIMARY KEY,
+	display_name TEXT NOT NULL,
+	decimals INTEGER NOT NULL DEFAULT 6,
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS token_ledger (
+	ledger_seq INTEGER PRIMARY KEY,
+	receipt_id TEXT NOT NULL UNIQUE,
+	issuer_id TEXT NOT NULL,
+	asset_id TEXT NOT NULL REFERENCES token_assets(asset_id),
+	account_id TEXT NOT NULL,
+	app_id TEXT NOT NULL DEFAULT '',
+	event_type TEXT NOT NULL,
+	amount_delta INTEGER NOT NULL,
+	source_type TEXT NOT NULL,
+	source_ref TEXT NOT NULL,
+	previous_hash TEXT NOT NULL,
+	event_hash TEXT NOT NULL UNIQUE,
+	signature TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS token_processed_payments (
+	provider TEXT NOT NULL,
+	provider_payment_id TEXT NOT NULL,
+	account_id TEXT NOT NULL,
+	asset_id TEXT NOT NULL,
+	amount INTEGER NOT NULL,
+	receipt_id TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(provider, provider_payment_id)
+);
+
+CREATE TABLE IF NOT EXISTS token_spend_nonces (
+	account_id TEXT NOT NULL,
+	app_id TEXT NOT NULL,
+	idempotency_key TEXT NOT NULL,
+	receipt_id TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(account_id, app_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS token_payment_intents (
+	id TEXT PRIMARY KEY,
+	provider TEXT NOT NULL,
+	account_id TEXT NOT NULL,
+	app_id TEXT NOT NULL DEFAULT '',
+	product_id TEXT NOT NULL,
+	asset_id TEXT NOT NULL,
+	token_units INTEGER NOT NULL,
+	provider_amount INTEGER NOT NULL DEFAULT 0,
+	provider_address TEXT NOT NULL DEFAULT '',
+	provider_ref TEXT NOT NULL DEFAULT '',
+	provider_payment_id TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT 'pending',
+	receipt_id TEXT NOT NULL DEFAULT '',
+	expires_at TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS token_checkpoints (
+	ledger_seq INTEGER PRIMARY KEY,
+	issuer_id TEXT NOT NULL,
+	asset_id TEXT NOT NULL,
+	ledger_root TEXT NOT NULL,
+	signature TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `)
 	if err != nil {
 		return err
@@ -566,6 +707,10 @@ CREATE TABLE IF NOT EXISTS server_leaderboard_stats (
 		`ALTER TABLE server_users ADD COLUMN profile_icon INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_clients ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE server_clients ADD COLUMN last_client_clock INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_encrypted_records ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE server_encrypted_records ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE server_encrypted_records ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE token_payment_intents ADD COLUMN provider_payment_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE uku_processes ADD COLUMN quorum_votes INTEGER NOT NULL DEFAULT 0`,
@@ -585,6 +730,13 @@ WHERE alias IS NOT NULL AND alias<>''`); err != nil {
 		`CREATE INDEX IF NOT EXISTS server_friend_requests_requester_status ON server_friend_requests(requester_user_id_hash,status,updated_at)`,
 		`CREATE INDEX IF NOT EXISTS server_profile_stats_lookup ON server_profile_stats(app,practice,metric,value)`,
 		`CREATE INDEX IF NOT EXISTS server_leaderboard_stats_lookup ON server_leaderboard_stats(app,practice,metric,value)`,
+		`CREATE INDEX IF NOT EXISTS server_app_grants_user_status ON server_app_grants(user_id_hash,status,updated_at)`,
+		`CREATE INDEX IF NOT EXISTS server_app_grants_lookup ON server_app_grants(user_id_hash,source_app_id,target_app_id,collection_prefix,status)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS server_app_grants_active_unique ON server_app_grants(user_id_hash,source_app_id,target_app_id,collection_prefix,permission) WHERE status='active'`,
+		`CREATE INDEX IF NOT EXISTS server_encrypted_records_collection ON server_encrypted_records(user_id_hash,collection,server_version)`,
+		`CREATE INDEX IF NOT EXISTS token_ledger_account_asset ON token_ledger(account_id,asset_id,ledger_seq)`,
+		`CREATE INDEX IF NOT EXISTS token_ledger_source ON token_ledger(source_type,source_ref)`,
+		`CREATE INDEX IF NOT EXISTS token_payment_intents_account ON token_payment_intents(account_id,provider,status,created_at)`,
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err
@@ -754,7 +906,7 @@ func (s *Store) ApplySyncDetailed(ctx context.Context, req SyncRequest, publicKe
 		return SyncResult{}, nil, fmt.Errorf("social_cache is server-owned")
 	}
 	for _, item := range req.EncryptedRecords {
-		if !validEncryptedRecord(item) {
+		if !validEncryptedRecordForProtocol(item, req.ProtocolVersion) {
 			return SyncResult{}, nil, fmt.Errorf("invalid encrypted record")
 		}
 	}
@@ -3289,7 +3441,7 @@ ORDER BY kind`, userID)
 
 func (s *Store) hashEncryptedRecords(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
 FROM server_encrypted_records
 WHERE user_id_hash=?1
 ORDER BY collection,id`, userID)
@@ -3299,13 +3451,16 @@ ORDER BY collection,id`, userID)
 	defer rows.Close()
 
 	for rows.Next() {
-		var collection, id, keyID, nonce, ciphertext, updatedAt string
+		var collection, id, keyID, nonce, ciphertext, updatedAt, contentHash, parentID string
 		var deletedAt int64
-		if err := rows.Scan(&collection, &id, &keyID, &nonce, &ciphertext, &updatedAt, &deletedAt); err != nil {
+		var schemaVersion int
+		if err := rows.Scan(&collection, &id, &keyID, &nonce, &ciphertext, &updatedAt,
+			&deletedAt, &contentHash, &schemaVersion, &parentID); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "encrypted_record\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-			collection, id, keyID, nonce, ciphertext, updatedAt, deletedAt)
+		fmt.Fprintf(h, "encrypted_record\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
+			collection, id, keyID, nonce, ciphertext, updatedAt, deletedAt,
+			contentHash, schemaVersion, parentID)
 	}
 	return rows.Err()
 }
@@ -3493,7 +3648,7 @@ ORDER BY server_version,kind`, userID, sinceVersion)
 
 func (s *Store) snapshotEncryptedRecords(ctx context.Context, userID string, sinceVersion int64) ([]EncryptedRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
 FROM server_encrypted_records
 WHERE user_id_hash=?1 AND server_version>?2
 ORDER BY server_version,collection,id`, userID, sinceVersion)
@@ -3506,7 +3661,8 @@ ORDER BY server_version,collection,id`, userID, sinceVersion)
 	for rows.Next() {
 		var item EncryptedRecord
 		if err := rows.Scan(&item.Collection, &item.ID, &item.KeyID, &item.Nonce,
-			&item.Ciphertext, &item.UpdatedAt, &item.DeletedAt); err != nil {
+			&item.Ciphertext, &item.UpdatedAt, &item.DeletedAt, &item.ContentHash,
+			&item.SchemaVersion, &item.ParentID); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -3679,18 +3835,22 @@ func upsertEncryptedRecord(ctx context.Context, tx *sql.Tx, userID string, item 
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,server_version)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
 ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
 	key_id=excluded.key_id,
 	nonce=excluded.nonce,
 	ciphertext=excluded.ciphertext,
 	updated_at=excluded.updated_at,
 	deleted_at=excluded.deleted_at,
+	content_hash=excluded.content_hash,
+	schema_version=excluded.schema_version,
+	parent_id=excluded.parent_id,
 	server_version=excluded.server_version
 WHERE excluded.updated_at >= server_encrypted_records.updated_at`,
 		userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
-		normalizeTime(item.UpdatedAt, ""), item.DeletedAt, version)
+		normalizeTime(item.UpdatedAt, ""), item.DeletedAt, item.ContentHash,
+		item.SchemaVersion, item.ParentID, version)
 	if err != nil {
 		return 0, err
 	}

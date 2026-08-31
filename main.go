@@ -45,7 +45,11 @@ func main() {
 		log.Fatalf("create verifier: %v", err)
 	}
 
-	handler := NewServer(cfg, store, verifier).Routes()
+	ksync := NewServer(cfg, store, verifier)
+	if cfg.TokenDirectPurchasesEnabled {
+		go ksync.runMoneroInvoiceReconciler(context.Background(), time.Minute)
+	}
+	handler := ksync.Routes()
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,

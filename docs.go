@@ -53,14 +53,26 @@ a{color:#254da8}
 <body>
 <main>
 <h1>Ksync Sync API</h1>
-<p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys.</p>
+<p>Stateless post-quantum sync relay for Kryon apps. The server stores public keys and mirrored app data, never client private keys. Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility, and released Inbe v4 encrypted collections remain valid.</p>
 <p><a href="/openapi.json">OpenAPI JSON</a> · <a href="/healthz">Health check</a> · <a href="/readyz">Readiness</a> · <a href="/metrics">Metrics</a></p>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/apps</code><p>Lists registered apps, collection prefixes, visibility classes, and capabilities. Built-in registrations include Inbe and Uku.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/apps</code><p>Registers or updates an app when <code>KSYNC_ADMIN_TOKEN</code> is set and <code>X-Ksync-Admin</code> matches it.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/challenge?user_id=&lt;sha256-public-key-hex&gt;</code><p>Issues a single-use 32-byte challenge nonce encoded as lowercase hex.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/sync/login</code><p>Verifies the challenge signature and returns a cacheable bearer token plus server clock time.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>ksync-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies signed local changes and returns remote changes newer than <code>since_server_version</code>.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/diagnostics</code><p>Returns bearer-authenticated sync state, table counts, compaction position, and legacy client hints.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the Waozi token issuer key. Official apps accept only Waozi-signed <code>waozi:token</code> receipts.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct Monero prices when direct purchases are enabled.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's Waozi token balance computed from signed ledger events.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits Waozi tokens with app policy and idempotency enforcement.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/purchases/monero/invoices</code><p>Creates a bearer-authenticated Monero invoice for a configured token product.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/invoices/{id}</code><p>Returns invoice status and settles a confirmed Monero payment against the authenticated account.</p></section>
+<section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/account/app-grants</code><p>Lists or creates bearer-authenticated grants for sharing registered app collection prefixes across apps.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/account/app-records</code><p>Returns encrypted records from a granted collection prefix for cross-app use.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
-<section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Deletes all remote data for the signed sync account.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete</code><p>Deletes all remote data for the signed sync account without uploading the private key.</p></section>
+<section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Legacy signed deletion endpoint kept for older clients.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
 <h2>Signed Message</h2>
 <pre>ksync-sync-v1
@@ -115,6 +127,214 @@ func openAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/tokens/assets": map[string]any{
+				"get": map[string]any{
+					"summary": "List token assets",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Token assets"},
+					},
+				},
+			},
+			"/api/v1/tokens/issuer": map[string]any{
+				"get": map[string]any{
+					"summary": "Get Waozi token issuer key",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Token issuer"},
+					},
+				},
+			},
+			"/api/v1/tokens/products": map[string]any{
+				"get": map[string]any{
+					"summary": "List configured token products",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Token products"},
+					},
+				},
+			},
+			"/api/v1/tokens/balance": map[string]any{
+				"get": map[string]any{
+					"summary":  "Get authenticated Waozi token balance",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Token balance"},
+						"401": map[string]any{"description": "Invalid bearer token"},
+					},
+				},
+			},
+			"/api/v1/tokens/ledger": map[string]any{
+				"get": map[string]any{
+					"summary":  "List authenticated Waozi token receipts",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Token ledger events"},
+					},
+				},
+			},
+			"/api/v1/tokens/spend": map[string]any{
+				"post": map[string]any{
+					"summary":  "Spend Waozi tokens",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Signed debit receipt"},
+						"409": map[string]any{"description": "Insufficient balance"},
+					},
+				},
+			},
+			"/api/v1/tokens/purchases/google/verify": map[string]any{
+				"post": map[string]any{
+					"summary":  "Verify Google Play purchase and credit Waozi tokens",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Signed credit receipt"},
+					},
+				},
+			},
+			"/api/v1/tokens/purchases/monero/invoices": map[string]any{
+				"post": map[string]any{
+					"summary":  "Create Monero token invoice",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"201": map[string]any{"description": "Monero invoice"},
+					},
+				},
+			},
+			"/api/v1/tokens/purchases/monero/invoices/{id}": map[string]any{
+				"get": map[string]any{
+					"summary":  "Get or settle Monero token invoice",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Monero invoice status"},
+						"404": map[string]any{"description": "Invoice not found"},
+					},
+				},
+			},
+			"/api/v1/tokens/checkpoints/latest": map[string]any{
+				"get": map[string]any{
+					"summary": "Get latest signed token checkpoint",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Token checkpoint"},
+						"404": map[string]any{"description": "No checkpoint exists"},
+					},
+				},
+			},
+			"/api/v1/tokens/receipts/{receipt_id}": map[string]any{
+				"get": map[string]any{
+					"summary": "Get token receipt",
+					"parameters": []map[string]any{
+						{"name": "receipt_id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Signed token receipt"},
+						"404": map[string]any{"description": "Receipt not found"},
+					},
+				},
+			},
+			"/api/v1/admin/tokens/manual-credit": map[string]any{
+				"post": map[string]any{
+					"summary": "Admin credit Waozi tokens",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Signed credit receipt"},
+						"401": map[string]any{"description": "Invalid admin token"},
+						"403": map[string]any{"description": "Admin disabled"},
+					},
+				},
+			},
+			"/api/v1/admin/tokens/checkpoint": map[string]any{
+				"post": map[string]any{
+					"summary": "Create signed token checkpoint",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Token checkpoint"},
+						"401": map[string]any{"description": "Invalid admin token"},
+						"403": map[string]any{"description": "Admin disabled"},
+					},
+				},
+			},
+			"/api/v1/apps": map[string]any{
+				"get": map[string]any{
+					"summary": "List registered apps",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "App registry"},
+					},
+				},
+				"post": map[string]any{
+					"summary":     "Register or update an app",
+					"description": "Requires KSYNC_ADMIN_TOKEN on the server and matching X-Ksync-Admin header.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Registered app"},
+						"401": map[string]any{"description": "Invalid admin token"},
+						"403": map[string]any{"description": "Admin registration disabled"},
+					},
+				},
+			},
+			"/api/v1/apps/{app_id}": map[string]any{
+				"get": map[string]any{
+					"summary": "Get registered app",
+					"parameters": []map[string]any{
+						{"name": "app_id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "App registration"},
+						"404": map[string]any{"description": "App not found"},
+					},
+				},
+				"put": map[string]any{
+					"summary":     "Register or update an app",
+					"description": "Requires KSYNC_ADMIN_TOKEN on the server and matching X-Ksync-Admin header.",
+					"parameters": []map[string]any{
+						{"name": "app_id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Registered app"},
+					},
+				},
+			},
+			"/api/v1/apps/{app_id}/collections": map[string]any{
+				"get": map[string]any{
+					"summary": "List app collection prefixes",
+					"parameters": []map[string]any{
+						{"name": "app_id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Collection prefixes"},
+						"404": map[string]any{"description": "App not found"},
+					},
+				},
+			},
+			"/api/v1/account/app-grants": map[string]any{
+				"get": map[string]any{
+					"summary":  "List cross-app grants",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "App grants"},
+					},
+				},
+				"post": map[string]any{
+					"summary":  "Create cross-app grant",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"201": map[string]any{"description": "Created app grant"},
+						"400": map[string]any{"description": "Invalid or private collection"},
+					},
+				},
+			},
+			"/api/v1/account/app-records": map[string]any{
+				"get": map[string]any{
+					"summary":  "Read encrypted records from a granted app collection prefix",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{"name": "source_app_id", "in": "query", "required": true, "schema": map[string]any{"type": "string"}},
+						{"name": "target_app_id", "in": "query", "required": true, "schema": map[string]any{"type": "string"}},
+						{"name": "collection_prefix", "in": "query", "required": true, "schema": map[string]any{"type": "string"}},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Encrypted records"},
+						"403": map[string]any{"description": "Grant required"},
+					},
+				},
+			},
 			"/api/v1/sync/diagnostics": map[string]any{
 				"get": map[string]any{
 					"summary":  "Inspect sync state for the authenticated account",
@@ -139,6 +359,24 @@ func openAPISpec() map[string]any {
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Challenge nonce"},
 						"400": map[string]any{"description": "Invalid user id"},
+					},
+				},
+			},
+			"/api/v1/sync/login": map[string]any{
+				"post": map[string]any{
+					"summary":     "Create bearer token",
+					"description": "Body is signed through X-Ksync-Signature over the exact raw request body bytes. The response includes server_time for client token-expiry clock skew compensation.",
+					"parameters":  signedHeaderParameters(),
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/LoginRequest"}},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Bearer token issued", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/LoginResponse"}}}},
+						"400": map[string]any{"description": "Invalid request or missing challenge"},
+						"401": map[string]any{"description": "Signature rejected"},
 					},
 				},
 			},
@@ -183,7 +421,25 @@ func openAPISpec() map[string]any {
 			"/api/v1/account": map[string]any{
 				"delete": map[string]any{
 					"summary":     "Delete remote account data",
-					"description": "Deletes server-side mirrored data for the signed account.",
+					"description": "Legacy signed deletion endpoint kept for older clients. New clients should use POST /api/v1/account/delete.",
+					"parameters":  signedHeaderParameters(),
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/DeleteRequest"}},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Remote data deleted"},
+						"400": map[string]any{"description": "Invalid request or missing challenge"},
+						"401": map[string]any{"description": "Signature rejected"},
+					},
+				},
+			},
+			"/api/v1/account/delete": map[string]any{
+				"post": map[string]any{
+					"summary":     "Delete remote account data",
+					"description": "Deletes server-side mirrored data for the signed account without uploading the private key.",
 					"parameters":  signedHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,
@@ -324,12 +580,23 @@ func openAPISpec() map[string]any {
 						"local_date": map[string]any{"type": "integer"},
 					},
 				},
+				"LoginRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"user_id_hash", "client_id"},
+					"properties": map[string]any{
+						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+						"client_id":    map[string]any{"type": "string"},
+						"public_key":   map[string]any{"type": "string", "description": "ML-DSA-44 public key as hex or base64; required on first login."},
+					},
+				},
 				"SyncRequest": map[string]any{
 					"type":     "object",
 					"required": []string{"user_id_hash"},
 					"properties": map[string]any{
-						"protocol_version":     map[string]any{"type": "integer", "description": "Use 4 for encrypted-record dual-write transition support. Version 3 clean hierarchical data responses and versions 1-2 legacy clients remain supported."},
+						"protocol_version":     map[string]any{"type": "integer", "description": "Use 5 for encrypted-record primary private data, or 4 for encrypted-record dual-write transition support. Version 3 clean hierarchical data responses and versions 1-2 legacy clients remain supported."},
+						"app_id":               map[string]any{"type": "string", "description": "Optional through protocol v5. Future protocol v6 requires a registered app_id and registered encrypted record collections."},
 						"client_capabilities":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"include_legacy_data":  map[string]any{"type": "boolean", "description": "Protocol v5 opt-in for receiving legacy typed private rows alongside encrypted records."},
 						"user_id_hash":         map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 						"client_id":            map[string]any{"type": "string"},
 						"client_clock":         map[string]any{"type": "integer"},
@@ -340,6 +607,17 @@ func openAPISpec() map[string]any {
 						"sessions":             map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Session"}},
 						"ops":                  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/SyncOp"}},
 						"encrypted_records":    map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/EncryptedRecord"}},
+					},
+				},
+				"LoginResponse": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"status":             map[string]any{"type": "string"},
+						"auth_token":         map[string]any{"type": "string"},
+						"expires_in_seconds": map[string]any{"type": "integer"},
+						"server_time":        map[string]any{"type": "integer", "description": "Unix seconds from the server clock. Clients can use it to compensate for local clock skew while caching bearer tokens."},
+						"account_alias":      map[string]any{"type": "string"},
+						"profile_icon":       map[string]any{"type": "integer"},
 					},
 				},
 				"SyncResponse": map[string]any{
@@ -474,13 +752,16 @@ func openAPISpec() map[string]any {
 				"EncryptedRecord": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"collection": map[string]any{"type": "string"},
-						"id":         map[string]any{"type": "string"},
-						"key_id":     map[string]any{"type": "string"},
-						"nonce":      map[string]any{"type": "string"},
-						"ciphertext": map[string]any{"type": "string"},
-						"updated_at": map[string]any{"type": "string", "format": "date-time"},
-						"deleted_at": map[string]any{"type": "integer"},
+						"collection":     map[string]any{"type": "string"},
+						"id":             map[string]any{"type": "string"},
+						"key_id":         map[string]any{"type": "string"},
+						"nonce":          map[string]any{"type": "string"},
+						"ciphertext":     map[string]any{"type": "string"},
+						"updated_at":     map[string]any{"type": "string", "format": "date-time"},
+						"deleted_at":     map[string]any{"type": "integer"},
+						"content_hash":   map[string]any{"type": "string", "description": "Optional lowercase SHA-256 hex hash of the canonical plaintext or ciphertext selected by the client protocol."},
+						"schema_version": map[string]any{"type": "integer"},
+						"parent_id":      map[string]any{"type": "string"},
 					},
 				},
 				"SyncOp": map[string]any{

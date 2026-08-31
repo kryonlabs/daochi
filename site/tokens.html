@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Daochi Tokens</title>
-  <meta name="description" content="Daochi Waozi token assets, signed receipts, purchases, spends, app IDs, and ledger checkpoints.">
+  <meta name="description" content="Daochi token assets, signed receipts, purchases, spends, app IDs, and ledger checkpoints.">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -22,13 +22,13 @@
   <main>
     <section class="page-hero">
       <p class="eyebrow">Tokens</p>
-      <h1>Signed Waozi receipts for official app purchases and spends.</h1>
-      <p class="lead">Daochi can issue <code>waozi:token</code> receipts after verifying Google Play, Monero, or admin credits. The ledger is append-only, account-scoped, and app-tagged.</p>
+      <h1>Signed receipts for app purchases and spends.</h1>
+      <p class="lead">Daochi can issue configured asset receipts after verifying a payment provider or admin credit. The ledger is append-only, account-scoped, and app-tagged.</p>
     </section>
 
     <section>
       <h2>Ledger model</h2>
-      <p>Every token event records issuer, asset, account, optional <code>app_id</code>, event type, amount delta, ledger sequence, previous hash, event hash, signature, source type, and source reference. Official clients verify the Ed25519 issuer key and accept only <code>issuer_id=waozi</code> with <code>asset_id=waozi:token</code> for official Waozi balances.</p>
+      <p>Every token event records issuer, asset, account, optional <code>app_id</code>, event type, amount delta, ledger sequence, previous hash, event hash, signature, source type, and source reference. Clients verify the Ed25519 issuer key and accept only the issuer and asset IDs they trust.</p>
       <p>Purchases credit the account ledger. Spends debit the account ledger and require an app ID plus an idempotency key, so repeating a spend request returns the existing receipt instead of double-charging the account.</p>
       <div class="panel">
         <div class="panel-row"><strong>Issuer</strong><span><code>GET /api/v1/tokens/issuer</code></span></div>
@@ -42,7 +42,7 @@
     <section>
       <h2>App scoping</h2>
       <p>Token purchases, spends, invoices, receipts, and spend nonces carry <code>app_id</code>. Daochi validates that the app is registered before accepting a spend or purchase flow. This gives auditability by app and allows clients to prove which app initiated a token event.</p>
-      <p>The current balance endpoint is account-wide for <code>waozi:token</code>; it is not yet a separate per-app allocation pool. If product policy requires per-app token distribution, the next protocol step should add app-filtered balances, app-filtered ledger queries, and explicit account-to-app allocation events.</p>
+      <p>The current balance endpoint is account-wide per asset; it is not yet a separate per-app allocation pool. If product policy requires per-app token distribution, the next protocol step should add app-filtered balances, app-filtered ledger queries, and explicit account-to-app allocation events.</p>
       <div class="callout">
         <p>Token ledger and payment intent rows are financial audit records. They are scoped by account for balance and receipt lookup, but they are intentionally not included in normal account data export and are not deleted by account-data cascade.</p>
       </div>

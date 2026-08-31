@@ -85,12 +85,12 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>ksync-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies typed local changes or stores an encrypted envelope, then returns remote changes newer than the requested server version.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/diagnostics</code><p>Returns bearer-authenticated sync state, table counts, compaction position, legacy client hints, and recent sync audit metadata.</p></section>
-<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the Waozi token issuer key. Official apps accept only Waozi-signed <code>waozi:token</code> receipts.</p></section>
-<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct Monero prices when direct purchases are enabled.</p></section>
-<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's Waozi token balance computed from signed ledger events.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits Waozi tokens with app policy and idempotency enforcement.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/purchases/monero/invoices</code><p>Creates a bearer-authenticated Monero invoice for a configured token product.</p></section>
-<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/invoices/{id}</code><p>Returns invoice status and settles a confirmed Monero payment against the authenticated account.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the configured token issuer key.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct payment prices when direct purchases are enabled.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's token balance computed from signed ledger events.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits tokens with app policy and idempotency enforcement.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/purchases/monero/invoices</code><p>Creates a bearer-authenticated invoice for a configured token product.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/invoices/{id}</code><p>Returns invoice status and settles a confirmed payment against the authenticated account.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/account/app-grants</code><p>Lists or creates bearer-authenticated grants for sharing registered app collection prefixes across apps.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/account/app-records</code><p>Returns encrypted records from a granted collection prefix for cross-app use.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
@@ -167,7 +167,7 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/tokens/issuer": map[string]any{
 				"get": map[string]any{
-					"summary": "Get Waozi token issuer key",
+					"summary": "Get token issuer key",
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Token issuer"},
 					},
@@ -183,7 +183,7 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/tokens/balance": map[string]any{
 				"get": map[string]any{
-					"summary":  "Get authenticated Waozi token balance",
+					"summary":  "Get authenticated token balance",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Token balance"},
@@ -193,7 +193,7 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/tokens/ledger": map[string]any{
 				"get": map[string]any{
-					"summary":  "List authenticated Waozi token receipts",
+					"summary":  "List authenticated token receipts",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Token ledger events"},
@@ -202,7 +202,7 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/tokens/spend": map[string]any{
 				"post": map[string]any{
-					"summary":  "Spend Waozi tokens",
+					"summary":  "Spend tokens",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Signed debit receipt"},
@@ -212,7 +212,7 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/tokens/purchases/google/verify": map[string]any{
 				"post": map[string]any{
-					"summary":  "Verify Google Play purchase and credit Waozi tokens",
+					"summary":  "Verify app-store purchase and credit tokens",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Signed credit receipt"},
@@ -221,22 +221,22 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/tokens/purchases/monero/invoices": map[string]any{
 				"post": map[string]any{
-					"summary":  "Create Monero token invoice",
+					"summary":  "Create direct token invoice",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
-						"201": map[string]any{"description": "Monero invoice"},
+						"201": map[string]any{"description": "Direct payment invoice"},
 					},
 				},
 			},
 			"/api/v1/tokens/purchases/monero/invoices/{id}": map[string]any{
 				"get": map[string]any{
-					"summary":  "Get or settle Monero token invoice",
+					"summary":  "Get or settle direct token invoice",
 					"security": []map[string]any{{"bearerAuth": []string{}}},
 					"parameters": []map[string]any{
 						{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
 					},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Monero invoice status"},
+						"200": map[string]any{"description": "Direct payment invoice status"},
 						"404": map[string]any{"description": "Invoice not found"},
 					},
 				},
@@ -264,7 +264,7 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/admin/tokens/manual-credit": map[string]any{
 				"post": map[string]any{
-					"summary": "Admin credit Waozi tokens",
+					"summary": "Admin credit tokens",
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Signed credit receipt"},
 						"401": map[string]any{"description": "Invalid admin token"},

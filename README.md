@@ -76,7 +76,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `GET /metrics`
 - `GET /`
 
-`api.waozi.xyz` should terminate TLS at a reverse proxy and forward to `KSYNC_ADDR`, for example `127.0.0.1:8080`.
+The public API hostname should terminate TLS at a reverse proxy and forward to `KSYNC_ADDR`, for example `127.0.0.1:8080`.
 Set `KSYNC_TOKEN_SECRET_HEX` to at least 32 random bytes encoded as hex in production.
 `KSYNC_ALLOW_EPHEMERAL_TOKEN_SECRET=1` is only for local development because it invalidates tokens on restart and is not a stable server secret.
 
@@ -151,15 +151,15 @@ Runtime configuration. The current server keeps `KSYNC_*` environment variable n
 
 ```sh
 KSYNC_ADDR=127.0.0.1:8080
-KSYNC_BASE_URL=https://api.waozi.xyz
+KSYNC_BASE_URL=https://api.example.com
 KSYNC_DB=/var/lib/ksync/ksync.db
 KSYNC_ADMIN_TOKEN=<optional app registry write token>
 KSYNC_TOKEN_SECRET_HEX=<stable 64+ hex chars shared by every server instance>
-KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX=<ed25519 public key hex>
-KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX_FILE=/run/secrets/waozi_issuer_public.hex
-KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX=<ed25519 private key hex, issuer nodes only>
-KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX_FILE=/run/secrets/waozi_issuer_private.hex
-KSYNC_TOKEN_PRODUCTS=waozi_tokens_small:5000000:1000000000000
+KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX=<ed25519 public key hex>
+KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE=/run/secrets/token_issuer_public.hex
+KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX=<ed25519 private key hex, issuer nodes only>
+KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE=/run/secrets/token_issuer_private.hex
+KSYNC_TOKEN_PRODUCTS=tokens_small:5000000:1000000000000
 KSYNC_GOOGLE_PACKAGE_NAMES=com.example.app
 KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON=<google service account json>
 KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON_FILE=/run/secrets/google_play_service_account.json
@@ -187,15 +187,15 @@ If `KSYNC_TOKEN_SECRET_HEX` is missing, Daochi generates a random in-memory secr
 
 Encrypted envelope limits are disabled by default to avoid surprising existing clients. Set `KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN` to cap each envelope response, `KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES` to reject writes that would exceed an account quota, and `KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS` only after clients can tolerate older envelope pruning.
 
-## Waozi Tokens
+## Tokens
 
-Daochi can issue `waozi:token` receipts for official Waozi apps. The server verifies Google Play or Monero payments, writes an append-only ledger event, and signs the receipt with the Waozi Ed25519 issuer key. Official clients must verify the issuer key and accept only `issuer_id=waozi` with `asset_id=waozi:token`.
+Daochi can issue signed token receipts for registered assets. The server verifies a payment provider or admin credit, writes an append-only ledger event, and signs the receipt with the configured Ed25519 issuer key. Clients must verify the issuer key and accept only issuer and asset IDs they trust.
 
-Self-hosted Daochi servers may use the same ledger shape for local assets later, but they cannot create official Waozi tokens without the Waozi private issuer key. If only `KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX` is configured, the server can expose and verify receipts but cannot credit or spend tokens.
+Self-hosted Daochi servers may use the same ledger shape for local assets later, but they cannot create receipts for an issuer without that issuer's private key. If only the issuer public key is configured, the server can expose and verify receipts but cannot credit or spend tokens.
 
 Token ledger and payment-intent rows are financial audit records. They are scoped by account for balance and receipt lookup, but they are not included in normal account data export and are not deleted by account-data cascade.
 
-Token purchases, spends, invoices, receipts, and spend nonces carry `app_id`, and spend or purchase flows validate that the app is registered. The current balance is still account-wide for `waozi:token`; Daochi does not yet maintain separate per-app token allocation pools. Add app-filtered balances, app-filtered ledger queries, and explicit account-to-app allocation events before treating per-app token distribution as complete.
+Token purchases, spends, invoices, receipts, and spend nonces carry `app_id`, and spend or purchase flows validate that the app is registered. The current balance is still account-wide per asset; Daochi does not yet maintain separate per-app token allocation pools. Add app-filtered balances, app-filtered ledger queries, and explicit account-to-app allocation events before treating per-app token distribution as complete.
 
 ## Encrypted Hierarchy
 
@@ -217,7 +217,7 @@ Example nginx server block:
 
 ```nginx
 server {
-    server_name api.waozi.xyz;
+    server_name api.example.com;
 
     location / {
         proxy_pass http://127.0.0.1:8080;

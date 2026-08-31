@@ -52,8 +52,14 @@ func loadConfig() Config {
 		}
 		ephemeralSecret = true
 	}
-	issuerPublic := envBytesHexOrFile("KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX", "KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
-	issuerPrivateBytes := envBytesHexOrFile("KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX", "KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX_FILE", nil)
+	issuerPublic := envBytesHexOrFile("KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX", "KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
+	if len(issuerPublic) == 0 {
+		issuerPublic = envBytesHexOrFile("KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX", "KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
+	}
+	issuerPrivateBytes := envBytesHexOrFile("KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX", "KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE", nil)
+	if len(issuerPrivateBytes) == 0 {
+		issuerPrivateBytes = envBytesHexOrFile("KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX", "KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX_FILE", nil)
+	}
 	var issuerPrivate ed25519.PrivateKey
 	if len(issuerPrivateBytes) == ed25519.SeedSize {
 		issuerPrivate = ed25519.NewKeyFromSeed(issuerPrivateBytes)
@@ -65,7 +71,7 @@ func loadConfig() Config {
 	}
 	return Config{
 		Addr:                            envString("KSYNC_ADDR", "127.0.0.1:8080"),
-		BaseURL:                         envString("KSYNC_BASE_URL", "https://api.waozi.xyz"),
+		BaseURL:                         envString("KSYNC_BASE_URL", "https://api.example.com"),
 		DBPath:                          envString("KSYNC_DB", "ksync.db"),
 		AdminToken:                      envString("KSYNC_ADMIN_TOKEN", ""),
 		ChallengeTTL:                    envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second),

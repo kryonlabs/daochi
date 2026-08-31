@@ -75,7 +75,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/liboqs
-          key: liboqs-${{ runner.os }}-${{ hashFiles('vendor/liboqs/CMakeLists.txt') }}
+          key: liboqs-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('vendor/liboqs/CMakeLists.txt') }}
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3

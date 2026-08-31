@@ -4,7 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Daochi Mesh Model</title>
-  <meta name="description" content="Daochi mesh model for local-first records, server relay, device trust, and future peer transports.">
+  <meta name="description" content="Daochi mesh model for offline-first keys, local-first encrypted records, server relay, device trust, and future peer transports.">
+  <meta name="theme-color" content="#f7ede2">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
+  <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -22,13 +28,13 @@
   <main>
     <section class="page-hero">
       <p class="eyebrow">Mesh</p>
-      <h1>Records first, transport second.</h1>
-      <p class="lead">Daochi is deployed as a relay today, but the data model is shaped so encrypted records can move through a server, a local network, or a future peer path without changing app ownership semantics.</p>
+      <h1>Keys and records first, transport second.</h1>
+      <p class="lead">Daochi is deployed as a relay today, but the data model is shaped so device-created account keys and encrypted records can move through a server, a local network, or a future peer path without changing app ownership semantics.</p>
     </section>
 
     <section>
       <h2>Current relay role</h2>
-      <p>The server gives apps a reliable rendezvous point: account discovery, durable version ordering, sync compaction, export, deletion, social projections, and event notification. This keeps existing products practical while clients migrate toward encrypted record ownership.</p>
+      <p>The server gives apps a reliable rendezvous point: account discovery by public-key hash, durable version ordering, sync compaction, export, deletion, social projections, and event notification. This keeps existing products practical while clients migrate toward encrypted record ownership.</p>
       <p>Server-readable data is limited to the compatibility and public surfaces that intentionally need it: aliases, friend requests, selected profile stats, public records, app registrations, token ledger metadata, and legacy typed rows for old clients.</p>
     </section>
 
@@ -36,10 +42,11 @@
       <div class="split">
         <div>
           <h2>Future mesh shape</h2>
-          <p>The mesh direction is local-first rather than server-only. Devices should eventually exchange encrypted records directly when they can, then use the relay when they need availability, ordering, or remote notification.</p>
+          <p>The mesh direction is local-first rather than server-only. A device should be able to create its account key offline, use that key to prove authority with ML-DSA-44 signatures, exchange encrypted records directly when it can, then use the relay when it needs availability, ordering, or remote notification.</p>
           <p>Conflict handling stays close to each app's domain model. Daochi provides record identity, account identity, timestamps, versions, deletion markers, content hashes, and parent references; apps decide how habits, sessions, proposals, votes, and other domain objects merge.</p>
         </div>
         <div class="panel">
+          <div class="panel-row"><strong>Device</strong><span>offline account-key creation and client-side record encryption</span></div>
           <div class="panel-row"><strong>Server</strong><span>Durable relay, ordering, export, deletion, remote events</span></div>
           <div class="panel-row"><strong>LAN</strong><span>Future nearby-device exchange for encrypted records</span></div>
           <div class="panel-row"><strong>Peer</strong><span>Future explicit-trust path for device-to-device sync</span></div>

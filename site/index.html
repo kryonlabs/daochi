@@ -4,15 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Daochi</title>
-  <meta name="description" content="Mesh-native sync for app-owned data, signed identity, encrypted records, remote events, and signed token receipts.">
+  <meta name="description" content="Mesh-native sync with offline-first account keys, post-quantum signed identity, encrypted records, remote events, and signed token receipts.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://daochi.net/">
   <meta property="og:title" content="Daochi">
-  <meta property="og:description" content="Mesh-native sync for app-owned data.">
+  <meta property="og:description" content="Offline-first account keys, post-quantum signed identity, and encrypted app-owned records.">
+  <meta property="og:image" content="https://daochi.net/icon-512.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Daochi">
-  <meta name="twitter:description" content="Mesh-native sync for app-owned data.">
-  <meta name="theme-color" content="#f7f8fb">
+  <meta name="twitter:description" content="Offline-first account keys, post-quantum signed identity, and encrypted app-owned records.">
+  <meta name="twitter:image" content="https://daochi.net/icon-512.png">
+  <meta name="theme-color" content="#f7ede2">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
+  <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -29,28 +36,32 @@
 
   <main>
     <section class="hero">
-      <p class="eyebrow">Mesh-native sync for app-owned data</p>
+      <img class="hero-logo" src="/assets/daochi-logo-pixel-128.png" width="128" height="128" alt="">
+      <p class="eyebrow">Offline-first keys for mesh-native sync</p>
       <h1>Daochi</h1>
-      <p class="lead">A sync relay and protocol surface for native, web, desktop, mobile, and TUI apps that need signed identity, encrypted private records, signed app registration, remote events, and portable app-owned data.</p>
+      <p class="lead">A sync relay and protocol surface where the account's root authority is a device-created ML-DSA-44 keypair: a post-quantum proof of account control for encrypted, app-owned records.</p>
       <div class="actions">
         <a class="button" href="/protocol.html">Protocol</a>
         <a class="button secondary" href="/mesh.html">Mesh model</a>
-        <a class="button secondary" href="/tokens.html">Token receipts</a>
       </div>
     </section>
 
     <section>
       <p class="eyebrow">What it does</p>
-      <h2>Server-assisted today, designed for records that can move through more than one path.</h2>
-      <p>Daochi stores public keys, account metadata, app registrations, sync versions, encrypted records, and selected public or social projections. It never stores client private keys. Existing clients can keep using the compatibility wire names while the product name moves from Ksync to Daochi.</p>
+      <h2>Server-assisted today, designed for keys and records that do not depend on the server.</h2>
+      <p>Daochi stores public keys, account metadata, app registrations, sync versions, encrypted records, and selected public or social projections. Account keys are generated client-side and can exist before the first network request. The relay never stores client private keys. Existing clients can keep using the compatibility wire names while the product name moves from Ksync to Daochi.</p>
       <div class="grid">
         <article class="card">
-          <h3>Signed accounts</h3>
-          <p>Clients prove account control by signing short-lived challenges. The server issues cacheable bearer tokens for normal sync and social calls.</p>
+          <h3>Offline-first keys</h3>
+          <p>Clients create and retain the durable account key locally. The server sees the public key, its account hash, and signatures, not the private key.</p>
+        </article>
+        <article class="card">
+          <h3>Post-quantum identity</h3>
+          <p>The ML-DSA-44 account key is the root authority. Login, deletion, and strict transactions prove control with post-quantum signatures.</p>
         </article>
         <article class="card">
           <h3>Encrypted records</h3>
-          <p>Private data can be written as opaque versioned records. The relay stores and orders the blobs without parsing their contents.</p>
+          <p>Private data is written as opaque versioned ciphertext. The relay stores, orders, exports, and deletes the blobs without parsing their contents.</p>
         </article>
         <article class="card">
           <h3>App ownership</h3>
@@ -59,6 +70,50 @@
         <article class="card">
           <h3>Remote events</h3>
           <p>WebSocket events notify clients when newer data exists while keeping bearer tokens out of request URLs.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <p class="eyebrow">Security posture</p>
+      <h2>The server coordinates sync; the user's root authority stays in the account key.</h2>
+      <div class="security-list">
+        <article>
+          <h3>Key creation starts offline</h3>
+          <p>A new client can generate its ML-DSA-44 account key before it talks to Daochi. First login registers the public key, and future logins prove control by signing fresh challenges.</p>
+        </article>
+        <article>
+          <h3>Private records stay client encrypted</h3>
+          <p>Protocol v5 makes encrypted records the primary private-data surface. Daochi validates record metadata and versions ciphertext, but plaintext and record encryption choices stay with clients and apps.</p>
+        </article>
+        <article>
+          <h3>Post-quantum where authority is proven</h3>
+          <p>Daochi's shipped post-quantum proof is account authority through ML-DSA-44 signatures. App manifest keys and token issuer keys are separate Ed25519 authorities.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="milestones">
+      <p class="eyebrow">Milestones</p>
+      <h2>From compatible sync to a mesh-native post-quantum proof standard.</h2>
+      <p>Daochi keeps older clients working while moving each protocol generation away from server-owned trust. The shipped post-quantum claim is account authority: the durable account key is ML-DSA-44. Full post-quantum record confidentiality still needs a specified client encryption profile.</p>
+
+      <div class="milestone-shell compact">
+        <div class="milestone-rail" role="tablist" aria-label="Protocol milestones">
+          <button class="milestone-step" type="button" role="tab" aria-selected="true" data-id="v1"><b>v1</b><span>signed base</span></button>
+          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v2"><b>v2</b><span>operation log</span></button>
+          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v3"><b>v3</b><span>clean reads</span></button>
+          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v4"><b>v4</b><span>encrypted records</span></button>
+          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v5"><b>v5</b><span>encrypted primary</span></button>
+          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v6"><b>v6</b><span>signed tx</span></button>
+          <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="next"><b>next</b><span>mesh standard</span></button>
+        </div>
+
+        <article class="milestone-detail" aria-live="polite">
+          <div class="version" id="milestone-version">v1</div>
+          <h3 id="milestone-title">Signed compatibility base</h3>
+          <p id="milestone-summary">Account control is proven by the client account key instead of a server password.</p>
+          <div class="standard-note" id="milestone-note"><span>root authority: post-quantum account proof</span></div>
         </article>
       </div>
     </section>
@@ -84,5 +139,34 @@
     <span>&copy; 2026 <a href="https://kryonlabs.com">Kryon Labs</a></span>
     <a href="https://github.com/kryonlabs/daochi">Source</a>
   </footer>
+
+  <script>
+    const milestones = {
+      v1: ["v1", "Signed compatibility base", "Account control is proven by the client account key instead of a server password.", "root authority: post-quantum account proof"],
+      v2: ["v2", "Operation log", "Clients can retry and converge through operation IDs, server versions, and idempotent writes.", "compatibility retained"],
+      v3: ["v3", "Clean hierarchical reads", "Newer clients get cleaner typed data while older compatibility clients continue to sync.", "prepares private/public split"],
+      v4: ["v4", "Encrypted-record transition", "Clients can dual-write legacy rows and opaque encrypted records while the relay stores versions.", "record confidentiality moves client-side"],
+      v5: ["v5", "Encrypted records become primary", "Private app data moves into encrypted hierarchical collections; legacy private rows are opt-in.", "private default: encrypted record surface"],
+      v6: ["v6", "Strict signed transactions", "X-Daochi-Tx binds account authority, app authority, body hash, path, nonce, and expiry.", "account authority remains post-quantum"],
+      next: ["next", "Mesh-native proof standard", "Specify device lifecycle, peer transports, and classical, hybrid, or post-quantum record encryption profiles.", "target, not yet a shipped confidentiality claim"]
+    };
+
+    const steps = Array.from(document.querySelectorAll(".milestone-step"));
+    const version = document.getElementById("milestone-version");
+    const title = document.getElementById("milestone-title");
+    const summary = document.getElementById("milestone-summary");
+    const note = document.getElementById("milestone-note");
+
+    function showMilestone(id) {
+      const item = milestones[id] || milestones.v1;
+      version.textContent = item[0];
+      title.textContent = item[1];
+      summary.textContent = item[2];
+      note.firstElementChild.textContent = item[3];
+      steps.forEach(step => step.setAttribute("aria-selected", String(step.dataset.id === id)));
+    }
+
+    steps.forEach(step => step.addEventListener("click", () => showMilestone(step.dataset.id)));
+  </script>
 </body>
 </html>

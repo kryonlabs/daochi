@@ -4,7 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Daochi Protocol</title>
-  <meta name="description" content="Daochi protocol details for signed identity, encrypted records, sync compatibility, and remote events.">
+  <meta name="description" content="Daochi protocol details for offline-first account keys, post-quantum signed identity, encrypted records, sync compatibility, and remote events.">
+  <meta name="theme-color" content="#f7ede2">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
+  <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -22,20 +28,22 @@
   <main>
     <section class="page-hero">
       <p class="eyebrow">Protocol</p>
-      <h1>Signed sync with a stable compatibility window.</h1>
-      <p class="lead">The protocol keeps shipped compatibility clients working while moving new clients toward encrypted private records, app-owned collection namespaces, signed transaction envelopes, and transport-neutral record envelopes.</p>
+      <h1>Post-quantum proof of account authority.</h1>
+      <p class="lead">The protocol keeps shipped compatibility clients working while moving new clients toward device-generated account keys, ML-DSA-44 account signatures, encrypted private records, app-owned collection namespaces, signed transaction envelopes, and transport-neutral record envelopes.</p>
     </section>
 
     <section>
       <div class="split">
         <div>
           <h2>Identity and authentication</h2>
-          <p>A client account is identified by the hash of its public account key. Login starts with a single-use challenge for that account, then the client signs a canonical request body with ML-DSA-44. Daochi verifies the signature and returns a bearer token for ordinary sync and social endpoints.</p>
+          <p>A client account starts with key material created and retained by the client. The ML-DSA-44 keypair is the root account authority. The account is identified by the hash of its public key, so a device can create the durable identity before it ever contacts the relay. First sync or login registers the public key. Later login starts with a single-use challenge for that account, then the client signs a canonical request body with ML-DSA-44. Daochi verifies the post-quantum proof of control and returns a bearer token for ordinary sync and social endpoints.</p>
           <p>Bearer tokens are operational credentials, not the durable account identity. Clients should repeat the challenge and login flow when a token expires, receives a <code>401</code>, or the server restarts with a new development token secret.</p>
         </div>
         <div class="panel">
+          <div class="panel-row"><strong>Key origin</strong><span>generated client-side before relay registration</span></div>
           <div class="panel-row"><strong>Challenge</strong><span><code>GET /api/v1/sync/challenge?user_id=&lt;hash&gt;</code></span></div>
           <div class="panel-row"><strong>Login</strong><span><code>POST /api/v1/sync/login</code> with signed JSON</span></div>
+          <div class="panel-row"><strong>Signature</strong><span>ML-DSA-44 account proof</span></div>
           <div class="panel-row"><strong>Token</strong><span>HMAC bearer credential scoped to the account hash</span></div>
           <div class="panel-row"><strong>Clock</strong><span>Responses include server Unix time for client expiry skew handling</span></div>
         </div>
@@ -45,7 +53,7 @@
     <section>
       <h2>Sync surfaces</h2>
       <p>The legacy typed sync surface stores rows and JSON payloads that the server can read and compact. It remains available for clients that shipped before encrypted private records were primary.</p>
-      <p>Encrypted records are keyed by <code>collection</code> and <code>id</code>. The server validates names, versions the records, relays them to newer clients, exports them, and deletes them with the account, but does not need to inspect the ciphertext. Protocol v5 treats encrypted records as the primary private-data surface and returns legacy private rows only when clients explicitly request them.</p>
+      <p>Encrypted records are keyed by <code>collection</code> and <code>id</code>. The server validates names, versions the records, relays them to newer clients, exports them, and deletes them with the account, but does not need to inspect the ciphertext. Protocol v5 treats encrypted records as the primary private-data surface and returns legacy private rows only when clients explicitly request them. The relay stores opaque ciphertext; apps remain responsible for their record encryption scheme, nonce discipline, and key rotation.</p>
       <div class="grid">
         <article class="card">
           <h3>v4 transition</h3>
@@ -72,6 +80,12 @@
         <div class="panel-row"><strong>Account</strong><span>ML-DSA-44 signature over the canonical transaction</span></div>
         <div class="panel-row"><strong>App</strong><span>Ed25519 signature from an active manifest key</span></div>
       </div>
+    </section>
+
+    <section>
+      <h2>Private key boundary</h2>
+      <p>Normal login, sync, signed transactions, and account deletion do not upload the account private key. The website deletion helper can accept an exported account key file for recovery and support cases; it signs a fixed deletion proof, verifies that proof against the registered public key, deletes the account data, and does not store the uploaded key.</p>
+      <p>This distinction matters for the security claim: Daochi's account authority is post-quantum through ML-DSA-44 signatures, while encrypted record confidentiality is provided by client-side ciphertext that the relay is designed to move without reading.</p>
     </section>
 
     <section>

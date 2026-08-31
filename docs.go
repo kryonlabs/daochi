@@ -36,11 +36,13 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Daochi</title>
 <style>
-body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;line-height:1.5;color:#18202a;background:#f5f1e8}
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Mono:ital,wght@0,300;0,400;0,600;1,400&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&display=swap');
+body{font-family:"Noto Sans Mono",ui-monospace,Menlo,monospace;margin:0;line-height:1.85;color:#4a4038;background:linear-gradient(180deg,#f7ede2 0%%,#f2e2d0 60%%,#f7ede2 100%%);font-size:13.5px}
 main{max-width:1040px;margin:0 auto;padding:44px 20px 28px}
 .hero{padding:54px 0 42px;border-bottom:1px solid #d8cdbd}
 .eyebrow{margin:0 0 10px;color:#7b5b2a;font-size:.78rem;font-weight:750;letter-spacing:.15em;text-transform:uppercase}
-h1{margin:0;color:#14262b;font-size:clamp(4rem,12vw,8rem);line-height:.85;letter-spacing:0}
+h1{margin:0;color:#14262b;font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(3.4rem,9vw,6.6rem);font-weight:600;line-height:.92;letter-spacing:0}
+h2{font-family:"Cormorant Garamond",Georgia,serif}
 .lead{max-width:760px;margin:22px 0 0;color:#4f5d62;font-size:1.22rem}
 .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
 .button{display:inline-flex;align-items:center;min-height:40px;padding:0 15px;border:1px solid #19353b;border-radius:6px;background:#19353b;color:white;text-decoration:none;font-weight:750}
@@ -54,6 +56,9 @@ code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 pre{overflow:auto;background:#14262b;color:#f9fafb;padding:16px;border-radius:8px}
 .endpoint{margin:10px 0}
 .method{display:inline-block;min-width:56px;font-weight:700}
+.security{display:grid;gap:12px;margin:20px 0}
+.security p{margin:0;color:#59676c}
+.security strong{display:block;color:#18202a}
 .status{border-top:1px solid #d8cdbd;margin-top:22px;padding-top:14px;display:flex;gap:18px;align-items:center;color:#5c6675;font-size:.9rem;flex-wrap:wrap}
 .status strong{color:#18202a;font-weight:650}
 .status-error{border-top:1px solid #d8cdbd;margin-top:22px;padding-top:14px;color:#5c6675}
@@ -65,16 +70,22 @@ a{color:#0b625d}
 <body>
 <main>
 <section class="hero">
-<p class="eyebrow">Mesh-native sync for app-owned data</p>
+<p class="eyebrow">Offline-first keys for mesh-native sync</p>
 <h1>Daochi</h1>
-<p class="lead">Signed identity, portable sync, encrypted records, and remote events for native and web apps. Server-assisted today, built toward a mesh-native network.</p>
+<p class="lead">Device-created account keys, post-quantum proof of account authority, encrypted records, and remote events for native and web apps. Server-assisted today, built toward a mesh-native network.</p>
 <div class="actions"><a class="button" href="/openapi.json">OpenAPI JSON</a><a class="button secondary" href="/healthz">Health check</a><a class="button secondary" href="/readyz">Readiness</a></div>
 </section>
 <section class="grid" aria-label="Daochi capabilities">
-<article class="card"><h2>Signed identity</h2><p>Accounts prove control with short-lived challenges and ML-DSA signatures. Private keys stay on the client.</p></article>
+<article class="card"><h2>Offline-first keys</h2><p>Clients create the durable ML-DSA-44 account key locally. The relay sees the public key, account hash, and signatures, not the private key.</p></article>
+<article class="card"><h2>Post-quantum account authority</h2><p>The durable account key is ML-DSA-44. Clients prove control with short-lived challenges before receiving operational bearer tokens.</p></article>
 <article class="card"><h2>App-owned records</h2><p>Applications keep ownership of their data while the relay stores versions, opaque encrypted payloads, and shared projections.</p></article>
 <article class="card"><h2>Remote events</h2><p>WebSocket events wake clients when fresh sync data is available without exposing bearer tokens through URLs.</p></article>
 <article class="card"><h2>Mesh roadmap</h2><p>The protocol is shaped for local-first and cross-device sync, with server relay as the current deployment path.</p></article>
+</section>
+<section class="security" aria-label="Security posture">
+<p><strong>Key creation starts offline.</strong> A device can create its account key before the first network request; first login registers the public key, and later logins prove control with fresh signatures.</p>
+<p><strong>Private records stay client encrypted.</strong> Daochi validates metadata and versions ciphertext, but plaintext and record encryption choices remain with clients and apps.</p>
+<p><strong>The post-quantum proof is account authority.</strong> Daochi uses ML-DSA-44 signatures for identity and account authorization; app manifest keys and token issuer keys are separate Ed25519 authorities.</p>
 </section>
 <h2 class="section-title">API surface</h2>
 <p>Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility. Protocol v1 through v5 remain valid through 2027-09-01.</p>

@@ -80,10 +80,9 @@ type AppKey struct {
 }
 
 type TokenPolicy struct {
-	AssetID             string `json:"asset_id"`
-	Permission          string `json:"permission"`
-	Status              string `json:"status,omitempty"`
-	LegacyUnsignedUntil int64  `json:"legacy_unsigned_until,omitempty"`
+	AssetID    string `json:"asset_id"`
+	Permission string `json:"permission"`
+	Status     string `json:"status,omitempty"`
 }
 
 func readSignedTxHeader(r *http.Request) (SignedTxEnvelope, error) {

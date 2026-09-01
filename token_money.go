@@ -1064,17 +1064,14 @@ func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []
 	if !hasPolicy {
 		return nil
 	}
-	policy, ok, err := s.store.AppTokenPermission(ctx, appID, assetID, permission)
+	_, ok, err := s.store.AppTokenPermission(ctx, appID, assetID, permission)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return authError{status: http.StatusForbidden, message: "app token permission denied"}
 	}
-	if hasSignedTx || (policy.LegacyUnsignedUntil > 0 && time.Now().Unix() <= policy.LegacyUnsignedUntil) {
-		return nil
-	}
-	return authError{status: http.StatusUnauthorized, message: "signed transaction required"}
+	return nil
 }
 
 func validTokenPolicyPermission(value string) bool {

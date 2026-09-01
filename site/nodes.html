@@ -71,11 +71,6 @@
       return text(value);
     }
 
-    function legacyWindow(value) {
-      if (!value) return "signed transaction required";
-      return `legacy unsigned until ${dateTime(value)}`;
-    }
-
     function resultLabel(result) {
       if (!result) return "not checked";
       if (result.ok) return `${result.status} ok`;
@@ -176,7 +171,6 @@
             <li>
               <code>${text(item.asset_id)}</code>
               <span>${text(item.permission)} ${text(item.status, "active")}</span>
-              <em>${legacyWindow(item.legacy_unsigned_until)}</em>
             </li>`, "none")}
         </article>
       `;

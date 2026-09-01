@@ -221,7 +221,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/tokens/spend": map[string]any{
 				"post": map[string]any{
 					"summary":     "Spend tokens",
-					"description": "If the app has signed token policies, this endpoint requires the matching policy and requires X-Daochi-Tx after any policy-defined legacy unsigned grace deadline.",
+					"description": "If the app has token policies, this endpoint requires the matching app asset permission. X-Daochi-Tx is validated when present.",
 					"security":    []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Signed debit receipt"},
@@ -233,7 +233,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/tokens/purchases/google/verify": map[string]any{
 				"post": map[string]any{
 					"summary":     "Verify app-store purchase and credit tokens",
-					"description": "If the app has signed token policies, this endpoint requires a purchase policy and requires X-Daochi-Tx after any policy-defined legacy unsigned grace deadline.",
+					"description": "If the app has token policies, this endpoint requires a purchase permission. X-Daochi-Tx is validated when present.",
 					"security":    []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Signed credit receipt"},
@@ -243,7 +243,7 @@ func openAPISpec() map[string]any {
 			"/api/v1/tokens/purchases/monero/invoices": map[string]any{
 				"post": map[string]any{
 					"summary":     "Create direct token invoice",
-					"description": "If the app has signed token policies, this endpoint requires a purchase policy and requires X-Daochi-Tx after any policy-defined legacy unsigned grace deadline.",
+					"description": "If the app has token policies, this endpoint requires a purchase permission. X-Daochi-Tx is validated when present.",
 					"security":    []map[string]any{{"bearerAuth": []string{}}},
 					"responses": map[string]any{
 						"201": map[string]any{"description": "Direct payment invoice"},
@@ -729,10 +729,9 @@ func openAPISpec() map[string]any {
 				"TokenPolicy": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"asset_id":              map[string]any{"type": "string"},
-						"permission":            map[string]any{"type": "string"},
-						"status":                map[string]any{"type": "string"},
-						"legacy_unsigned_until": map[string]any{"type": "integer"},
+						"asset_id":   map[string]any{"type": "string"},
+						"permission": map[string]any{"type": "string"},
+						"status":     map[string]any{"type": "string"},
 					},
 				},
 				"LoginRequest": map[string]any{

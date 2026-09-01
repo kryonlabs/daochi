@@ -49,7 +49,7 @@
     <section>
       <h2>App scoping</h2>
       <p>Token purchases, spends, invoices, receipts, and spend nonces carry <code>app_id</code>. Daochi validates that the app is registered before accepting a spend or purchase flow. Account-wide balance and ledger reads remain the default. Passing <code>app_id</code> returns only token events for that app.</p>
-      <p>Signed app manifests can define token policies for <code>spend</code> and <code>purchase</code>. Once policies exist for an app, token actions need the matching policy and, after any declared legacy grace deadline, a valid <code>X-Daochi-Tx</code> envelope signed by both the account key and an active app key.</p>
+      <p>Signed app manifests can define token policies for <code>spend</code> and <code>purchase</code>. Once policies exist for an app, token actions need the matching app asset permission. A supplied <code>X-Daochi-Tx</code> envelope is verified, but unsigned token requests remain supported while token client integration is still pending.</p>
       <div class="callout">
         <p>Token ledger and payment intent rows are financial audit records. App-filtered balances are audit views over those rows, not separate allocation pools. Explicit account-to-app allocation events are still needed before per-app token distribution is complete.</p>
       </div>

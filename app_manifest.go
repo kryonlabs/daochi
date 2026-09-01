@@ -84,10 +84,9 @@ VALUES(?1,?2,?3,?4,?5,?6,?7)`,
 	}
 	for _, policy := range manifest.TokenPolicies {
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until)
-VALUES(?1,?2,?3,?4,?5)`,
-			manifest.AppID, policy.AssetID, policy.Permission, defaultString(policy.Status, appStatusActive),
-			policy.LegacyUnsignedUntil); err != nil {
+INSERT INTO token_app_permissions(app_id,asset_id,permission,status)
+VALUES(?1,?2,?3,?4)`,
+			manifest.AppID, policy.AssetID, policy.Permission, defaultString(policy.Status, appStatusActive)); err != nil {
 			return err
 		}
 	}
@@ -161,10 +160,10 @@ VALUES(?1,?2)`, app.AppID, capability); err != nil {
 		}
 		for _, policy := range app.TokenPolicies {
 			if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until)
-VALUES(?1,?2,?3,?4,?5)`,
+INSERT INTO token_app_permissions(app_id,asset_id,permission,status)
+VALUES(?1,?2,?3,?4)`,
 				app.AppID, policy.AssetID, policy.Permission,
-				defaultString(policy.Status, appStatusActive), policy.LegacyUnsignedUntil); err != nil {
+				defaultString(policy.Status, appStatusActive)); err != nil {
 				return err
 			}
 		}
@@ -251,7 +250,7 @@ ORDER BY key_id`, appID)
 
 func (s *Store) TokenPolicies(ctx context.Context, appID string) ([]TokenPolicy, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT asset_id,permission,status,legacy_unsigned_until
+SELECT asset_id,permission,status
 FROM token_app_permissions
 WHERE app_id=?1
 ORDER BY asset_id,permission`, appID)
@@ -262,7 +261,7 @@ ORDER BY asset_id,permission`, appID)
 	var out []TokenPolicy
 	for rows.Next() {
 		var policy TokenPolicy
-		if err := rows.Scan(&policy.AssetID, &policy.Permission, &policy.Status, &policy.LegacyUnsignedUntil); err != nil {
+		if err := rows.Scan(&policy.AssetID, &policy.Permission, &policy.Status); err != nil {
 			return nil, err
 		}
 		out = append(out, policy)
@@ -286,10 +285,10 @@ VALUES(?1,?2,?3,?4,?5)`, tx.AccountID, tx.TxID, tx.AppID, tx.Nonce, tx.ExpiresAt
 func (s *Store) AppTokenPermission(ctx context.Context, appID, assetID, permission string) (TokenPolicy, bool, error) {
 	var policy TokenPolicy
 	err := s.db.QueryRowContext(ctx, `
-SELECT asset_id,permission,status,legacy_unsigned_until
+SELECT asset_id,permission,status
 FROM token_app_permissions
 WHERE app_id=?1 AND asset_id=?2 AND permission=?3 AND status='active'`, appID, assetID, permission).Scan(
-		&policy.AssetID, &policy.Permission, &policy.Status, &policy.LegacyUnsignedUntil)
+		&policy.AssetID, &policy.Permission, &policy.Status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TokenPolicy{}, false, nil
 	}
@@ -521,10 +520,6 @@ func validateAppManifest(manifest AppManifest) error {
 		}
 		if policy.Status != "" && policy.Status != appStatusActive && policy.Status != appStatusSuspended {
 			return errors.New("invalid token policy status")
-		}
-		if policy.LegacyUnsignedUntil > 0 &&
-			time.Unix(policy.LegacyUnsignedUntil, 0).After(time.Now().Add(time.Duration(ksyncPreviousVersionGrace)*24*time.Hour)) {
-			return errors.New("legacy unsigned token window too long")
 		}
 	}
 	if manifest.ExpiresAt > 0 && time.Now().Unix() > manifest.ExpiresAt {

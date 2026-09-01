@@ -13,11 +13,10 @@ import (
 )
 
 const (
-	appStatusActive              = "active"
-	appStatusSuspended           = "suspended"
-	appGrantRead                 = "read"
-	appCompatibilityDeadline     = "2027-09-01"
-	appCompatibilityDeadlineUnix = 1819756800
+	appStatusActive          = "active"
+	appStatusSuspended       = "suspended"
+	appGrantRead             = "read"
+	appCompatibilityDeadline = "2027-09-01"
 )
 
 func (s *Store) SeedBuiltinApps(ctx context.Context) error {
@@ -52,8 +51,8 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 			{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
 		},
 		TokenPolicies: []TokenPolicy{
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive, LegacyUnsignedUntil: appCompatibilityDeadlineUnix},
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive, LegacyUnsignedUntil: appCompatibilityDeadlineUnix},
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive},
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive},
 		},
 	}
 	ukuvota := AppRegistration{
@@ -85,8 +84,8 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 			{ID: "draft.sync", Collections: []string{"private.ukuvota.v1.drafts.*"}, RequiresSignedTx: true},
 		},
 		TokenPolicies: []TokenPolicy{
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive, LegacyUnsignedUntil: appCompatibilityDeadlineUnix},
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive, LegacyUnsignedUntil: appCompatibilityDeadlineUnix},
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive},
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive},
 		},
 	}
 	if err := s.UpsertApp(ctx, inbe); err != nil {

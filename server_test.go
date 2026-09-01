@@ -900,9 +900,8 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 		}},
 		Capabilities: []string{"encrypted-records"},
 		TokenPolicies: []TokenPolicy{{
-			AssetID:             waoziTokenAssetID,
-			Permission:          tokenPermissionSpend,
-			LegacyUnsignedUntil: time.Now().Add(365 * 24 * time.Hour).Unix(),
+			AssetID:    waoziTokenAssetID,
+			Permission: tokenPermissionSpend,
 		}},
 	}
 	manifestBytes, manifestHash, err := formatAppManifestForTest(manifest)

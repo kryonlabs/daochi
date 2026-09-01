@@ -80,7 +80,7 @@ jobs:
             mkdir -p /var/lib/ksync/backups
             cp /opt/ksync/ksync \"/var/lib/ksync/backups/ksync.pre-upgrade.$STAMP\"
             sqlite3 /var/lib/ksync/ksync.db \".backup '/var/lib/ksync/backups/ksync.db.$STAMP'\" 2>/dev/null || true
-            cp /opt/ksync-src/ksync /opt/ksync/ksync.new
+            cp /opt/ksync-src/daochi /opt/ksync/ksync.new
             mv /opt/ksync/ksync.new /opt/ksync/ksync
             systemctl restart ksync.service
             sleep 3

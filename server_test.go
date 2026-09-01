@@ -3922,6 +3922,8 @@ func TestUkuVoteDisplayNameUniqueness(t *testing.T) {
 
 func TestAllowedCORSOrigin(t *testing.T) {
 	allowed := []string{
+		"https://daochi.pages.dev",
+		"https://daochi.kryonlabs.com",
 		"https://inbe.waozi.xyz",
 		"https://uku.waozi.xyz",
 		"http://localhost:8080",

@@ -107,6 +107,20 @@ func TestDocsEndpoints(t *testing.T) {
 	assertOpenAPIRefsResolve(t, decoded)
 }
 
+func TestEnvNodePeers(t *testing.T) {
+	t.Setenv("KSYNC_KNOWN_NODES", "Alpha=https://alpha.example/, Beta|https://beta.example, https://alpha.example")
+	peers := envNodePeers("KSYNC_KNOWN_NODES")
+	if len(peers) != 2 {
+		t.Fatalf("peer count = %d peers=%#v", len(peers), peers)
+	}
+	if peers[0].Name != "Alpha" || peers[0].URL != "https://alpha.example" {
+		t.Fatalf("first peer = %#v", peers[0])
+	}
+	if peers[1].Name != "Beta" || peers[1].URL != "https://beta.example" {
+		t.Fatalf("second peer = %#v", peers[1])
+	}
+}
+
 func TestWaoziTokenCreditSpendAndIdempotency(t *testing.T) {
 	server, _, _ := testServer(t)
 	publicKey, privateKey, err := ed25519.GenerateKey(nil)
@@ -1334,6 +1348,9 @@ func TestHashMismatchRequiresFullSnapshotAfterApplyingUpload(t *testing.T) {
 
 func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 	server, _, _ := testServer(t)
+	server.cfg.KnownNodes = []NodePeer{
+		{Name: "Mirror node", URL: "https://mirror.example"},
+	}
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x61)
 
@@ -1341,6 +1358,33 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 	handler.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if ready.Code != http.StatusOK {
 		t.Fatalf("readyz status = %d body=%s", ready.Code, ready.Body.String())
+	}
+
+	nodeInfo := httptest.NewRecorder()
+	handler.ServeHTTP(nodeInfo, httptest.NewRequest(http.MethodGet, "/api/v1/node", nil))
+	if nodeInfo.Code != http.StatusOK {
+		t.Fatalf("node info status = %d body=%s", nodeInfo.Code, nodeInfo.Body.String())
+	}
+	var nodePayload struct {
+		Status       string     `json:"status"`
+		Capabilities []string   `json:"capabilities"`
+		KnownNodes   []NodePeer `json:"known_nodes"`
+		Protocol     struct {
+			MinSupported int `json:"min_supported"`
+			Latest       int `json:"latest"`
+		} `json:"protocol"`
+	}
+	if err := json.Unmarshal(nodeInfo.Body.Bytes(), &nodePayload); err != nil {
+		t.Fatal(err)
+	}
+	if nodePayload.Status != "ok" ||
+		nodePayload.Protocol.MinSupported != ksyncMinSupportedProtocol ||
+		nodePayload.Protocol.Latest != ksyncLatestProtocol ||
+		!containsString(nodePayload.Capabilities, "aliases") ||
+		!containsString(nodePayload.Capabilities, "friends") ||
+		len(nodePayload.KnownNodes) != 1 ||
+		nodePayload.KnownNodes[0].URL != "https://mirror.example" {
+		t.Fatalf("unexpected node info payload: %#v", nodePayload)
 	}
 
 	body := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"test-client-1","encrypted_records":[{"collection":"private","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-19T12:00:00Z"}]}`)

@@ -26,6 +26,7 @@ type Config struct {
 	EncryptedPayloadMaxAccountBytes int64
 	EncryptedPayloadRetention       time.Duration
 	NodeRegistryPublicKey           ed25519.PublicKey
+	KnownNodes                      []NodePeer
 	WaoziIssuerPublicKey            ed25519.PublicKey
 	WaoziIssuerPrivateKey           ed25519.PrivateKey
 	TokenProducts                   map[string]TokenProduct
@@ -71,9 +72,10 @@ func loadConfig() Config {
 	if len(issuerPrivate) == ed25519.PrivateKeySize && len(issuerPublic) == 0 {
 		issuerPublic = issuerPrivate.Public().(ed25519.PublicKey)
 	}
+	baseURL := envString("KSYNC_BASE_URL", "https://api.example.com")
 	return Config{
 		Addr:                            envString("KSYNC_ADDR", "127.0.0.1:8080"),
-		BaseURL:                         envString("KSYNC_BASE_URL", "https://api.example.com"),
+		BaseURL:                         baseURL,
 		DBPath:                          envString("KSYNC_DB", "ksync.db"),
 		AdminToken:                      envString("KSYNC_ADMIN_TOKEN", ""),
 		ChallengeTTL:                    envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second),
@@ -85,6 +87,7 @@ func loadConfig() Config {
 		EncryptedPayloadMaxAccountBytes: envInt64("KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0),
 		EncryptedPayloadRetention:       envDurationDays("KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS", 0),
 		NodeRegistryPublicKey:           nodeRegistryPublic,
+		KnownNodes:                      envNodePeers("KSYNC_KNOWN_NODES"),
 		WaoziIssuerPublicKey:            issuerPublic,
 		WaoziIssuerPrivateKey:           issuerPrivate,
 		TokenProducts:                   envTokenProducts("KSYNC_TOKEN_PRODUCTS"),
@@ -202,6 +205,37 @@ func envStringSet(key string) map[string]bool {
 		}
 	}
 	return out
+}
+
+func envNodePeers(key string) []NodePeer {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var peers []NodePeer
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		name := ""
+		urlValue := item
+		if before, after, ok := strings.Cut(item, "="); ok {
+			name = strings.TrimSpace(before)
+			urlValue = after
+		} else if before, after, ok := strings.Cut(item, "|"); ok {
+			name = strings.TrimSpace(before)
+			urlValue = after
+		}
+		urlValue = strings.TrimRight(strings.TrimSpace(urlValue), "/")
+		if urlValue == "" || seen[urlValue] {
+			continue
+		}
+		seen[urlValue] = true
+		peers = append(peers, NodePeer{Name: name, URL: urlValue})
+	}
+	return peers
 }
 
 func envTokenProducts(key string) map[string]TokenProduct {

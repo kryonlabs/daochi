@@ -38,6 +38,11 @@ type LoginResponse struct {
 	ProfileIcon  int    `json:"profile_icon,omitempty"`
 }
 
+type NodePeer struct {
+	Name string `json:"name,omitempty"`
+	URL  string `json:"url"`
+}
+
 type AccountExportResponse struct {
 	Status       string                      `json:"status"`
 	UserIDHash   string                      `json:"user_id_hash"`

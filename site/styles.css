@@ -231,6 +231,114 @@ li {
   gap: 16px;
 }
 
+.node-browser {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.node-map-card,
+.node-detail-shell {
+  min-width: 0;
+}
+
+.node-map-card {
+  position: sticky;
+  top: 82px;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 252, 247, .72);
+  box-shadow: 0 14px 40px rgba(180, 106, 90, .08);
+}
+
+.node-map-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.node-map-heading h2 {
+  margin-bottom: 0;
+  font-size: clamp(1.55rem, 3vw, 2.35rem);
+}
+
+.section-label {
+  margin: 0 0 6px;
+  color: var(--red);
+  font-size: .68rem;
+  font-weight: 850;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.node-map-count {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid rgba(63, 95, 140, .24);
+  border-radius: 999px;
+  background: rgba(63, 95, 140, .08);
+  color: var(--blue);
+  font-size: .72rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.node-canvas-wrap {
+  height: clamp(320px, 46vw, 520px);
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+#node-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.node-rail {
+  display: grid;
+  gap: 8px;
+}
+
+.node-rail button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 54px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.node-rail button:hover,
+.node-rail button.active {
+  border-color: rgba(4, 101, 95, .42);
+  background: rgba(4, 101, 95, .06);
+}
+
+.node-rail button span {
+  font-weight: 850;
+}
+
+.node-rail button em {
+  color: var(--muted);
+  font-size: .72rem;
+  font-style: normal;
+}
+
 .node-card,
 .app-card,
 .token-card {
@@ -264,6 +372,40 @@ li {
 
 .node-card > h4 {
   margin-top: 18px;
+}
+
+.node-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 18px 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(242, 226, 208, .55);
+}
+
+.node-tabs button {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 850 .72rem/1 "Noto Sans Mono", ui-monospace, Menlo, monospace;
+  text-transform: uppercase;
+}
+
+.node-tabs button:hover,
+.node-tabs button.active {
+  border-color: rgba(4, 101, 95, .28);
+  background: var(--surface);
+  color: var(--teal-dark);
+}
+
+.node-tab-panel {
+  min-width: 0;
 }
 
 .app-card h5 {
@@ -710,6 +852,23 @@ pre {
 
   .split {
     grid-template-columns: 1fr;
+  }
+
+  .node-browser {
+    grid-template-columns: 1fr;
+  }
+
+  .node-map-card {
+    position: static;
+  }
+
+  .node-map-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .node-canvas-wrap {
+    height: 340px;
   }
 
   .page-hero {

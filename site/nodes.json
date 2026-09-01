@@ -2,7 +2,8 @@
   "nodes": [
     {
       "name": "Waozi public node",
-      "url": "https://api.waozi.xyz"
+      "url": "https://api.waozi.xyz",
+      "peers": []
     }
   ]
 }

@@ -87,6 +87,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
+	mux.HandleFunc("GET /api/v1/node", s.handleNodeInfo)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/v1/apps", s.handleAppList)
 	mux.HandleFunc("POST /api/v1/apps", s.handleAppList)
@@ -178,6 +179,23 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, map[string]any{
 		"status": statusText(status == http.StatusOK),
 		"checks": checks,
+	})
+}
+
+func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
+	knownNodes := s.cfg.KnownNodes
+	if knownNodes == nil {
+		knownNodes = []NodePeer{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "ok",
+		"base_url":     strings.TrimSpace(s.cfg.BaseURL),
+		"capabilities": ksyncServerCapabilities,
+		"known_nodes":  knownNodes,
+		"protocol": map[string]int{
+			"min_supported": ksyncMinSupportedProtocol,
+			"latest":        ksyncLatestProtocol,
+		},
 	})
 }
 

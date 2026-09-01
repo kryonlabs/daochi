@@ -30,17 +30,32 @@
     <section class="page-hero">
       <p class="eyebrow">Nodes</p>
       <h1>Registered apps are visible per node.</h1>
-      <p class="lead">Each Daochi node chooses which app manifests it accepts. Clients can check the node registry before enabling app-owned sync features.</p>
+      <p class="lead">Each Daochi node publishes its peer nodes, accepted tokens, app manifests, node-level capabilities, readiness checks, and protocol bounds.</p>
     </section>
 
-    <section>
-      <h2>Known nodes</h2>
-      <div id="node-list" class="node-list" aria-live="polite">
-        <article class="node-card">
-          <h3>Loading nodes</h3>
-          <p>Checking configured Daochi nodes.</p>
-        </article>
+    <section class="node-browser" aria-label="Daochi node map">
+      <div class="node-map-card">
+        <div class="node-map-heading">
+          <div>
+            <p class="section-label">Node Canvas</p>
+            <h2>Network view</h2>
+          </div>
+          <div id="node-map-count" class="node-map-count">loading</div>
+        </div>
+        <div class="node-canvas-wrap">
+          <canvas id="node-canvas" width="920" height="520" aria-label="Daochi node connection canvas"></canvas>
+        </div>
+        <div id="node-rail" class="node-rail" aria-label="Node selector"></div>
       </div>
+
+      <aside class="node-detail-shell">
+        <div id="node-detail" class="node-detail" aria-live="polite">
+          <article class="node-card">
+            <h3>Loading nodes</h3>
+            <p>Checking configured Daochi nodes.</p>
+          </article>
+        </div>
+      </aside>
     </section>
   </main>
 
@@ -50,24 +65,61 @@
   </footer>
 
   <script>
-    const list = document.getElementById("node-list");
+    const canvas = document.getElementById("node-canvas");
+    const ctx = canvas.getContext("2d");
+    const detail = document.getElementById("node-detail");
+    const rail = document.getElementById("node-rail");
+    const count = document.getElementById("node-map-count");
 
-    function text(value, fallback = "") {
+    const state = {
+      nodes: [],
+      edges: [],
+      selected: 0,
+      hover: -1,
+      tab: "overview",
+      hitAreas: [],
+      dpr: 1
+    };
+
+    const MAX_DISCOVERED_NODES = 24;
+
+    function plain(value, fallback = "") {
       return typeof value === "string" && value.trim() ? value.trim() : fallback;
     }
 
+    function escapeHTML(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function text(value, fallback = "") {
+      return escapeHTML(plain(value, fallback));
+    }
+
+    function attr(value) {
+      return escapeHTML(plain(value));
+    }
+
+    function normalizeURL(value) {
+      return plain(value).replace(/\/+$/, "");
+    }
+
     function join(items) {
-      return Array.isArray(items) && items.length ? items.join(", ") : "none declared";
+      return Array.isArray(items) && items.length ? items.map((item) => text(item)).join(", ") : "none declared";
     }
 
     function itemList(items, renderItem, fallback = "none declared") {
-      if (!Array.isArray(items) || !items.length) return `<p>${fallback}</p>`;
+      if (!Array.isArray(items) || !items.length) return `<p>${text(fallback)}</p>`;
       return `<ul class="detail-list">${items.map(renderItem).join("")}</ul>`;
     }
 
     function dateTime(value) {
       if (!value) return "";
-      if (typeof value === "number") return new Date(value * 1000).toISOString();
+      if (typeof value === "number") return escapeHTML(new Date(value * 1000).toISOString());
       return text(value);
     }
 
@@ -80,7 +132,7 @@
     function detailRows(rows) {
       if (!Array.isArray(rows) || !rows.length) return "<p>none</p>";
       return `<dl class="detail-grid">${rows.map(([label, value]) => `
-        <div><dt>${label}</dt><dd>${value || "none"}</dd></div>
+        <div><dt>${text(label)}</dt><dd>${value || "none"}</dd></div>
       `).join("")}</dl>`;
     }
 
@@ -100,9 +152,37 @@
     }
 
     function link(url, label) {
-      const href = text(url);
+      const href = plain(url);
       if (!href) return "";
-      return `<a href="${href.replaceAll('"', "&quot;")}">${label}</a>`;
+      return `<a href="${attr(href)}">${text(label)}</a>`;
+    }
+
+    function peerList(value) {
+      if (!Array.isArray(value)) return [];
+      const peers = [];
+      const seen = new Set();
+      for (const item of value) {
+        const peer = typeof item === "string" ? { url: item } : item || {};
+        const url = normalizeURL(peer.url || peer.base_url);
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        peers.push({ name: plain(peer.name, url), url });
+      }
+      return peers;
+    }
+
+    function mergePeers(...lists) {
+      const merged = [];
+      const seen = new Set();
+      for (const list of lists) {
+        for (const peer of list) {
+          const url = normalizeURL(peer.url);
+          if (!url || seen.has(url)) continue;
+          seen.add(url);
+          merged.push({ name: plain(peer.name, url), url });
+        }
+      }
+      return merged;
     }
 
     function appMarkup(app) {
@@ -120,17 +200,17 @@
           </div>
           <div class="tag-row">
             <span>${text(app.status, "unknown")}</span>
-            <span>schema v${app.app_schema_version || 0}</span>
+            <span>schema v${Number(app.app_schema_version || 0)}</span>
             ${app.min_supported_client_version ? `<span>min client ${text(app.min_supported_client_version)}</span>` : ""}
             ${app.current_client_version ? `<span>client ${text(app.current_client_version)}</span>` : ""}
-            ${app.compatibility_until ? `<span>compat until ${app.compatibility_until}</span>` : ""}
+            ${app.compatibility_until ? `<span>compat until ${text(app.compatibility_until)}</span>` : ""}
             ${app.manifest_hash ? `<span>signed manifest</span>` : ""}
           </div>
           ${detailRows([
             ["App ID", `<code>${text(app.app_id)}</code>`],
             ["Created", text(app.created_at)],
             ["Updated", text(app.updated_at)],
-            ["Manifest version", app.manifest_version ? `v${app.manifest_version}` : ""],
+            ["Manifest version", app.manifest_version ? `v${Number(app.manifest_version)}` : ""],
             ["Manifest expires", dateTime(app.manifest_expires_at)],
             ["Public key", app.public_key ? `<code>${text(app.public_key)}</code>` : ""],
             ["Manifest hash", app.manifest_hash ? `<code>${text(app.manifest_hash)}</code>` : ""],
@@ -150,14 +230,14 @@
           ${itemList(collections, (item) => `
             <li>
               <code>${text(item.collection_prefix)}</code>
-              <span>${text(item.visibility, "private")}${item.schema_version ? ` schema v${item.schema_version}` : ""}${item.created_at ? ` created ${text(item.created_at)}` : ""}</span>
+              <span>${text(item.visibility, "private")}${item.schema_version ? ` schema v${Number(item.schema_version)}` : ""}${item.created_at ? ` created ${text(item.created_at)}` : ""}</span>
               ${item.description ? `<em>${text(item.description)}</em>` : ""}
             </li>`)}
           <h5>Legacy</h5>
           ${itemList(legacy, (item) => `
             <li>
               <code>${text(item.name)}</code>
-              <span>${text(item.status, "compatibility")}${item.version ? ` v${item.version}` : ""} until ${text(item.valid_until, "unspecified")}</span>
+              <span>${text(item.status, "compatibility")}${item.version ? ` v${Number(item.version)}` : ""} until ${text(item.valid_until, "unspecified")}</span>
             </li>`, "none")}
           <h5>Keys</h5>
           ${itemList(keys, (item) => `
@@ -186,7 +266,7 @@
           <div class="tag-row">
             <span>${text(asset.status, "unknown")}</span>
             <span>issuer ${text(asset.issuer_id, "unknown")}</span>
-            <span>${asset.decimals || 0} decimals</span>
+            <span>${Number(asset.decimals || 0)} decimals</span>
           </div>
           ${issuer && issuer.issuer_id === asset.issuer_id ? detailRows([
             ["Issuer status", text(issuer.status)],
@@ -201,13 +281,13 @@
       return `
         <li>
           <code>${text(product.product_id)}</code>
-          <span>${product.token_units || 0} token units${product.monero_atomic_amount ? ` / ${product.monero_atomic_amount} atomic XMR` : ""}</span>
+          <span>${Number(product.token_units || 0)} token units${product.monero_atomic_amount ? ` / ${Number(product.monero_atomic_amount)} atomic XMR` : ""}</span>
         </li>
       `;
     }
 
     async function appDetail(nodeUrl, app) {
-      const appID = text(app.app_id);
+      const appID = plain(app.app_id);
       if (!appID) return app;
       try {
         const response = await fetch(`${nodeUrl}/api/v1/apps/${encodeURIComponent(appID)}`, { cache: "no-store" });
@@ -218,75 +298,387 @@
       }
     }
 
-    async function loadNode(node) {
-      const nodeUrl = text(node.url).replace(/\/+$/, "");
-      try {
-        const [health, ready, appsResult, tokenResult, issuerResult, productResult] = await Promise.all([
-          fetchJSON(`${nodeUrl}/healthz`),
-          fetchJSON(`${nodeUrl}/readyz`),
-          fetchJSON(`${nodeUrl}/api/v1/apps`),
-          fetchJSON(`${nodeUrl}/api/v1/tokens/assets`),
-          fetchJSON(`${nodeUrl}/api/v1/tokens/issuer`),
-          fetchJSON(`${nodeUrl}/api/v1/tokens/products`)
-        ]);
-        const readiness = ready.data && ready.data.checks ? ready.data.checks : {};
-        const tokens = Array.isArray(tokenResult.data.assets) ? tokenResult.data.assets : [];
-        const products = Array.isArray(productResult.data.products) ? productResult.data.products : [];
-        const apps = Array.isArray(appsResult.data.apps) ? appsResult.data.apps : [];
-        const registrations = await Promise.all(apps.map((app) => appDetail(nodeUrl, app)));
-        const online = health.ok && appsResult.ok && tokenResult.ok;
-        return `
-          <article class="node-card">
-            <div class="node-heading">
-              <div>
-                <h3>${text(node.name, nodeUrl)}</h3>
-                <p><a href="${nodeUrl}">${nodeUrl}</a></p>
-              </div>
-              <span class="status-pill${online ? "" : " offline"}">${online ? "online" : "degraded"}</span>
-            </div>
-            <h4>Node Diagnostics</h4>
-            ${detailRows([
-              ["Health", resultLabel(health)],
-              ["Readiness", resultLabel(ready)],
-              ["Apps endpoint", resultLabel(appsResult)],
-              ["Token assets endpoint", resultLabel(tokenResult)],
-              ["Token issuer endpoint", resultLabel(issuerResult)],
-              ["Token products endpoint", resultLabel(productResult)]
-            ])}
-            <h4>Readiness Checks</h4>
-            ${detailRows(Object.entries(readiness).map(([key, value]) => [key, text(value)]))}
-            <h4>Accepted Tokens</h4>
-            <div class="token-list">${tokens.length ? tokens.map((asset) => tokenMarkup(asset, issuerResult.data)).join("") : "<p>No accepted tokens published.</p>"}</div>
-            <h4>Purchase Products</h4>
-            ${itemList(products, productMarkup, "No direct purchase products published.")}
-            <h4>Registered Apps</h4>
-            <div class="app-list">${registrations.length ? registrations.map(appMarkup).join("") : "<p>No apps registered.</p>"}</div>
-          </article>
-        `;
-      } catch (error) {
-        return `
-          <article class="node-card">
-            <div class="node-heading">
-              <div>
-                <h3>${text(node.name, nodeUrl)}</h3>
-                <p><a href="${nodeUrl}">${nodeUrl}</a></p>
-              </div>
-              <span class="status-pill offline">offline</span>
-            </div>
-            <p>Could not load this node from the browser. The node may be offline or may not expose cross-origin registry reads.</p>
-          </article>
-        `;
-      }
+    async function loadNode(node, index) {
+      const nodeUrl = normalizeURL(node.url);
+      const declaredPeers = peerList(node.peers);
+      const [nodeInfo, health, ready, appsResult, tokenResult, issuerResult, productResult] = await Promise.all([
+        fetchJSON(`${nodeUrl}/api/v1/node`),
+        fetchJSON(`${nodeUrl}/healthz`),
+        fetchJSON(`${nodeUrl}/readyz`),
+        fetchJSON(`${nodeUrl}/api/v1/apps`),
+        fetchJSON(`${nodeUrl}/api/v1/tokens/assets`),
+        fetchJSON(`${nodeUrl}/api/v1/tokens/issuer`),
+        fetchJSON(`${nodeUrl}/api/v1/tokens/products`)
+      ]);
+      const readiness = ready.data && ready.data.checks ? ready.data.checks : {};
+      const tokens = Array.isArray(tokenResult.data.assets) ? tokenResult.data.assets : [];
+      const products = Array.isArray(productResult.data.products) ? productResult.data.products : [];
+      const apps = Array.isArray(appsResult.data.apps) ? appsResult.data.apps : [];
+      const registrations = await Promise.all(apps.map((app) => appDetail(nodeUrl, app)));
+      const publishedPeers = peerList(nodeInfo.data.known_nodes);
+      const peers = mergePeers(declaredPeers, publishedPeers);
+      const online = health.ok && appsResult.ok && tokenResult.ok;
+      return {
+        index,
+        name: plain(node.name, nodeUrl),
+        url: nodeUrl,
+        online,
+        status: online ? "online" : "degraded",
+        nodeInfo,
+        health,
+        ready,
+        appsResult,
+        tokenResult,
+        issuerResult,
+        productResult,
+        readiness,
+        peers,
+        tokens,
+        products,
+        apps: registrations
+      };
     }
+
+    function overviewMarkup(node) {
+      const protocol = node.nodeInfo.data && node.nodeInfo.data.protocol ? node.nodeInfo.data.protocol : {};
+      const capabilities = Array.isArray(node.nodeInfo.data.capabilities) ? node.nodeInfo.data.capabilities : [];
+      return `
+        <h4>Node Info</h4>
+        ${detailRows([
+          ["Node URL", `<a href="${attr(node.url)}">${text(node.url)}</a>`],
+          ["Configured name", text(node.name)],
+          ["Health", resultLabel(node.health)],
+          ["Readiness", resultLabel(node.ready)],
+          ["Node metadata endpoint", resultLabel(node.nodeInfo)],
+          ["Apps endpoint", resultLabel(node.appsResult)],
+          ["Token assets endpoint", resultLabel(node.tokenResult)],
+          ["Token issuer endpoint", resultLabel(node.issuerResult)],
+          ["Token products endpoint", resultLabel(node.productResult)],
+          ["Base URL", text(node.nodeInfo.data.base_url)],
+          ["Known peer nodes", String(node.peers.length)],
+          ["Min protocol", protocol.min_supported ? String(Number(protocol.min_supported)) : ""],
+          ["Latest protocol", protocol.latest ? String(Number(protocol.latest)) : ""],
+          ["Registered apps", String(node.apps.length)],
+          ["Accepted token assets", String(node.tokens.length)]
+        ])}
+        <h4>Node Capabilities</h4>
+        ${itemList(capabilities, (capability) => `<li><code>${text(capability)}</code></li>`, "none declared")}
+        <h4>Known Node Peers</h4>
+        ${itemList(node.peers, (peer) => `<li><a href="${attr(peer.url)}">${text(peer.name)}</a><span>${text(peer.url)}</span></li>`, "none declared")}
+        <h4>Readiness Checks</h4>
+        ${detailRows(Object.entries(node.readiness).map(([key, value]) => [key, text(value)]))}
+      `;
+    }
+
+    function tokensMarkup(node) {
+      return `
+        <h4>Accepted Tokens</h4>
+        <div class="token-list">${node.tokens.length ? node.tokens.map((asset) => tokenMarkup(asset, node.issuerResult.data)).join("") : "<p>No accepted tokens published.</p>"}</div>
+        <h4>Purchase Products</h4>
+        ${itemList(node.products, productMarkup, "No direct purchase products published.")}
+      `;
+    }
+
+    function appsMarkup(node) {
+      return `
+        <h4>Registered Apps</h4>
+        <div class="app-list">${node.apps.length ? node.apps.map(appMarkup).join("") : "<p>No apps registered.</p>"}</div>
+      `;
+    }
+
+    function renderDetail() {
+      const node = state.nodes[state.selected];
+      if (!node) {
+        detail.innerHTML = `<article class="node-card"><h3>No node selected</h3><p>No configured nodes are available.</p></article>`;
+        return;
+      }
+      const panels = {
+        overview: overviewMarkup,
+        tokens: tokensMarkup,
+        apps: appsMarkup
+      };
+      const tab = panels[state.tab] ? state.tab : "overview";
+      detail.innerHTML = `
+        <article class="node-card selected-node-card">
+          <div class="node-heading">
+            <div>
+              <h3>${text(node.name)}</h3>
+              <p><a href="${attr(node.url)}">${text(node.url)}</a></p>
+            </div>
+            <span class="status-pill${node.online ? "" : " offline"}">${text(node.status)}</span>
+          </div>
+          <div class="node-tabs" role="tablist" aria-label="${text(node.name)} details">
+            ${["overview", "tokens", "apps"].map((id) => `
+              <button type="button" class="${tab === id ? "active" : ""}" data-tab="${id}" role="tab" aria-selected="${tab === id ? "true" : "false"}">${text(id)}</button>
+            `).join("")}
+          </div>
+          <div class="node-tab-panel" role="tabpanel">
+            ${panels[tab](node)}
+          </div>
+        </article>
+      `;
+    }
+
+    function renderRail() {
+      rail.innerHTML = state.nodes.map((node, index) => `
+        <button type="button" class="${index === state.selected ? "active" : ""}" data-node-index="${index}">
+          <span>${text(node.name)}</span>
+          <em>${text(node.status)} / ${node.peers.length} peers / ${node.apps.length} apps / ${node.tokens.length} tokens</em>
+        </button>
+      `).join("");
+      count.textContent = `${state.nodes.length} nodes / ${state.edges.length} connections`;
+    }
+
+    function nodePoint(index, total, width, height) {
+      if (total <= 1) return { x: width * 0.5, y: height * 0.48 };
+      const radius = Math.min(width, height) * 0.34;
+      const angle = -Math.PI / 2 + (Math.PI * 2 * index) / total;
+      return {
+        x: width * 0.5 + Math.cos(angle) * radius,
+        y: height * 0.52 + Math.sin(angle) * radius
+      };
+    }
+
+    function drawLabel(label, x, y, maxWidth, align = "center") {
+      ctx.textAlign = align;
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "#4a4038";
+      ctx.font = "700 12px 'Noto Sans Mono', monospace";
+      const clipped = label.length > 30 ? label.slice(0, 27) + "..." : label;
+      ctx.fillText(clipped, x, y, maxWidth);
+    }
+
+    function drawArrow(from, to, active) {
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      const unitX = dx / distance;
+      const unitY = dy / distance;
+      const start = { x: from.x + unitX * 32, y: from.y + unitY * 32 };
+      const end = { x: to.x - unitX * 32, y: to.y - unitY * 32 };
+      ctx.strokeStyle = active ? "rgba(159, 124, 47, .82)" : "rgba(4, 101, 95, .32)";
+      ctx.fillStyle = active ? "rgba(159, 124, 47, .82)" : "rgba(4, 101, 95, .42)";
+      ctx.lineWidth = active ? 3 : 2;
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+
+      const head = active ? 11 : 9;
+      ctx.beginPath();
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(end.x - unitX * head - unitY * head * .55, end.y - unitY * head + unitX * head * .55);
+      ctx.lineTo(end.x - unitX * head + unitY * head * .55, end.y - unitY * head - unitX * head * .55);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function renderCanvas() {
+      if (!ctx) return;
+      const rect = canvas.parentElement.getBoundingClientRect();
+      const width = Math.max(320, Math.floor(rect.width));
+      const height = Math.max(300, Math.floor(rect.height));
+      state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(width * state.dpr);
+      canvas.height = Math.floor(height * state.dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const gradient = ctx.createLinearGradient(0, 0, width, height);
+      gradient.addColorStop(0, "#fffaf4");
+      gradient.addColorStop(1, "#f2e2d0");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = "rgba(230, 213, 196, .68)";
+      ctx.lineWidth = 1;
+      for (let x = 34; x < width; x += 34) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      for (let y = 34; y < height; y += 34) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+
+      state.hitAreas = [];
+
+      state.nodes.forEach((node, index) => {
+        const point = nodePoint(index, state.nodes.length, width, height);
+        node.canvasPoint = point;
+      });
+
+      state.edges.forEach((edge) => {
+        const source = state.nodes[edge.from];
+        const target = state.nodes[edge.to];
+        if (!source || !target || !source.canvasPoint || !target.canvasPoint) return;
+        drawArrow(source.canvasPoint, target.canvasPoint, edge.from === state.selected || edge.to === state.selected);
+      });
+
+      if (!state.edges.length) {
+        ctx.fillStyle = "rgba(74, 64, 56, .58)";
+        ctx.font = "700 12px 'Noto Sans Mono', monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText("no published peer connections yet", width * 0.5, height - 36, width - 40);
+      }
+
+      state.nodes.forEach((node, index) => {
+        const point = node.canvasPoint;
+        const selected = index === state.selected;
+        const hover = index === state.hover;
+        const radius = selected ? 29 : hover ? 27 : 24;
+        const fill = node.online ? "#04655f" : "#b46a5a";
+        const ring = selected ? "#9f7c2f" : "rgba(255, 252, 247, .95)";
+
+        ctx.fillStyle = "rgba(74, 64, 56, .13)";
+        ctx.beginPath();
+        ctx.arc(point.x + 4, point.y + 7, radius + 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = ring;
+        ctx.lineWidth = selected ? 5 : 4;
+        ctx.stroke();
+
+        ctx.fillStyle = "#fffcf7";
+        ctx.font = "800 12px 'Noto Sans Mono', monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(node.peers.length), point.x, point.y - 5);
+        ctx.font = "700 9px 'Noto Sans Mono', monospace";
+        ctx.fillText("peers", point.x, point.y + 8);
+        drawLabel(node.name, point.x, point.y + radius + 12, 180);
+
+        state.hitAreas.push({ index, x: point.x, y: point.y, r: radius + 12 });
+      });
+    }
+
+    function selectNode(index) {
+      if (!state.nodes[index]) return;
+      state.selected = index;
+      renderRail();
+      renderDetail();
+      renderCanvas();
+    }
+
+    async function loadGraph(seedNodes) {
+      const nodes = [];
+      const byURL = new Map();
+
+      function enqueue(rawNode) {
+        const url = normalizeURL(rawNode && rawNode.url);
+        if (!url || byURL.has(url) || nodes.length >= MAX_DISCOVERED_NODES) return;
+        byURL.set(url, nodes.length);
+        nodes.push({
+          name: plain(rawNode.name, url),
+          url,
+          peers: peerList(rawNode.peers)
+        });
+      }
+
+      seedNodes.forEach(enqueue);
+      for (let index = 0; index < nodes.length; index++) {
+        const loaded = await loadNode(nodes[index], index);
+        nodes[index] = loaded;
+        byURL.set(loaded.url, index);
+        loaded.peers.forEach((peer) => enqueue(peer));
+      }
+
+      const edges = [];
+      const seenEdges = new Set();
+      nodes.forEach((node, from) => {
+        node.index = from;
+        node.peers.forEach((peer) => {
+          const to = byURL.get(normalizeURL(peer.url));
+          if (to === undefined || to === from) return;
+          const key = `${from}->${to}`;
+          if (seenEdges.has(key)) return;
+          seenEdges.add(key);
+          edges.push({ from, to });
+        });
+      });
+      return { nodes, edges };
+    }
+
+    function pointFromEvent(event) {
+      const rect = canvas.getBoundingClientRect();
+      const source = event.touches && event.touches.length ? event.touches[0] : event;
+      return {
+        x: source.clientX - rect.left,
+        y: source.clientY - rect.top
+      };
+    }
+
+    function hitTest(point) {
+      for (const hit of state.hitAreas) {
+        const dx = point.x - hit.x;
+        const dy = point.y - hit.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= hit.r) return hit.index;
+      }
+      return -1;
+    }
+
+    canvas.addEventListener("pointermove", (event) => {
+      const hit = hitTest(pointFromEvent(event));
+      if (hit !== state.hover) {
+        state.hover = hit;
+        canvas.style.cursor = hit >= 0 ? "pointer" : "default";
+        renderCanvas();
+      }
+    });
+
+    canvas.addEventListener("pointerleave", () => {
+      state.hover = -1;
+      canvas.style.cursor = "default";
+      renderCanvas();
+    });
+
+    canvas.addEventListener("click", (event) => {
+      const hit = hitTest(pointFromEvent(event));
+      if (hit >= 0) selectNode(hit);
+    });
+
+    detail.addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-tab]");
+      if (!tab) return;
+      state.tab = tab.getAttribute("data-tab") || "overview";
+      renderDetail();
+    });
+
+    rail.addEventListener("click", (event) => {
+      const nodeButton = event.target.closest("[data-node-index]");
+      if (!nodeButton) return;
+      selectNode(Number(nodeButton.getAttribute("data-node-index")));
+    });
+
+    window.addEventListener("resize", () => renderCanvas());
 
     async function main() {
       try {
         const response = await fetch("/nodes.json", { cache: "no-store" });
         const config = await response.json();
         const nodes = Array.isArray(config.nodes) ? config.nodes : [];
-        list.innerHTML = (await Promise.all(nodes.map(loadNode))).join("");
+        const graph = await loadGraph(nodes);
+        state.nodes = graph.nodes;
+        state.edges = graph.edges;
+        state.selected = 0;
+        renderRail();
+        renderDetail();
+        renderCanvas();
       } catch (error) {
-        list.innerHTML = `<article class="node-card"><h3>Node list unavailable</h3><p>Could not load the checked-in node configuration.</p></article>`;
+        count.textContent = "unavailable";
+        detail.innerHTML = `<article class="node-card"><h3>Node list unavailable</h3><p>Could not load the checked-in node configuration.</p></article>`;
+        renderCanvas();
       }
     }
 

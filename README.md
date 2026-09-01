@@ -14,7 +14,7 @@ Clients that encrypt the whole sync payload may post an encrypted envelope to `P
 
 Daochi keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding product behavior. Registered apps can send `app_id` in v5 compatibility mode only when that app's registered compatibility policy allows it. Older shipped Inbe clients without `app_id` continue to sync during the compatibility window. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections that belong to that registered app.
 
-Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01** for legacy clients covered by app policy. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid. App manifests declare their own compatibility windows through `compatibility_until` and `legacy_protocols`; app token policies may also declare a temporary unsigned legacy window, capped at 365 days, so released clients can migrate without sudden token-flow breakage.
+Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01** for legacy clients covered by app policy. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid. App manifests declare their own compatibility windows through `compatibility_until` and `legacy_protocols`.
 
 API access is scoped by account, with explicit shared surfaces:
 
@@ -36,6 +36,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/apps/register-signed`
 - `GET /api/v1/apps/{app_id}`
 - `GET /api/v1/apps/{app_id}/collections`
+- `GET /api/v1/node`
 - `GET /api/v1/tokens/assets`
 - `GET /api/v1/tokens/products`
 - `GET /api/v1/tokens/issuer`
@@ -189,6 +190,7 @@ KSYNC_ADMIN_TOKEN=<optional app registry write token>
 KSYNC_TOKEN_SECRET_HEX=<stable 64+ hex chars shared by every server instance>
 KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX=<ed25519 public key hex for signed app approvals>
 KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE=/run/secrets/node_registry_public.hex
+KSYNC_KNOWN_NODES=Mirror=https://mirror.example
 KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX=<ed25519 public key hex>
 KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE=/run/secrets/token_issuer_public.hex
 KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX=<ed25519 private key hex, issuer nodes only>
@@ -210,6 +212,8 @@ KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN=0
 KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES=0
 KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS=0
 ```
+
+`KSYNC_KNOWN_NODES` is a comma-separated public peer-node list. Entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`; `/api/v1/node` publishes that list as `known_nodes` so clients and the nodes page can discover node-to-node connections.
 
 Generate a token secret once and keep it stable across restarts and every deployed instance:
 

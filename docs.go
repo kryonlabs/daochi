@@ -160,6 +160,14 @@ func openAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/node": map[string]any{
+				"get": map[string]any{
+					"summary": "Node metadata",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Node protocol bounds, capabilities, and known peer nodes"},
+					},
+				},
+			},
 			"/metrics": map[string]any{
 				"get": map[string]any{
 					"summary": "Prometheus metrics",

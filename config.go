@@ -243,10 +243,15 @@ func envNodePeersValue(raw string) []NodePeer {
 		}
 		name := ""
 		urlValue := item
-		if before, after, ok := strings.Cut(item, "="); ok {
+		policyFields := []string{}
+		if fields := strings.Split(item, ";"); len(fields) > 1 {
+			urlValue = strings.TrimSpace(fields[0])
+			policyFields = fields[1:]
+		}
+		if before, after, ok := strings.Cut(urlValue, "="); ok {
 			name = strings.TrimSpace(before)
 			urlValue = after
-		} else if before, after, ok := strings.Cut(item, "|"); ok {
+		} else if before, after, ok := strings.Cut(urlValue, "|"); ok {
 			name = strings.TrimSpace(before)
 			urlValue = after
 		}
@@ -255,9 +260,80 @@ func envNodePeersValue(raw string) []NodePeer {
 			continue
 		}
 		seen[urlValue] = true
-		peers = append(peers, NodePeer{Name: name, URL: urlValue})
+		peers = append(peers, NodePeer{Name: name, URL: urlValue, Sync: envNodeSyncPolicyValue(policyFields)})
 	}
 	return peers
+}
+
+func envNodeSyncPolicyValue(fields []string) *NodeSyncPolicy {
+	var policy NodeSyncPolicy
+	for _, field := range fields {
+		key, value, ok := strings.Cut(strings.TrimSpace(field), "=")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		switch key {
+		case "sync", "mode", "direction":
+			policy.Direction = normalizeNodeSyncDirection(value)
+		case "app", "apps", "app_id", "app_ids":
+			policy.Apps = splitNodeSyncList(value)
+		case "collection", "collections":
+			policy.Collections = splitNodeSyncList(value)
+		case "data", "type", "types":
+			policy.Data = splitNodeSyncList(value)
+		case "enabled":
+			if !envBoolValue(value, true) {
+				policy.Direction = "none"
+			}
+		}
+	}
+	if policy.Direction == "" && len(policy.Apps) == 0 && len(policy.Collections) == 0 && len(policy.Data) == 0 {
+		return nil
+	}
+	if policy.Direction == "" {
+		policy.Direction = "bidirectional"
+	}
+	return &policy
+}
+
+func normalizeNodeSyncDirection(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "pull", "receive", "from_peer", "from-peer":
+		return "pull"
+	case "push", "send", "to_peer", "to-peer":
+		return "push"
+	case "bidirectional", "both", "mirror", "readwrite", "read-write":
+		return "bidirectional"
+	case "none", "off", "disabled", "false", "0", "no":
+		return "none"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func splitNodeSyncList(value string) []string {
+	value = strings.NewReplacer("|", "+", " ", "+").Replace(value)
+	seen := map[string]bool{}
+	var out []string
+	for _, item := range strings.Split(value, "+") {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func envBoolValue(value string, fallback bool) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return fallback
+	}
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func envTokenProducts(key string) map[string]TokenProduct {

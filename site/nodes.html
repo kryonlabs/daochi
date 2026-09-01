@@ -206,9 +206,19 @@
         const url = normalizeURL(peer.url || peer.base_url);
         if (!url || seen.has(url)) continue;
         seen.add(url);
-        peers.push({ name: plain(peer.name, url), url });
+        peers.push({ name: plain(peer.name, url), url, sync: peer.sync || null });
       }
       return peers;
+    }
+
+    function syncPolicyText(policy) {
+      if (!policy) return "sync policy not declared";
+      const parts = [];
+      if (policy.direction) parts.push(text(policy.direction));
+      if (Array.isArray(policy.apps) && policy.apps.length) parts.push(`apps ${policy.apps.map((item) => text(item)).join(", ")}`);
+      if (Array.isArray(policy.collections) && policy.collections.length) parts.push(`collections ${policy.collections.map((item) => text(item)).join(", ")}`);
+      if (Array.isArray(policy.data) && policy.data.length) parts.push(`data ${policy.data.map((item) => text(item)).join(", ")}`);
+      return parts.length ? parts.join(" / ") : "sync policy not declared";
     }
 
     function mergePeers(...lists) {
@@ -434,7 +444,7 @@
           ["Logical data size", formatBytes(storage.logical_bytes)]
         ]), { open: true, meta: `${node.status} / protocol ${Number(protocol.latest || 0)}` })}
         ${disclosure("Node Capabilities", itemList(capabilities, (capability) => `<li><code>${text(capability)}</code></li>`, "none declared"), { meta: `${capabilities.length} declared` })}
-        ${disclosure("Known Node Peers", itemList(node.peers, (peer) => `<li><a href="${attr(peer.url)}">${text(peer.name)}</a><span>${text(peer.url)}</span></li>`, "none declared"), { meta: `${node.peers.length} peers` })}
+        ${disclosure("Known Node Peers", itemList(node.peers, (peer) => `<li><a href="${attr(peer.url)}">${text(peer.name)}</a><span>${text(peer.url)}</span><em>${syncPolicyText(peer.sync)}</em></li>`, "none declared"), { meta: `${node.peers.length} peers` })}
         ${disclosure("Readiness Checks", detailRows(Object.entries(node.readiness).map(([key, value]) => [key, text(value)])), { meta: `${Object.keys(node.readiness).length} checks` })}
       `;
     }

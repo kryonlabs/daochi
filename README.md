@@ -197,7 +197,7 @@ DAOCHI_ADMIN_TOKEN=<optional app registry write token>
 DAOCHI_TOKEN_SECRET_HEX=<stable 64+ hex chars shared by every server instance>
 DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX=<ed25519 public key hex for signed app approvals>
 DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE=/run/secrets/node_registry_public.hex
-DAOCHI_KNOWN_NODES=Mirror=https://mirror.example
+DAOCHI_KNOWN_NODES=Mirror=https://mirror.example;sync=pull;apps=inbe;collections=inbe.*;data=encrypted_records
 DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX=<ed25519 public key hex>
 DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE=/run/secrets/token_issuer_public.hex
 DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX=<ed25519 private key hex, issuer nodes only>
@@ -220,7 +220,7 @@ DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES=0
 DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS=0
 ```
 
-`DAOCHI_KNOWN_NODES` is a comma-separated public peer-node list. Entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`; `/api/v1/node` publishes that list as `known_nodes` so clients and the nodes page can discover node-to-node connections.
+`DAOCHI_KNOWN_NODES` is a comma-separated public peer-node list. Entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`; `/api/v1/node` publishes that list as `known_nodes` so clients and the nodes page can discover node-to-node connections. A peer entry can add semicolon-separated sync policy fields: `sync=<pull|push|bidirectional|none>`, `apps=inbe+ukuvota`, `collections=inbe.*+profile.public`, and `data=encrypted_records+app_registry`. These policies describe what the node is willing to sync with that peer; node-to-node replication workers must enforce the same allowlist before pushing or pulling data.
 
 Generate a token secret once and keep it stable across restarts and every deployed instance:
 

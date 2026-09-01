@@ -677,6 +677,16 @@ func openAPISpec() map[string]any {
 					"properties": map[string]any{
 						"name": map[string]any{"type": "string"},
 						"url":  map[string]any{"type": "string"},
+						"sync": map[string]any{"$ref": "#/components/schemas/NodeSyncPolicy"},
+					},
+				},
+				"NodeSyncPolicy": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"direction":   map[string]any{"type": "string", "enum": []string{"pull", "push", "bidirectional", "none"}},
+						"apps":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"collections": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"data":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					},
 				},
 				"NodeUsage": map[string]any{

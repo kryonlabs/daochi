@@ -39,8 +39,16 @@ type LoginResponse struct {
 }
 
 type NodePeer struct {
-	Name string `json:"name,omitempty"`
-	URL  string `json:"url"`
+	Name string          `json:"name,omitempty"`
+	URL  string          `json:"url"`
+	Sync *NodeSyncPolicy `json:"sync,omitempty"`
+}
+
+type NodeSyncPolicy struct {
+	Direction   string   `json:"direction,omitempty"`
+	Apps        []string `json:"apps,omitempty"`
+	Collections []string `json:"collections,omitempty"`
+	Data        []string `json:"data,omitempty"`
 }
 
 type NodeUsage struct {

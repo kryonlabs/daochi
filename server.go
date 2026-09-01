@@ -195,12 +195,19 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "node usage failed")
 		return
 	}
+	storage, err := s.store.NodeStorageUsage(r.Context())
+	if err != nil {
+		slog.Error("load node storage usage", "error", err)
+		writeError(w, http.StatusInternalServerError, "node storage usage failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":       "ok",
 		"base_url":     strings.TrimSpace(s.cfg.BaseURL),
 		"capabilities": ksyncServerCapabilities,
 		"known_nodes":  knownNodes,
 		"usage":        usage,
+		"storage":      storage,
 		"protocol": map[string]int{
 			"min_supported": ksyncMinSupportedProtocol,
 			"latest":        ksyncLatestProtocol,
@@ -218,7 +225,11 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		usage.ConnectedWebSocketClients = stats.Connections
 		usage.WebSocketConnectionLimitPerUser = webSocketConnectionLimitPerUser
 	}
-	s.metrics.writePrometheus(w, usage)
+	storage, err := s.store.NodeStorageUsage(r.Context())
+	if err != nil {
+		slog.Error("load metrics storage usage", "error", err)
+	}
+	s.metrics.writePrometheus(w, usage, storage)
 }
 
 func (s *Server) nodeUsage(ctx context.Context) (NodeUsage, error) {

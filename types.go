@@ -54,6 +54,42 @@ type NodeUsage struct {
 	WebSocketConnectionLimitPerUser int `json:"websocket_connection_limit_per_user"`
 }
 
+type NodeStorageUsage struct {
+	DatabaseFileBytes           int64              `json:"database_file_bytes"`
+	DatabaseWALBytes            int64              `json:"database_wal_bytes,omitempty"`
+	DatabaseSHMBytes            int64              `json:"database_shm_bytes,omitempty"`
+	DatabaseTotalBytes          int64              `json:"database_total_bytes"`
+	SQLitePageBytes             int64              `json:"sqlite_page_bytes,omitempty"`
+	LogicalBytes                int64              `json:"logical_bytes"`
+	EncryptedRecordBytes        int64              `json:"encrypted_record_bytes"`
+	EncryptedPayloadBytes       int64              `json:"encrypted_payload_bytes"`
+	UnassignedBytes             int64              `json:"unassigned_bytes,omitempty"`
+	UnassignedEncryptedPayloads StorageBucketUsage `json:"unassigned_encrypted_payloads,omitempty"`
+	Apps                        []AppStorageUsage  `json:"apps"`
+}
+
+type AppStorageUsage struct {
+	AppID        string                   `json:"app_id"`
+	DisplayName  string                   `json:"display_name,omitempty"`
+	LogicalBytes int64                    `json:"logical_bytes"`
+	RecordBytes  int64                    `json:"record_bytes"`
+	RecordCount  int                      `json:"record_count"`
+	Collections  []CollectionStorageUsage `json:"collections"`
+}
+
+type CollectionStorageUsage struct {
+	CollectionPrefix string `json:"collection_prefix,omitempty"`
+	Collection       string `json:"collection"`
+	LogicalBytes     int64  `json:"logical_bytes"`
+	RecordBytes      int64  `json:"record_bytes"`
+	RecordCount      int    `json:"record_count"`
+}
+
+type StorageBucketUsage struct {
+	LogicalBytes int64 `json:"logical_bytes"`
+	Count        int   `json:"count"`
+}
+
 type AccountExportResponse struct {
 	Status       string                      `json:"status"`
 	UserIDHash   string                      `json:"user_id_hash"`

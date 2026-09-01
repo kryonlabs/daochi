@@ -662,6 +662,7 @@ func openAPISpec() map[string]any {
 						"capabilities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 						"known_nodes":  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/NodePeer"}},
 						"usage":        map[string]any{"$ref": "#/components/schemas/NodeUsage"},
+						"storage":      map[string]any{"$ref": "#/components/schemas/NodeStorageUsage"},
 						"protocol": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
@@ -689,6 +690,50 @@ func openAPISpec() map[string]any {
 						"connected_websocket_clients":         map[string]any{"type": "integer"},
 						"recent_activity_window_days":         map[string]any{"type": "integer"},
 						"websocket_connection_limit_per_user": map[string]any{"type": "integer"},
+					},
+				},
+				"NodeStorageUsage": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"database_file_bytes":           map[string]any{"type": "integer"},
+						"database_wal_bytes":            map[string]any{"type": "integer"},
+						"database_shm_bytes":            map[string]any{"type": "integer"},
+						"database_total_bytes":          map[string]any{"type": "integer"},
+						"sqlite_page_bytes":             map[string]any{"type": "integer"},
+						"logical_bytes":                 map[string]any{"type": "integer"},
+						"encrypted_record_bytes":        map[string]any{"type": "integer"},
+						"encrypted_payload_bytes":       map[string]any{"type": "integer"},
+						"unassigned_bytes":              map[string]any{"type": "integer"},
+						"unassigned_encrypted_payloads": map[string]any{"$ref": "#/components/schemas/StorageBucketUsage"},
+						"apps":                          map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/AppStorageUsage"}},
+					},
+				},
+				"AppStorageUsage": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"app_id":        map[string]any{"type": "string"},
+						"display_name":  map[string]any{"type": "string"},
+						"logical_bytes": map[string]any{"type": "integer"},
+						"record_bytes":  map[string]any{"type": "integer"},
+						"record_count":  map[string]any{"type": "integer"},
+						"collections":   map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/CollectionStorageUsage"}},
+					},
+				},
+				"CollectionStorageUsage": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"collection_prefix": map[string]any{"type": "string"},
+						"collection":        map[string]any{"type": "string"},
+						"logical_bytes":     map[string]any{"type": "integer"},
+						"record_bytes":      map[string]any{"type": "integer"},
+						"record_count":      map[string]any{"type": "integer"},
+					},
+				},
+				"StorageBucketUsage": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"logical_bytes": map[string]any{"type": "integer"},
+						"count":         map[string]any{"type": "integer"},
 					},
 				},
 				"FriendRequestCreateRequest": map[string]any{

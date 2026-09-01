@@ -5,6 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Daochi Nodes</title>
   <meta name="description" content="Known Daochi nodes and the apps registered with each node.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://daochi.net/nodes.html">
+  <meta property="og:title" content="Daochi Nodes">
+  <meta property="og:description" content="Known Daochi nodes, storage usage, apps, peers, readiness, and protocol bounds.">
+  <meta property="og:image" content="https://daochi.net/og-image.png">
+  <meta property="og:image:secure_url" content="https://daochi.net/og-image.png">
+  <meta property="og:image:alt" content="Daochi post-quantum sync with encrypted app-owned records.">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Daochi Nodes">
+  <meta name="twitter:description" content="Known Daochi nodes, storage usage, apps, peers, readiness, and protocol bounds.">
+  <meta name="twitter:image" content="https://daochi.net/og-image.png">
+  <meta name="twitter:image:alt" content="Daochi post-quantum sync with encrypted app-owned records.">
   <meta name="theme-color" content="#f7ede2">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
@@ -122,6 +136,20 @@
       if (!value) return "";
       if (typeof value === "number") return escapeHTML(new Date(value * 1000).toISOString());
       return text(value);
+    }
+
+    function formatBytes(value) {
+      const bytes = Number(value || 0);
+      if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let n = bytes;
+      let unit = 0;
+      while (n >= 1024 && unit < units.length - 1) {
+        n /= 1024;
+        unit++;
+      }
+      const precision = unit === 0 || n >= 100 ? 0 : n >= 10 ? 1 : 2;
+      return `${n.toFixed(precision)} ${units[unit]}`;
     }
 
     function resultLabel(result) {
@@ -266,6 +294,31 @@
       `;
     }
 
+    function storageAppMarkup(app) {
+      const collections = Array.isArray(app.collections) ? app.collections : [];
+      return `
+        <details class="app-card app-disclosure">
+          <summary>
+            <span>
+              <strong>${text(app.display_name, app.app_id)}</strong>
+              <em><code>${text(app.app_id)}</code> / ${formatBytes(app.logical_bytes)} / ${Number(app.record_count || 0)} records</em>
+            </span>
+          </summary>
+          ${detailRows([
+            ["Logical bytes", formatBytes(app.logical_bytes)],
+            ["Encrypted record bytes", formatBytes(app.record_bytes)],
+            ["Encrypted records", String(Number(app.record_count || 0))]
+          ])}
+          ${disclosure("Collections", itemList(collections, (item) => `
+            <li>
+              <code>${text(item.collection)}</code>
+              <span>${formatBytes(item.logical_bytes)} / ${Number(item.record_count || 0)} records</span>
+              ${item.collection_prefix ? `<em>matched ${text(item.collection_prefix)}</em>` : ""}
+            </li>`, "No stored records."), { meta: `${collections.length} stored` })}
+        </details>
+      `;
+    }
+
     function tokenMarkup(asset, issuer) {
       return `
         <article class="token-card">
@@ -353,6 +406,7 @@
       const protocol = node.nodeInfo.data && node.nodeInfo.data.protocol ? node.nodeInfo.data.protocol : {};
       const capabilities = Array.isArray(node.nodeInfo.data.capabilities) ? node.nodeInfo.data.capabilities : [];
       const usage = usageFor(node);
+      const storage = storageFor(node);
       return `
         ${disclosure("Node Info", detailRows([
           ["Node URL", `<a href="${attr(node.url)}">${text(node.url)}</a>`],
@@ -375,11 +429,32 @@
           ["Registered clients", String(Number(usage.registered_clients || 0))],
           ["Active clients 30d", String(Number(usage.active_clients_30d || 0))],
           ["Connected users", String(Number(usage.connected_users || 0))],
-          ["Connected WebSocket clients", String(Number(usage.connected_websocket_clients || 0))]
+          ["Connected WebSocket clients", String(Number(usage.connected_websocket_clients || 0))],
+          ["Database size", formatBytes(storage.database_total_bytes)],
+          ["Logical data size", formatBytes(storage.logical_bytes)]
         ]), { open: true, meta: `${node.status} / protocol ${Number(protocol.latest || 0)}` })}
         ${disclosure("Node Capabilities", itemList(capabilities, (capability) => `<li><code>${text(capability)}</code></li>`, "none declared"), { meta: `${capabilities.length} declared` })}
         ${disclosure("Known Node Peers", itemList(node.peers, (peer) => `<li><a href="${attr(peer.url)}">${text(peer.name)}</a><span>${text(peer.url)}</span></li>`, "none declared"), { meta: `${node.peers.length} peers` })}
         ${disclosure("Readiness Checks", detailRows(Object.entries(node.readiness).map(([key, value]) => [key, text(value)])), { meta: `${Object.keys(node.readiness).length} checks` })}
+      `;
+    }
+
+    function storageMarkup(node) {
+      const storage = storageFor(node);
+      const apps = Array.isArray(storage.apps) ? storage.apps : [];
+      return `
+        ${disclosure("Node Storage", detailRows([
+          ["Database file", formatBytes(storage.database_file_bytes)],
+          ["SQLite WAL", formatBytes(storage.database_wal_bytes)],
+          ["SQLite SHM", formatBytes(storage.database_shm_bytes)],
+          ["Database total", formatBytes(storage.database_total_bytes)],
+          ["SQLite page bytes", formatBytes(storage.sqlite_page_bytes)],
+          ["Logical bytes", formatBytes(storage.logical_bytes)],
+          ["Encrypted record bytes", formatBytes(storage.encrypted_record_bytes)],
+          ["Opaque payload bytes", formatBytes(storage.encrypted_payload_bytes)],
+          ["Unassigned bytes", formatBytes(storage.unassigned_bytes)]
+        ]), { open: true, meta: formatBytes(storage.database_total_bytes) })}
+        ${disclosure("App Storage", `<div class="app-list">${apps.length ? apps.map(storageAppMarkup).join("") : "<p>No app storage reported.</p>"}</div>`, { open: true, meta: `${apps.length} apps` })}
       `;
     }
 
@@ -400,6 +475,10 @@
       return node.nodeInfo.data && node.nodeInfo.data.usage ? node.nodeInfo.data.usage : {};
     }
 
+    function storageFor(node) {
+      return node.nodeInfo.data && node.nodeInfo.data.storage ? node.nodeInfo.data.storage : {};
+    }
+
     function renderDetail() {
       const node = state.nodes[state.selected];
       if (!node) {
@@ -408,6 +487,7 @@
       }
       const panels = {
         overview: overviewMarkup,
+        storage: storageMarkup,
         tokens: tokensMarkup,
         apps: appsMarkup
       };
@@ -422,7 +502,7 @@
             <span class="status-pill${node.online ? "" : " offline"}">${text(node.status)}</span>
           </div>
           <div class="node-tabs" role="tablist" aria-label="${text(node.name)} details">
-            ${["overview", "tokens", "apps"].map((id) => `
+            ${["overview", "storage", "tokens", "apps"].map((id) => `
               <button type="button" class="${tab === id ? "active" : ""}" data-tab="${id}" role="tab" aria-selected="${tab === id ? "true" : "false"}">${text(id)}</button>
             `).join("")}
           </div>

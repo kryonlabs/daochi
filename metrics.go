@@ -84,7 +84,7 @@ func (m *ServerMetrics) recordWebSocketReject(reason string) {
 	m.mu.Unlock()
 }
 
-func (m *ServerMetrics) writePrometheus(w http.ResponseWriter, usage NodeUsage) {
+func (m *ServerMetrics) writePrometheus(w http.ResponseWriter, usage NodeUsage, storage NodeStorageUsage) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	writeScalarMetric(w, "daochi_sync_requests_total", "counter", m.syncRequests.Load())
 	writeScalarMetric(w, "daochi_sync_failures_total", "counter", m.syncFailures.Load())
@@ -103,6 +103,13 @@ func (m *ServerMetrics) writePrometheus(w http.ResponseWriter, usage NodeUsage) 
 	writeScalarMetric(w, "daochi_registered_clients", "gauge", uint64(usage.RegisteredClients))
 	writeScalarMetric(w, "daochi_active_clients_30d", "gauge", uint64(usage.ActiveClients30d))
 	writeScalarMetric(w, "daochi_websocket_connection_limit_per_user", "gauge", uint64(usage.WebSocketConnectionLimitPerUser))
+	writeScalarMetric(w, "daochi_storage_database_total_bytes", "gauge", uint64(nonNegativeInt64(storage.DatabaseTotalBytes)))
+	writeScalarMetric(w, "daochi_storage_sqlite_page_bytes", "gauge", uint64(nonNegativeInt64(storage.SQLitePageBytes)))
+	writeScalarMetric(w, "daochi_storage_logical_bytes", "gauge", uint64(nonNegativeInt64(storage.LogicalBytes)))
+	writeScalarMetric(w, "daochi_storage_encrypted_record_bytes", "gauge", uint64(nonNegativeInt64(storage.EncryptedRecordBytes)))
+	writeScalarMetric(w, "daochi_storage_encrypted_payload_bytes", "gauge", uint64(nonNegativeInt64(storage.EncryptedPayloadBytes)))
+	writeAppStorageMetrics(w, "daochi_storage_app_logical_bytes", "gauge", storage.Apps)
+	writeCollectionStorageMetrics(w, "daochi_storage_collection_logical_bytes", "gauge", storage.Apps)
 	writeScalarMetric(w, "ksync_sync_requests_total", "counter", m.syncRequests.Load())
 	writeScalarMetric(w, "ksync_sync_failures_total", "counter", m.syncFailures.Load())
 	writeScalarMetric(w, "ksync_sync_full_snapshots_total", "counter", m.syncFullSnapshots.Load())
@@ -115,6 +122,32 @@ func (m *ServerMetrics) writePrometheus(w http.ResponseWriter, usage NodeUsage) 
 	writeScalarMetric(w, "ksync_websocket_rejected_total", "counter", m.webSocketRejected.Load())
 	writeScalarMetric(w, "ksync_websocket_active", "gauge", uint64(usage.ConnectedWebSocketClients))
 	m.writeMapMetrics(w)
+}
+
+func nonNegativeInt64(value int64) int64 {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func writeAppStorageMetrics(w http.ResponseWriter, name, typ string, apps []AppStorageUsage) {
+	fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
+	for _, app := range apps {
+		fmt.Fprintf(w, `%s{app_id="%s"} %d`+"\n",
+			name, escapeMetricLabel(app.AppID), nonNegativeInt64(app.LogicalBytes))
+	}
+}
+
+func writeCollectionStorageMetrics(w http.ResponseWriter, name, typ string, apps []AppStorageUsage) {
+	fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
+	for _, app := range apps {
+		for _, collection := range app.Collections {
+			fmt.Fprintf(w, `%s{app_id="%s",collection="%s"} %d`+"\n",
+				name, escapeMetricLabel(app.AppID), escapeMetricLabel(collection.Collection),
+				nonNegativeInt64(collection.LogicalBytes))
+		}
+	}
 }
 
 func (m *ServerMetrics) writeMapMetrics(w http.ResponseWriter) {

@@ -20,7 +20,8 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 var ErrSyncUserNotFound = errors.New("sync user not found")
@@ -259,7 +260,7 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, path: path}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -4330,6 +4331,200 @@ func (s *Store) NodeUsage(ctx context.Context, now time.Time) (NodeUsage, error)
 		}
 	}
 	return usage, nil
+}
+
+func (s *Store) NodeStorageUsage(ctx context.Context) (NodeStorageUsage, error) {
+	usage := NodeStorageUsage{}
+
+	if s.path != "" && s.path != ":memory:" {
+		usage.DatabaseFileBytes = fileSizeOrZero(s.path)
+		usage.DatabaseWALBytes = fileSizeOrZero(s.path + "-wal")
+		usage.DatabaseSHMBytes = fileSizeOrZero(s.path + "-shm")
+		usage.DatabaseTotalBytes = usage.DatabaseFileBytes + usage.DatabaseWALBytes + usage.DatabaseSHMBytes
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&usage.SQLitePageBytes); err != nil {
+		return NodeStorageUsage{}, err
+	}
+
+	apps, err := s.appStorageUsage(ctx)
+	if err != nil {
+		return NodeStorageUsage{}, err
+	}
+	usage.Apps = apps
+	for _, app := range apps {
+		usage.EncryptedRecordBytes += app.RecordBytes
+		usage.LogicalBytes += app.LogicalBytes
+		if app.AppID == "unregistered" {
+			usage.UnassignedBytes += app.LogicalBytes
+		}
+	}
+
+	var payloadCount int
+	if err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*), COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)
+FROM server_encrypted_payloads`).Scan(&payloadCount, &usage.EncryptedPayloadBytes); err != nil {
+		return NodeStorageUsage{}, err
+	}
+	usage.UnassignedEncryptedPayloads = StorageBucketUsage{
+		LogicalBytes: usage.EncryptedPayloadBytes,
+		Count:        payloadCount,
+	}
+	usage.UnassignedBytes += usage.EncryptedPayloadBytes
+	usage.LogicalBytes += usage.EncryptedPayloadBytes
+
+	return usage, nil
+}
+
+type appCollectionMatcher struct {
+	AppID       string
+	DisplayName string
+	Prefix      string
+	MatchPrefix string
+	Wildcard    bool
+	Specificity int
+}
+
+type collectionStorageRow struct {
+	Collection string
+	Count      int
+	Bytes      int64
+}
+
+func (s *Store) appStorageUsage(ctx context.Context) ([]AppStorageUsage, error) {
+	matchers, err := s.appCollectionMatchers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT collection,
+       COUNT(*),
+       COALESCE(SUM(LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)),0)
+FROM server_encrypted_records
+GROUP BY collection
+ORDER BY collection`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	appsByID := map[string]*AppStorageUsage{}
+	for _, matcher := range matchers {
+		if _, ok := appsByID[matcher.AppID]; !ok {
+			appsByID[matcher.AppID] = &AppStorageUsage{
+				AppID:       matcher.AppID,
+				DisplayName: matcher.DisplayName,
+				Collections: []CollectionStorageUsage{},
+			}
+		}
+	}
+	for rows.Next() {
+		var row collectionStorageRow
+		if err := rows.Scan(&row.Collection, &row.Count, &row.Bytes); err != nil {
+			return nil, err
+		}
+		matcher := bestCollectionMatcher(row.Collection, matchers)
+		appID := "unregistered"
+		displayName := "Unregistered collections"
+		collectionPrefix := ""
+		if matcher != nil {
+			appID = matcher.AppID
+			displayName = matcher.DisplayName
+			collectionPrefix = matcher.Prefix
+		}
+		app, ok := appsByID[appID]
+		if !ok {
+			app = &AppStorageUsage{
+				AppID:       appID,
+				DisplayName: displayName,
+				Collections: []CollectionStorageUsage{},
+			}
+			appsByID[appID] = app
+		}
+		app.LogicalBytes += row.Bytes
+		app.RecordBytes += row.Bytes
+		app.RecordCount += row.Count
+		app.Collections = append(app.Collections, CollectionStorageUsage{
+			CollectionPrefix: collectionPrefix,
+			Collection:       row.Collection,
+			LogicalBytes:     row.Bytes,
+			RecordBytes:      row.Bytes,
+			RecordCount:      row.Count,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	apps := make([]AppStorageUsage, 0, len(appsByID))
+	for _, app := range appsByID {
+		sort.Slice(app.Collections, func(i, j int) bool {
+			return app.Collections[i].Collection < app.Collections[j].Collection
+		})
+		apps = append(apps, *app)
+	}
+	sort.Slice(apps, func(i, j int) bool {
+		if apps[i].LogicalBytes != apps[j].LogicalBytes {
+			return apps[i].LogicalBytes > apps[j].LogicalBytes
+		}
+		return apps[i].AppID < apps[j].AppID
+	})
+	return apps, nil
+}
+
+func (s *Store) appCollectionMatchers(ctx context.Context) ([]appCollectionMatcher, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT a.app_id,a.display_name,c.collection_prefix
+FROM server_apps a
+JOIN server_app_collections c ON c.app_id=a.app_id
+ORDER BY a.app_id,c.collection_prefix`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var matchers []appCollectionMatcher
+	for rows.Next() {
+		var matcher appCollectionMatcher
+		if err := rows.Scan(&matcher.AppID, &matcher.DisplayName, &matcher.Prefix); err != nil {
+			return nil, err
+		}
+		matcher.MatchPrefix = strings.TrimSuffix(matcher.Prefix, "*")
+		matcher.Wildcard = matcher.MatchPrefix != matcher.Prefix
+		matcher.Specificity = len(matcher.MatchPrefix)
+		matchers = append(matchers, matcher)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return matchers, nil
+}
+
+func bestCollectionMatcher(collection string, matchers []appCollectionMatcher) *appCollectionMatcher {
+	var best *appCollectionMatcher
+	for i := range matchers {
+		matcher := &matchers[i]
+		matches := false
+		if matcher.Wildcard {
+			matches = strings.HasPrefix(collection, matcher.MatchPrefix)
+		} else {
+			matches = collection == matcher.MatchPrefix
+		}
+		if !matches {
+			continue
+		}
+		if best == nil || matcher.Specificity > best.Specificity {
+			best = matcher
+		}
+	}
+	return best
+}
+
+func fileSizeOrZero(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
 
 func (s *Store) SyncDiagnosticReport(ctx context.Context, userID string) (SyncDiagnosticReport, error) {

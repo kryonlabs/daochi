@@ -1373,7 +1373,8 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 			MinSupported int `json:"min_supported"`
 			Latest       int `json:"latest"`
 		} `json:"protocol"`
-		Usage NodeUsage `json:"usage"`
+		Usage   NodeUsage        `json:"usage"`
+		Storage NodeStorageUsage `json:"storage"`
 	}
 	if err := json.Unmarshal(nodeInfo.Body.Bytes(), &nodePayload); err != nil {
 		t.Fatal(err)
@@ -1390,11 +1391,12 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 		nodePayload.Usage.RegisteredClients != 1 ||
 		nodePayload.Usage.ActiveClients30d != 1 ||
 		nodePayload.Usage.RecentActivityWindowDays != 30 ||
-		nodePayload.Usage.WebSocketConnectionLimitPerUser != 8 {
+		nodePayload.Usage.WebSocketConnectionLimitPerUser != 8 ||
+		nodePayload.Storage.SQLitePageBytes == 0 {
 		t.Fatalf("unexpected node info payload: %#v", nodePayload)
 	}
 
-	body := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"test-client-1","encrypted_records":[{"collection":"private","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-19T12:00:00Z"}]}`)
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"test-client-1","encrypted_records":[{"collection":"inbe.habits","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-19T12:00:00Z"}]}`)
 	res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
 	var first SyncResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil {
@@ -1404,6 +1406,26 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 		len(first.Changes.EncryptedRecords) != 1 ||
 		first.Changes.EncryptedRecords[0].Ciphertext != "ciphertext-v1" {
 		t.Fatalf("unexpected encrypted sync response: %#v", first)
+	}
+	nodeInfoAfterSync := httptest.NewRecorder()
+	handler.ServeHTTP(nodeInfoAfterSync, httptest.NewRequest(http.MethodGet, "/api/v1/node", nil))
+	if nodeInfoAfterSync.Code != http.StatusOK {
+		t.Fatalf("node info after sync status = %d body=%s", nodeInfoAfterSync.Code, nodeInfoAfterSync.Body.String())
+	}
+	var nodePayloadAfterSync struct {
+		Storage NodeStorageUsage `json:"storage"`
+	}
+	if err := json.Unmarshal(nodeInfoAfterSync.Body.Bytes(), &nodePayloadAfterSync); err != nil {
+		t.Fatal(err)
+	}
+	if nodePayloadAfterSync.Storage.EncryptedRecordBytes == 0 ||
+		nodePayloadAfterSync.Storage.LogicalBytes == 0 ||
+		len(nodePayloadAfterSync.Storage.Apps) == 0 ||
+		nodePayloadAfterSync.Storage.Apps[0].AppID != "inbe" ||
+		nodePayloadAfterSync.Storage.Apps[0].RecordCount != 1 ||
+		len(nodePayloadAfterSync.Storage.Apps[0].Collections) != 1 ||
+		nodePayloadAfterSync.Storage.Apps[0].Collections[0].Collection != "inbe.habits" {
+		t.Fatalf("unexpected storage payload: %#v", nodePayloadAfterSync.Storage)
 	}
 	if first.Diagnostics == nil ||
 		first.Diagnostics.AppliedInput.EncryptedRecords != 1 ||
@@ -1452,6 +1474,9 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 		!strings.Contains(metrics.Body.String(), `daochi_http_requests_total{method="POST",route="/api/v1/sync",status="200"} 1`) ||
 		!strings.Contains(metrics.Body.String(), "daochi_registered_users 1") ||
 		!strings.Contains(metrics.Body.String(), "daochi_active_users_30d 1") ||
+		!strings.Contains(metrics.Body.String(), "daochi_storage_logical_bytes") ||
+		!strings.Contains(metrics.Body.String(), `daochi_storage_app_logical_bytes{app_id="inbe"}`) ||
+		!strings.Contains(metrics.Body.String(), `daochi_storage_collection_logical_bytes{app_id="inbe",collection="inbe.habits"}`) ||
 		!strings.Contains(metrics.Body.String(), "ksync_sync_encrypted_records_applied_total 1") ||
 		!strings.Contains(metrics.Body.String(), `ksync_http_requests_total{method="POST",route="/api/v1/sync",status="200"} 1`) {
 		t.Fatalf("unexpected metrics status=%d body=%s", metrics.Code, metrics.Body.String())

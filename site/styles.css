@@ -374,6 +374,75 @@ li {
   margin-top: 18px;
 }
 
+.detail-section {
+  min-width: 0;
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 252, 247, .62);
+  overflow: hidden;
+}
+
+.detail-section > summary,
+.app-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 12px;
+  color: var(--teal-dark);
+  cursor: pointer;
+  font-size: .76rem;
+  font-weight: 850;
+  list-style: none;
+}
+
+.detail-section > summary::-webkit-details-marker,
+.app-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.detail-section > summary::before,
+.app-disclosure > summary::before {
+  content: "+";
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #d8bba9;
+  border-radius: 50%;
+  color: var(--red);
+  background: var(--surface);
+  font-weight: 900;
+}
+
+.detail-section[open] > summary::before,
+.app-disclosure[open] > summary::before {
+  content: "-";
+  border-color: rgba(4, 101, 95, .32);
+  color: var(--teal);
+}
+
+.detail-section > summary span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: .68rem;
+  font-weight: 750;
+  text-align: right;
+}
+
+.detail-section-body {
+  min-width: 0;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.detail-section-body > :first-child {
+  margin-top: 12px;
+}
+
 .node-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -406,6 +475,38 @@ li {
 
 .node-tab-panel {
   min-width: 0;
+}
+
+.app-disclosure {
+  display: block;
+}
+
+.app-disclosure > summary {
+  align-items: flex-start;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-disclosure > summary span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.app-disclosure > summary strong {
+  color: var(--teal-dark);
+  font-size: .9rem;
+}
+
+.app-disclosure > summary em {
+  color: var(--muted);
+  font-size: .72rem;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.app-disclosure > p:first-of-type {
+  margin-top: 12px;
 }
 
 .app-card h5 {

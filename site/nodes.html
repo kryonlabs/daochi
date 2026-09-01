@@ -136,6 +136,17 @@
       `).join("")}</dl>`;
     }
 
+    function disclosure(title, body, options = {}) {
+      const open = options.open ? " open" : "";
+      const meta = options.meta ? `<span>${text(options.meta)}</span>` : "";
+      return `
+        <details class="detail-section"${open}>
+          <summary><strong>${text(title)}</strong>${meta}</summary>
+          <div class="detail-section-body">${body}</div>
+        </details>
+      `;
+    }
+
     async function fetchJSON(url) {
       try {
         const response = await fetch(url, { cache: "no-store" });
@@ -193,11 +204,14 @@
       const keys = Array.isArray(app.keys) ? app.keys : [];
       const tokenPolicies = Array.isArray(app.token_policies) ? app.token_policies : [];
       return `
-        <article class="app-card">
-          <div>
-            <h4>${text(app.display_name, app.app_id)}</h4>
-            <p><code>${text(app.app_id)}</code> ${links ? " / " + links : ""}</p>
-          </div>
+        <details class="app-card app-disclosure">
+          <summary>
+            <span>
+              <strong>${text(app.display_name, app.app_id)}</strong>
+              <em><code>${text(app.app_id)}</code> / ${text(app.status, "unknown")} / ${features.length} features / ${collections.length} collections</em>
+            </span>
+          </summary>
+          <p><code>${text(app.app_id)}</code> ${links ? " / " + links : ""}</p>
           <div class="tag-row">
             <span>${text(app.status, "unknown")}</span>
             <span>schema v${Number(app.app_schema_version || 0)}</span>
@@ -206,7 +220,9 @@
             ${app.compatibility_until ? `<span>compat until ${text(app.compatibility_until)}</span>` : ""}
             ${app.manifest_hash ? `<span>signed manifest</span>` : ""}
           </div>
-          ${detailRows([
+          <p>${text(app.description, "No description provided.")}</p>
+          <p><strong>Capabilities</strong> ${join(app.capabilities)}</p>
+          ${disclosure("Registration", detailRows([
             ["App ID", `<code>${text(app.app_id)}</code>`],
             ["Created", text(app.created_at)],
             ["Updated", text(app.updated_at)],
@@ -216,43 +232,36 @@
             ["Manifest hash", app.manifest_hash ? `<code>${text(app.manifest_hash)}</code>` : ""],
             ["Manifest signature", app.manifest_signature ? `<code>${text(app.manifest_signature)}</code>` : ""],
             ["Approval signature", app.approval_signature ? `<code>${text(app.approval_signature)}</code>` : ""]
-          ])}
-          <p>${text(app.description, "No description provided.")}</p>
-          <p><strong>Capabilities</strong> ${join(app.capabilities)}</p>
-          <h5>Features</h5>
-          ${itemList(features, (item) => `
+          ]), { open: true })}
+          ${disclosure("Features", itemList(features, (item) => `
             <li>
               <code>${text(item.id)}</code>
               ${item.requires_signed_tx ? `<span>signed transaction required</span>` : `<span>read/public</span>`}
               ${Array.isArray(item.collections) && item.collections.length ? `<em>${item.collections.map((collection) => text(collection)).join(", ")}</em>` : ""}
-            </li>`)}
-          <h5>Collections</h5>
-          ${itemList(collections, (item) => `
+            </li>`), { meta: `${features.length} declared` })}
+          ${disclosure("Collections", itemList(collections, (item) => `
             <li>
               <code>${text(item.collection_prefix)}</code>
               <span>${text(item.visibility, "private")}${item.schema_version ? ` schema v${Number(item.schema_version)}` : ""}${item.created_at ? ` created ${text(item.created_at)}` : ""}</span>
               ${item.description ? `<em>${text(item.description)}</em>` : ""}
-            </li>`)}
-          <h5>Legacy</h5>
-          ${itemList(legacy, (item) => `
+            </li>`), { meta: `${collections.length} prefixes` })}
+          ${disclosure("Legacy Protocols", itemList(legacy, (item) => `
             <li>
               <code>${text(item.name)}</code>
               <span>${text(item.status, "compatibility")}${item.version ? ` v${Number(item.version)}` : ""} until ${text(item.valid_until, "unspecified")}</span>
-            </li>`, "none")}
-          <h5>Keys</h5>
-          ${itemList(keys, (item) => `
+            </li>`, "none"), { meta: `${legacy.length} policies` })}
+          ${disclosure("Keys", itemList(keys, (item) => `
             <li>
               <code>${text(item.key_id)}</code>
               <span>${text(item.algorithm)} ${text(item.purpose)} ${text(item.status, "active")}</span>
               ${item.expires_at ? `<em>expires ${dateTime(item.expires_at)}</em>` : ""}
-            </li>`, "none")}
-          <h5>Token Policies</h5>
-          ${itemList(tokenPolicies, (item) => `
+            </li>`, "none"), { meta: `${keys.length} keys` })}
+          ${disclosure("Token Policies", itemList(tokenPolicies, (item) => `
             <li>
               <code>${text(item.asset_id)}</code>
               <span>${text(item.permission)} ${text(item.status, "active")}</span>
-            </li>`, "none")}
-        </article>
+            </li>`, "none"), { meta: `${tokenPolicies.length} policies` })}
+        </details>
       `;
     }
 
@@ -343,8 +352,7 @@
       const protocol = node.nodeInfo.data && node.nodeInfo.data.protocol ? node.nodeInfo.data.protocol : {};
       const capabilities = Array.isArray(node.nodeInfo.data.capabilities) ? node.nodeInfo.data.capabilities : [];
       return `
-        <h4>Node Info</h4>
-        ${detailRows([
+        ${disclosure("Node Info", detailRows([
           ["Node URL", `<a href="${attr(node.url)}">${text(node.url)}</a>`],
           ["Configured name", text(node.name)],
           ["Health", resultLabel(node.health)],
@@ -360,29 +368,23 @@
           ["Latest protocol", protocol.latest ? String(Number(protocol.latest)) : ""],
           ["Registered apps", String(node.apps.length)],
           ["Accepted token assets", String(node.tokens.length)]
-        ])}
-        <h4>Node Capabilities</h4>
-        ${itemList(capabilities, (capability) => `<li><code>${text(capability)}</code></li>`, "none declared")}
-        <h4>Known Node Peers</h4>
-        ${itemList(node.peers, (peer) => `<li><a href="${attr(peer.url)}">${text(peer.name)}</a><span>${text(peer.url)}</span></li>`, "none declared")}
-        <h4>Readiness Checks</h4>
-        ${detailRows(Object.entries(node.readiness).map(([key, value]) => [key, text(value)]))}
+        ]), { open: true, meta: `${node.status} / protocol ${Number(protocol.latest || 0)}` })}
+        ${disclosure("Node Capabilities", itemList(capabilities, (capability) => `<li><code>${text(capability)}</code></li>`, "none declared"), { meta: `${capabilities.length} declared` })}
+        ${disclosure("Known Node Peers", itemList(node.peers, (peer) => `<li><a href="${attr(peer.url)}">${text(peer.name)}</a><span>${text(peer.url)}</span></li>`, "none declared"), { meta: `${node.peers.length} peers` })}
+        ${disclosure("Readiness Checks", detailRows(Object.entries(node.readiness).map(([key, value]) => [key, text(value)])), { meta: `${Object.keys(node.readiness).length} checks` })}
       `;
     }
 
     function tokensMarkup(node) {
       return `
-        <h4>Accepted Tokens</h4>
-        <div class="token-list">${node.tokens.length ? node.tokens.map((asset) => tokenMarkup(asset, node.issuerResult.data)).join("") : "<p>No accepted tokens published.</p>"}</div>
-        <h4>Purchase Products</h4>
-        ${itemList(node.products, productMarkup, "No direct purchase products published.")}
+        ${disclosure("Accepted Tokens", `<div class="token-list">${node.tokens.length ? node.tokens.map((asset) => tokenMarkup(asset, node.issuerResult.data)).join("") : "<p>No accepted tokens published.</p>"}</div>`, { open: true, meta: `${node.tokens.length} assets` })}
+        ${disclosure("Purchase Products", itemList(node.products, productMarkup, "No direct purchase products published."), { meta: `${node.products.length} products` })}
       `;
     }
 
     function appsMarkup(node) {
       return `
-        <h4>Registered Apps</h4>
-        <div class="app-list">${node.apps.length ? node.apps.map(appMarkup).join("") : "<p>No apps registered.</p>"}</div>
+        ${disclosure("Registered Apps", `<div class="app-list">${node.apps.length ? node.apps.map(appMarkup).join("") : "<p>No apps registered.</p>"}</div>`, { open: true, meta: `${node.apps.length} apps` })}
       `;
     }
 

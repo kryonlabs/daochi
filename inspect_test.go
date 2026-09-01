@@ -89,7 +89,7 @@ func TestInspectSummaryAndUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = doctor.String()
-	for _, want := range []string{"Ksync doctor", "Warnings", "legacy clients below protocol 5", "server_sync_audit", "server_encrypted_payloads", "protocol=5", "full_snapshot=true"} {
+	for _, want := range []string{"Daochi doctor", "Warnings", "legacy clients below protocol 5", "server_sync_audit", "server_encrypted_payloads", "protocol=5", "full_snapshot=true"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, got)
 		}

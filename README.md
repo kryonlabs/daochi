@@ -32,7 +32,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/sync`
 - `POST /api/v1/account/delete`
 - `GET /api/v1/apps`
-- `POST /api/v1/apps` with `X-Daochi-Admin` when `KSYNC_ADMIN_TOKEN` is set
+- `POST /api/v1/apps` with `X-Daochi-Admin` when `DAOCHI_ADMIN_TOKEN` is set
 - `POST /api/v1/apps/register-signed`
 - `GET /api/v1/apps/{app_id}`
 - `GET /api/v1/apps/{app_id}/collections`
@@ -86,9 +86,9 @@ WebSocket client connections. `/metrics` publishes the same aggregate user and
 client gauges with `daochi_*` names; legacy `ksync_*` metric aliases remain for
 existing dashboards.
 
-The public API hostname should terminate TLS at a reverse proxy and forward to `KSYNC_ADDR`, for example `127.0.0.1:8080`.
-Set `KSYNC_TOKEN_SECRET_HEX` to at least 32 random bytes encoded as hex in production.
-`KSYNC_ALLOW_EPHEMERAL_TOKEN_SECRET=1` is only for local development because it invalidates tokens on restart and is not a stable server secret.
+The public API hostname should terminate TLS at a reverse proxy and forward to `DAOCHI_ADDR`, for example `127.0.0.1:8080`.
+Set `DAOCHI_TOKEN_SECRET_HEX` to at least 32 random bytes encoded as hex in production.
+`DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET=1` is only for local development because it invalidates tokens on restart and is not a stable server secret.
 
 Bearer tokens are intentionally cacheable client-side credentials, not the user's durable login state. Clients should silently run the challenge/sign/login flow again when a token expires or receives a `401`, as long as the local account key still exists. Login responses include `server_time` as Unix seconds so clients can compensate for local clock skew when caching token expiry. Older clients may ignore it. Only an explicit user logout, account deletion, or local account reset should remove the account key.
 
@@ -175,8 +175,8 @@ The Makefile builds a minimal static liboqs from `vendor/liboqs` with `SIG_ml_ds
 Inspect a production database offline with:
 
 ```sh
-./daochi inspect --db /var/lib/ksync/ksync.db summary
-./daochi inspect --db /var/lib/ksync/ksync.db doctor <user_id_hash>
+./daochi inspect --db /var/lib/daochi/daochi.db summary
+./daochi inspect --db /var/lib/daochi/daochi.db doctor <user_id_hash>
 ```
 
 `inspect doctor` prints redacted account status, sync versions, table counts, recent client protocol hints, and recent sync audit metadata. Use `--full` only when you intentionally need unredacted IDs.
@@ -187,40 +187,40 @@ Without Nix, install liboqs headers and library on the host, then:
 CGO_ENABLED=1 go build -o daochi .
 ```
 
-Runtime configuration. The current server keeps `KSYNC_*` environment variable names for compatibility:
+Runtime configuration. `DAOCHI_*` names are preferred. Existing `KSYNC_*` names remain accepted as compatibility fallbacks:
 
 ```sh
-KSYNC_ADDR=127.0.0.1:8080
-KSYNC_BASE_URL=https://api.example.com
-KSYNC_DB=/var/lib/ksync/ksync.db
-KSYNC_ADMIN_TOKEN=<optional app registry write token>
-KSYNC_TOKEN_SECRET_HEX=<stable 64+ hex chars shared by every server instance>
-KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX=<ed25519 public key hex for signed app approvals>
-KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE=/run/secrets/node_registry_public.hex
-KSYNC_KNOWN_NODES=Mirror=https://mirror.example
-KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX=<ed25519 public key hex>
-KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE=/run/secrets/token_issuer_public.hex
-KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX=<ed25519 private key hex, issuer nodes only>
-KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE=/run/secrets/token_issuer_private.hex
-KSYNC_TOKEN_PRODUCTS=tokens_small:5000000:1000000000000
-KSYNC_GOOGLE_PACKAGE_NAMES=com.example.app
-KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON=<google service account json>
-KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON_FILE=/run/secrets/google_play_service_account.json
-KSYNC_GOOGLE_OAUTH_CLIENT_JSON_FILE=/run/secrets/google_play_oauth_client.json
-KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN_FILE=/run/secrets/google_play_refresh_token.txt
-KSYNC_TOKEN_DIRECT_PURCHASES_ENABLED=1
-KSYNC_MONERO_WALLET_RPC_URL=http://127.0.0.1:18083
-KSYNC_MONERO_WALLET_RPC_USER=<wallet rpc user>
-KSYNC_MONERO_WALLET_RPC_PASSWORD=<wallet rpc password>
-KSYNC_CHALLENGE_TTL_SECONDS=60
-KSYNC_TOKEN_TTL_SECONDS=3600
-KSYNC_MAX_BODY_BYTES=1048576
-KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN=0
-KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES=0
-KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS=0
+DAOCHI_ADDR=127.0.0.1:8080
+DAOCHI_BASE_URL=https://api.example.com
+DAOCHI_DB=/var/lib/daochi/daochi.db
+DAOCHI_ADMIN_TOKEN=<optional app registry write token>
+DAOCHI_TOKEN_SECRET_HEX=<stable 64+ hex chars shared by every server instance>
+DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX=<ed25519 public key hex for signed app approvals>
+DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE=/run/secrets/node_registry_public.hex
+DAOCHI_KNOWN_NODES=Mirror=https://mirror.example
+DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX=<ed25519 public key hex>
+DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE=/run/secrets/token_issuer_public.hex
+DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX=<ed25519 private key hex, issuer nodes only>
+DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE=/run/secrets/token_issuer_private.hex
+DAOCHI_TOKEN_PRODUCTS=tokens_small:5000000:1000000000000
+DAOCHI_GOOGLE_PACKAGE_NAMES=com.example.app
+DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON=<google service account json>
+DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE=/run/secrets/google_play_service_account.json
+DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE=/run/secrets/google_play_oauth_client.json
+DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE=/run/secrets/google_play_refresh_token.txt
+DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED=1
+DAOCHI_MONERO_WALLET_RPC_URL=http://127.0.0.1:18083
+DAOCHI_MONERO_WALLET_RPC_USER=<wallet rpc user>
+DAOCHI_MONERO_WALLET_RPC_PASSWORD=<wallet rpc password>
+DAOCHI_CHALLENGE_TTL_SECONDS=60
+DAOCHI_TOKEN_TTL_SECONDS=3600
+DAOCHI_MAX_BODY_BYTES=1048576
+DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN=0
+DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES=0
+DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS=0
 ```
 
-`KSYNC_KNOWN_NODES` is a comma-separated public peer-node list. Entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`; `/api/v1/node` publishes that list as `known_nodes` so clients and the nodes page can discover node-to-node connections.
+`DAOCHI_KNOWN_NODES` is a comma-separated public peer-node list. Entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`; `/api/v1/node` publishes that list as `known_nodes` so clients and the nodes page can discover node-to-node connections.
 
 Generate a token secret once and keep it stable across restarts and every deployed instance:
 
@@ -228,9 +228,9 @@ Generate a token secret once and keep it stable across restarts and every deploy
 openssl rand -hex 32
 ```
 
-If `KSYNC_TOKEN_SECRET_HEX` is missing, Daochi generates a random in-memory secret at startup. That is only suitable for single-process local development: existing bearer tokens become invalid after restart, and multi-instance deployments will reject tokens issued by another instance.
+If `DAOCHI_TOKEN_SECRET_HEX` is missing, Daochi generates a random in-memory secret at startup. That is only suitable for single-process local development: existing bearer tokens become invalid after restart, and multi-instance deployments will reject tokens issued by another instance.
 
-Encrypted envelope limits are disabled by default to avoid surprising existing clients. Set `KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN` to cap each envelope response, `KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES` to reject writes that would exceed an account quota, and `KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS` only after clients can tolerate older envelope pruning.
+Encrypted envelope limits are disabled by default to avoid surprising existing clients. Set `DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN` to cap each envelope response, `DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES` to reject writes that would exceed an account quota, and `DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS` only after clients can tolerate older envelope pruning.
 
 ## Tokens
 
@@ -254,7 +254,7 @@ Nodes can accept self-contained app manifests through `POST /api/v1/apps/registe
 - `manifest_signature`, an Ed25519 signature from one active app key over `daochi-app-manifest-v1\n<canonical manifest json>`;
 - `approval_signature`, an Ed25519 signature from the node registry key over `daochi-app-approval-v1\n<app_id>\n<manifest_hash>\n`.
 
-Each node decides which registry approval key it trusts through `KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX` or `KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE`. That keeps registration cross-platform: CLI, TUI, web, mobile, and desktop apps all submit the same signed JSON manifest, and no platform-specific package name is the root of authority.
+Each node decides which registry approval key it trusts through `DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX` or `DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE`. That keeps registration cross-platform: CLI, TUI, web, mobile, and desktop apps all submit the same signed JSON manifest, and no platform-specific package name is the root of authority.
 
 ## Encrypted Hierarchy
 

@@ -1138,7 +1138,7 @@ func syncHeaderParameters() []map[string]any {
 			"name":        "X-Daochi-Limit",
 			"in":          "header",
 			"required":    false,
-			"description": "Optional encrypted envelope page size. X-Ksync-Limit remains accepted. The server may clamp this with KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN.",
+			"description": "Optional encrypted envelope page size. X-Ksync-Limit remains accepted. The server may clamp this with DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN.",
 			"schema":      map[string]any{"type": "integer"},
 		},
 	}

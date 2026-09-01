@@ -1,16 +1,16 @@
 services:
-  ksync:
+  daochi:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      KSYNC_ADDR: 0.0.0.0:8080
-      KSYNC_BASE_URL: https://api.example.com
-      KSYNC_DB: /data/ksync.db
-      KSYNC_TOKEN_SECRET_HEX: ${KSYNC_TOKEN_SECRET_HEX:?set KSYNC_TOKEN_SECRET_HEX to a stable 32-byte hex secret}
+      DAOCHI_ADDR: 0.0.0.0:8080
+      DAOCHI_BASE_URL: https://api.example.com
+      DAOCHI_DB: /data/daochi.db
+      DAOCHI_TOKEN_SECRET_HEX: ${DAOCHI_TOKEN_SECRET_HEX:?set DAOCHI_TOKEN_SECRET_HEX to a stable 32-byte hex secret}
     volumes:
-      - ksync-data:/data
+      - daochi-data:/data
     ports:
       - "127.0.0.1:8080:8080"
     read_only: true
@@ -22,4 +22,4 @@ services:
       - no-new-privileges:true
 
 volumes:
-  ksync-data:
+  daochi-data:

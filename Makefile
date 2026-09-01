@@ -31,7 +31,6 @@ $(LIBOQS_A): $(LIBOQS_DIR)/CMakeLists.txt
 
 build: $(LIBOQS_A)
 	$(CGO_ENV) $(GO) build -o daochi .
-	ln -sf daochi ksync
 
 test: $(LIBOQS_A)
 	$(CGO_ENV) GOCACHE=/tmp/daochi-gocache $(GO) test ./...

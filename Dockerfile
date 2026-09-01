@@ -17,14 +17,13 @@ RUN go build -mod=mod -o /out/daochi .
 
 FROM debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && useradd --system --uid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin ksync \
+    && useradd --system --uid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin daochi \
     && mkdir -p /data \
-    && chown ksync:ksync /data \
+    && chown daochi:daochi /data \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=liboqs /usr/local/lib/liboqs.so* /usr/local/lib/
 COPY --from=build /out/daochi /usr/local/bin/daochi
-RUN ln -s /usr/local/bin/daochi /usr/local/bin/ksync
 ENV LD_LIBRARY_PATH=/usr/local/lib
 EXPOSE 8080
-USER ksync
+USER daochi
 CMD ["daochi"]

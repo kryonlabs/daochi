@@ -1328,7 +1328,7 @@ func (s *Store) CreateMoneroInvoice(ctx context.Context, accountID, appID string
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}
-	address, index, err := createMoneroSubaddress(ctx, cfg, "ksync-"+id)
+	address, index, err := createMoneroSubaddress(ctx, cfg, "daochi-"+id)
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}

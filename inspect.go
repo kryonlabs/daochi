@@ -30,7 +30,7 @@ func runInspect(ctx context.Context, args []string, opts InspectOptions) error {
 		return err
 	}
 	if opts.DBPath == "" {
-		opts.DBPath = envString("KSYNC_DB", "ksync.db")
+		opts.DBPath = envString("DAOCHI_DB", envString("KSYNC_DB", "daochi.db"))
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
@@ -50,12 +50,12 @@ func runInspect(ctx context.Context, args []string, opts InspectOptions) error {
 		return inspectUsers(ctx, db, opts.Out, opts.Full)
 	case "doctor":
 		if len(rest) != 2 {
-			return fmt.Errorf("usage: ksync inspect doctor <user_id_hash>")
+			return fmt.Errorf("usage: daochi inspect doctor <user_id_hash>")
 		}
 		return inspectDoctor(ctx, db, opts.Out, rest[1], opts.Full)
 	case "user":
 		if len(rest) != 2 {
-			return fmt.Errorf("usage: ksync inspect user <user_id_hash>")
+			return fmt.Errorf("usage: daochi inspect user <user_id_hash>")
 		}
 		return inspectUser(ctx, db, opts.Out, rest[1], opts.Full)
 	default:
@@ -88,7 +88,7 @@ func inspectSummary(ctx context.Context, db *sql.DB, out io.Writer) error {
 		"server_encrypted_payloads",
 		"server_sync_audit",
 	}
-	fmt.Fprintln(out, "Ksync data summary")
+	fmt.Fprintln(out, "Daochi data summary")
 	for _, table := range tables {
 		n, err := inspectCount(ctx, db, table, "")
 		if err != nil {
@@ -186,7 +186,7 @@ SELECT compacted_through_version
 FROM server_sync_compaction
 WHERE user_id_hash=?1`, userID).Scan(&compactedThrough)
 
-	fmt.Fprintf(out, "Ksync doctor %s\n", redactID(userID, full))
+	fmt.Fprintf(out, "Daochi doctor %s\n", redactID(userID, full))
 	fmt.Fprintf(out, "status=ok server_version=%d compacted_through=%d\n", version, compactedThrough)
 	fmt.Fprintf(out, "created=%s last_seen=%s\n", createdAt, lastSeenAt)
 

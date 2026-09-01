@@ -60,6 +60,50 @@
       return Array.isArray(items) && items.length ? items.join(", ") : "none declared";
     }
 
+    function itemList(items, renderItem, fallback = "none declared") {
+      if (!Array.isArray(items) || !items.length) return `<p>${fallback}</p>`;
+      return `<ul class="detail-list">${items.map(renderItem).join("")}</ul>`;
+    }
+
+    function dateTime(value) {
+      if (!value) return "";
+      if (typeof value === "number") return new Date(value * 1000).toISOString();
+      return text(value);
+    }
+
+    function legacyWindow(value) {
+      if (!value) return "signed transaction required";
+      return `legacy unsigned until ${dateTime(value)}`;
+    }
+
+    function resultLabel(result) {
+      if (!result) return "not checked";
+      if (result.ok) return `${result.status} ok`;
+      return result.status ? `${result.status} unavailable` : "unavailable";
+    }
+
+    function detailRows(rows) {
+      if (!Array.isArray(rows) || !rows.length) return "<p>none</p>";
+      return `<dl class="detail-grid">${rows.map(([label, value]) => `
+        <div><dt>${label}</dt><dd>${value || "none"}</dd></div>
+      `).join("")}</dl>`;
+    }
+
+    async function fetchJSON(url) {
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (error) {
+          data = {};
+        }
+        return { ok: response.ok, status: response.status, data };
+      } catch (error) {
+        return { ok: false, status: 0, data: {}, error: String(error) };
+      }
+    }
+
     function link(url, label) {
       const href = text(url);
       if (!href) return "";
@@ -71,6 +115,8 @@
       const features = Array.isArray(app.features) ? app.features : [];
       const legacy = Array.isArray(app.legacy_protocols) ? app.legacy_protocols : [];
       const links = [link(app.homepage_url, "homepage"), link(app.source_url, "source")].filter(Boolean).join(" / ");
+      const keys = Array.isArray(app.keys) ? app.keys : [];
+      const tokenPolicies = Array.isArray(app.token_policies) ? app.token_policies : [];
       return `
         <article class="app-card">
           <div>
@@ -80,27 +126,121 @@
           <div class="tag-row">
             <span>${text(app.status, "unknown")}</span>
             <span>schema v${app.app_schema_version || 0}</span>
+            ${app.min_supported_client_version ? `<span>min client ${text(app.min_supported_client_version)}</span>` : ""}
+            ${app.current_client_version ? `<span>client ${text(app.current_client_version)}</span>` : ""}
             ${app.compatibility_until ? `<span>compat until ${app.compatibility_until}</span>` : ""}
+            ${app.manifest_hash ? `<span>signed manifest</span>` : ""}
           </div>
+          ${detailRows([
+            ["App ID", `<code>${text(app.app_id)}</code>`],
+            ["Created", text(app.created_at)],
+            ["Updated", text(app.updated_at)],
+            ["Manifest version", app.manifest_version ? `v${app.manifest_version}` : ""],
+            ["Manifest expires", dateTime(app.manifest_expires_at)],
+            ["Public key", app.public_key ? `<code>${text(app.public_key)}</code>` : ""],
+            ["Manifest hash", app.manifest_hash ? `<code>${text(app.manifest_hash)}</code>` : ""],
+            ["Manifest signature", app.manifest_signature ? `<code>${text(app.manifest_signature)}</code>` : ""],
+            ["Approval signature", app.approval_signature ? `<code>${text(app.approval_signature)}</code>` : ""]
+          ])}
           <p>${text(app.description, "No description provided.")}</p>
           <p><strong>Capabilities</strong> ${join(app.capabilities)}</p>
-          <p><strong>Features</strong> ${features.length ? features.map((item) => text(item.id)).join(", ") : "none declared"}</p>
-          <p><strong>Collections</strong> ${collections.length ? collections.map((item) => text(item.collection_prefix)).join(", ") : "none declared"}</p>
-          <p><strong>Legacy</strong> ${legacy.length ? legacy.map((item) => `${text(item.name)} until ${text(item.valid_until)}`).join(", ") : "none"}</p>
-          ${app.manifest_hash ? `<p><strong>Manifest</strong> <code>${app.manifest_hash}</code></p>` : ""}
+          <h5>Features</h5>
+          ${itemList(features, (item) => `
+            <li>
+              <code>${text(item.id)}</code>
+              ${item.requires_signed_tx ? `<span>signed transaction required</span>` : `<span>read/public</span>`}
+              ${Array.isArray(item.collections) && item.collections.length ? `<em>${item.collections.map((collection) => text(collection)).join(", ")}</em>` : ""}
+            </li>`)}
+          <h5>Collections</h5>
+          ${itemList(collections, (item) => `
+            <li>
+              <code>${text(item.collection_prefix)}</code>
+              <span>${text(item.visibility, "private")}${item.schema_version ? ` schema v${item.schema_version}` : ""}${item.created_at ? ` created ${text(item.created_at)}` : ""}</span>
+              ${item.description ? `<em>${text(item.description)}</em>` : ""}
+            </li>`)}
+          <h5>Legacy</h5>
+          ${itemList(legacy, (item) => `
+            <li>
+              <code>${text(item.name)}</code>
+              <span>${text(item.status, "compatibility")}${item.version ? ` v${item.version}` : ""} until ${text(item.valid_until, "unspecified")}</span>
+            </li>`, "none")}
+          <h5>Keys</h5>
+          ${itemList(keys, (item) => `
+            <li>
+              <code>${text(item.key_id)}</code>
+              <span>${text(item.algorithm)} ${text(item.purpose)} ${text(item.status, "active")}</span>
+              ${item.expires_at ? `<em>expires ${dateTime(item.expires_at)}</em>` : ""}
+            </li>`, "none")}
+          <h5>Token Policies</h5>
+          ${itemList(tokenPolicies, (item) => `
+            <li>
+              <code>${text(item.asset_id)}</code>
+              <span>${text(item.permission)} ${text(item.status, "active")}</span>
+              <em>${legacyWindow(item.legacy_unsigned_until)}</em>
+            </li>`, "none")}
         </article>
       `;
+    }
+
+    function tokenMarkup(asset, issuer) {
+      return `
+        <article class="token-card">
+          <div>
+            <h4>${text(asset.display_name, asset.asset_id)}</h4>
+            <p><code>${text(asset.asset_id)}</code></p>
+          </div>
+          <div class="tag-row">
+            <span>${text(asset.status, "unknown")}</span>
+            <span>issuer ${text(asset.issuer_id, "unknown")}</span>
+            <span>${asset.decimals || 0} decimals</span>
+          </div>
+          ${issuer && issuer.issuer_id === asset.issuer_id ? detailRows([
+            ["Issuer status", text(issuer.status)],
+            ["Issuer algorithm", text(issuer.algorithm)],
+            ["Issuer public key", issuer.public_key ? `<code>${text(issuer.public_key)}</code>` : ""]
+          ]) : ""}
+        </article>
+      `;
+    }
+
+    function productMarkup(product) {
+      return `
+        <li>
+          <code>${text(product.product_id)}</code>
+          <span>${product.token_units || 0} token units${product.monero_atomic_amount ? ` / ${product.monero_atomic_amount} atomic XMR` : ""}</span>
+        </li>
+      `;
+    }
+
+    async function appDetail(nodeUrl, app) {
+      const appID = text(app.app_id);
+      if (!appID) return app;
+      try {
+        const response = await fetch(`${nodeUrl}/api/v1/apps/${encodeURIComponent(appID)}`, { cache: "no-store" });
+        if (!response.ok) return app;
+        return await response.json();
+      } catch (error) {
+        return app;
+      }
     }
 
     async function loadNode(node) {
       const nodeUrl = text(node.url).replace(/\/+$/, "");
       try {
-        const [health, appsResponse] = await Promise.all([
-          fetch(`${nodeUrl}/healthz`, { cache: "no-store" }),
-          fetch(`${nodeUrl}/api/v1/apps`, { cache: "no-store" })
+        const [health, ready, appsResult, tokenResult, issuerResult, productResult] = await Promise.all([
+          fetchJSON(`${nodeUrl}/healthz`),
+          fetchJSON(`${nodeUrl}/readyz`),
+          fetchJSON(`${nodeUrl}/api/v1/apps`),
+          fetchJSON(`${nodeUrl}/api/v1/tokens/assets`),
+          fetchJSON(`${nodeUrl}/api/v1/tokens/issuer`),
+          fetchJSON(`${nodeUrl}/api/v1/tokens/products`)
         ]);
-        const apps = await appsResponse.json();
-        const registrations = Array.isArray(apps.apps) ? apps.apps : [];
+        const readiness = ready.data && ready.data.checks ? ready.data.checks : {};
+        const tokens = Array.isArray(tokenResult.data.assets) ? tokenResult.data.assets : [];
+        const products = Array.isArray(productResult.data.products) ? productResult.data.products : [];
+        const apps = Array.isArray(appsResult.data.apps) ? appsResult.data.apps : [];
+        const registrations = await Promise.all(apps.map((app) => appDetail(nodeUrl, app)));
+        const online = health.ok && appsResult.ok && tokenResult.ok;
         return `
           <article class="node-card">
             <div class="node-heading">
@@ -108,8 +248,24 @@
                 <h3>${text(node.name, nodeUrl)}</h3>
                 <p><a href="${nodeUrl}">${nodeUrl}</a></p>
               </div>
-              <span class="status-pill">${health.ok && appsResponse.ok ? "online" : "degraded"}</span>
+              <span class="status-pill${online ? "" : " offline"}">${online ? "online" : "degraded"}</span>
             </div>
+            <h4>Node Diagnostics</h4>
+            ${detailRows([
+              ["Health", resultLabel(health)],
+              ["Readiness", resultLabel(ready)],
+              ["Apps endpoint", resultLabel(appsResult)],
+              ["Token assets endpoint", resultLabel(tokenResult)],
+              ["Token issuer endpoint", resultLabel(issuerResult)],
+              ["Token products endpoint", resultLabel(productResult)]
+            ])}
+            <h4>Readiness Checks</h4>
+            ${detailRows(Object.entries(readiness).map(([key, value]) => [key, text(value)]))}
+            <h4>Accepted Tokens</h4>
+            <div class="token-list">${tokens.length ? tokens.map((asset) => tokenMarkup(asset, issuerResult.data)).join("") : "<p>No accepted tokens published.</p>"}</div>
+            <h4>Purchase Products</h4>
+            ${itemList(products, productMarkup, "No direct purchase products published.")}
+            <h4>Registered Apps</h4>
             <div class="app-list">${registrations.length ? registrations.map(appMarkup).join("") : "<p>No apps registered.</p>"}</div>
           </article>
         `;

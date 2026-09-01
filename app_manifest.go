@@ -155,6 +155,20 @@ VALUES(?1,?2)`, app.AppID, capability); err != nil {
 			}
 		}
 	}
+	if len(app.TokenPolicies) > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM token_app_permissions WHERE app_id=?1`, app.AppID); err != nil {
+			return err
+		}
+		for _, policy := range app.TokenPolicies {
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until)
+VALUES(?1,?2,?3,?4,?5)`,
+				app.AppID, policy.AssetID, policy.Permission,
+				defaultString(policy.Status, appStatusActive), policy.LegacyUnsignedUntil); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

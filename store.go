@@ -268,11 +268,11 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := store.SeedBuiltinApps(context.Background()); err != nil {
+	if err := store.SeedTokenAssets(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := store.SeedTokenAssets(context.Background()); err != nil {
+	if err := store.SeedBuiltinApps(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

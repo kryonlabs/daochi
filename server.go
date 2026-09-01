@@ -42,6 +42,8 @@ const (
 )
 
 var ksyncServerCapabilities = []string{
+	"aliases",
+	"friends",
 	"v3-typed-sync",
 	"v4-encrypted-records",
 	"v4-dual-write-transition",
@@ -53,6 +55,7 @@ var ksyncServerCapabilities = []string{
 	"protocol-previous-version-grace-days-365",
 	"v6-signed-transactions",
 	"v6-signed-app-manifests",
+	"profile-stats",
 	"pub-relay",
 }
 

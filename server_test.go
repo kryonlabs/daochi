@@ -1022,19 +1022,25 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 		t.Fatal(err)
 	}
 	foundInbe := false
+	foundUkuvota := false
 	for _, app := range registry.Apps {
 		if app.AppID == "inbe" {
 			foundInbe = true
 			if !containsString(app.Capabilities, "encrypted-records") {
 				t.Fatalf("inbe capabilities missing encrypted-records: %#v", app)
 			}
+			if containsString(app.Capabilities, "friends") {
+				t.Fatalf("friends should be a Daochi server capability, not an inbe app capability: %#v", app)
+			}
 			hasReleasedV4 := false
 			hasShared := false
+			hasLegacyFriendVisible := false
 			for _, collection := range app.Collections {
 				hasReleasedV4 = hasReleasedV4 || collection.CollectionPrefix == "inbe.habits"
 				hasShared = hasShared || collection.CollectionPrefix == "shared.inbe.v1.*"
+				hasLegacyFriendVisible = hasLegacyFriendVisible || collection.CollectionPrefix == "friends.inbe.v1.*"
 			}
-			if !hasReleasedV4 || !hasShared {
+			if !hasReleasedV4 || !hasShared || !hasLegacyFriendVisible {
 				t.Fatalf("inbe collections missing v4/shared entries: %#v", app.Collections)
 			}
 			if app.CompatibilityUntil != appCompatibilityDeadline ||
@@ -1042,16 +1048,37 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 				len(app.LegacyProtocols) == 0 {
 				t.Fatalf("inbe compatibility policy missing: %#v", app)
 			}
+			if len(app.TokenPolicies) != 2 {
+				t.Fatalf("inbe chi token policies missing: %#v", app.TokenPolicies)
+			}
+			for _, feature := range app.Features {
+				if feature.ID == "social.friends" {
+					t.Fatalf("inbe should not own the core friend graph feature: %#v", app.Features)
+				}
+			}
+		}
+		if app.AppID == "uku" {
+			t.Fatalf("deprecated uku app should not be listed: %#v", registry.Apps)
 		}
 		if app.AppID == "ukuvota" {
+			foundUkuvota = true
 			if app.CompatibilityUntil != "" || len(app.LegacyProtocols) != 0 ||
 				!containsString(app.Capabilities, "public-records") {
 				t.Fatalf("ukuvota should be registered without legacy policy: %#v", app)
+			}
+			if containsString(app.Capabilities, "aliases") {
+				t.Fatalf("aliases should be a Daochi server capability, not an ukuvota app capability: %#v", app)
+			}
+			if len(app.TokenPolicies) != 2 {
+				t.Fatalf("ukuvota chi token policies missing: %#v", app.TokenPolicies)
 			}
 		}
 	}
 	if !foundInbe {
 		t.Fatalf("inbe app not seeded: %#v", registry.Apps)
+	}
+	if !foundUkuvota {
+		t.Fatalf("ukuvota app not seeded: %#v", registry.Apps)
 	}
 
 	detail := httptest.NewRecorder()
@@ -1065,6 +1092,29 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 	}
 	if app.AppID != "inbe" || len(app.Collections) == 0 {
 		t.Fatalf("unexpected inbe app detail: %#v", app)
+	}
+}
+
+func TestSeedBuiltinAppsPrunesDeprecatedUku(t *testing.T) {
+	_, store, _ := testServer(t)
+	if err := store.UpsertApp(context.Background(), AppRegistration{
+		AppID:       "uku",
+		DisplayName: "Uku",
+		Status:      appStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.AppByID(context.Background(), "uku"); err != nil || !found {
+		t.Fatalf("expected deprecated app fixture before prune, found=%v err=%v", found, err)
+	}
+	if err := store.SeedBuiltinApps(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.AppByID(context.Background(), "uku"); err != nil || found {
+		t.Fatalf("deprecated uku app still present, found=%v err=%v", found, err)
+	}
+	if _, found, err := store.AppByID(context.Background(), "ukuvota"); err != nil || !found {
+		t.Fatalf("ukuvota missing after prune, found=%v err=%v", found, err)
 	}
 }
 

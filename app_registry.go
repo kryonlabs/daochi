@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	appStatusActive          = "active"
-	appStatusSuspended       = "suspended"
-	appGrantRead             = "read"
-	appCompatibilityDeadline = "2027-09-01"
+	appStatusActive              = "active"
+	appStatusSuspended           = "suspended"
+	appGrantRead                 = "read"
+	appCompatibilityDeadline     = "2027-09-01"
+	appCompatibilityDeadlineUnix = 1819756800
 )
 
 func (s *Store) SeedBuiltinApps(ctx context.Context) error {
@@ -40,19 +41,22 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 			{CollectionPrefix: "friends.inbe.v1.*", Visibility: "friends", SchemaVersion: 1, Description: "Friend-visible Inbe records."},
 			{CollectionPrefix: "public.inbe.v1.*", Visibility: "public", SchemaVersion: 1, Description: "Public Inbe records."},
 		},
-		Capabilities: []string{"sync", "encrypted-records", "profile-stats", "friends", "leaderboard"},
+		Capabilities: []string{"sync", "encrypted-records", "profile-stats", "leaderboard"},
 		Features: []AppFeature{
 			{ID: "sync.private_records", Collections: []string{"private.inbe.v1.*", "inbe.habits", "inbe.habit_days", "inbe.sessions"}, RequiresSignedTx: true},
 			{ID: "sync.shared_records", Collections: []string{"shared.inbe.v1.*"}, RequiresSignedTx: true},
-			{ID: "social.friends", Collections: []string{"friends.inbe.v1.*"}, RequiresSignedTx: true},
 			{ID: "profile.stats", RequiresSignedTx: false},
 		},
 		LegacyProtocols: []LegacyProtocol{
 			{Name: "inbe-typed-sync", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
 			{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
 		},
+		TokenPolicies: []TokenPolicy{
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive, LegacyUnsignedUntil: appCompatibilityDeadlineUnix},
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive, LegacyUnsignedUntil: appCompatibilityDeadlineUnix},
+		},
 	}
-	uku := AppRegistration{
+	ukuvota := AppRegistration{
 		AppID:            "ukuvota",
 		DisplayName:      "Ukuvota",
 		Description:      "Public and shared decision data owned by the Ukuvota app.",
@@ -70,7 +74,7 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 			{CollectionPrefix: "private.ukuvota.v1.drafts.*", Visibility: "private", SchemaVersion: 1, Description: "Private local draft sync records."},
 			{CollectionPrefix: "private.ukuvota.v1.profile.*", Visibility: "private", SchemaVersion: 1, Description: "Private Ukuvota profile preferences."},
 		},
-		Capabilities: []string{"public-records", "private-drafts", "processes", "proposals", "voting", "participants", "aliases", "qr-share"},
+		Capabilities: []string{"public-records", "private-drafts", "processes", "proposals", "voting", "participants", "qr-share"},
 		Features: []AppFeature{
 			{ID: "process.create", Collections: []string{"public.ukuvota.v1.processes.*"}, RequiresSignedTx: true},
 			{ID: "process.read", Collections: []string{"public.ukuvota.v1.processes.*"}, RequiresSignedTx: false},
@@ -80,11 +84,23 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 			{ID: "participant.upsert", Collections: []string{"public.ukuvota.v1.participants.*"}, RequiresSignedTx: true},
 			{ID: "draft.sync", Collections: []string{"private.ukuvota.v1.drafts.*"}, RequiresSignedTx: true},
 		},
+		TokenPolicies: []TokenPolicy{
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive, LegacyUnsignedUntil: appCompatibilityDeadlineUnix},
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive, LegacyUnsignedUntil: appCompatibilityDeadlineUnix},
+		},
 	}
 	if err := s.UpsertApp(ctx, inbe); err != nil {
 		return err
 	}
-	return s.UpsertApp(ctx, uku)
+	if err := s.UpsertApp(ctx, ukuvota); err != nil {
+		return err
+	}
+	return s.PruneDeprecatedBuiltinApps(ctx)
+}
+
+func (s *Store) PruneDeprecatedBuiltinApps(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM server_apps WHERE app_id='uku'`)
+	return err
 }
 
 func (s *Store) UpsertApp(ctx context.Context, app AppRegistration) error {

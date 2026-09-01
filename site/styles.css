@@ -225,13 +225,15 @@ li {
 }
 
 .node-list,
-.app-list {
+.app-list,
+.token-list {
   display: grid;
   gap: 16px;
 }
 
 .node-card,
-.app-card {
+.app-card,
+.token-card {
   padding: 20px;
   border: 1.5px solid var(--line);
   border-radius: 12px;
@@ -248,13 +250,75 @@ li {
 }
 
 .node-heading h3,
-.app-card h4 {
+.node-card h4,
+.app-card h4,
+.token-card h4 {
   margin: 0 0 6px;
 }
 
 .node-heading p,
-.app-card p {
+.app-card p,
+.token-card p {
   margin-bottom: 8px;
+}
+
+.node-card > h4 {
+  margin-top: 18px;
+}
+
+.app-card h5 {
+  margin: 16px 0 8px;
+  font-size: .78rem;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.detail-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.detail-list li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.detail-list li span,
+.detail-list li em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+  margin: 12px 0;
+}
+
+.detail-grid div {
+  min-width: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.detail-grid dt {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: .72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.detail-grid dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .status-pill,

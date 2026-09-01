@@ -82,6 +82,7 @@
     };
 
     const MAX_DISCOVERED_NODES = 24;
+    const MAX_CANVAS_DPR = 4;
 
     function plain(value, fallback = "") {
       return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -456,8 +457,8 @@
       const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
       const unitX = dx / distance;
       const unitY = dy / distance;
-      const start = { x: from.x + unitX * 32, y: from.y + unitY * 32 };
-      const end = { x: to.x - unitX * 32, y: to.y - unitY * 32 };
+      const start = { x: Math.round(from.x + unitX * 32), y: Math.round(from.y + unitY * 32) };
+      const end = { x: Math.round(to.x - unitX * 32), y: Math.round(to.y - unitY * 32) };
       ctx.strokeStyle = active ? "rgba(159, 124, 47, .82)" : "rgba(4, 101, 95, .32)";
       ctx.fillStyle = active ? "rgba(159, 124, 47, .82)" : "rgba(4, 101, 95, .42)";
       ctx.lineWidth = active ? 3 : 2;
@@ -480,12 +481,13 @@
       const rect = canvas.parentElement.getBoundingClientRect();
       const width = Math.max(320, Math.floor(rect.width));
       const height = Math.max(300, Math.floor(rect.height));
-      state.dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.floor(width * state.dpr);
-      canvas.height = Math.floor(height * state.dpr);
+      state.dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_CANVAS_DPR);
+      canvas.width = Math.round(width * state.dpr);
+      canvas.height = Math.round(height * state.dpr);
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+      ctx.imageSmoothingEnabled = false;
       ctx.clearRect(0, 0, width, height);
 
       const gradient = ctx.createLinearGradient(0, 0, width, height);
@@ -497,15 +499,17 @@
       ctx.strokeStyle = "rgba(230, 213, 196, .68)";
       ctx.lineWidth = 1;
       for (let x = 34; x < width; x += 34) {
+        const crispX = Math.round(x) + .5;
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
+        ctx.moveTo(crispX, 0);
+        ctx.lineTo(crispX, height);
         ctx.stroke();
       }
       for (let y = 34; y < height; y += 34) {
+        const crispY = Math.round(y) + .5;
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
+        ctx.moveTo(0, crispY);
+        ctx.lineTo(width, crispY);
         ctx.stroke();
       }
 
@@ -513,7 +517,7 @@
 
       state.nodes.forEach((node, index) => {
         const point = nodePoint(index, state.nodes.length, width, height);
-        node.canvasPoint = point;
+        node.canvasPoint = { x: Math.round(point.x), y: Math.round(point.y) };
       });
 
       state.edges.forEach((edge) => {

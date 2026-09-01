@@ -43,6 +43,17 @@ type NodePeer struct {
 	URL  string `json:"url"`
 }
 
+type NodeUsage struct {
+	RegisteredUsers                 int `json:"registered_users"`
+	ActiveUsers30d                  int `json:"active_users_30d"`
+	RegisteredClients               int `json:"registered_clients"`
+	ActiveClients30d                int `json:"active_clients_30d"`
+	ConnectedUsers                  int `json:"connected_users"`
+	ConnectedWebSocketClients       int `json:"connected_websocket_clients"`
+	RecentActivityWindowDays        int `json:"recent_activity_window_days"`
+	WebSocketConnectionLimitPerUser int `json:"websocket_connection_limit_per_user"`
+}
+
 type AccountExportResponse struct {
 	Status       string                      `json:"status"`
 	UserIDHash   string                      `json:"user_id_hash"`

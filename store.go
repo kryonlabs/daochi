@@ -4311,6 +4311,27 @@ SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='server_us
 	return nil
 }
 
+func (s *Store) NodeUsage(ctx context.Context, now time.Time) (NodeUsage, error) {
+	cutoff := now.UTC().Add(-30 * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	usage := NodeUsage{RecentActivityWindowDays: 30}
+	queries := []struct {
+		target *int
+		query  string
+		args   []any
+	}{
+		{&usage.RegisteredUsers, `SELECT COUNT(*) FROM server_users`, nil},
+		{&usage.ActiveUsers30d, `SELECT COUNT(*) FROM server_users WHERE last_seen_at>=?1`, []any{cutoff}},
+		{&usage.RegisteredClients, `SELECT COUNT(*) FROM server_clients`, nil},
+		{&usage.ActiveClients30d, `SELECT COUNT(*) FROM server_clients WHERE last_seen_at>=?1`, []any{cutoff}},
+	}
+	for _, item := range queries {
+		if err := s.db.QueryRowContext(ctx, item.query, item.args...).Scan(item.target); err != nil {
+			return NodeUsage{}, err
+		}
+	}
+	return usage, nil
+}
+
 func (s *Store) SyncDiagnosticReport(ctx context.Context, userID string) (SyncDiagnosticReport, error) {
 	version, err := s.currentUserVersion(ctx, userID)
 	if err != nil {

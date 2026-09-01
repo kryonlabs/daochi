@@ -1373,6 +1373,7 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 			MinSupported int `json:"min_supported"`
 			Latest       int `json:"latest"`
 		} `json:"protocol"`
+		Usage NodeUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(nodeInfo.Body.Bytes(), &nodePayload); err != nil {
 		t.Fatal(err)
@@ -1383,7 +1384,13 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 		!containsString(nodePayload.Capabilities, "aliases") ||
 		!containsString(nodePayload.Capabilities, "friends") ||
 		len(nodePayload.KnownNodes) != 1 ||
-		nodePayload.KnownNodes[0].URL != "https://mirror.example" {
+		nodePayload.KnownNodes[0].URL != "https://mirror.example" ||
+		nodePayload.Usage.RegisteredUsers != 1 ||
+		nodePayload.Usage.ActiveUsers30d != 1 ||
+		nodePayload.Usage.RegisteredClients != 1 ||
+		nodePayload.Usage.ActiveClients30d != 1 ||
+		nodePayload.Usage.RecentActivityWindowDays != 30 ||
+		nodePayload.Usage.WebSocketConnectionLimitPerUser != 8 {
 		t.Fatalf("unexpected node info payload: %#v", nodePayload)
 	}
 
@@ -1441,6 +1448,10 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 	metrics := httptest.NewRecorder()
 	handler.ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if metrics.Code != http.StatusOK ||
+		!strings.Contains(metrics.Body.String(), "daochi_sync_encrypted_records_applied_total 1") ||
+		!strings.Contains(metrics.Body.String(), `daochi_http_requests_total{method="POST",route="/api/v1/sync",status="200"} 1`) ||
+		!strings.Contains(metrics.Body.String(), "daochi_registered_users 1") ||
+		!strings.Contains(metrics.Body.String(), "daochi_active_users_30d 1") ||
 		!strings.Contains(metrics.Body.String(), "ksync_sync_encrypted_records_applied_total 1") ||
 		!strings.Contains(metrics.Body.String(), `ksync_http_requests_total{method="POST",route="/api/v1/sync",status="200"} 1`) {
 		t.Fatalf("unexpected metrics status=%d body=%s", metrics.Code, metrics.Body.String())
@@ -4017,6 +4028,8 @@ func TestAllowedCORSOrigin(t *testing.T) {
 	allowed := []string{
 		"https://daochi.pages.dev",
 		"https://daochi.kryonlabs.com",
+		"https://daochi.net",
+		"https://www.daochi.net",
 		"https://inbe.waozi.xyz",
 		"https://uku.waozi.xyz",
 		"http://localhost:8080",

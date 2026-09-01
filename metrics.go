@@ -84,19 +84,36 @@ func (m *ServerMetrics) recordWebSocketReject(reason string) {
 	m.mu.Unlock()
 }
 
-func (m *ServerMetrics) writePrometheus(w http.ResponseWriter, activeWebSockets int) {
+func (m *ServerMetrics) writePrometheus(w http.ResponseWriter, usage NodeUsage) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	fmt.Fprintf(w, "# TYPE ksync_sync_requests_total counter\nksync_sync_requests_total %d\n", m.syncRequests.Load())
-	fmt.Fprintf(w, "# TYPE ksync_sync_failures_total counter\nksync_sync_failures_total %d\n", m.syncFailures.Load())
-	fmt.Fprintf(w, "# TYPE ksync_sync_full_snapshots_total counter\nksync_sync_full_snapshots_total %d\n", m.syncFullSnapshots.Load())
-	fmt.Fprintf(w, "# TYPE ksync_sync_encrypted_records_applied_total counter\nksync_sync_encrypted_records_applied_total %d\n", m.syncEncryptedRecords.Load())
-	fmt.Fprintf(w, "# TYPE ksync_sync_encrypted_payloads_applied_total counter\nksync_sync_encrypted_payloads_applied_total %d\n", m.syncEncryptedPayloads.Load())
-	fmt.Fprintf(w, "# TYPE ksync_rate_limited_requests_total counter\nksync_rate_limited_requests_total %d\n", m.rateLimitedRequests.Load())
-	fmt.Fprintf(w, "# TYPE ksync_auth_failures_total counter\nksync_auth_failures_total %d\n", m.authFailures.Load())
-	fmt.Fprintf(w, "# TYPE ksync_legacy_client_hints_total counter\nksync_legacy_client_hints_total %d\n", m.legacyClientHints.Load())
-	fmt.Fprintf(w, "# TYPE ksync_websocket_accepted_total counter\nksync_websocket_accepted_total %d\n", m.webSocketAccepted.Load())
-	fmt.Fprintf(w, "# TYPE ksync_websocket_rejected_total counter\nksync_websocket_rejected_total %d\n", m.webSocketRejected.Load())
-	fmt.Fprintf(w, "# TYPE ksync_websocket_active gauge\nksync_websocket_active %d\n", activeWebSockets)
+	writeScalarMetric(w, "daochi_sync_requests_total", "counter", m.syncRequests.Load())
+	writeScalarMetric(w, "daochi_sync_failures_total", "counter", m.syncFailures.Load())
+	writeScalarMetric(w, "daochi_sync_full_snapshots_total", "counter", m.syncFullSnapshots.Load())
+	writeScalarMetric(w, "daochi_sync_encrypted_records_applied_total", "counter", m.syncEncryptedRecords.Load())
+	writeScalarMetric(w, "daochi_sync_encrypted_payloads_applied_total", "counter", m.syncEncryptedPayloads.Load())
+	writeScalarMetric(w, "daochi_rate_limited_requests_total", "counter", m.rateLimitedRequests.Load())
+	writeScalarMetric(w, "daochi_auth_failures_total", "counter", m.authFailures.Load())
+	writeScalarMetric(w, "daochi_legacy_client_hints_total", "counter", m.legacyClientHints.Load())
+	writeScalarMetric(w, "daochi_websocket_accepted_total", "counter", m.webSocketAccepted.Load())
+	writeScalarMetric(w, "daochi_websocket_rejected_total", "counter", m.webSocketRejected.Load())
+	writeScalarMetric(w, "daochi_websocket_active", "gauge", uint64(usage.ConnectedWebSocketClients))
+	writeScalarMetric(w, "daochi_connected_users", "gauge", uint64(usage.ConnectedUsers))
+	writeScalarMetric(w, "daochi_registered_users", "gauge", uint64(usage.RegisteredUsers))
+	writeScalarMetric(w, "daochi_active_users_30d", "gauge", uint64(usage.ActiveUsers30d))
+	writeScalarMetric(w, "daochi_registered_clients", "gauge", uint64(usage.RegisteredClients))
+	writeScalarMetric(w, "daochi_active_clients_30d", "gauge", uint64(usage.ActiveClients30d))
+	writeScalarMetric(w, "daochi_websocket_connection_limit_per_user", "gauge", uint64(usage.WebSocketConnectionLimitPerUser))
+	writeScalarMetric(w, "ksync_sync_requests_total", "counter", m.syncRequests.Load())
+	writeScalarMetric(w, "ksync_sync_failures_total", "counter", m.syncFailures.Load())
+	writeScalarMetric(w, "ksync_sync_full_snapshots_total", "counter", m.syncFullSnapshots.Load())
+	writeScalarMetric(w, "ksync_sync_encrypted_records_applied_total", "counter", m.syncEncryptedRecords.Load())
+	writeScalarMetric(w, "ksync_sync_encrypted_payloads_applied_total", "counter", m.syncEncryptedPayloads.Load())
+	writeScalarMetric(w, "ksync_rate_limited_requests_total", "counter", m.rateLimitedRequests.Load())
+	writeScalarMetric(w, "ksync_auth_failures_total", "counter", m.authFailures.Load())
+	writeScalarMetric(w, "ksync_legacy_client_hints_total", "counter", m.legacyClientHints.Load())
+	writeScalarMetric(w, "ksync_websocket_accepted_total", "counter", m.webSocketAccepted.Load())
+	writeScalarMetric(w, "ksync_websocket_rejected_total", "counter", m.webSocketRejected.Load())
+	writeScalarMetric(w, "ksync_websocket_active", "gauge", uint64(usage.ConnectedWebSocketClients))
 	m.writeMapMetrics(w)
 }
 
@@ -104,11 +121,20 @@ func (m *ServerMetrics) writeMapMetrics(w http.ResponseWriter) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ensureMaps()
+	writeLabelMap(w, "daochi_http_requests_total", "counter", "method,route,status", m.httpRequests)
+	writeLabelMap(w, "daochi_http_request_duration_milliseconds_total", "counter", "method,route,status", m.httpLatencyMS)
+	writeLabelMap(w, "daochi_auth_failures_by_reason_total", "counter", "status,reason", m.authFailuresBy)
+	writeSingleLabelMap(w, "daochi_sync_full_snapshots_by_reason_total", "counter", "reason", m.fullSnapshotsBy)
+	writeSingleLabelMap(w, "daochi_websocket_rejected_by_reason_total", "counter", "reason", m.webSocketRejects)
 	writeLabelMap(w, "ksync_http_requests_total", "counter", "method,route,status", m.httpRequests)
 	writeLabelMap(w, "ksync_http_request_duration_milliseconds_total", "counter", "method,route,status", m.httpLatencyMS)
 	writeLabelMap(w, "ksync_auth_failures_by_reason_total", "counter", "status,reason", m.authFailuresBy)
 	writeSingleLabelMap(w, "ksync_sync_full_snapshots_by_reason_total", "counter", "reason", m.fullSnapshotsBy)
 	writeSingleLabelMap(w, "ksync_websocket_rejected_by_reason_total", "counter", "reason", m.webSocketRejects)
+}
+
+func writeScalarMetric(w http.ResponseWriter, name, typ string, value uint64) {
+	fmt.Fprintf(w, "# TYPE %s %s\n%s %d\n", name, typ, name, value)
 }
 
 func writeLabelMap(w http.ResponseWriter, name, typ, labels string, values map[string]uint64) {

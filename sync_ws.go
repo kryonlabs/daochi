@@ -29,6 +29,11 @@ type syncHub struct {
 	subs map[string]map[chan syncEvent]struct{}
 }
 
+type syncHubStats struct {
+	Connections int
+	Users       int
+}
+
 func newSyncHub() *syncHub {
 	return &syncHub{subs: make(map[string]map[chan syncEvent]struct{})}
 }
@@ -74,13 +79,21 @@ func (h *syncHub) count(userID string) int {
 }
 
 func (h *syncHub) total() int {
+	return h.stats().Connections
+}
+
+func (h *syncHub) stats() syncHubStats {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	n := 0
+	stats := syncHubStats{}
 	for _, subs := range h.subs {
-		n += len(subs)
+		if len(subs) == 0 {
+			continue
+		}
+		stats.Users++
+		stats.Connections += len(subs)
 	}
-	return n
+	return stats
 }
 
 func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {

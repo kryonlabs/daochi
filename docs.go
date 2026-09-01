@@ -135,6 +135,12 @@ func openAPISpec() map[string]any {
 			"title":       "Daochi API",
 			"version":     "1.0.0",
 			"description": "Mesh-native sync API for app-owned data. Protocol v1 through v5 remain valid through 2027-09-01; after any future deprecation, the immediately previous version stays valid for at least one additional year.",
+			"x-daochi-protocol-policy": map[string]any{
+				"min_supported_protocol":          ksyncMinSupportedProtocol,
+				"latest_protocol":                 ksyncLatestProtocol,
+				"v1_v5_valid_through":             ksyncCompatibilityDeadline,
+				"previous_version_grace_days_min": ksyncPreviousVersionGrace,
+			},
 			"x-ksync-protocol-policy": map[string]any{
 				"min_supported_protocol":          ksyncMinSupportedProtocol,
 				"latest_protocol":                 ksyncLatestProtocol,
@@ -164,7 +170,14 @@ func openAPISpec() map[string]any {
 				"get": map[string]any{
 					"summary": "Node metadata",
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Node protocol bounds, capabilities, and known peer nodes"},
+						"200": map[string]any{
+							"description": "Node protocol bounds, capabilities, known peer nodes, and aggregate usage counts",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": map[string]any{"$ref": "#/components/schemas/NodeInfoResponse"},
+								},
+							},
+						},
 					},
 				},
 			},
@@ -641,6 +654,43 @@ func openAPISpec() map[string]any {
 		},
 		"components": map[string]any{
 			"schemas": map[string]any{
+				"NodeInfoResponse": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"status":       map[string]any{"type": "string"},
+						"base_url":     map[string]any{"type": "string"},
+						"capabilities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"known_nodes":  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/NodePeer"}},
+						"usage":        map[string]any{"$ref": "#/components/schemas/NodeUsage"},
+						"protocol": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"min_supported": map[string]any{"type": "integer"},
+								"latest":        map[string]any{"type": "integer"},
+							},
+						},
+					},
+				},
+				"NodePeer": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string"},
+						"url":  map[string]any{"type": "string"},
+					},
+				},
+				"NodeUsage": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"registered_users":                    map[string]any{"type": "integer"},
+						"active_users_30d":                    map[string]any{"type": "integer"},
+						"registered_clients":                  map[string]any{"type": "integer"},
+						"active_clients_30d":                  map[string]any{"type": "integer"},
+						"connected_users":                     map[string]any{"type": "integer"},
+						"connected_websocket_clients":         map[string]any{"type": "integer"},
+						"recent_activity_window_days":         map[string]any{"type": "integer"},
+						"websocket_connection_limit_per_user": map[string]any{"type": "integer"},
+					},
+				},
 				"FriendRequestCreateRequest": map[string]any{
 					"type":     "object",
 					"required": []string{"target"},

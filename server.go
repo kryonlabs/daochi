@@ -32,13 +32,15 @@ var encryptedRecordIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
 var contentHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const (
-	daochiSignatureContext     = "daochi-sync-v1"
-	ksyncSignatureContext      = "ksync-sync-v1"
-	legacyInbeSignatureContext = "inbe-sync-v1"
-	ksyncMinSupportedProtocol  = 1
-	ksyncLatestProtocol        = 6
-	ksyncCompatibilityDeadline = "2027-09-01"
-	ksyncPreviousVersionGrace  = 365
+	daochiSignatureContext          = "daochi-sync-v1"
+	ksyncSignatureContext           = "ksync-sync-v1"
+	legacyInbeSignatureContext      = "inbe-sync-v1"
+	ksyncMinSupportedProtocol       = 1
+	ksyncLatestProtocol             = 6
+	ksyncCompatibilityDeadline      = "2027-09-01"
+	ksyncPreviousVersionGrace       = 365
+	nodeUsageRecentWindowDays       = 30
+	webSocketConnectionLimitPerUser = 8
 )
 
 var ksyncServerCapabilities = []string{
@@ -187,11 +189,18 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 	if knownNodes == nil {
 		knownNodes = []NodePeer{}
 	}
+	usage, err := s.nodeUsage(r.Context())
+	if err != nil {
+		slog.Error("load node usage", "error", err)
+		writeError(w, http.StatusInternalServerError, "node usage failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":       "ok",
 		"base_url":     strings.TrimSpace(s.cfg.BaseURL),
 		"capabilities": ksyncServerCapabilities,
 		"known_nodes":  knownNodes,
+		"usage":        usage,
 		"protocol": map[string]int{
 			"min_supported": ksyncMinSupportedProtocol,
 			"latest":        ksyncLatestProtocol,
@@ -200,7 +209,29 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	s.metrics.writePrometheus(w, s.syncHub.total())
+	usage, err := s.nodeUsage(r.Context())
+	if err != nil {
+		slog.Error("load metrics usage", "error", err)
+		usage = NodeUsage{RecentActivityWindowDays: nodeUsageRecentWindowDays}
+		stats := s.syncHub.stats()
+		usage.ConnectedUsers = stats.Users
+		usage.ConnectedWebSocketClients = stats.Connections
+		usage.WebSocketConnectionLimitPerUser = webSocketConnectionLimitPerUser
+	}
+	s.metrics.writePrometheus(w, usage)
+}
+
+func (s *Server) nodeUsage(ctx context.Context) (NodeUsage, error) {
+	usage, err := s.store.NodeUsage(ctx, time.Now())
+	if err != nil {
+		return NodeUsage{}, err
+	}
+	stats := s.syncHub.stats()
+	usage.ConnectedUsers = stats.Users
+	usage.ConnectedWebSocketClients = stats.Connections
+	usage.RecentActivityWindowDays = nodeUsageRecentWindowDays
+	usage.WebSocketConnectionLimitPerUser = webSocketConnectionLimitPerUser
+	return usage, nil
 }
 
 func (s *Server) handleSyncDiagnostics(w http.ResponseWriter, r *http.Request) {
@@ -2271,6 +2302,8 @@ func allowedCORSOrigin(origin string) string {
 	}
 	if origin == "https://daochi.pages.dev" ||
 		origin == "https://daochi.kryonlabs.com" ||
+		origin == "https://daochi.net" ||
+		origin == "https://www.daochi.net" ||
 		origin == "https://inbe.waozi.xyz" ||
 		origin == "https://uku.waozi.xyz" {
 		return origin

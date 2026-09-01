@@ -352,6 +352,7 @@
     function overviewMarkup(node) {
       const protocol = node.nodeInfo.data && node.nodeInfo.data.protocol ? node.nodeInfo.data.protocol : {};
       const capabilities = Array.isArray(node.nodeInfo.data.capabilities) ? node.nodeInfo.data.capabilities : [];
+      const usage = usageFor(node);
       return `
         ${disclosure("Node Info", detailRows([
           ["Node URL", `<a href="${attr(node.url)}">${text(node.url)}</a>`],
@@ -368,7 +369,13 @@
           ["Min protocol", protocol.min_supported ? String(Number(protocol.min_supported)) : ""],
           ["Latest protocol", protocol.latest ? String(Number(protocol.latest)) : ""],
           ["Registered apps", String(node.apps.length)],
-          ["Accepted token assets", String(node.tokens.length)]
+          ["Accepted token assets", String(node.tokens.length)],
+          ["Registered users", String(Number(usage.registered_users || 0))],
+          ["Active users 30d", String(Number(usage.active_users_30d || 0))],
+          ["Registered clients", String(Number(usage.registered_clients || 0))],
+          ["Active clients 30d", String(Number(usage.active_clients_30d || 0))],
+          ["Connected users", String(Number(usage.connected_users || 0))],
+          ["Connected WebSocket clients", String(Number(usage.connected_websocket_clients || 0))]
         ]), { open: true, meta: `${node.status} / protocol ${Number(protocol.latest || 0)}` })}
         ${disclosure("Node Capabilities", itemList(capabilities, (capability) => `<li><code>${text(capability)}</code></li>`, "none declared"), { meta: `${capabilities.length} declared` })}
         ${disclosure("Known Node Peers", itemList(node.peers, (peer) => `<li><a href="${attr(peer.url)}">${text(peer.name)}</a><span>${text(peer.url)}</span></li>`, "none declared"), { meta: `${node.peers.length} peers` })}
@@ -387,6 +394,10 @@
       return `
         ${disclosure("Registered Apps", `<div class="app-list">${node.apps.length ? node.apps.map(appMarkup).join("") : "<p>No apps registered.</p>"}</div>`, { open: true, meta: `${node.apps.length} apps` })}
       `;
+    }
+
+    function usageFor(node) {
+      return node.nodeInfo.data && node.nodeInfo.data.usage ? node.nodeInfo.data.usage : {};
     }
 
     function renderDetail() {
@@ -422,11 +433,16 @@
       `;
     }
 
+    function railMeta(node) {
+      const usage = usageFor(node);
+      return `${node.status} / ${Number(usage.active_users_30d || 0)} active users / ${Number(usage.connected_websocket_clients || 0)} connected`;
+    }
+
     function renderRail() {
       rail.innerHTML = state.nodes.map((node, index) => `
         <button type="button" class="${index === state.selected ? "active" : ""}" data-node-index="${index}">
           <span>${text(node.name)}</span>
-          <em>${text(node.status)} / ${node.peers.length} peers / ${node.apps.length} apps / ${node.tokens.length} tokens</em>
+          <em>${text(railMeta(node))}</em>
         </button>
       `).join("");
       count.textContent = `${state.nodes.length} nodes / ${state.edges.length} connections`;

@@ -224,6 +224,66 @@ li {
   color: var(--muted);
 }
 
+.node-list,
+.app-list {
+  display: grid;
+  gap: 16px;
+}
+
+.node-card,
+.app-card {
+  padding: 20px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 14px 40px rgba(180, 106, 90, .08);
+}
+
+.node-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.node-heading h3,
+.app-card h4 {
+  margin: 0 0 6px;
+}
+
+.node-heading p,
+.app-card p {
+  margin-bottom: 8px;
+}
+
+.status-pill,
+.tag-row span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(4, 101, 95, .24);
+  border-radius: 999px;
+  background: rgba(4, 101, 95, .08);
+  color: var(--teal-dark);
+  font-size: .72rem;
+  font-weight: 850;
+}
+
+.status-pill.offline {
+  border-color: rgba(180, 106, 90, .35);
+  background: rgba(180, 106, 90, .1);
+  color: var(--red);
+}
+
+.tag-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+}
+
 .security-list {
   display: grid;
   gap: 22px;

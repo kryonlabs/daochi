@@ -308,14 +308,14 @@ func openAPISpec() map[string]any {
 				"get": map[string]any{
 					"summary": "List registered apps",
 					"responses": map[string]any{
-						"200": map[string]any{"description": "App registry"},
+						"200": map[string]any{"description": "App registry", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/AppRegistryResponse"}}}},
 					},
 				},
 				"post": map[string]any{
 					"summary":     "Register or update an app",
 					"description": "Requires the server admin token and matching X-Daochi-Admin header. X-Ksync-Admin remains accepted for compatibility.",
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Registered app"},
+						"200": map[string]any{"description": "Registered app", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/AppRegistration"}}}},
 						"401": map[string]any{"description": "Invalid admin token"},
 						"403": map[string]any{"description": "Admin registration disabled"},
 					},
@@ -326,7 +326,7 @@ func openAPISpec() map[string]any {
 					"summary":     "Register or update an app with a signed manifest",
 					"description": "The manifest is signed by an active Ed25519 app key and approved by the node registry key configured on this node.",
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Registered app"},
+						"200": map[string]any{"description": "Registered app", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/AppRegistration"}}}},
 						"401": map[string]any{"description": "Manifest or node approval signature rejected"},
 						"403": map[string]any{"description": "Node registry approval key unavailable"},
 					},
@@ -339,7 +339,7 @@ func openAPISpec() map[string]any {
 						{"name": "app_id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
 					},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "App registration"},
+						"200": map[string]any{"description": "App registration", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/AppRegistration"}}}},
 						"404": map[string]any{"description": "App not found"},
 					},
 				},
@@ -350,7 +350,7 @@ func openAPISpec() map[string]any {
 						{"name": "app_id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
 					},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Registered app"},
+						"200": map[string]any{"description": "Registered app", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/AppRegistration"}}}},
 					},
 				},
 			},
@@ -656,6 +656,83 @@ func openAPISpec() map[string]any {
 						"value":      map[string]any{"type": "number"},
 						"label":      map[string]any{"type": "string"},
 						"local_date": map[string]any{"type": "integer"},
+					},
+				},
+				"AppRegistryResponse": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"apps": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/AppRegistration"}},
+					},
+				},
+				"AppRegistration": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"app_id":                       map[string]any{"type": "string"},
+						"display_name":                 map[string]any{"type": "string"},
+						"description":                  map[string]any{"type": "string"},
+						"homepage_url":                 map[string]any{"type": "string"},
+						"source_url":                   map[string]any{"type": "string"},
+						"status":                       map[string]any{"type": "string"},
+						"app_schema_version":           map[string]any{"type": "integer"},
+						"min_supported_client_version": map[string]any{"type": "string"},
+						"current_client_version":       map[string]any{"type": "string"},
+						"compatibility_until":          map[string]any{"type": "string", "format": "date"},
+						"manifest_version":             map[string]any{"type": "integer"},
+						"manifest_hash":                map[string]any{"type": "string"},
+						"manifest_expires_at":          map[string]any{"type": "integer"},
+						"collections":                  map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/AppCollection"}},
+						"capabilities":                 map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"features":                     map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/AppFeature"}},
+						"legacy_protocols":             map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/LegacyProtocol"}},
+						"keys":                         map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/AppKey"}},
+						"token_policies":               map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/TokenPolicy"}},
+					},
+				},
+				"AppCollection": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"collection_prefix": map[string]any{"type": "string"},
+						"visibility":        map[string]any{"type": "string"},
+						"schema_version":    map[string]any{"type": "integer"},
+						"description":       map[string]any{"type": "string"},
+					},
+				},
+				"AppFeature": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":                 map[string]any{"type": "string"},
+						"collections":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"requires_signed_tx": map[string]any{"type": "boolean"},
+						"description":        map[string]any{"type": "string"},
+					},
+				},
+				"LegacyProtocol": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name":        map[string]any{"type": "string"},
+						"version":     map[string]any{"type": "integer"},
+						"status":      map[string]any{"type": "string"},
+						"valid_until": map[string]any{"type": "string", "format": "date"},
+					},
+				},
+				"AppKey": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"key_id":     map[string]any{"type": "string"},
+						"algorithm":  map[string]any{"type": "string"},
+						"public_key": map[string]any{"type": "string"},
+						"purpose":    map[string]any{"type": "string"},
+						"status":     map[string]any{"type": "string"},
+						"expires_at": map[string]any{"type": "integer"},
+					},
+				},
+				"TokenPolicy": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"asset_id":              map[string]any{"type": "string"},
+						"permission":            map[string]any{"type": "string"},
+						"status":                map[string]any{"type": "string"},
+						"legacy_unsigned_until": map[string]any{"type": "integer"},
 					},
 				},
 				"LoginRequest": map[string]any{

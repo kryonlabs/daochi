@@ -1202,15 +1202,28 @@ func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error
 		if !validNamespace(req.AppID) {
 			return errors.New("invalid app_id")
 		}
-		exists, err := s.store.AppExists(ctx, req.AppID)
+		app, exists, err := s.store.AppByID(ctx, req.AppID)
 		if err != nil {
 			return err
 		}
 		if !exists {
-			if req.ProtocolVersion >= 6 {
-				return errors.New("unknown app_id")
+			return errors.New("unknown app_id")
+		}
+		if app.Status != appStatusActive {
+			return errors.New("app_id inactive")
+		}
+		if req.ProtocolVersion >= 6 && app.ManifestExpiresAt > 0 &&
+			time.Now().Unix() > app.ManifestExpiresAt {
+			return errors.New("app manifest expired")
+		}
+		if req.ProtocolVersion < 6 {
+			allowed, err := s.store.AppAllowsLegacyProtocol(ctx, req.AppID, req.ProtocolVersion)
+			if err != nil {
+				return err
 			}
-			slog.Warn("sync request used unknown app_id", "app_id", logText(req.AppID), "mode", "compat")
+			if !allowed {
+				return errors.New("legacy protocol not allowed for app_id")
+			}
 		}
 	}
 	if req.ProtocolVersion >= 6 && req.AppID == "" {
@@ -1336,11 +1349,18 @@ func validEncryptedHierarchyCollection(collection string) bool {
 		return ksyncVersionSegmentPattern.MatchString(parts[1]) &&
 			ksyncNamespaceSegmentPattern.MatchString(parts[2])
 	}
-	if len(parts) == 4 && (parts[0] == "private" || parts[0] == "shared" ||
+	if len(parts) >= 4 && (parts[0] == "private" || parts[0] == "shared" ||
 		parts[0] == "friends" || parts[0] == "public") {
-		return ksyncNamespaceSegmentPattern.MatchString(parts[1]) &&
-			ksyncVersionSegmentPattern.MatchString(parts[2]) &&
-			ksyncNamespaceSegmentPattern.MatchString(parts[3])
+		if !ksyncNamespaceSegmentPattern.MatchString(parts[1]) ||
+			!ksyncVersionSegmentPattern.MatchString(parts[2]) {
+			return false
+		}
+		for _, part := range parts[3:] {
+			if !ksyncNamespaceSegmentPattern.MatchString(part) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }
@@ -1823,12 +1843,7 @@ func readUkuCreateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody
 	if !ukuProcessHasVoting(req.Type) {
 		req.QuorumVotes = 0
 	}
-	if ukuProcessUsesReason(req.Type) && !strings.Contains(string(body), `"require_vote_reason"`) {
-		req.RequireReason = true
-	}
-	if !ukuProcessUsesReason(req.Type) {
-		req.RequireReason = false
-	}
+	req.RequireReason = false
 	if ukuProcessHasOptions(req.Type) {
 		seen := make(map[string]bool)
 		if len(req.Options) < 2 {

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daochi Nodes</title>
+  <meta name="description" content="Known Daochi nodes and the apps registered with each node.">
+  <meta name="theme-color" content="#f7ede2">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
+  <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Daochi</a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/protocol.html">Protocol</a>
+      <a href="/mesh.html">Mesh</a>
+      <a href="/apps.html">Apps</a>
+      <a href="/nodes.html">Nodes</a>
+      <a href="/tokens.html">Tokens</a>
+      <a href="/openapi.json">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="page-hero">
+      <p class="eyebrow">Nodes</p>
+      <h1>Registered apps are visible per node.</h1>
+      <p class="lead">Each Daochi node chooses which app manifests it accepts. Clients can check the node registry before enabling app-owned sync features.</p>
+    </section>
+
+    <section>
+      <h2>Known nodes</h2>
+      <div id="node-list" class="node-list" aria-live="polite">
+        <article class="node-card">
+          <h3>Loading nodes</h3>
+          <p>Checking configured Daochi nodes.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>&copy; 2026 <a href="https://kryonlabs.com">Kryon Labs</a></span>
+    <span>Post-quantum account authority for app-owned sync.</span>
+  </footer>
+
+  <script>
+    const list = document.getElementById("node-list");
+
+    function text(value, fallback = "") {
+      return typeof value === "string" && value.trim() ? value.trim() : fallback;
+    }
+
+    function join(items) {
+      return Array.isArray(items) && items.length ? items.join(", ") : "none declared";
+    }
+
+    function link(url, label) {
+      const href = text(url);
+      if (!href) return "";
+      return `<a href="${href.replaceAll('"', "&quot;")}">${label}</a>`;
+    }
+
+    function appMarkup(app) {
+      const collections = Array.isArray(app.collections) ? app.collections : [];
+      const features = Array.isArray(app.features) ? app.features : [];
+      const legacy = Array.isArray(app.legacy_protocols) ? app.legacy_protocols : [];
+      const links = [link(app.homepage_url, "homepage"), link(app.source_url, "source")].filter(Boolean).join(" / ");
+      return `
+        <article class="app-card">
+          <div>
+            <h4>${text(app.display_name, app.app_id)}</h4>
+            <p><code>${text(app.app_id)}</code> ${links ? " / " + links : ""}</p>
+          </div>
+          <div class="tag-row">
+            <span>${text(app.status, "unknown")}</span>
+            <span>schema v${app.app_schema_version || 0}</span>
+            ${app.compatibility_until ? `<span>compat until ${app.compatibility_until}</span>` : ""}
+          </div>
+          <p>${text(app.description, "No description provided.")}</p>
+          <p><strong>Capabilities</strong> ${join(app.capabilities)}</p>
+          <p><strong>Features</strong> ${features.length ? features.map((item) => text(item.id)).join(", ") : "none declared"}</p>
+          <p><strong>Collections</strong> ${collections.length ? collections.map((item) => text(item.collection_prefix)).join(", ") : "none declared"}</p>
+          <p><strong>Legacy</strong> ${legacy.length ? legacy.map((item) => `${text(item.name)} until ${text(item.valid_until)}`).join(", ") : "none"}</p>
+          ${app.manifest_hash ? `<p><strong>Manifest</strong> <code>${app.manifest_hash}</code></p>` : ""}
+        </article>
+      `;
+    }
+
+    async function loadNode(node) {
+      const nodeUrl = text(node.url).replace(/\/+$/, "");
+      try {
+        const [health, appsResponse] = await Promise.all([
+          fetch(`${nodeUrl}/healthz`, { cache: "no-store" }),
+          fetch(`${nodeUrl}/api/v1/apps`, { cache: "no-store" })
+        ]);
+        const apps = await appsResponse.json();
+        const registrations = Array.isArray(apps.apps) ? apps.apps : [];
+        return `
+          <article class="node-card">
+            <div class="node-heading">
+              <div>
+                <h3>${text(node.name, nodeUrl)}</h3>
+                <p><a href="${nodeUrl}">${nodeUrl}</a></p>
+              </div>
+              <span class="status-pill">${health.ok && appsResponse.ok ? "online" : "degraded"}</span>
+            </div>
+            <div class="app-list">${registrations.length ? registrations.map(appMarkup).join("") : "<p>No apps registered.</p>"}</div>
+          </article>
+        `;
+      } catch (error) {
+        return `
+          <article class="node-card">
+            <div class="node-heading">
+              <div>
+                <h3>${text(node.name, nodeUrl)}</h3>
+                <p><a href="${nodeUrl}">${nodeUrl}</a></p>
+              </div>
+              <span class="status-pill offline">offline</span>
+            </div>
+            <p>Could not load this node from the browser. The node may be offline or may not expose cross-origin registry reads.</p>
+          </article>
+        `;
+      }
+    }
+
+    async function main() {
+      try {
+        const response = await fetch("/nodes.json", { cache: "no-store" });
+        const config = await response.json();
+        const nodes = Array.isArray(config.nodes) ? config.nodes : [];
+        list.innerHTML = (await Promise.all(nodes.map(loadNode))).join("");
+      } catch (error) {
+        list.innerHTML = `<article class="node-card"><h3>Node list unavailable</h3><p>Could not load the checked-in node configuration.</p></article>`;
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>

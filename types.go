@@ -286,24 +286,30 @@ type FriendStatsResponse struct {
 }
 
 type AppRegistration struct {
-	AppID             string          `json:"app_id"`
-	DisplayName       string          `json:"display_name"`
-	Description       string          `json:"description,omitempty"`
-	HomepageURL       string          `json:"homepage_url,omitempty"`
-	SourceURL         string          `json:"source_url,omitempty"`
-	PublicKey         string          `json:"public_key,omitempty"`
-	Status            string          `json:"status"`
-	CreatedAt         string          `json:"created_at,omitempty"`
-	UpdatedAt         string          `json:"updated_at,omitempty"`
-	ManifestVersion   int             `json:"manifest_version,omitempty"`
-	ManifestHash      string          `json:"manifest_hash,omitempty"`
-	ManifestSignature string          `json:"manifest_signature,omitempty"`
-	ApprovalSignature string          `json:"approval_signature,omitempty"`
-	ManifestExpiresAt int64           `json:"manifest_expires_at,omitempty"`
-	Collections       []AppCollection `json:"collections,omitempty"`
-	Capabilities      []string        `json:"capabilities,omitempty"`
-	Keys              []AppKey        `json:"keys,omitempty"`
-	TokenPolicies     []TokenPolicy   `json:"token_policies,omitempty"`
+	AppID              string           `json:"app_id"`
+	DisplayName        string           `json:"display_name"`
+	Description        string           `json:"description,omitempty"`
+	HomepageURL        string           `json:"homepage_url,omitempty"`
+	SourceURL          string           `json:"source_url,omitempty"`
+	PublicKey          string           `json:"public_key,omitempty"`
+	Status             string           `json:"status"`
+	AppSchemaVersion   int              `json:"app_schema_version,omitempty"`
+	MinClientVersion   string           `json:"min_supported_client_version,omitempty"`
+	CurrentVersion     string           `json:"current_client_version,omitempty"`
+	CompatibilityUntil string           `json:"compatibility_until,omitempty"`
+	CreatedAt          string           `json:"created_at,omitempty"`
+	UpdatedAt          string           `json:"updated_at,omitempty"`
+	ManifestVersion    int              `json:"manifest_version,omitempty"`
+	ManifestHash       string           `json:"manifest_hash,omitempty"`
+	ManifestSignature  string           `json:"manifest_signature,omitempty"`
+	ApprovalSignature  string           `json:"approval_signature,omitempty"`
+	ManifestExpiresAt  int64            `json:"manifest_expires_at,omitempty"`
+	Collections        []AppCollection  `json:"collections,omitempty"`
+	Capabilities       []string         `json:"capabilities,omitempty"`
+	Features           []AppFeature     `json:"features,omitempty"`
+	LegacyProtocols    []LegacyProtocol `json:"legacy_protocols,omitempty"`
+	Keys               []AppKey         `json:"keys,omitempty"`
+	TokenPolicies      []TokenPolicy    `json:"token_policies,omitempty"`
 }
 
 type AppCollection struct {
@@ -317,6 +323,20 @@ type AppCollection struct {
 
 type AppRegistryResponse struct {
 	Apps []AppRegistration `json:"apps"`
+}
+
+type AppFeature struct {
+	ID               string   `json:"id"`
+	Collections      []string `json:"collections,omitempty"`
+	RequiresSignedTx bool     `json:"requires_signed_tx,omitempty"`
+	Description      string   `json:"description,omitempty"`
+}
+
+type LegacyProtocol struct {
+	Name       string `json:"name"`
+	Version    int    `json:"version,omitempty"`
+	Status     string `json:"status"`
+	ValidUntil string `json:"valid_until"`
 }
 
 type AppGrant struct {

@@ -9,20 +9,28 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
-	appStatusActive    = "active"
-	appStatusSuspended = "suspended"
-	appGrantRead       = "read"
+	appStatusActive          = "active"
+	appStatusSuspended       = "suspended"
+	appGrantRead             = "read"
+	appCompatibilityDeadline = "2027-09-01"
 )
 
 func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 	inbe := AppRegistration{
-		AppID:       "inbe",
-		DisplayName: "Inner Breeze",
-		Description: "Breathing, meditation, and habit data.",
-		Status:      appStatusActive,
+		AppID:              "inbe",
+		DisplayName:        "Inner Breeze",
+		Description:        "Breathing, meditation, and habit data.",
+		HomepageURL:        "https://inbe.waozi.xyz/",
+		SourceURL:          "https://github.com/waozixyz/inbe",
+		Status:             appStatusActive,
+		AppSchemaVersion:   1,
+		MinClientVersion:   "0.0.0",
+		CurrentVersion:     "next",
+		CompatibilityUntil: appCompatibilityDeadline,
 		Collections: []AppCollection{
 			{CollectionPrefix: "inbe.habits", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit records."},
 			{CollectionPrefix: "inbe.habit_days", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit-day records."},
@@ -33,18 +41,45 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 			{CollectionPrefix: "public.inbe.v1.*", Visibility: "public", SchemaVersion: 1, Description: "Public Inbe records."},
 		},
 		Capabilities: []string{"sync", "encrypted-records", "profile-stats", "friends", "leaderboard"},
+		Features: []AppFeature{
+			{ID: "sync.private_records", Collections: []string{"private.inbe.v1.*", "inbe.habits", "inbe.habit_days", "inbe.sessions"}, RequiresSignedTx: true},
+			{ID: "sync.shared_records", Collections: []string{"shared.inbe.v1.*"}, RequiresSignedTx: true},
+			{ID: "social.friends", Collections: []string{"friends.inbe.v1.*"}, RequiresSignedTx: true},
+			{ID: "profile.stats", RequiresSignedTx: false},
+		},
+		LegacyProtocols: []LegacyProtocol{
+			{Name: "inbe-typed-sync", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
+			{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
+		},
 	}
 	uku := AppRegistration{
-		AppID:       "uku",
-		DisplayName: "Uku",
-		Description: "Public and shared decision data.",
-		Status:      appStatusActive,
+		AppID:            "ukuvota",
+		DisplayName:      "Ukuvota",
+		Description:      "Public and shared decision data owned by the Ukuvota app.",
+		HomepageURL:      "https://uku.waozi.xyz/",
+		SourceURL:        "https://github.com/waozixyz/uku",
+		Status:           appStatusActive,
+		AppSchemaVersion: 1,
+		MinClientVersion: "0.1.0",
+		CurrentVersion:   "0.1.0",
 		Collections: []AppCollection{
-			{CollectionPrefix: "private.uku.v1.*", Visibility: "private", SchemaVersion: 1},
-			{CollectionPrefix: "shared.uku.v1.*", Visibility: "shared", SchemaVersion: 1},
-			{CollectionPrefix: "public.uku.v1.*", Visibility: "public", SchemaVersion: 1},
+			{CollectionPrefix: "public.ukuvota.v1.processes.*", Visibility: "public", SchemaVersion: 1, Description: "Public process metadata and state documents."},
+			{CollectionPrefix: "public.ukuvota.v1.proposals.*", Visibility: "public", SchemaVersion: 1, Description: "Public proposal documents."},
+			{CollectionPrefix: "public.ukuvota.v1.votes.*", Visibility: "public", SchemaVersion: 1, Description: "Public vote documents."},
+			{CollectionPrefix: "public.ukuvota.v1.participants.*", Visibility: "public", SchemaVersion: 1, Description: "Public participant documents."},
+			{CollectionPrefix: "private.ukuvota.v1.drafts.*", Visibility: "private", SchemaVersion: 1, Description: "Private local draft sync records."},
+			{CollectionPrefix: "private.ukuvota.v1.profile.*", Visibility: "private", SchemaVersion: 1, Description: "Private Ukuvota profile preferences."},
 		},
-		Capabilities: []string{"processes", "proposals", "voting"},
+		Capabilities: []string{"public-records", "private-drafts", "processes", "proposals", "voting", "participants", "aliases", "qr-share"},
+		Features: []AppFeature{
+			{ID: "process.create", Collections: []string{"public.ukuvota.v1.processes.*"}, RequiresSignedTx: true},
+			{ID: "process.read", Collections: []string{"public.ukuvota.v1.processes.*"}, RequiresSignedTx: false},
+			{ID: "process.list_public", Collections: []string{"public.ukuvota.v1.processes.*"}, RequiresSignedTx: false},
+			{ID: "proposal.upsert", Collections: []string{"public.ukuvota.v1.proposals.*"}, RequiresSignedTx: true},
+			{ID: "vote.upsert", Collections: []string{"public.ukuvota.v1.votes.*"}, RequiresSignedTx: true},
+			{ID: "participant.upsert", Collections: []string{"public.ukuvota.v1.participants.*"}, RequiresSignedTx: true},
+			{ID: "draft.sync", Collections: []string{"private.ukuvota.v1.drafts.*"}, RequiresSignedTx: true},
+		},
 	}
 	if err := s.UpsertApp(ctx, inbe); err != nil {
 		return err
@@ -66,7 +101,9 @@ func (s *Store) UpsertApp(ctx context.Context, app AppRegistration) error {
 
 func (s *Store) ListApps(ctx context.Context) ([]AppRegistration, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,created_at,updated_at
+SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,
+       app_schema_version,min_supported_client_version,current_client_version,
+       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at
 FROM server_apps
 ORDER BY app_id`)
 	if err != nil {
@@ -77,8 +114,15 @@ ORDER BY app_id`)
 	apps := []AppRegistration{}
 	for rows.Next() {
 		var app AppRegistration
+		var featuresJSON string
+		var legacyProtocolsJSON string
 		if err := rows.Scan(&app.AppID, &app.DisplayName, &app.Description, &app.HomepageURL,
-			&app.SourceURL, &app.PublicKey, &app.Status, &app.CreatedAt, &app.UpdatedAt); err != nil {
+			&app.SourceURL, &app.PublicKey, &app.Status, &app.AppSchemaVersion,
+			&app.MinClientVersion, &app.CurrentVersion, &app.CompatibilityUntil,
+			&featuresJSON, &legacyProtocolsJSON, &app.CreatedAt, &app.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if err := decodeAppMetadata(featuresJSON, legacyProtocolsJSON, &app); err != nil {
 			return nil, err
 		}
 		apps = append(apps, app)
@@ -104,15 +148,26 @@ ORDER BY app_id`)
 
 func (s *Store) AppByID(ctx context.Context, appID string) (AppRegistration, bool, error) {
 	var app AppRegistration
-	err := s.db.QueryRowContext(ctx, `
-SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,created_at,updated_at
+	row := s.db.QueryRowContext(ctx, `
+SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,
+       app_schema_version,min_supported_client_version,current_client_version,
+       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at
 FROM server_apps
-WHERE app_id=?1`, appID).Scan(&app.AppID, &app.DisplayName, &app.Description,
-		&app.HomepageURL, &app.SourceURL, &app.PublicKey, &app.Status, &app.CreatedAt, &app.UpdatedAt)
+WHERE app_id=?1`, appID)
+	var featuresJSON string
+	var legacyProtocolsJSON string
+	err := row.Scan(&app.AppID, &app.DisplayName, &app.Description,
+		&app.HomepageURL, &app.SourceURL, &app.PublicKey, &app.Status,
+		&app.AppSchemaVersion, &app.MinClientVersion, &app.CurrentVersion,
+		&app.CompatibilityUntil, &featuresJSON, &legacyProtocolsJSON,
+		&app.CreatedAt, &app.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AppRegistration{}, false, nil
 	}
 	if err != nil {
+		return AppRegistration{}, false, err
+	}
+	if err := decodeAppMetadata(featuresJSON, legacyProtocolsJSON, &app); err != nil {
 		return AppRegistration{}, false, err
 	}
 	var err2 error
@@ -130,10 +185,47 @@ WHERE app_id=?1`, appID).Scan(&app.AppID, &app.DisplayName, &app.Description,
 	return app, true, nil
 }
 
+func decodeAppMetadata(featuresJSON, legacyProtocolsJSON string, app *AppRegistration) error {
+	if strings.TrimSpace(featuresJSON) != "" {
+		if err := json.Unmarshal([]byte(featuresJSON), &app.Features); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(legacyProtocolsJSON) != "" {
+		if err := json.Unmarshal([]byte(legacyProtocolsJSON), &app.LegacyProtocols); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) AppExists(ctx context.Context, appID string) (bool, error) {
 	var exists int
 	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_apps WHERE app_id=?1 AND status='active')`, appID).Scan(&exists)
 	return exists != 0, err
+}
+
+func (s *Store) AppAllowsLegacyProtocol(ctx context.Context, appID string, protocolVersion int) (bool, error) {
+	app, found, err := s.AppByID(ctx, appID)
+	if err != nil || !found {
+		return false, err
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	for _, legacy := range app.LegacyProtocols {
+		if legacy.Status != "compatibility" && legacy.Status != "active" {
+			continue
+		}
+		if legacy.Version > 0 && protocolVersion > legacy.Version {
+			continue
+		}
+		if legacy.ValidUntil >= today {
+			return true, nil
+		}
+	}
+	if app.CompatibilityUntil != "" && app.CompatibilityUntil >= today {
+		return true, nil
+	}
+	return false, nil
 }
 
 func (s *Store) AppCollections(ctx context.Context, appID string) ([]AppCollection, error) {
@@ -630,6 +722,9 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 	req.SourceURL = strings.TrimSpace(req.SourceURL)
 	req.PublicKey = strings.TrimSpace(req.PublicKey)
 	req.Status = strings.TrimSpace(req.Status)
+	req.MinClientVersion = strings.TrimSpace(req.MinClientVersion)
+	req.CurrentVersion = strings.TrimSpace(req.CurrentVersion)
+	req.CompatibilityUntil = strings.TrimSpace(req.CompatibilityUntil)
 	if req.Status == "" {
 		req.Status = appStatusActive
 	}
@@ -642,7 +737,14 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 	if req.Status != appStatusActive && req.Status != appStatusSuspended {
 		return req, errors.New("invalid status")
 	}
-	if len(req.Collections) > 64 || len(req.Capabilities) > 64 {
+	if req.AppSchemaVersion < 0 || req.AppSchemaVersion > 65535 {
+		return req, errors.New("invalid app_schema_version")
+	}
+	if req.CompatibilityUntil != "" && !validDateString(req.CompatibilityUntil) {
+		return req, errors.New("invalid compatibility_until")
+	}
+	if len(req.Collections) > 64 || len(req.Capabilities) > 64 ||
+		len(req.Features) > 128 || len(req.LegacyProtocols) > 64 {
 		return req, errors.New("too many app fields")
 	}
 	for i := range req.Collections {
@@ -662,6 +764,30 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		req.Capabilities[i] = strings.TrimSpace(req.Capabilities[i])
 		if !validNamespace(req.Capabilities[i]) {
 			return req, errors.New("invalid capability")
+		}
+	}
+	for i := range req.Features {
+		req.Features[i].ID = strings.TrimSpace(req.Features[i].ID)
+		req.Features[i].Description = strings.TrimSpace(req.Features[i].Description)
+		if !validNamespace(req.Features[i].ID) || len(req.Features[i].Collections) > 16 {
+			return req, errors.New("invalid app feature")
+		}
+		for j := range req.Features[i].Collections {
+			req.Features[i].Collections[j] = strings.TrimSpace(req.Features[i].Collections[j])
+			if !validCollectionPrefix(req.Features[i].Collections[j]) {
+				return req, errors.New("invalid app feature collection")
+			}
+		}
+	}
+	for i := range req.LegacyProtocols {
+		req.LegacyProtocols[i].Name = strings.TrimSpace(req.LegacyProtocols[i].Name)
+		req.LegacyProtocols[i].Status = strings.TrimSpace(req.LegacyProtocols[i].Status)
+		req.LegacyProtocols[i].ValidUntil = strings.TrimSpace(req.LegacyProtocols[i].ValidUntil)
+		if !validNamespace(req.LegacyProtocols[i].Name) ||
+			req.LegacyProtocols[i].Version < 0 ||
+			!validLegacyProtocolStatus(req.LegacyProtocols[i].Status) ||
+			!validDateString(req.LegacyProtocols[i].ValidUntil) {
+			return req, errors.New("invalid legacy protocol")
 		}
 	}
 	return req, nil
@@ -723,6 +849,23 @@ func validAppVisibility(value string) bool {
 	}
 }
 
+func validLegacyProtocolStatus(value string) bool {
+	switch value {
+	case "compatibility", "deprecated", "active":
+		return true
+	default:
+		return false
+	}
+}
+
+func validDateString(value string) bool {
+	if value == "" {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", value)
+	return err == nil
+}
+
 func validCollectionPrefix(value string) bool {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -742,10 +885,18 @@ func validCollectionPrefixWildcardBase(value string) bool {
 	if len(parts) == 2 && parts[0] == "account" {
 		return ksyncVersionSegmentPattern.MatchString(parts[1])
 	}
-	if len(parts) == 3 && (parts[0] == "private" || parts[0] == "shared" ||
+	if len(parts) >= 3 && (parts[0] == "private" || parts[0] == "shared" ||
 		parts[0] == "friends" || parts[0] == "public") {
-		return ksyncNamespaceSegmentPattern.MatchString(parts[1]) &&
-			ksyncVersionSegmentPattern.MatchString(parts[2])
+		if !ksyncNamespaceSegmentPattern.MatchString(parts[1]) ||
+			!ksyncVersionSegmentPattern.MatchString(parts[2]) {
+			return false
+		}
+		for _, part := range parts[3:] {
+			if !ksyncNamespaceSegmentPattern.MatchString(part) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }

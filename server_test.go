@@ -929,7 +929,8 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 		t.Fatal(err)
 	}
 	if registered.AppID != "testapp" || registered.ManifestHash != manifestHash ||
-		len(registered.Keys) != 1 || len(registered.TokenPolicies) != 1 {
+		len(registered.Keys) != 1 || len(registered.TokenPolicies) != 1 ||
+		registered.AppSchemaVersion != 0 {
 		t.Fatalf("registered app missing manifest fields: %#v", registered)
 	}
 
@@ -1036,6 +1037,17 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 			if !hasReleasedV4 || !hasShared {
 				t.Fatalf("inbe collections missing v4/shared entries: %#v", app.Collections)
 			}
+			if app.CompatibilityUntil != appCompatibilityDeadline ||
+				!containsString(app.Capabilities, "encrypted-records") ||
+				len(app.LegacyProtocols) == 0 {
+				t.Fatalf("inbe compatibility policy missing: %#v", app)
+			}
+		}
+		if app.AppID == "ukuvota" {
+			if app.CompatibilityUntil != "" || len(app.LegacyProtocols) != 0 ||
+				!containsString(app.Capabilities, "public-records") {
+				t.Fatalf("ukuvota should be registered without legacy policy: %#v", app)
+			}
 		}
 	}
 	if !foundInbe {
@@ -1053,6 +1065,40 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 	}
 	if app.AppID != "inbe" || len(app.Collections) == 0 {
 		t.Fatalf("unexpected inbe app detail: %#v", app)
+	}
+}
+
+func TestInbeLegacyCompatibilityPolicyKeepsOldClientsWorking(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x58)
+
+	legacyNoApp := []byte(`{"protocol_version":4,"user_id_hash":"` + identity.UserID + `","client_id":"legacy-inbe-client","encrypted_records":[{"collection":"inbe.habits","id":"habit-legacy","key_id":"inbe-v4-main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(legacyNoApp))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Inbe-User", identity.UserID)
+	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("legacy inbe no-app status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	v5Inbe := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"inbe-v5-client","encrypted_records":[{"collection":"inbe.habits","id":"habit-v5","key_id":"inbe-v4-main","nonce":"n2","ciphertext":"ciphertext-v2","updated_at":"2026-08-29T12:00:01Z"}]}`)
+	res = syncWithBody(t, handler, "", identity.UserID, identity.Token, v5Inbe)
+	if res.Code != http.StatusOK {
+		t.Fatalf("registered inbe v5 status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	v5Ukuvota := []byte(`{"protocol_version":5,"app_id":"ukuvota","user_id_hash":"` + identity.UserID + `","client_id":"ukuvota-v5-client","encrypted_records":[{"collection":"public.ukuvota.v1.processes.test","id":"process-1","key_id":"main","nonce":"n3","ciphertext":"ciphertext-v3","updated_at":"2026-08-29T12:00:02Z"}]}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(v5Ukuvota))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Daochi-User", identity.UserID)
+	req.Header.Set("Authorization", "Bearer "+identity.Token)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "legacy protocol not allowed for app_id") {
+		t.Fatalf("ukuvota v5 compatibility status = %d body=%s", res.Code, res.Body.String())
 	}
 }
 
@@ -3187,7 +3233,7 @@ func TestUkuDataCascadesOnAccountDelete(t *testing.T) {
 	assertCount(t, store, "uku_votes", 0)
 }
 
-func TestUkuProcessMetadataVoteReasonAndExport(t *testing.T) {
+func TestUkuProcessMetadataAndExport(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x42)
@@ -3201,7 +3247,7 @@ func TestUkuProcessMetadataVoteReasonAndExport(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
 		t.Fatal(err)
 	}
-	if process.Type != "consent" || process.Title != "Adopt the policy?" || process.QuorumPercent != 60 || process.QuorumVotes != 3 || !process.RequireReason {
+	if process.Type != "consent" || process.Title != "Adopt the policy?" || process.QuorumPercent != 60 || process.QuorumVotes != 3 || process.RequireReason {
 		t.Fatalf("unexpected process metadata: %#v", process)
 	}
 
@@ -3212,8 +3258,8 @@ func TestUkuProcessMetadataVoteReasonAndExport(t *testing.T) {
 	}
 
 	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/consent-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"status-quo":1}}`))
-	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "vote reason required") {
-		t.Fatalf("missing reason status = %d body=%s", res.Code, res.Body.String())
+	if res.Code != http.StatusOK {
+		t.Fatalf("no-reason vote status = %d body=%s", res.Code, res.Body.String())
 	}
 
 	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/consent-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","display_name":"wao","scores":{"status-quo":1},"reason":"This is acceptable."}`))

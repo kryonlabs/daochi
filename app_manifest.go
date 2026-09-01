@@ -29,14 +29,20 @@ func (s *Store) UpsertSignedAppManifest(ctx context.Context, manifest AppManifes
 		status = appStatusActive
 	}
 	app := AppRegistration{
-		AppID:        manifest.AppID,
-		DisplayName:  manifest.DisplayName,
-		Description:  manifest.Description,
-		HomepageURL:  manifest.HomepageURL,
-		SourceURL:    manifest.SourceURL,
-		Status:       status,
-		Collections:  manifest.Collections,
-		Capabilities: manifest.Capabilities,
+		AppID:              manifest.AppID,
+		DisplayName:        manifest.DisplayName,
+		Description:        manifest.Description,
+		HomepageURL:        manifest.HomepageURL,
+		SourceURL:          manifest.SourceURL,
+		Status:             status,
+		AppSchemaVersion:   manifest.AppSchemaVersion,
+		MinClientVersion:   manifest.MinClientVersion,
+		CurrentVersion:     manifest.CurrentVersion,
+		CompatibilityUntil: manifest.CompatibilityUntil,
+		Collections:        manifest.Collections,
+		Capabilities:       manifest.Capabilities,
+		Features:           manifest.Features,
+		LegacyProtocols:    manifest.LegacyProtocols,
 	}
 	if len(manifest.Keys) > 0 {
 		app.PublicKey = manifest.Keys[0].PublicKey
@@ -90,12 +96,20 @@ VALUES(?1,?2,?3,?4,?5)`,
 
 func upsertAppTx(ctx context.Context, tx *sql.Tx, app AppRegistration) error {
 	status := strings.TrimSpace(app.Status)
+	featuresJSON, err := json.Marshal(app.Features)
+	if err != nil {
+		return err
+	}
+	legacyProtocolsJSON, err := json.Marshal(app.LegacyProtocols)
+	if err != nil {
+		return err
+	}
 	if status == "" {
 		status = appStatusActive
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status)
-VALUES(?1,?2,?3,?4,?5,?6,?7)
+INSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status,app_schema_version,min_supported_client_version,current_client_version,compatibility_until,features_json,legacy_protocols_json)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
 ON CONFLICT(app_id) DO UPDATE SET
 	display_name=excluded.display_name,
 	description=excluded.description,
@@ -103,8 +117,16 @@ ON CONFLICT(app_id) DO UPDATE SET
 	source_url=excluded.source_url,
 	public_key=excluded.public_key,
 	status=excluded.status,
+	app_schema_version=excluded.app_schema_version,
+	min_supported_client_version=excluded.min_supported_client_version,
+	current_client_version=excluded.current_client_version,
+	compatibility_until=excluded.compatibility_until,
+	features_json=excluded.features_json,
+	legacy_protocols_json=excluded.legacy_protocols_json,
 	updated_at=CURRENT_TIMESTAMP`,
-		app.AppID, app.DisplayName, app.Description, app.HomepageURL, app.SourceURL, app.PublicKey, status); err != nil {
+		app.AppID, app.DisplayName, app.Description, app.HomepageURL, app.SourceURL, app.PublicKey, status,
+		app.AppSchemaVersion, app.MinClientVersion, app.CurrentVersion, app.CompatibilityUntil,
+		string(featuresJSON), string(legacyProtocolsJSON)); err != nil {
 		return err
 	}
 	if len(app.Collections) > 0 {
@@ -156,14 +178,27 @@ WHERE app_id=?1 AND key_id=?2 AND status='active'`, appID, keyID).Scan(
 }
 
 func (s *Store) HydrateAppManifestFields(ctx context.Context, app *AppRegistration) error {
+	var manifestJSON string
 	err := s.db.QueryRowContext(ctx, `
-SELECT manifest_version,manifest_hash,manifest_signature,approval_signature,expires_at
+SELECT manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at
 FROM server_app_manifests
 WHERE app_id=?1 AND status='active'`, app.AppID).Scan(
-		&app.ManifestVersion, &app.ManifestHash, &app.ManifestSignature,
+		&app.ManifestVersion, &manifestJSON, &app.ManifestHash, &app.ManifestSignature,
 		&app.ApprovalSignature, &app.ManifestExpiresAt)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
+	}
+	if manifestJSON != "" {
+		var manifest AppManifest
+		if err := json.Unmarshal([]byte(manifestJSON), &manifest); err != nil {
+			return err
+		}
+		app.AppSchemaVersion = manifest.AppSchemaVersion
+		app.MinClientVersion = manifest.MinClientVersion
+		app.CurrentVersion = manifest.CurrentVersion
+		app.CompatibilityUntil = manifest.CompatibilityUntil
+		app.Features = manifest.Features
+		app.LegacyProtocols = manifest.LegacyProtocols
 	}
 	keys, err := s.AppKeys(ctx, app.AppID)
 	if err != nil {
@@ -376,6 +411,21 @@ func normalizeAppManifest(manifest *AppManifest) {
 	for i := range manifest.Capabilities {
 		manifest.Capabilities[i] = strings.TrimSpace(manifest.Capabilities[i])
 	}
+	for i := range manifest.Features {
+		manifest.Features[i].ID = strings.TrimSpace(manifest.Features[i].ID)
+		manifest.Features[i].Description = strings.TrimSpace(manifest.Features[i].Description)
+		for j := range manifest.Features[i].Collections {
+			manifest.Features[i].Collections[j] = strings.TrimSpace(manifest.Features[i].Collections[j])
+		}
+	}
+	for i := range manifest.LegacyProtocols {
+		manifest.LegacyProtocols[i].Name = strings.TrimSpace(manifest.LegacyProtocols[i].Name)
+		manifest.LegacyProtocols[i].Status = strings.TrimSpace(manifest.LegacyProtocols[i].Status)
+		manifest.LegacyProtocols[i].ValidUntil = strings.TrimSpace(manifest.LegacyProtocols[i].ValidUntil)
+	}
+	manifest.MinClientVersion = strings.TrimSpace(manifest.MinClientVersion)
+	manifest.CurrentVersion = strings.TrimSpace(manifest.CurrentVersion)
+	manifest.CompatibilityUntil = strings.TrimSpace(manifest.CompatibilityUntil)
 	for i := range manifest.TokenPolicies {
 		manifest.TokenPolicies[i].AssetID = strings.TrimSpace(manifest.TokenPolicies[i].AssetID)
 		manifest.TokenPolicies[i].Permission = strings.TrimSpace(manifest.TokenPolicies[i].Permission)
@@ -402,7 +452,15 @@ func validateAppManifest(manifest AppManifest) error {
 	if len(manifest.Keys) == 0 || len(manifest.Keys) > 16 {
 		return errors.New("invalid app keys")
 	}
-	if len(manifest.Collections) > 64 || len(manifest.Capabilities) > 64 || len(manifest.TokenPolicies) > 64 {
+	if manifest.AppSchemaVersion < 0 || manifest.AppSchemaVersion > 65535 {
+		return errors.New("invalid app_schema_version")
+	}
+	if manifest.CompatibilityUntil != "" && !validDateString(manifest.CompatibilityUntil) {
+		return errors.New("invalid compatibility_until")
+	}
+	if len(manifest.Collections) > 64 || len(manifest.Capabilities) > 64 ||
+		len(manifest.Features) > 128 || len(manifest.LegacyProtocols) > 64 ||
+		len(manifest.TokenPolicies) > 64 {
 		return errors.New("too many manifest fields")
 	}
 	for _, key := range manifest.Keys {
@@ -425,6 +483,22 @@ func validateAppManifest(manifest AppManifest) error {
 	for _, capability := range manifest.Capabilities {
 		if !validNamespace(capability) {
 			return errors.New("invalid capability")
+		}
+	}
+	for _, feature := range manifest.Features {
+		if !validNamespace(feature.ID) || len(feature.Collections) > 16 {
+			return errors.New("invalid app feature")
+		}
+		for _, collection := range feature.Collections {
+			if !validCollectionPrefix(collection) {
+				return errors.New("invalid app feature collection")
+			}
+		}
+	}
+	for _, legacy := range manifest.LegacyProtocols {
+		if !validNamespace(legacy.Name) || legacy.Version < 0 ||
+			!validLegacyProtocolStatus(legacy.Status) || !validDateString(legacy.ValidUntil) {
+			return errors.New("invalid legacy protocol")
 		}
 	}
 	for _, policy := range manifest.TokenPolicies {

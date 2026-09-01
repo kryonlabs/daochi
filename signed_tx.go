@@ -49,18 +49,24 @@ type SignedAppRegistrationRequest struct {
 }
 
 type AppManifest struct {
-	ManifestVersion int             `json:"manifest_version"`
-	AppID           string          `json:"app_id"`
-	DisplayName     string          `json:"display_name"`
-	Description     string          `json:"description,omitempty"`
-	HomepageURL     string          `json:"homepage_url,omitempty"`
-	SourceURL       string          `json:"source_url,omitempty"`
-	Status          string          `json:"status,omitempty"`
-	ExpiresAt       int64           `json:"expires_at,omitempty"`
-	Keys            []AppKey        `json:"keys"`
-	Collections     []AppCollection `json:"collections,omitempty"`
-	Capabilities    []string        `json:"capabilities,omitempty"`
-	TokenPolicies   []TokenPolicy   `json:"token_policies,omitempty"`
+	ManifestVersion    int              `json:"manifest_version"`
+	AppID              string           `json:"app_id"`
+	DisplayName        string           `json:"display_name"`
+	Description        string           `json:"description,omitempty"`
+	HomepageURL        string           `json:"homepage_url,omitempty"`
+	SourceURL          string           `json:"source_url,omitempty"`
+	Status             string           `json:"status,omitempty"`
+	ExpiresAt          int64            `json:"expires_at,omitempty"`
+	AppSchemaVersion   int              `json:"app_schema_version,omitempty"`
+	MinClientVersion   string           `json:"min_supported_client_version,omitempty"`
+	CurrentVersion     string           `json:"current_client_version,omitempty"`
+	CompatibilityUntil string           `json:"compatibility_until,omitempty"`
+	Keys               []AppKey         `json:"keys"`
+	Collections        []AppCollection  `json:"collections,omitempty"`
+	Capabilities       []string         `json:"capabilities,omitempty"`
+	Features           []AppFeature     `json:"features,omitempty"`
+	LegacyProtocols    []LegacyProtocol `json:"legacy_protocols,omitempty"`
+	TokenPolicies      []TokenPolicy    `json:"token_policies,omitempty"`
 }
 
 type AppKey struct {

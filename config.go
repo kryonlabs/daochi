@@ -27,6 +27,9 @@ type Config struct {
 	EncryptedPayloadRetention       time.Duration
 	NodeRegistryPublicKey           ed25519.PublicKey
 	KnownNodes                      []NodePeer
+	NodeSyncToken                   string
+	NodeSyncInterval                time.Duration
+	NodeSyncBatchLimit              int
 	WaoziIssuerPublicKey            ed25519.PublicKey
 	WaoziIssuerPrivateKey           ed25519.PrivateKey
 	TokenProducts                   map[string]TokenProduct
@@ -88,6 +91,9 @@ func loadConfig() Config {
 		EncryptedPayloadRetention:       envDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", envDurationDays("KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS", 0)),
 		NodeRegistryPublicKey:           nodeRegistryPublic,
 		KnownNodes:                      envNodePeersValue(envString("DAOCHI_KNOWN_NODES", envString("KSYNC_KNOWN_NODES", ""))),
+		NodeSyncToken:                   envString("DAOCHI_NODE_SYNC_TOKEN", envString("KSYNC_NODE_SYNC_TOKEN", "")),
+		NodeSyncInterval:                envDurationSeconds("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", envDurationSeconds("KSYNC_NODE_SYNC_INTERVAL_SECONDS", 0)),
+		NodeSyncBatchLimit:              envInt("DAOCHI_NODE_SYNC_BATCH_LIMIT", envInt("KSYNC_NODE_SYNC_BATCH_LIMIT", 500)),
 		WaoziIssuerPublicKey:            issuerPublic,
 		WaoziIssuerPrivateKey:           issuerPrivate,
 		TokenProducts:                   envTokenProductsValue(envString("DAOCHI_TOKEN_PRODUCTS", envString("KSYNC_TOKEN_PRODUCTS", ""))),

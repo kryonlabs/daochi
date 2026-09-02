@@ -1483,6 +1483,99 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 	}
 }
 
+func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
+	source, _, _ := testServer(t)
+	source.cfg.NodeSyncToken = "mesh-secret"
+	sourceHandler := source.Routes()
+	identity := newTestIdentity(t, sourceHandler, 0x6b)
+
+	body := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"test-client-1","protocol_version":5,"encrypted_records":[` +
+		`{"collection":"inbe.habits","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"inbe-ciphertext","updated_at":"2026-08-19T12:00:00Z"},` +
+		`{"collection":"private.ukuvota.v1.drafts.one","id":"draft-1","key_id":"main","nonce":"n2","ciphertext":"uku-ciphertext","updated_at":"2026-08-19T12:01:00Z"}` +
+		`]}`)
+	syncWithBody(t, sourceHandler, "", identity.UserID, identity.Token, body)
+
+	unauthorized := httptest.NewRecorder()
+	sourceHandler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/v1/node/mesh/export", strings.NewReader(`{}`)))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("mesh export without token status = %d body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+
+	exportReq := NodeMeshExportRequest{
+		Limit: 10,
+		Policy: NodeSyncPolicy{
+			Direction:   "pull",
+			Apps:        []string{"inbe"},
+			Collections: []string{"inbe.*"},
+			Data:        []string{"encrypted_records"},
+		},
+	}
+	exportBody, err := json.Marshal(exportReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exportHTTP := httptest.NewRequest(http.MethodPost, "/api/v1/node/mesh/export", bytes.NewReader(exportBody))
+	exportHTTP.Header.Set("Content-Type", "application/json")
+	exportHTTP.Header.Set("Authorization", "Bearer mesh-secret")
+	exportRes := httptest.NewRecorder()
+	sourceHandler.ServeHTTP(exportRes, exportHTTP)
+	if exportRes.Code != http.StatusOK {
+		t.Fatalf("mesh export status = %d body=%s", exportRes.Code, exportRes.Body.String())
+	}
+	var exported NodeMeshExportResponse
+	if err := json.Unmarshal(exportRes.Body.Bytes(), &exported); err != nil {
+		t.Fatal(err)
+	}
+	if len(exported.Records) != 1 ||
+		exported.Records[0].UserIDHash != identity.UserID ||
+		exported.Records[0].Record.Collection != "inbe.habits" ||
+		exported.Records[0].Record.Ciphertext != "inbe-ciphertext" {
+		t.Fatalf("unexpected mesh export: %#v", exported)
+	}
+
+	peerHTTP := httptest.NewServer(sourceHandler)
+	defer peerHTTP.Close()
+
+	target, _, _ := testServer(t)
+	target.cfg.NodeSyncToken = "mesh-secret"
+	target.cfg.NodeSyncBatchLimit = 1
+	err = target.pullNodePeer(context.Background(), NodePeer{
+		Name: "source",
+		URL:  peerHTTP.URL,
+		Sync: &NodeSyncPolicy{
+			Direction:   "pull",
+			Apps:        []string{"inbe"},
+			Collections: []string{"inbe.*"},
+			Data:        []string{"encrypted_records"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("pull node peer: %v", err)
+	}
+	imported, _, _, err := target.store.ExportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
+		Apps:        []string{"inbe"},
+		Collections: []string{"inbe.*"},
+		Data:        []string{"encrypted_records"},
+	}, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imported) != 1 || imported[0].Record.Ciphertext != "inbe-ciphertext" {
+		t.Fatalf("unexpected imported records: %#v", imported)
+	}
+	appliedAgain, err := target.store.ImportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
+		Apps:        []string{"inbe"},
+		Collections: []string{"inbe.*"},
+		Data:        []string{"encrypted_records"},
+	}, imported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appliedAgain != 0 {
+		t.Fatalf("idempotent mesh import applied %d records, want 0", appliedAgain)
+	}
+}
+
 func TestEncryptedSyncEnvelopeStoresAndRelaysOpaquely(t *testing.T) {
 	server, store, _ := testServer(t)
 	handler := server.Routes()

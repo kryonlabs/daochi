@@ -49,6 +49,7 @@ func main() {
 	if cfg.TokenDirectPurchasesEnabled {
 		go daochi.runMoneroInvoiceReconciler(context.Background(), time.Minute)
 	}
+	go daochi.runNodeSync(context.Background())
 	handler := daochi.Routes()
 	server := &http.Server{
 		Addr:              cfg.Addr,

@@ -21,6 +21,9 @@ func TestLoadConfigPrefersDaochiEnv(t *testing.T) {
 	t.Setenv("KSYNC_DB", "/data/ksync.db")
 	t.Setenv("DAOCHI_KNOWN_NODES", "Waozi=https://api.waozi.xyz;sync=pull;apps=inbe+ukuvota;collections=inbe.*+profile.public;data=encrypted_records+app_registry")
 	t.Setenv("KSYNC_KNOWN_NODES", "Legacy=https://legacy.example")
+	t.Setenv("DAOCHI_NODE_SYNC_TOKEN", "node-secret")
+	t.Setenv("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", "30")
+	t.Setenv("DAOCHI_NODE_SYNC_BATCH_LIMIT", "250")
 	t.Setenv("DAOCHI_TOKEN_TTL_SECONDS", "90")
 	t.Setenv("KSYNC_TOKEN_TTL_SECONDS", "45")
 
@@ -33,6 +36,9 @@ func TestLoadConfigPrefersDaochiEnv(t *testing.T) {
 	}
 	if cfg.TokenTTL != 90*time.Second {
 		t.Fatalf("TokenTTL=%s, want 90s", cfg.TokenTTL)
+	}
+	if cfg.NodeSyncToken != "node-secret" || cfg.NodeSyncInterval != 30*time.Second || cfg.NodeSyncBatchLimit != 250 {
+		t.Fatalf("node sync config=%q/%s/%d, want DAOCHI values", cfg.NodeSyncToken, cfg.NodeSyncInterval, cfg.NodeSyncBatchLimit)
 	}
 	if len(cfg.KnownNodes) != 1 || cfg.KnownNodes[0].Name != "Waozi" || cfg.KnownNodes[0].URL != "https://api.waozi.xyz" {
 		t.Fatalf("KnownNodes=%+v, want DAOCHI_KNOWN_NODES", cfg.KnownNodes)

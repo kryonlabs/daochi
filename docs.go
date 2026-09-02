@@ -96,6 +96,8 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>daochi-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies typed local changes or stores an encrypted envelope, then returns remote changes newer than the requested server version.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/diagnostics</code><p>Returns bearer-authenticated sync state, table counts, compaction position, legacy client hints, and recent sync audit metadata.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/mesh/export</code><p>Exports policy-filtered encrypted app records to an authenticated peer node.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/mesh/import</code><p>Imports policy-filtered encrypted app records from an authenticated peer node.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the configured token issuer key.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct payment prices when direct purchases are enabled.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's token balance computed from signed ledger events.</p></section>
@@ -178,6 +180,29 @@ func openAPISpec() map[string]any {
 								},
 							},
 						},
+					},
+				},
+			},
+			"/api/v1/node/mesh/export": map[string]any{
+				"post": map[string]any{
+					"summary":     "Export encrypted records to a trusted peer node",
+					"description": "Requires Authorization: Bearer <DAOCHI_NODE_SYNC_TOKEN> or X-Daochi-Node-Token. The response is filtered by the requested node sync policy.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Policy-filtered encrypted records"},
+						"401": map[string]any{"description": "Invalid node token"},
+						"503": map[string]any{"description": "Node sync is not configured"},
+					},
+				},
+			},
+			"/api/v1/node/mesh/import": map[string]any{
+				"post": map[string]any{
+					"summary":     "Import encrypted records from a trusted peer node",
+					"description": "Requires Authorization: Bearer <DAOCHI_NODE_SYNC_TOKEN> or X-Daochi-Node-Token. Incoming records are filtered by the requested node sync policy and applied idempotently.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Import result"},
+						"400": map[string]any{"description": "Invalid record payload"},
+						"401": map[string]any{"description": "Invalid node token"},
+						"503": map[string]any{"description": "Node sync is not configured"},
 					},
 				},
 			},

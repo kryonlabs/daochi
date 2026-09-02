@@ -59,6 +59,7 @@ var ksyncServerCapabilities = []string{
 	"v6-signed-app-manifests",
 	"profile-stats",
 	"pub-relay",
+	"node-mesh-encrypted-records",
 }
 
 type Server struct {
@@ -90,6 +91,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("GET /api/v1/node", s.handleNodeInfo)
+	mux.HandleFunc("POST /api/v1/node/mesh/export", s.handleNodeMeshExport)
+	mux.HandleFunc("POST /api/v1/node/mesh/import", s.handleNodeMeshImport)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/v1/apps", s.handleAppList)
 	mux.HandleFunc("POST /api/v1/apps", s.handleAppList)

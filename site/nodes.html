@@ -19,7 +19,7 @@
   <meta name="twitter:description" content="Known Daochi nodes, storage usage, apps, peers, readiness, and protocol bounds.">
   <meta name="twitter:image" content="https://daochi.net/og-image.png">
   <meta name="twitter:image:alt" content="Daochi post-quantum sync with encrypted app-owned records.">
-  <meta name="theme-color" content="#f7ede2">
+  <meta name="theme-color" content="#061820">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
   <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16">
@@ -551,7 +551,7 @@
     function drawLabel(label, x, y, maxWidth, align = "center") {
       ctx.textAlign = align;
       ctx.textBaseline = "top";
-      ctx.fillStyle = "#4a4038";
+      ctx.fillStyle = "#f4f0df";
       ctx.font = "700 12px 'Noto Sans Mono', monospace";
       const clipped = label.length > 30 ? label.slice(0, 27) + "..." : label;
       ctx.fillText(clipped, x, y, maxWidth);
@@ -565,8 +565,8 @@
       const unitY = dy / distance;
       const start = { x: Math.round(from.x + unitX * 32), y: Math.round(from.y + unitY * 32) };
       const end = { x: Math.round(to.x - unitX * 32), y: Math.round(to.y - unitY * 32) };
-      ctx.strokeStyle = active ? "rgba(159, 124, 47, .82)" : "rgba(4, 101, 95, .32)";
-      ctx.fillStyle = active ? "rgba(159, 124, 47, .82)" : "rgba(4, 101, 95, .42)";
+      ctx.strokeStyle = active ? "rgba(245, 201, 109, .9)" : "rgba(75, 198, 184, .38)";
+      ctx.fillStyle = active ? "rgba(245, 201, 109, .9)" : "rgba(75, 198, 184, .5)";
       ctx.lineWidth = active ? 3 : 2;
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
@@ -597,12 +597,12 @@
       ctx.clearRect(0, 0, width, height);
 
       const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, "#fffaf4");
-      gradient.addColorStop(1, "#f2e2d0");
+      gradient.addColorStop(0, "#0d2930");
+      gradient.addColorStop(1, "#061820");
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, width, height);
 
-      ctx.strokeStyle = "rgba(230, 213, 196, .68)";
+      ctx.strokeStyle = "rgba(119, 214, 212, .13)";
       ctx.lineWidth = 1;
       for (let x = 34; x < width; x += 34) {
         const crispX = Math.round(x) + .5;
@@ -634,7 +634,7 @@
       });
 
       if (!state.edges.length) {
-        ctx.fillStyle = "rgba(74, 64, 56, .58)";
+        ctx.fillStyle = "rgba(244, 240, 223, .68)";
         ctx.font = "700 12px 'Noto Sans Mono', monospace";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
@@ -646,10 +646,10 @@
         const selected = index === state.selected;
         const hover = index === state.hover;
         const radius = selected ? 29 : hover ? 27 : 24;
-        const fill = node.online ? "#04655f" : "#b46a5a";
-        const ring = selected ? "#9f7c2f" : "rgba(255, 252, 247, .95)";
+        const fill = node.online ? "#4bc6b8" : "#ff6f6b";
+        const ring = selected ? "#f5c96d" : "rgba(244, 240, 223, .95)";
 
-        ctx.fillStyle = "rgba(74, 64, 56, .13)";
+        ctx.fillStyle = "rgba(0, 8, 12, .34)";
         ctx.beginPath();
         ctx.arc(point.x + 4, point.y + 7, radius + 2, 0, Math.PI * 2);
         ctx.fill();
@@ -662,7 +662,7 @@
         ctx.lineWidth = selected ? 5 : 4;
         ctx.stroke();
 
-        ctx.fillStyle = "#fffcf7";
+        ctx.fillStyle = "#061820";
         ctx.font = "800 12px 'Noto Sans Mono', monospace";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";

@@ -125,6 +125,34 @@ func (s *Store) ImportMeshEncryptedRecords(ctx context.Context, policy NodeSyncP
 	return applied, nil
 }
 
+func (s *Store) LoadNodeSyncCursor(ctx context.Context, peerKey string) (string, error) {
+	var cursor string
+	err := s.db.QueryRowContext(ctx, `
+SELECT cursor
+FROM node_sync_cursors
+WHERE peer_key=?1`, peerKey).Scan(&cursor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return cursor, nil
+}
+
+func (s *Store) SaveNodeSyncCursor(ctx context.Context, peerKey, cursor string) error {
+	if strings.TrimSpace(cursor) == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO node_sync_cursors(peer_key,cursor,updated_at)
+VALUES(?1,?2,CURRENT_TIMESTAMP)
+ON CONFLICT(peer_key) DO UPDATE SET
+	cursor=excluded.cursor,
+	updated_at=CURRENT_TIMESTAMP`, peerKey, cursor)
+	return err
+}
+
 func upsertMeshUser(ctx context.Context, tx *sql.Tx, item MeshEncryptedRecord, publicKey []byte) error {
 	createdAt := normalizeTime(item.CreatedAt, "")
 	lastSeenAt := normalizeTime(item.LastSeenAt, createdAt)

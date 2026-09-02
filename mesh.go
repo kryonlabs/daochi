@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -189,7 +191,11 @@ func (s *Server) pullNodePeer(ctx context.Context, peer NodePeer) error {
 		return nil
 	}
 	policy := effectiveNodeSyncPolicy(peer.Sync)
-	cursor := ""
+	peerKey := meshPeerCursorKey(baseURL, policy)
+	cursor, err := s.store.LoadNodeSyncCursor(ctx, peerKey)
+	if err != nil {
+		return err
+	}
 	for {
 		req := NodeMeshExportRequest{
 			Cursor: cursor,
@@ -208,6 +214,13 @@ func (s *Server) pullNodePeer(ctx context.Context, peer NodePeer) error {
 			return err
 		}
 		slog.Info("mesh peer pull applied records", "peer", peer.Name, "url", baseURL, "records", len(exported.Records), "applied", applied)
+		lastCursor, err := meshCursorForRecord(exported.Records[len(exported.Records)-1])
+		if err != nil {
+			return err
+		}
+		if err := s.store.SaveNodeSyncCursor(ctx, peerKey, lastCursor); err != nil {
+			return err
+		}
 		if !exported.Truncated || exported.NextCursor == "" {
 			return nil
 		}
@@ -259,6 +272,21 @@ func effectiveNodeSyncPolicy(policy *NodeSyncPolicy) NodeSyncPolicy {
 		return NodeSyncPolicy{}
 	}
 	return *policy
+}
+
+func meshPeerCursorKey(baseURL string, policy NodeSyncPolicy) string {
+	body, _ := json.Marshal(policy)
+	sum := sha256.Sum256([]byte(strings.TrimRight(baseURL, "/") + "\x00" + string(body)))
+	return hex.EncodeToString(sum[:])
+}
+
+func meshCursorForRecord(record MeshEncryptedRecord) (string, error) {
+	return encodeMeshCursor(meshCursor{
+		UpdatedAt:  record.Record.UpdatedAt,
+		UserIDHash: record.UserIDHash,
+		Collection: record.Record.Collection,
+		ID:         record.Record.ID,
+	})
 }
 
 func nodePolicyIncludesData(policy *NodeSyncPolicy, dataType string) bool {

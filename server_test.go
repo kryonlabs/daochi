@@ -1533,7 +1533,22 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 		t.Fatalf("unexpected mesh export: %#v", exported)
 	}
 
-	peerHTTP := httptest.NewServer(sourceHandler)
+	exportCursors := []string{}
+	peerHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/node/mesh/export" {
+			data, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read mesh export body: %v", err)
+			}
+			r.Body = io.NopCloser(bytes.NewReader(data))
+			var req NodeMeshExportRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				t.Fatalf("decode mesh export body: %v", err)
+			}
+			exportCursors = append(exportCursors, req.Cursor)
+		}
+		sourceHandler.ServeHTTP(w, r)
+	}))
 	defer peerHTTP.Close()
 
 	target, _, _ := testServer(t)
@@ -1562,6 +1577,25 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	}
 	if len(imported) != 1 || imported[0].Record.Ciphertext != "inbe-ciphertext" {
 		t.Fatalf("unexpected imported records: %#v", imported)
+	}
+	if len(exportCursors) < 2 || exportCursors[0] != "" || exportCursors[1] == "" {
+		t.Fatalf("mesh pull cursors after first pull = %#v, want empty cursor then pagination cursor", exportCursors)
+	}
+	afterFirstPull := len(exportCursors)
+	if err := target.pullNodePeer(context.Background(), NodePeer{
+		Name: "source",
+		URL:  peerHTTP.URL,
+		Sync: &NodeSyncPolicy{
+			Direction:   "pull",
+			Apps:        []string{"inbe"},
+			Collections: []string{"inbe.*"},
+			Data:        []string{"encrypted_records"},
+		},
+	}); err != nil {
+		t.Fatalf("pull node peer again: %v", err)
+	}
+	if len(exportCursors) != afterFirstPull+1 || exportCursors[len(exportCursors)-1] == "" {
+		t.Fatalf("mesh pull did not resume from persisted cursor: %#v", exportCursors)
 	}
 	appliedAgain, err := target.store.ImportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
 		Apps:        []string{"inbe"},

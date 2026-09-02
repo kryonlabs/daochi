@@ -776,6 +776,12 @@ CREATE TABLE IF NOT EXISTS token_app_permissions (
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY(app_id, asset_id, permission)
 );
+
+CREATE TABLE IF NOT EXISTS node_sync_cursors (
+	peer_key TEXT PRIMARY KEY,
+	cursor TEXT NOT NULL,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `)
 	if err != nil {
 		return err

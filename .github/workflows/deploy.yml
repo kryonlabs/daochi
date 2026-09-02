@@ -71,10 +71,13 @@ jobs:
 
       - name: Swap binary and restart
         id: swap
+        env:
+          DAOCHI_NODE_SYNC_TOKEN: ${{ secrets.DAOCHI_NODE_SYNC_TOKEN }}
         run: |
           REMOTE="${{ secrets.KSYNC_USER }}@${{ secrets.KSYNC_HOST }}"
           STAMP=$(date -u +%Y%m%dT%H%M%SZ)
           echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"
+          mesh_token=$(printf '%s' "$DAOCHI_NODE_SYNC_TOKEN" | sed "s/'/'\\\\''/g")
           ssh "$REMOTE" "
             set -e
             mkdir -p /var/lib/ksync/backups
@@ -82,6 +85,12 @@ jobs:
             sqlite3 /var/lib/ksync/ksync.db \".backup '/var/lib/ksync/backups/ksync.db.$STAMP'\" 2>/dev/null || true
             cp /opt/ksync-src/daochi /opt/ksync/ksync.new
             mv /opt/ksync/ksync.new /opt/ksync/ksync
+            if [ -n '$mesh_token' ]; then
+              install -d -m 755 /etc/systemd/system/ksync.service.d
+              umask 077
+              printf '%s\n' '[Service]' 'Environment=DAOCHI_NODE_SYNC_TOKEN=$mesh_token' > /etc/systemd/system/ksync.service.d/20-daochi-mesh.conf
+              systemctl daemon-reload
+            fi
             systemctl restart ksync.service
             sleep 3
             systemctl is-active --quiet ksync.service

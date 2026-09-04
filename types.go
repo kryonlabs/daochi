@@ -532,6 +532,60 @@ type MoneroInvoiceResponse struct {
 	Receipt      *TokenReceipt `json:"receipt,omitempty"`
 }
 
+type MoneroAccountAddress struct {
+	AccountID    string `json:"account_id"`
+	Alias        string `json:"alias,omitempty"`
+	ProfileIcon  int    `json:"profile_icon,omitempty"`
+	Address      string `json:"address"`
+	AccountIndex int    `json:"-"`
+	AddressIndex int    `json:"-"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type MoneroRate struct {
+	AtomicAmount int64 `json:"xmr_atomic_units"`
+	TokenUnits   int64 `json:"token_units"`
+}
+
+type MoneroAddressResponse struct {
+	AccountID             string     `json:"account_id"`
+	Alias                 string     `json:"alias,omitempty"`
+	ProfileIcon           int        `json:"profile_icon,omitempty"`
+	AssetID               string     `json:"asset_id"`
+	Address               string     `json:"address"`
+	URI                   string     `json:"uri"`
+	Network               string     `json:"network"`
+	ConfirmationsRequired int64      `json:"confirmations_required"`
+	MinimumAtomicAmount   int64      `json:"minimum_atomic_amount"`
+	Rate                  MoneroRate `json:"rate"`
+}
+
+type MoneroDeposit struct {
+	TxID            string        `json:"tx_id"`
+	AccountID       string        `json:"account_id,omitempty"`
+	AmountAtomic    int64         `json:"amount_atomic"`
+	TokenUnits      int64         `json:"token_units,omitempty"`
+	BlockHeight     int64         `json:"block_height,omitempty"`
+	Confirmations   int64         `json:"confirmations"`
+	Status          string        `json:"status"`
+	FirstSeenAt     string        `json:"first_seen_at"`
+	ConfirmedAt     string        `json:"confirmed_at,omitempty"`
+	CreditedAt      string        `json:"credited_at,omitempty"`
+	Receipt         *TokenReceipt `json:"receipt,omitempty"`
+	AccountIndex    int           `json:"-"`
+	AddressIndex    int           `json:"-"`
+	UnlockTime      int64         `json:"-"`
+	Locked          bool          `json:"-"`
+	DoubleSpendSeen bool          `json:"-"`
+	RateAtomic      int64         `json:"-"`
+	RateTokenUnits  int64         `json:"-"`
+	ReceiptID       string        `json:"-"`
+}
+
+type MoneroDepositsResponse struct {
+	Deposits []MoneroDeposit `json:"deposits"`
+}
+
 type TokenCheckpoint struct {
 	LedgerSeq  int64  `json:"ledger_seq"`
 	IssuerID   string `json:"issuer_id"`
@@ -648,104 +702,4 @@ type SyncResult struct {
 	Sessions         int `json:"sessions"`
 	SocialCache      int `json:"social_cache"`
 	EncryptedRecords int `json:"encrypted_records,omitempty"`
-}
-
-type UkuProcess struct {
-	ID              string        `json:"id"`
-	OwnerUserIDHash string        `json:"owner_user_id_hash,omitempty"`
-	Type            string        `json:"type"`
-	Title           string        `json:"title"`
-	Description     string        `json:"description,omitempty"`
-	Visibility      string        `json:"visibility"`
-	ProposalMinutes int           `json:"proposal_minutes"`
-	VotingMinutes   int           `json:"voting_minutes"`
-	NegativeWeight  int           `json:"negative_weight"`
-	QuorumPercent   int           `json:"quorum_percent"`
-	QuorumVotes     int           `json:"quorum_votes"`
-	RequireReason   bool          `json:"require_vote_reason"`
-	Outcome         string        `json:"outcome,omitempty"`
-	ReviewAt        string        `json:"review_at,omitempty"`
-	CreatedAt       string        `json:"created_at"`
-	UpdatedAt       string        `json:"updated_at"`
-	Options         []UkuOption   `json:"options,omitempty"`
-	Proposals       []UkuProposal `json:"proposals,omitempty"`
-	Votes           []UkuVote     `json:"votes,omitempty"`
-	Audit           []UkuAudit    `json:"audit,omitempty"`
-}
-
-type UkuOption struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-	Position    int    `json:"position"`
-}
-
-type UkuProposal struct {
-	ID               string `json:"id"`
-	AuthorUserIDHash string `json:"author_user_id_hash,omitempty"`
-	Title            string `json:"title"`
-	Description      string `json:"description,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
-	DeletedAt        int64  `json:"deleted_at,omitempty"`
-}
-
-type UkuVote struct {
-	VoterUserIDHash string         `json:"voter_user_id_hash,omitempty"`
-	DisplayName     string         `json:"display_name,omitempty"`
-	Scores          map[string]int `json:"scores"`
-	Reason          string         `json:"reason,omitempty"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
-}
-
-type UkuAudit struct {
-	ID              int64           `json:"id"`
-	ActorUserIDHash string          `json:"actor_user_id_hash,omitempty"`
-	Action          string          `json:"action"`
-	EntityType      string          `json:"entity_type"`
-	EntityID        string          `json:"entity_id,omitempty"`
-	Payload         json.RawMessage `json:"payload,omitempty"`
-	CreatedAt       string          `json:"created_at"`
-}
-
-type UkuCreateProcessRequest struct {
-	UserIDHash      string      `json:"user_id_hash"`
-	ID              string      `json:"id,omitempty"`
-	Type            string      `json:"type"`
-	Title           string      `json:"title"`
-	Description     string      `json:"description,omitempty"`
-	Visibility      string      `json:"visibility,omitempty"`
-	ProposalMinutes int         `json:"proposal_minutes"`
-	VotingMinutes   int         `json:"voting_minutes"`
-	NegativeWeight  int         `json:"negative_weight"`
-	QuorumPercent   int         `json:"quorum_percent,omitempty"`
-	QuorumVotes     int         `json:"quorum_votes,omitempty"`
-	RequireReason   bool        `json:"require_vote_reason,omitempty"`
-	Options         []UkuOption `json:"options,omitempty"`
-}
-
-type UkuUpdateProcessRequest struct {
-	UserIDHash    string `json:"user_id_hash"`
-	Title         string `json:"title,omitempty"`
-	Description   string `json:"description,omitempty"`
-	Visibility    string `json:"visibility,omitempty"`
-	QuorumPercent *int   `json:"quorum_percent,omitempty"`
-	QuorumVotes   *int   `json:"quorum_votes,omitempty"`
-	Outcome       string `json:"outcome,omitempty"`
-	ReviewAt      string `json:"review_at,omitempty"`
-}
-
-type UkuProposalRequest struct {
-	UserIDHash  string `json:"user_id_hash"`
-	ID          string `json:"id,omitempty"`
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
-}
-
-type UkuVoteRequest struct {
-	UserIDHash  string         `json:"user_id_hash"`
-	DisplayName string         `json:"display_name,omitempty"`
-	Scores      map[string]int `json:"scores"`
-	Reason      string         `json:"reason,omitempty"`
 }

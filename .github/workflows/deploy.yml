@@ -82,7 +82,9 @@ jobs:
             set -e
             mkdir -p /var/lib/ksync/backups
             cp /opt/ksync/ksync \"/var/lib/ksync/backups/ksync.pre-upgrade.$STAMP\"
-            sqlite3 /var/lib/ksync/ksync.db \".backup '/var/lib/ksync/backups/ksync.db.$STAMP'\" 2>/dev/null || true
+            sqlite3 /var/lib/ksync/ksync.db \".backup '/var/lib/ksync/backups/ksync.db.$STAMP'\"
+            test -s \"/var/lib/ksync/backups/ksync.db.$STAMP\"
+            find /var/lib/ksync/backups -type f \( -name 'ksync.pre-upgrade.*' -o -name 'ksync.db.*' \) -mtime +30 -delete
             cp /opt/ksync-src/daochi /opt/ksync/ksync.new
             mv /opt/ksync/ksync.new /opt/ksync/ksync
             if [ -n '$mesh_token' ]; then
@@ -100,12 +102,17 @@ jobs:
         run: |
           REMOTE="${{ secrets.KSYNC_USER }}@${{ secrets.KSYNC_HOST }}"
           STAMP=${{ steps.swap.outputs.stamp }}
-          code=$(ssh "$REMOTE" 'curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:8080/api/v1/sync/challenge?user_id=0000000000000000000000000000000000000000000000000000000000000000"')
+          code=$(ssh "$REMOTE" 'curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:8080/readyz"')
           echo "health check: $code"
           if [ "$code" != "200" ]; then
             echo "::error::health check failed ($code) - rolling back"
-            ssh "$REMOTE" "cp /var/lib/ksync/backups/ksync.pre-upgrade.$STAMP /opt/ksync/ksync && systemctl restart ksync.service"
+            ssh "$REMOTE" "systemctl stop ksync.service && cp /var/lib/ksync/backups/ksync.pre-upgrade.$STAMP /opt/ksync/ksync && cp /var/lib/ksync/backups/ksync.db.$STAMP /var/lib/ksync/ksync.db && systemctl start ksync.service"
             exit 1
           fi
-          pub=$(curl -s -o /dev/null -w "%{http_code}" "https://api.waozi.xyz/api/v1/sync/challenge?user_id=0000000000000000000000000000000000000000000000000000000000000000" || echo 000)
+          pub=$(curl -sS -o /dev/null -w "%{http_code}" "https://api.waozi.xyz/readyz" || echo 000)
           echo "public endpoint through Cloudflare: $pub"
+          if [ "$pub" != "200" ]; then
+            echo "::error::public health check failed ($pub) - rolling back"
+            ssh "$REMOTE" "systemctl stop ksync.service && cp /var/lib/ksync/backups/ksync.pre-upgrade.$STAMP /opt/ksync/ksync && cp /var/lib/ksync/backups/ksync.db.$STAMP /var/lib/ksync/ksync.db && systemctl start ksync.service"
+            exit 1
+          fi

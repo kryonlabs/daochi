@@ -80,9 +80,10 @@ type AppKey struct {
 }
 
 type TokenPolicy struct {
-	AssetID    string `json:"asset_id"`
-	Permission string `json:"permission"`
-	Status     string `json:"status,omitempty"`
+	AssetID             string `json:"asset_id"`
+	Permission          string `json:"permission"`
+	Status              string `json:"status,omitempty"`
+	LegacyUnsignedUntil int64  `json:"legacy_unsigned_until,omitempty"`
 }
 
 func readSignedTxHeader(r *http.Request) (SignedTxEnvelope, error) {
@@ -127,6 +128,9 @@ func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byt
 	appID = strings.TrimSpace(appID)
 	if tx.ProtocolVersion < 6 {
 		return authError{status: http.StatusBadRequest, message: "signed transaction protocol too old"}
+	}
+	if tx.SignatureContext != "" && tx.SignatureContext != daochiTxContext {
+		return authError{status: http.StatusBadRequest, message: "invalid signed transaction context"}
 	}
 	if !validClientID(tx.TxID) || !validClientID(tx.Nonce) {
 		return authError{status: http.StatusBadRequest, message: "invalid signed transaction id"}
@@ -204,12 +208,8 @@ func (s *Server) verifyAppSignedTx(ctx context.Context, tx SignedTxEnvelope, mes
 }
 
 func canonicalSignedTxMessage(tx SignedTxEnvelope) []byte {
-	context := tx.SignatureContext
-	if context == "" {
-		context = daochiTxContext
-	}
 	var b strings.Builder
-	b.WriteString(context)
+	b.WriteString(daochiTxContext)
 	b.WriteByte('\n')
 	b.WriteString(strconv.Itoa(tx.ProtocolVersion))
 	b.WriteByte('\n')

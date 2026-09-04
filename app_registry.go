@@ -19,6 +19,8 @@ const (
 	appCompatibilityDeadline = "2027-09-01"
 )
 
+var errAppScopeNotOwned = errors.New("app does not own collection scope")
+
 func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 	inbe := AppRegistration{
 		AppID:              "inbe",
@@ -51,55 +53,19 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 			{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
 		},
 		TokenPolicies: []TokenPolicy{
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive},
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive},
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive, LegacyUnsignedUntil: 1819756800},
+			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive, LegacyUnsignedUntil: 1819756800},
 		},
 	}
-	ukuvota := AppRegistration{
-		AppID:            "ukuvota",
-		DisplayName:      "Ukuvota",
-		Description:      "Public and shared decision data owned by the Ukuvota app.",
-		HomepageURL:      "https://uku.waozi.xyz/",
-		SourceURL:        "https://github.com/waozixyz/uku",
-		Status:           appStatusActive,
-		AppSchemaVersion: 1,
-		MinClientVersion: "0.1.0",
-		CurrentVersion:   "0.1.0",
-		Collections: []AppCollection{
-			{CollectionPrefix: "public.ukuvota.v1.processes.*", Visibility: "public", SchemaVersion: 1, Description: "Public process metadata and state documents."},
-			{CollectionPrefix: "public.ukuvota.v1.proposals.*", Visibility: "public", SchemaVersion: 1, Description: "Public proposal documents."},
-			{CollectionPrefix: "public.ukuvota.v1.votes.*", Visibility: "public", SchemaVersion: 1, Description: "Public vote documents."},
-			{CollectionPrefix: "public.ukuvota.v1.participants.*", Visibility: "public", SchemaVersion: 1, Description: "Public participant documents."},
-			{CollectionPrefix: "private.ukuvota.v1.drafts.*", Visibility: "private", SchemaVersion: 1, Description: "Private local draft sync records."},
-			{CollectionPrefix: "private.ukuvota.v1.profile.*", Visibility: "private", SchemaVersion: 1, Description: "Private Ukuvota profile preferences."},
-		},
-		Capabilities: []string{"public-records", "private-drafts", "processes", "proposals", "voting", "participants", "qr-share"},
-		Features: []AppFeature{
-			{ID: "process.create", Collections: []string{"public.ukuvota.v1.processes.*"}, RequiresSignedTx: true},
-			{ID: "process.read", Collections: []string{"public.ukuvota.v1.processes.*"}, RequiresSignedTx: false},
-			{ID: "process.list_public", Collections: []string{"public.ukuvota.v1.processes.*"}, RequiresSignedTx: false},
-			{ID: "proposal.upsert", Collections: []string{"public.ukuvota.v1.proposals.*"}, RequiresSignedTx: true},
-			{ID: "vote.upsert", Collections: []string{"public.ukuvota.v1.votes.*"}, RequiresSignedTx: true},
-			{ID: "participant.upsert", Collections: []string{"public.ukuvota.v1.participants.*"}, RequiresSignedTx: true},
-			{ID: "draft.sync", Collections: []string{"private.ukuvota.v1.drafts.*"}, RequiresSignedTx: true},
-		},
-		TokenPolicies: []TokenPolicy{
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive},
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive},
-		},
-	}
-	if err := s.UpsertApp(ctx, inbe); err != nil {
+	var signedManifest int
+	if err := s.db.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status='active')`).Scan(&signedManifest); err != nil {
 		return err
 	}
-	if err := s.UpsertApp(ctx, ukuvota); err != nil {
-		return err
+	if signedManifest != 0 {
+		return nil
 	}
-	return s.PruneDeprecatedBuiltinApps(ctx)
-}
-
-func (s *Store) PruneDeprecatedBuiltinApps(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM server_apps WHERE app_id='uku'`)
-	return err
+	return s.UpsertApp(ctx, inbe)
 }
 
 func (s *Store) UpsertApp(ctx context.Context, app AppRegistration) error {
@@ -302,7 +268,7 @@ func (s *Store) AppOwnsCollection(ctx context.Context, appID, collection string)
 }
 
 func (s *Store) CreateAppGrant(ctx context.Context, userID string, req AppGrantRequest) (AppGrant, error) {
-	id, err := randomUkuID()
+	id, err := randomResourceID()
 	if err != nil {
 		return AppGrant{}, err
 	}
@@ -422,6 +388,16 @@ func (s *Store) AuthorizedAppRecords(ctx context.Context, userID, sourceAppID, t
 	collectionPrefix = strings.TrimSpace(collectionPrefix)
 	if sourceAppID == "" || targetAppID == "" || collectionPrefix == "" {
 		return nil, fmt.Errorf("source_app_id, target_app_id, and collection_prefix are required")
+	}
+	if _, ok, err := s.appCollectionVisibility(ctx, sourceAppID, collectionPrefix); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, errAppScopeNotOwned
+	}
+	if exists, err := s.AppExists(ctx, targetAppID); err != nil {
+		return nil, err
+	} else if !exists {
+		return nil, sql.ErrNoRows
 	}
 	if sourceAppID != targetAppID {
 		var exists int
@@ -645,6 +621,12 @@ func (s *Server) handleSignedAppGrant(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthError(w, err)
 		return
 	}
+	created := false
+	defer func() {
+		if !created {
+			s.store.ForgetSignedTx(r.Context(), req.Tx)
+		}
+	}()
 	grant, err := s.store.CreateAppGrant(r.Context(), userID, req.Grant)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -659,6 +641,7 @@ func (s *Server) handleSignedAppGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "app grant failed")
 		return
 	}
+	created = true
 	writeJSON(w, http.StatusCreated, grant)
 }
 
@@ -696,16 +679,40 @@ func (s *Server) handleAppRecords(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid app records query")
 		return
 	}
+	tx, err := readSignedTxHeader(r)
+	if err != nil {
+		s.writeAuthError(w, err)
+		return
+	}
+	if err := s.verifySignedTx(r.Context(), r, nil, tx, userID, targetAppID); err != nil {
+		s.writeAuthError(w, err)
+		return
+	}
+	readCompleted := false
+	defer func() {
+		if !readCompleted {
+			s.store.ForgetSignedTx(r.Context(), tx)
+		}
+	}()
 	records, err := s.store.AuthorizedAppRecords(r.Context(), userID, sourceAppID, targetAppID, collectionPrefix)
 	if err != nil {
 		if errors.Is(err, ErrSyncUserNotFound) {
 			writeError(w, http.StatusForbidden, "app grant required")
 			return
 		}
+		if errors.Is(err, errAppScopeNotOwned) {
+			writeError(w, http.StatusBadRequest, "source app does not own collection scope")
+			return
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "app not found")
+			return
+		}
 		slog.Error("read app records", "user", logText(userID), "source_app", logText(sourceAppID), "target_app", logText(targetAppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app records failed")
 		return
 	}
+	readCompleted = true
 	writeJSON(w, http.StatusOK, AppRecordsResponse{Records: records})
 }
 
@@ -759,7 +766,8 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		return req, errors.New("invalid compatibility_until")
 	}
 	if len(req.Collections) > 64 || len(req.Capabilities) > 64 ||
-		len(req.Features) > 128 || len(req.LegacyProtocols) > 64 {
+		len(req.Features) > 128 || len(req.LegacyProtocols) > 64 ||
+		len(req.TokenPolicies) > 64 {
 		return req, errors.New("too many app fields")
 	}
 	for i := range req.Collections {
@@ -771,7 +779,8 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 			return req, errors.New("invalid schema_version")
 		}
 		if !validCollectionPrefix(req.Collections[i].CollectionPrefix) ||
-			!validAppVisibility(req.Collections[i].Visibility) {
+			!validAppVisibility(req.Collections[i].Visibility) ||
+			!appOwnsDeclaredScope(req.AppID, req.Collections[i]) {
 			return req, errors.New("invalid app collection")
 		}
 	}
@@ -789,7 +798,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		}
 		for j := range req.Features[i].Collections {
 			req.Features[i].Collections[j] = strings.TrimSpace(req.Features[i].Collections[j])
-			if !validCollectionPrefix(req.Features[i].Collections[j]) {
+			if !declaresCollection(req.Collections, req.Features[i].Collections[j]) {
 				return req, errors.New("invalid app feature collection")
 			}
 		}
@@ -805,7 +814,40 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 			return req, errors.New("invalid legacy protocol")
 		}
 	}
+	for i := range req.TokenPolicies {
+		policy := &req.TokenPolicies[i]
+		policy.AssetID = strings.TrimSpace(policy.AssetID)
+		policy.Permission = strings.TrimSpace(policy.Permission)
+		policy.Status = defaultString(strings.TrimSpace(policy.Status), appStatusActive)
+		if policy.AssetID == "" || !validTokenPolicyPermission(policy.Permission) ||
+			(policy.Status != appStatusActive && policy.Status != appStatusSuspended) ||
+			policy.LegacyUnsignedUntil < 0 ||
+			policy.LegacyUnsignedUntil > time.Now().Add(365*24*time.Hour).Unix() {
+			return req, errors.New("invalid token policy")
+		}
+	}
 	return req, nil
+}
+
+func appOwnsDeclaredScope(appID string, collection AppCollection) bool {
+	// These names were released by Inbe before namespaced scopes existed.
+	if appID == "inbe" && validLegacyEncryptedCollection(collection.CollectionPrefix) {
+		return collection.Visibility == "private"
+	}
+	parts := strings.Split(strings.TrimSuffix(collection.CollectionPrefix, ".*"), ".")
+	if len(parts) < 3 || parts[1] != appID {
+		return false
+	}
+	return parts[0] == collection.Visibility
+}
+
+func declaresCollection(collections []AppCollection, prefix string) bool {
+	for _, collection := range collections {
+		if collection.CollectionPrefix == prefix {
+			return true
+		}
+	}
+	return false
 }
 
 func readAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (AppGrantRequest, error) {

@@ -7,25 +7,21 @@ import (
 	"time"
 )
 
-func TestLoadConfigPrefersDaochiEnv(t *testing.T) {
+func TestLoadConfigUsesCanonicalEnv(t *testing.T) {
 	daochiSecret := strings.Repeat("11", 32)
-	legacySecret := strings.Repeat("22", 32)
 
 	t.Setenv("DAOCHI_TOKEN_SECRET_HEX", daochiSecret)
-	t.Setenv("KSYNC_TOKEN_SECRET_HEX", legacySecret)
 	t.Setenv("DAOCHI_ADDR", "0.0.0.0:18080")
-	t.Setenv("KSYNC_ADDR", "0.0.0.0:8080")
 	t.Setenv("DAOCHI_BASE_URL", "http://192.168.100.97:18080")
-	t.Setenv("KSYNC_BASE_URL", "https://api.legacy.example")
 	t.Setenv("DAOCHI_DB", "/data/daochi.db")
-	t.Setenv("KSYNC_DB", "/data/ksync.db")
 	t.Setenv("DAOCHI_KNOWN_NODES", "Waozi=https://api.waozi.xyz;sync=pull;apps=inbe+ukuvota;collections=inbe.*+profile.public;data=encrypted_records+app_registry")
-	t.Setenv("KSYNC_KNOWN_NODES", "Legacy=https://legacy.example")
 	t.Setenv("DAOCHI_NODE_SYNC_TOKEN", "node-secret")
 	t.Setenv("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", "30")
 	t.Setenv("DAOCHI_NODE_SYNC_BATCH_LIMIT", "250")
 	t.Setenv("DAOCHI_TOKEN_TTL_SECONDS", "90")
-	t.Setenv("KSYNC_TOKEN_TTL_SECONDS", "45")
+	t.Setenv("MONERO_WALLET_RPC_URL", "http://127.0.0.1:18083")
+	t.Setenv("MONERO_RATE_ATOMIC_AMOUNT", "1000000000000")
+	t.Setenv("MONERO_RATE_TOKEN_UNITS", "5000000")
 
 	cfg := loadConfig()
 	if got := hex.EncodeToString(cfg.TokenSecret); got != daochiSecret {
@@ -40,6 +36,9 @@ func TestLoadConfigPrefersDaochiEnv(t *testing.T) {
 	if cfg.NodeSyncToken != "node-secret" || cfg.NodeSyncInterval != 30*time.Second || cfg.NodeSyncBatchLimit != 250 {
 		t.Fatalf("node sync config=%q/%s/%d, want DAOCHI values", cfg.NodeSyncToken, cfg.NodeSyncInterval, cfg.NodeSyncBatchLimit)
 	}
+	if cfg.MoneroWalletRPCURL != "http://127.0.0.1:18083" || cfg.MoneroRateAtomicAmount != 1000000000000 || cfg.MoneroRateTokenUnits != 5000000 {
+		t.Fatalf("unexpected Monero config: %+v", cfg)
+	}
 	if len(cfg.KnownNodes) != 1 || cfg.KnownNodes[0].Name != "Waozi" || cfg.KnownNodes[0].URL != "https://api.waozi.xyz" {
 		t.Fatalf("KnownNodes=%+v, want DAOCHI_KNOWN_NODES", cfg.KnownNodes)
 	}
@@ -49,32 +48,6 @@ func TestLoadConfigPrefersDaochiEnv(t *testing.T) {
 		strings.Join(cfg.KnownNodes[0].Sync.Collections, ",") != "inbe.*,profile.public" ||
 		strings.Join(cfg.KnownNodes[0].Sync.Data, ",") != "encrypted_records,app_registry" {
 		t.Fatalf("KnownNodes sync policy=%+v, want parsed peer policy", cfg.KnownNodes[0].Sync)
-	}
-}
-
-func TestLoadConfigAcceptsLegacyKsyncEnvFallback(t *testing.T) {
-	legacySecret := strings.Repeat("33", 32)
-
-	t.Setenv("DAOCHI_TOKEN_SECRET_HEX", "")
-	t.Setenv("DAOCHI_ADDR", "")
-	t.Setenv("DAOCHI_BASE_URL", "")
-	t.Setenv("DAOCHI_DB", "")
-	t.Setenv("DAOCHI_TOKEN_TTL_SECONDS", "")
-	t.Setenv("KSYNC_TOKEN_SECRET_HEX", legacySecret)
-	t.Setenv("KSYNC_ADDR", "0.0.0.0:8081")
-	t.Setenv("KSYNC_BASE_URL", "https://api.legacy.example")
-	t.Setenv("KSYNC_DB", "/data/legacy.db")
-	t.Setenv("KSYNC_TOKEN_TTL_SECONDS", "120")
-
-	cfg := loadConfig()
-	if got := hex.EncodeToString(cfg.TokenSecret); got != legacySecret {
-		t.Fatalf("TokenSecret=%q, want legacy KSYNC secret", got)
-	}
-	if cfg.Addr != "0.0.0.0:8081" || cfg.BaseURL != "https://api.legacy.example" || cfg.DBPath != "/data/legacy.db" {
-		t.Fatalf("config did not accept legacy KSYNC env: %+v", cfg)
-	}
-	if cfg.TokenTTL != 120*time.Second {
-		t.Fatalf("TokenTTL=%s, want 120s", cfg.TokenTTL)
 	}
 }
 

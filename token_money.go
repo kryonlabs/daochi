@@ -200,9 +200,16 @@ func (s *Store) CreditTokenPayment(ctx context.Context, signer ed25519.PrivateKe
 		return TokenReceipt{}, false, err
 	}
 	defer tx.Rollback()
+	receipt, created, err := creditTokenPaymentTx(ctx, tx, signer, provider, providerPaymentID, input)
+	if err != nil {
+		return TokenReceipt{}, false, err
+	}
+	return receipt, created, tx.Commit()
+}
 
+func creditTokenPaymentTx(ctx context.Context, tx *sql.Tx, signer ed25519.PrivateKey, provider, providerPaymentID string, input tokenEventInput) (TokenReceipt, bool, error) {
 	var existingReceiptID string
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 SELECT receipt_id
 FROM token_processed_payments
 WHERE provider=?1 AND provider_payment_id=?2`, provider, providerPaymentID).Scan(&existingReceiptID)
@@ -226,7 +233,7 @@ WHERE provider=?1 AND provider_payment_id=?2`, provider, providerPaymentID).Scan
 		if !found {
 			return TokenReceipt{}, false, errors.New("processed payment receipt missing")
 		}
-		return receipt, false, tx.Commit()
+		return receipt, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return TokenReceipt{}, false, err
@@ -242,7 +249,7 @@ VALUES(?1,?2,?3,?4,?5,?6)`, provider, providerPaymentID, input.AccountID,
 		waoziTokenAssetID, input.AmountDelta, receipt.ReceiptID); err != nil {
 		return TokenReceipt{}, false, err
 	}
-	return receipt, true, tx.Commit()
+	return receipt, true, nil
 }
 
 func (s *Store) SpendTokens(ctx context.Context, signer ed25519.PrivateKey, input tokenEventInput, idempotencyKey string) (TokenReceipt, int64, bool, error) {
@@ -255,13 +262,18 @@ func (s *Store) SpendTokens(ctx context.Context, signer ed25519.PrivateKey, inpu
 	}
 	defer tx.Rollback()
 
+	requestHash := tokenSpendRequestHash(input)
 	var existingReceiptID string
+	var existingRequestHash string
 	err = tx.QueryRowContext(ctx, `
-SELECT receipt_id
+SELECT receipt_id,request_hash
 FROM token_spend_nonces
 WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3`,
-		input.AccountID, input.AppID, idempotencyKey).Scan(&existingReceiptID)
+		input.AccountID, input.AppID, idempotencyKey).Scan(&existingReceiptID, &existingRequestHash)
 	if err == nil {
+		if existingRequestHash != "" && existingRequestHash != requestHash {
+			return TokenReceipt{}, 0, false, errors.New("idempotency key reused for different spend")
+		}
 		receipt, found, err := tokenReceiptByIDTx(ctx, tx, existingReceiptID)
 		if err != nil {
 			return TokenReceipt{}, 0, false, err
@@ -291,12 +303,17 @@ WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3`,
 		return TokenReceipt{}, 0, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_spend_nonces(account_id,app_id,idempotency_key,receipt_id)
-VALUES(?1,?2,?3,?4)`, input.AccountID, input.AppID, idempotencyKey, receipt.ReceiptID); err != nil {
+INSERT INTO token_spend_nonces(account_id,app_id,idempotency_key,receipt_id,request_hash)
+VALUES(?1,?2,?3,?4,?5)`, input.AccountID, input.AppID, idempotencyKey, receipt.ReceiptID, requestHash); err != nil {
 		return TokenReceipt{}, 0, false, err
 	}
 	balance += input.AmountDelta
 	return receipt, balance, true, tx.Commit()
+}
+
+func tokenSpendRequestHash(input tokenEventInput) string {
+	payload, _ := json.Marshal(input)
+	return sha256Hex(payload)
 }
 
 func insertTokenEventTx(ctx context.Context, tx *sql.Tx, signer ed25519.PrivateKey, input tokenEventInput) (TokenReceipt, error) {
@@ -319,7 +336,7 @@ LIMIT 1`).Scan(&previousSeq, &previousHash); err != nil && !errors.Is(err, sql.E
 	if previousSeq.Valid {
 		ledgerSeq = previousSeq.Int64 + 1
 	}
-	receiptID, err := randomUkuID()
+	receiptID, err := randomResourceID()
 	if err != nil {
 		return TokenReceipt{}, err
 	}
@@ -583,7 +600,7 @@ func (s *Server) handleTokenLedger(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTokenReceipt(w http.ResponseWriter, r *http.Request) {
 	receiptID := strings.TrimPrefix(r.URL.Path, "/api/v1/tokens/receipts/")
-	if !validUkuID(receiptID) {
+	if !validResourceID(receiptID) {
 		writeError(w, http.StatusBadRequest, "invalid receipt_id")
 		return
 	}
@@ -627,10 +644,20 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
-	if err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, req.AssetID, tokenPermissionSpend); err != nil {
+	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, req.AssetID, tokenPermissionSpend)
+	if err != nil {
+		if hasSignedTx {
+			s.store.ForgetSignedTx(r.Context(), signedTx)
+		}
 		s.writeAuthError(w, err)
 		return
 	}
+	completed := false
+	defer func() {
+		if hasSignedTx && !completed {
+			s.store.ForgetSignedTx(r.Context(), signedTx)
+		}
+	}()
 	sourceRef := req.Action + ":" + req.IdempotencyKey
 	if req.Metadata != "" {
 		sourceRef += ":" + shortHash(req.Metadata)
@@ -648,10 +675,15 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "insufficient balance")
 			return
 		}
+		if strings.Contains(err.Error(), "idempotency key reused") {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		slog.Error("token spend", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token spend failed")
 		return
 	}
+	completed = true
 	writeJSON(w, http.StatusOK, TokenSpendResponse{Status: "ok", Balance: balance, Receipt: receipt})
 }
 
@@ -683,10 +715,20 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
-	if err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase); err != nil {
+	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase)
+	if err != nil {
+		if hasSignedTx {
+			s.store.ForgetSignedTx(r.Context(), signedTx)
+		}
 		s.writeAuthError(w, err)
 		return
 	}
+	completed := false
+	defer func() {
+		if hasSignedTx && !completed {
+			s.store.ForgetSignedTx(r.Context(), signedTx)
+		}
+	}()
 	if len(s.cfg.GooglePackageNames) > 0 && !s.cfg.GooglePackageNames[req.PackageName] {
 		writeError(w, http.StatusBadRequest, "package not allowed")
 		return
@@ -717,6 +759,7 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "token balance failed")
 		return
 	}
+	completed = true
 	writeJSON(w, http.StatusOK, TokenPurchaseResponse{Status: "ok", Balance: balance, Receipt: receipt})
 }
 
@@ -747,16 +790,27 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
-	if err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase); err != nil {
+	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase)
+	if err != nil {
+		if hasSignedTx {
+			s.store.ForgetSignedTx(r.Context(), signedTx)
+		}
 		s.writeAuthError(w, err)
 		return
 	}
+	completed := false
+	defer func() {
+		if hasSignedTx && !completed {
+			s.store.ForgetSignedTx(r.Context(), signedTx)
+		}
+	}()
 	invoice, err := s.store.CreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.cfg)
 	if err != nil {
 		slog.Error("create monero invoice", "user", logText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	}
+	completed = true
 	writeJSON(w, http.StatusCreated, invoice)
 }
 
@@ -766,7 +820,7 @@ func (s *Server) handleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/tokens/purchases/monero/invoices/")
-	if !validUkuID(id) {
+	if !validResourceID(id) {
 		writeError(w, http.StatusBadRequest, "invalid invoice id")
 		return
 	}
@@ -841,6 +895,9 @@ func (s *Server) runMoneroInvoiceReconciler(ctx context.Context, interval time.D
 	for {
 		if err := s.reconcileMoneroInvoices(ctx, 100); err != nil {
 			slog.Warn("monero invoice reconciliation failed", "error", err)
+		}
+		if err := s.reconcileMoneroAccountDeposits(ctx); err != nil {
+			slog.Warn("monero account deposit reconciliation failed", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -1043,35 +1100,40 @@ func tokenAppFilter(r *http.Request) (string, bool, error) {
 	return appID, true, nil
 }
 
-func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []byte, accountID, appID, assetID, permission string) error {
+func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []byte, accountID, appID, assetID, permission string) (SignedTxEnvelope, bool, error) {
 	hasSignedTx := strings.TrimSpace(r.Header.Get("X-Daochi-Tx")) != ""
+	var signedTx SignedTxEnvelope
 	if hasSignedTx {
 		tx, err := readSignedTxHeader(r)
 		if err != nil {
-			return err
+			return signedTx, false, err
 		}
 		if err := s.verifySignedTx(ctx, r, body, tx, accountID, appID); err != nil {
-			return err
+			return signedTx, false, err
 		}
+		signedTx = tx
 	}
 	if !validTokenPolicyPermission(permission) {
-		return authError{status: http.StatusBadRequest, message: "invalid token permission"}
+		return signedTx, hasSignedTx, authError{status: http.StatusBadRequest, message: "invalid token permission"}
 	}
 	hasPolicy, err := s.store.HasTokenPolicy(ctx, appID)
 	if err != nil {
-		return err
+		return signedTx, hasSignedTx, err
 	}
 	if !hasPolicy {
-		return nil
+		return signedTx, hasSignedTx, nil
 	}
-	_, ok, err := s.store.AppTokenPermission(ctx, appID, assetID, permission)
+	policy, ok, err := s.store.AppTokenPermission(ctx, appID, assetID, permission)
 	if err != nil {
-		return err
+		return signedTx, hasSignedTx, err
 	}
 	if !ok {
-		return authError{status: http.StatusForbidden, message: "app token permission denied"}
+		return signedTx, hasSignedTx, authError{status: http.StatusForbidden, message: "app token permission denied"}
 	}
-	return nil
+	if !hasSignedTx && (policy.LegacyUnsignedUntil == 0 || time.Now().Unix() > policy.LegacyUnsignedUntil) {
+		return signedTx, false, authError{status: http.StatusUnauthorized, message: "signed transaction required"}
+	}
+	return signedTx, hasSignedTx, nil
 }
 
 func validTokenPolicyPermission(value string) bool {
@@ -1324,7 +1386,7 @@ func (s *Store) CreateMoneroInvoice(ctx context.Context, accountID, appID string
 	if product.MoneroAtomicAmount <= 0 {
 		return MoneroInvoiceResponse{}, errors.New("monero amount required")
 	}
-	id, err := randomUkuID()
+	id, err := randomResourceID()
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}
@@ -1476,15 +1538,8 @@ func verifyMoneroInvoicePayment(ctx context.Context, cfg Config, invoice MoneroI
 		return "", false, false, errPaymentUnavailable
 	}
 	var result struct {
-		In []struct {
-			TxID          string `json:"txid"`
-			Amount        int64  `json:"amount"`
-			Confirmations int64  `json:"confirmations"`
-			SubaddrIndex  struct {
-				Major int `json:"major"`
-				Minor int `json:"minor"`
-			} `json:"subaddr_index"`
-		} `json:"in"`
+		In   []moneroTransferRPC `json:"in"`
+		Pool []moneroTransferRPC `json:"pool"`
 	}
 	if err := moneroRPC(ctx, cfg, "get_transfers", map[string]any{
 		"in":              true,
@@ -1496,11 +1551,13 @@ func verifyMoneroInvoicePayment(ctx context.Context, cfg Config, invoice MoneroI
 	}, &result); err != nil {
 		return "", false, false, err
 	}
-	for _, tx := range result.In {
+	for _, tx := range append(result.Pool, result.In...) {
 		if tx.Amount >= invoice.AtomicAmount &&
 			tx.SubaddrIndex.Major == 0 && tx.SubaddrIndex.Minor == invoice.AddressIndex && tx.TxID != "" {
 			paymentID := fmt.Sprintf("%s:%d:%d", tx.TxID, tx.SubaddrIndex.Major, tx.SubaddrIndex.Minor)
-			return paymentID, true, tx.Confirmations >= 10, nil
+			confirmed := tx.Confirmations >= moneroConfirmationsRequired(cfg) &&
+				!tx.Locked && tx.UnlockTime == 0 && !tx.DoubleSpendSeen
+			return paymentID, true, confirmed, nil
 		}
 	}
 	return "", false, false, nil
@@ -1521,7 +1578,8 @@ func moneroRPC(ctx context.Context, cfg Config, method string, params map[string
 	if cfg.MoneroWalletRPCUser != "" || cfg.MoneroWalletRPCPassword != "" {
 		req.SetBasicAuth(cfg.MoneroWalletRPCUser, cfg.MoneroWalletRPCPassword)
 	}
-	res, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 15 * time.Second}
+	res, err := client.Do(req)
 	if err != nil {
 		return errPaymentUnavailable
 	}

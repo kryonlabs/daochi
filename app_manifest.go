@@ -43,6 +43,7 @@ func (s *Store) UpsertSignedAppManifest(ctx context.Context, manifest AppManifes
 		Capabilities:       manifest.Capabilities,
 		Features:           manifest.Features,
 		LegacyProtocols:    manifest.LegacyProtocols,
+		TokenPolicies:      manifest.TokenPolicies,
 	}
 	if len(manifest.Keys) > 0 {
 		app.PublicKey = manifest.Keys[0].PublicKey
@@ -84,9 +85,10 @@ VALUES(?1,?2,?3,?4,?5,?6,?7)`,
 	}
 	for _, policy := range manifest.TokenPolicies {
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_app_permissions(app_id,asset_id,permission,status)
-VALUES(?1,?2,?3,?4)`,
-			manifest.AppID, policy.AssetID, policy.Permission, defaultString(policy.Status, appStatusActive)); err != nil {
+INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until)
+VALUES(?1,?2,?3,?4,?5)`,
+			manifest.AppID, policy.AssetID, policy.Permission, defaultString(policy.Status, appStatusActive),
+			policy.LegacyUnsignedUntil); err != nil {
 			return err
 		}
 	}
@@ -128,44 +130,38 @@ ON CONFLICT(app_id) DO UPDATE SET
 		string(featuresJSON), string(legacyProtocolsJSON)); err != nil {
 		return err
 	}
-	if len(app.Collections) > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM server_app_collections WHERE app_id=?1`, app.AppID); err != nil {
-			return err
-		}
-		for _, collection := range app.Collections {
-			if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `DELETE FROM server_app_collections WHERE app_id=?1`, app.AppID); err != nil {
+		return err
+	}
+	for _, collection := range app.Collections {
+		if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_app_collections(app_id,collection_prefix,visibility,schema_version,description)
 VALUES(?1,?2,?3,?4,?5)`,
-				app.AppID, collection.CollectionPrefix, collection.Visibility,
-				collection.SchemaVersion, collection.Description); err != nil {
-				return err
-			}
-		}
-	}
-	if len(app.Capabilities) > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM server_app_capabilities WHERE app_id=?1`, app.AppID); err != nil {
+			app.AppID, collection.CollectionPrefix, collection.Visibility,
+			collection.SchemaVersion, collection.Description); err != nil {
 			return err
 		}
-		for _, capability := range app.Capabilities {
-			if _, err := tx.ExecContext(ctx, `
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM server_app_capabilities WHERE app_id=?1`, app.AppID); err != nil {
+		return err
+	}
+	for _, capability := range app.Capabilities {
+		if _, err := tx.ExecContext(ctx, `
 INSERT OR IGNORE INTO server_app_capabilities(app_id,capability)
 VALUES(?1,?2)`, app.AppID, capability); err != nil {
-				return err
-			}
-		}
-	}
-	if len(app.TokenPolicies) > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM token_app_permissions WHERE app_id=?1`, app.AppID); err != nil {
 			return err
 		}
-		for _, policy := range app.TokenPolicies {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_app_permissions(app_id,asset_id,permission,status)
-VALUES(?1,?2,?3,?4)`,
-				app.AppID, policy.AssetID, policy.Permission,
-				defaultString(policy.Status, appStatusActive)); err != nil {
-				return err
-			}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM token_app_permissions WHERE app_id=?1`, app.AppID); err != nil {
+		return err
+	}
+	for _, policy := range app.TokenPolicies {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until)
+VALUES(?1,?2,?3,?4,?5)`,
+			app.AppID, policy.AssetID, policy.Permission,
+			defaultString(policy.Status, appStatusActive), policy.LegacyUnsignedUntil); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -250,7 +246,7 @@ ORDER BY key_id`, appID)
 
 func (s *Store) TokenPolicies(ctx context.Context, appID string) ([]TokenPolicy, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT asset_id,permission,status
+SELECT asset_id,permission,status,legacy_unsigned_until
 FROM token_app_permissions
 WHERE app_id=?1
 ORDER BY asset_id,permission`, appID)
@@ -261,7 +257,7 @@ ORDER BY asset_id,permission`, appID)
 	var out []TokenPolicy
 	for rows.Next() {
 		var policy TokenPolicy
-		if err := rows.Scan(&policy.AssetID, &policy.Permission, &policy.Status); err != nil {
+		if err := rows.Scan(&policy.AssetID, &policy.Permission, &policy.Status, &policy.LegacyUnsignedUntil); err != nil {
 			return nil, err
 		}
 		out = append(out, policy)
@@ -282,13 +278,20 @@ VALUES(?1,?2,?3,?4,?5)`, tx.AccountID, tx.TxID, tx.AppID, tx.Nonce, tx.ExpiresAt
 	return err
 }
 
+func (s *Store) ForgetSignedTx(ctx context.Context, tx SignedTxEnvelope) {
+	_, _ = s.db.ExecContext(ctx, `
+DELETE FROM server_signed_transactions
+WHERE account_id=?1 AND tx_id=?2 AND app_id=?3 AND nonce=?4`,
+		tx.AccountID, tx.TxID, tx.AppID, tx.Nonce)
+}
+
 func (s *Store) AppTokenPermission(ctx context.Context, appID, assetID, permission string) (TokenPolicy, bool, error) {
 	var policy TokenPolicy
 	err := s.db.QueryRowContext(ctx, `
-SELECT asset_id,permission,status
+SELECT asset_id,permission,status,legacy_unsigned_until
 FROM token_app_permissions
 WHERE app_id=?1 AND asset_id=?2 AND permission=?3 AND status='active'`, appID, assetID, permission).Scan(
-		&policy.AssetID, &policy.Permission, &policy.Status)
+		&policy.AssetID, &policy.Permission, &policy.Status, &policy.LegacyUnsignedUntil)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TokenPolicy{}, false, nil
 	}
@@ -489,7 +492,9 @@ func validateAppManifest(manifest AppManifest) error {
 		}
 	}
 	for _, collection := range manifest.Collections {
-		if !validCollectionPrefix(collection.CollectionPrefix) || !validAppVisibility(collection.Visibility) {
+		if !validCollectionPrefix(collection.CollectionPrefix) ||
+			!validAppVisibility(collection.Visibility) ||
+			!appOwnsDeclaredScope(manifest.AppID, collection) {
 			return errors.New("invalid app collection")
 		}
 	}
@@ -503,7 +508,7 @@ func validateAppManifest(manifest AppManifest) error {
 			return errors.New("invalid app feature")
 		}
 		for _, collection := range feature.Collections {
-			if !validCollectionPrefix(collection) {
+			if !declaresCollection(manifest.Collections, collection) {
 				return errors.New("invalid app feature collection")
 			}
 		}
@@ -520,6 +525,10 @@ func validateAppManifest(manifest AppManifest) error {
 		}
 		if policy.Status != "" && policy.Status != appStatusActive && policy.Status != appStatusSuspended {
 			return errors.New("invalid token policy status")
+		}
+		if policy.LegacyUnsignedUntil < 0 ||
+			policy.LegacyUnsignedUntil > time.Now().Add(365*24*time.Hour).Unix() {
+			return errors.New("invalid legacy_unsigned_until")
 		}
 	}
 	if manifest.ExpiresAt > 0 && time.Now().Unix() > manifest.ExpiresAt {

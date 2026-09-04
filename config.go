@@ -40,14 +40,19 @@ type Config struct {
 	MoneroWalletRPCURL              string
 	MoneroWalletRPCUser             string
 	MoneroWalletRPCPassword         string
+	MoneroNetwork                   string
+	MoneroRateAtomicAmount          int64
+	MoneroRateTokenUnits            int64
+	MoneroMinimumAtomicAmount       int64
+	MoneroConfirmationsRequired     int64
 	TokenDirectPurchasesEnabled     bool
 }
 
 func loadConfig() Config {
-	secret := envBytesHex("DAOCHI_TOKEN_SECRET_HEX", envBytesHex("KSYNC_TOKEN_SECRET_HEX", nil))
+	secret := envBytesHex("DAOCHI_TOKEN_SECRET_HEX", nil)
 	ephemeralSecret := false
 	if len(secret) < 32 {
-		if !envBool("DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET", envBool("KSYNC_ALLOW_EPHEMERAL_TOKEN_SECRET", false)) {
+		if !envBool("DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET", false) {
 			log.Fatal("DAOCHI_TOKEN_SECRET_HEX must be at least 32 bytes; set DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET=1 only for local development")
 		}
 		slog.Warn("DAOCHI_TOKEN_SECRET_HEX is missing or too short; using an ephemeral token secret suitable only for local development")
@@ -57,15 +62,9 @@ func loadConfig() Config {
 		}
 		ephemeralSecret = true
 	}
-	nodeRegistryPublic := ed25519.PublicKey(envBytesHexOrFileFallback("DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX", "DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE", "KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX", "KSYNC_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE", nil))
-	issuerPublic := envBytesHexOrFileFallback("DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE", "KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX", "KSYNC_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
-	if len(issuerPublic) == 0 {
-		issuerPublic = envBytesHexOrFileFallback("DAOCHI_WAOZI_ISSUER_PUBLIC_KEY_HEX", "DAOCHI_WAOZI_ISSUER_PUBLIC_KEY_HEX_FILE", "KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX", "KSYNC_WAOZI_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
-	}
-	issuerPrivateBytes := envBytesHexOrFileFallback("DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE", "KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX", "KSYNC_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE", nil)
-	if len(issuerPrivateBytes) == 0 {
-		issuerPrivateBytes = envBytesHexOrFileFallback("DAOCHI_WAOZI_ISSUER_PRIVATE_KEY_HEX", "DAOCHI_WAOZI_ISSUER_PRIVATE_KEY_HEX_FILE", "KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX", "KSYNC_WAOZI_ISSUER_PRIVATE_KEY_HEX_FILE", nil)
-	}
+	nodeRegistryPublic := ed25519.PublicKey(envBytesHexOrFile("DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX", "DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE", nil))
+	issuerPublic := envBytesHexOrFile("DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE", nil)
+	issuerPrivateBytes := envBytesHexOrFile("DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE", nil)
 	var issuerPrivate ed25519.PrivateKey
 	if len(issuerPrivateBytes) == ed25519.SeedSize {
 		issuerPrivate = ed25519.NewKeyFromSeed(issuerPrivateBytes)
@@ -75,36 +74,41 @@ func loadConfig() Config {
 	if len(issuerPrivate) == ed25519.PrivateKeySize && len(issuerPublic) == 0 {
 		issuerPublic = issuerPrivate.Public().(ed25519.PublicKey)
 	}
-	baseURL := envString("DAOCHI_BASE_URL", envString("KSYNC_BASE_URL", "https://api.example.com"))
+	baseURL := envString("DAOCHI_BASE_URL", "https://api.example.com")
 	return Config{
-		Addr:                            envString("DAOCHI_ADDR", envString("KSYNC_ADDR", "127.0.0.1:8080")),
+		Addr:                            envString("DAOCHI_ADDR", "127.0.0.1:8080"),
 		BaseURL:                         baseURL,
-		DBPath:                          envString("DAOCHI_DB", envString("KSYNC_DB", "daochi.db")),
-		AdminToken:                      envString("DAOCHI_ADMIN_TOKEN", envString("KSYNC_ADMIN_TOKEN", "")),
-		ChallengeTTL:                    envDurationSeconds("DAOCHI_CHALLENGE_TTL_SECONDS", envDurationSeconds("KSYNC_CHALLENGE_TTL_SECONDS", 60*time.Second)),
-		TokenTTL:                        envDurationSeconds("DAOCHI_TOKEN_TTL_SECONDS", envDurationSeconds("KSYNC_TOKEN_TTL_SECONDS", 3600*time.Second)),
+		DBPath:                          envString("DAOCHI_DB", "daochi.db"),
+		AdminToken:                      envString("DAOCHI_ADMIN_TOKEN", ""),
+		ChallengeTTL:                    envDurationSeconds("DAOCHI_CHALLENGE_TTL_SECONDS", 60*time.Second),
+		TokenTTL:                        envDurationSeconds("DAOCHI_TOKEN_TTL_SECONDS", 3600*time.Second),
 		TokenSecret:                     secret,
 		TokenSecretEphemeral:            ephemeralSecret,
-		MaxBodyBytes:                    envInt64("DAOCHI_MAX_BODY_BYTES", envInt64("KSYNC_MAX_BODY_BYTES", 1<<20)),
-		EncryptedPayloadMaxReturn:       envInt("DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN", envInt("KSYNC_ENCRYPTED_PAYLOAD_MAX_RETURN", 0)),
-		EncryptedPayloadMaxAccountBytes: envInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", envInt64("KSYNC_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0)),
-		EncryptedPayloadRetention:       envDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", envDurationDays("KSYNC_ENCRYPTED_PAYLOAD_RETENTION_DAYS", 0)),
+		MaxBodyBytes:                    envInt64("DAOCHI_MAX_BODY_BYTES", 1<<20),
+		EncryptedPayloadMaxReturn:       envInt("DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN", 0),
+		EncryptedPayloadMaxAccountBytes: envInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0),
+		EncryptedPayloadRetention:       envDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", 0),
 		NodeRegistryPublicKey:           nodeRegistryPublic,
-		KnownNodes:                      envNodePeersValue(envString("DAOCHI_KNOWN_NODES", envString("KSYNC_KNOWN_NODES", ""))),
-		NodeSyncToken:                   envString("DAOCHI_NODE_SYNC_TOKEN", envString("KSYNC_NODE_SYNC_TOKEN", "")),
-		NodeSyncInterval:                envDurationSeconds("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", envDurationSeconds("KSYNC_NODE_SYNC_INTERVAL_SECONDS", 0)),
-		NodeSyncBatchLimit:              envInt("DAOCHI_NODE_SYNC_BATCH_LIMIT", envInt("KSYNC_NODE_SYNC_BATCH_LIMIT", 500)),
+		KnownNodes:                      envNodePeersValue(envString("DAOCHI_KNOWN_NODES", "")),
+		NodeSyncToken:                   envString("DAOCHI_NODE_SYNC_TOKEN", ""),
+		NodeSyncInterval:                envDurationSeconds("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", 0),
+		NodeSyncBatchLimit:              envInt("DAOCHI_NODE_SYNC_BATCH_LIMIT", 500),
 		WaoziIssuerPublicKey:            issuerPublic,
 		WaoziIssuerPrivateKey:           issuerPrivate,
-		TokenProducts:                   envTokenProductsValue(envString("DAOCHI_TOKEN_PRODUCTS", envString("KSYNC_TOKEN_PRODUCTS", ""))),
-		GooglePackageNames:              envStringSetValue(envString("DAOCHI_GOOGLE_PACKAGE_NAMES", envString("KSYNC_GOOGLE_PACKAGE_NAMES", ""))),
-		GoogleServiceAccountJSON:        envStringOrFileFallback("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON", "DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", "KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON", "KSYNC_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", ""),
-		GoogleOAuthClientJSON:           envStringOrFileFallback("DAOCHI_GOOGLE_OAUTH_CLIENT_JSON", "DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE", "KSYNC_GOOGLE_OAUTH_CLIENT_JSON", "KSYNC_GOOGLE_OAUTH_CLIENT_JSON_FILE", ""),
-		GoogleOAuthRefreshToken:         envStringOrFileFallback("DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN", "DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", "KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN", "KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", ""),
-		MoneroWalletRPCURL:              envString("DAOCHI_MONERO_WALLET_RPC_URL", envString("KSYNC_MONERO_WALLET_RPC_URL", "")),
-		MoneroWalletRPCUser:             envString("DAOCHI_MONERO_WALLET_RPC_USER", envString("KSYNC_MONERO_WALLET_RPC_USER", "")),
-		MoneroWalletRPCPassword:         envString("DAOCHI_MONERO_WALLET_RPC_PASSWORD", envString("KSYNC_MONERO_WALLET_RPC_PASSWORD", "")),
-		TokenDirectPurchasesEnabled:     envBool("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED", envBool("KSYNC_TOKEN_DIRECT_PURCHASES_ENABLED", false)),
+		TokenProducts:                   envTokenProductsValue(envString("DAOCHI_TOKEN_PRODUCTS", "")),
+		GooglePackageNames:              envStringSetValue(envString("DAOCHI_GOOGLE_PACKAGE_NAMES", "")),
+		GoogleServiceAccountJSON:        envStringOrFile("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON", "DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", ""),
+		GoogleOAuthClientJSON:           envStringOrFile("DAOCHI_GOOGLE_OAUTH_CLIENT_JSON", "DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE", ""),
+		GoogleOAuthRefreshToken:         envStringOrFile("DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN", "DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", ""),
+		MoneroWalletRPCURL:              envString("MONERO_WALLET_RPC_URL", ""),
+		MoneroWalletRPCUser:             envString("MONERO_WALLET_RPC_USER", ""),
+		MoneroWalletRPCPassword:         envStringOrFile("MONERO_WALLET_RPC_PASSWORD", "MONERO_WALLET_RPC_PASSWORD_FILE", ""),
+		MoneroNetwork:                   envString("MONERO_NETWORK", "mainnet"),
+		MoneroRateAtomicAmount:          envInt64("MONERO_RATE_ATOMIC_AMOUNT", 0),
+		MoneroRateTokenUnits:            envInt64("MONERO_RATE_TOKEN_UNITS", 0),
+		MoneroMinimumAtomicAmount:       envInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", 1),
+		MoneroConfirmationsRequired:     envInt64("MONERO_CONFIRMATIONS_REQUIRED", 10),
+		TokenDirectPurchasesEnabled:     envBool("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED", false),
 	}
 }
 
@@ -186,13 +190,6 @@ func envStringOrFile(key, fileKey, fallback string) string {
 	return fallback
 }
 
-func envStringOrFileFallback(key, fileKey, legacyKey, legacyFileKey, fallback string) string {
-	if value := envStringOrFile(key, fileKey, ""); value != "" {
-		return value
-	}
-	return envStringOrFile(legacyKey, legacyFileKey, fallback)
-}
-
 func envBytesHexOrFile(key, fileKey string, fallback []byte) []byte {
 	if value := os.Getenv(key); value != "" {
 		decoded, err := hex.DecodeString(strings.TrimSpace(value))
@@ -207,13 +204,6 @@ func envBytesHexOrFile(key, fileKey string, fallback []byte) []byte {
 		}
 	}
 	return fallback
-}
-
-func envBytesHexOrFileFallback(key, fileKey, legacyKey, legacyFileKey string, fallback []byte) []byte {
-	if value := envBytesHexOrFile(key, fileKey, nil); len(value) != 0 {
-		return value
-	}
-	return envBytesHexOrFile(legacyKey, legacyFileKey, fallback)
 }
 
 func envStringSet(key string) map[string]bool {

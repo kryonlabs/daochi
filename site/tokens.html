@@ -62,10 +62,24 @@
 
     <section>
       <h2>App scoping</h2>
-      <p>Token purchases, spends, invoices, receipts, and spend nonces carry <code>app_id</code>. Daochi validates that the app is registered before accepting a spend or purchase flow. Account-wide balance and ledger reads remain the default. Passing <code>app_id</code> returns only token events for that app.</p>
+      <p>Product purchases, spends, invoices, receipts, and spend nonces can carry <code>app_id</code>. Permanent-address Monero deposits credit the global account balance because the address identifies a person rather than an app. Daochi validates that an app is registered before accepting app-scoped spending or purchasing. Passing <code>app_id</code> returns only token events for that app.</p>
       <p>Signed app manifests can define token policies for <code>spend</code> and <code>purchase</code>. Once policies exist for an app, token actions need the matching app asset permission. A supplied <code>X-Daochi-Tx</code> envelope is verified, but unsigned token requests remain supported while token client integration is still pending.</p>
       <div class="callout">
         <p>Token ledger and payment intent rows are financial audit records. App-filtered balances are audit views over those rows, not separate allocation pools. Explicit account-to-app allocation events are still needed before per-app token distribution is complete.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Buy or gift with Monero</h2>
+      <p>Each account receives one permanent Monero subaddress. Sending XMR to your own address buys tokens for you. Sending XMR to the address resolved from another account's alias or public ID gifts tokens to that account. Both actions use the same settlement path.</p>
+      <p>Daochi records the transfer, waits for the configured confirmation threshold and an unlocked, non-double-spent output, then converts the atomic XMR amount with integer arithmetic and issues one idempotent signed credit.</p>
+      <div class="panel">
+        <div class="panel-row"><strong>My address</strong><span><code>GET /api/v1/tokens/purchases/monero/address</code></span></div>
+        <div class="panel-row"><strong>Gift address</strong><span><code>GET /api/v1/tokens/purchases/monero/address/@alias</code></span></div>
+        <div class="panel-row"><strong>Deposit history</strong><span><code>GET /api/v1/tokens/purchases/monero/deposits</code></span></div>
+      </div>
+      <div class="callout">
+        <p>The online node holds only a view-only merchant wallet. The mnemonic and private spend key remain offline and are never needed to allocate addresses or confirm deposits.</p>
       </div>
     </section>
   </main>

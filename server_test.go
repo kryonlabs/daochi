@@ -108,8 +108,8 @@ func TestDocsEndpoints(t *testing.T) {
 }
 
 func TestEnvNodePeers(t *testing.T) {
-	t.Setenv("KSYNC_KNOWN_NODES", "Alpha=https://alpha.example/, Beta|https://beta.example, https://alpha.example")
-	peers := envNodePeers("KSYNC_KNOWN_NODES")
+	t.Setenv("DAOCHI_KNOWN_NODES", "Alpha=https://alpha.example/, Beta|https://beta.example, https://alpha.example")
+	peers := envNodePeers("DAOCHI_KNOWN_NODES")
 	if len(peers) != 2 {
 		t.Fatalf("peer count = %d peers=%#v", len(peers), peers)
 	}
@@ -182,6 +182,11 @@ func TestWaoziTokenCreditSpendAndIdempotency(t *testing.T) {
 	}
 	if repeatPayload.Balance != 3000000 || repeatPayload.Receipt.ReceiptID != spendPayload.Receipt.ReceiptID {
 		t.Fatalf("spend was not idempotent: first=%#v repeat=%#v", spendPayload, repeatPayload)
+	}
+	reusedKeyBody := []byte(`{"app_id":"inbe","asset_id":"waozi:token","amount":1000000,"action":"different_action","idempotency_key":"test-spend-1"}`)
+	reusedKey := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/tokens/spend", identity.Token, reusedKeyBody)
+	if reusedKey.Code != http.StatusConflict || !strings.Contains(reusedKey.Body.String(), "idempotency key reused") {
+		t.Fatalf("changed spend reused idempotency key status = %d body=%s", reusedKey.Code, reusedKey.Body.String())
 	}
 
 	tooMuch := []byte(`{"app_id":"inbe","asset_id":"waozi:token","amount":4000000,"action":"feature_unlock","idempotency_key":"test-spend-2"}`)
@@ -379,6 +384,122 @@ func TestMoneroInvoiceReconcilerSettlesPendingInvoice(t *testing.T) {
 	}
 }
 
+func TestPermanentMoneroAddressPurchaseAndGift(t *testing.T) {
+	server, store, _ := testServer(t)
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet := newFakeMoneroWalletRPC(t)
+	server.cfg.WaoziIssuerPrivateKey = privateKey
+	server.cfg.TokenDirectPurchasesEnabled = true
+	server.cfg.MoneroWalletRPCURL = wallet.URL
+	server.cfg.MoneroNetwork = "stagenet"
+	server.cfg.MoneroRateAtomicAmount = 1000000000000
+	server.cfg.MoneroRateTokenUnits = 5000000
+	server.cfg.MoneroMinimumAtomicAmount = 1000
+	server.cfg.MoneroConfirmationsRequired = 10
+	handler := server.Routes()
+	recipient := newTestIdentity(t, handler, 0x75)
+	_ = newTestIdentity(t, handler, 0x76)
+	if err := store.SetAccountAlias(context.Background(), recipient.UserID, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	own := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/address", recipient.Token, nil)
+	if own.Code != http.StatusOK {
+		t.Fatalf("own address status = %d body=%s", own.Code, own.Body.String())
+	}
+	var ownAddress MoneroAddressResponse
+	if err := json.Unmarshal(own.Body.Bytes(), &ownAddress); err != nil {
+		t.Fatal(err)
+	}
+	if ownAddress.AccountID != recipient.UserID || ownAddress.Alias != "alice" ||
+		ownAddress.Network != "stagenet" || ownAddress.Address == "" {
+		t.Fatalf("unexpected own address: %#v", ownAddress)
+	}
+
+	gift := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/address/@alice", "", nil)
+	if gift.Code != http.StatusOK {
+		t.Fatalf("gift address status = %d body=%s", gift.Code, gift.Body.String())
+	}
+	var giftAddress MoneroAddressResponse
+	if err := json.Unmarshal(gift.Body.Bytes(), &giftAddress); err != nil {
+		t.Fatal(err)
+	}
+	if giftAddress.Address != ownAddress.Address || giftAddress.AccountID != recipient.UserID {
+		t.Fatalf("gift address differs from permanent address: own=%#v gift=%#v", ownAddress, giftAddress)
+	}
+	mapping, found, err := store.MoneroAccountAddress(context.Background(), recipient.UserID)
+	if err != nil || !found {
+		t.Fatalf("address mapping found=%v err=%v", found, err)
+	}
+
+	wallet.setTransfer(moneroTransfer{
+		TxID: "gift-to-alice", Amount: 2000000000000, Confirmations: 10,
+		Major: mapping.AccountIndex, Minor: mapping.AddressIndex,
+	})
+	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	balance, err := store.TokenBalance(context.Background(), recipient.UserID, waoziTokenAssetID)
+	if err != nil || balance != 10000000 {
+		t.Fatalf("gift balance=%d err=%v, want 10000000", balance, err)
+	}
+	deposits := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/deposits", recipient.Token, nil)
+	if deposits.Code != http.StatusOK || !strings.Contains(deposits.Body.String(), `"status":"credited"`) ||
+		!strings.Contains(deposits.Body.String(), `"token_units":10000000`) {
+		t.Fatalf("deposits status=%d body=%s", deposits.Code, deposits.Body.String())
+	}
+}
+
+func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
+	server, store, _ := testServer(t)
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet := newFakeMoneroWalletRPC(t)
+	server.cfg.WaoziIssuerPrivateKey = privateKey
+	server.cfg.TokenDirectPurchasesEnabled = true
+	server.cfg.MoneroWalletRPCURL = wallet.URL
+	server.cfg.MoneroRateAtomicAmount = 1000000000000
+	server.cfg.MoneroRateTokenUnits = 5000000
+	server.cfg.MoneroConfirmationsRequired = 10
+	handler := server.Routes()
+	recipient := newTestIdentity(t, handler, 0x77)
+	address := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/address", recipient.Token, nil)
+	if address.Code != http.StatusOK {
+		t.Fatalf("address status=%d body=%s", address.Code, address.Body.String())
+	}
+	mapping, _, _ := store.MoneroAccountAddress(context.Background(), recipient.UserID)
+	wallet.setTransfer(moneroTransfer{
+		TxID: "locked-payment", Amount: 1000000000000, Confirmations: 10,
+		Major: mapping.AccountIndex, Minor: mapping.AddressIndex, Locked: true,
+	})
+	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	balance, _ := store.TokenBalance(context.Background(), recipient.UserID, waoziTokenAssetID)
+	if balance != 0 {
+		t.Fatalf("locked deposit credited balance=%d", balance)
+	}
+	wallet.setTransfer(moneroTransfer{
+		TxID: "locked-payment", Amount: 1000000000000, Confirmations: 11,
+		Major: mapping.AccountIndex, Minor: mapping.AddressIndex,
+	})
+	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	balance, _ = store.TokenBalance(context.Background(), recipient.UserID, waoziTokenAssetID)
+	if balance != 5000000 {
+		t.Fatalf("unlocked deposit balance=%d, want 5000000", balance)
+	}
+}
+
 func TestProcessedPaymentCollisionRejected(t *testing.T) {
 	_, store, _ := testServer(t)
 	_, privateKey, err := ed25519.GenerateKey(nil)
@@ -471,6 +592,41 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	assertCount(t, store, "server_habit_days", 0)
 	assertCount(t, store, "server_sessions", 0)
 	assertCount(t, store, "server_session_rounds", 0)
+	assertCount(t, store, "server_account_tombstones", 1)
+
+	oldToken := httptest.NewRequest(http.MethodGet, "/api/v1/tokens/balance", nil)
+	oldToken.Header.Set("Authorization", "Bearer "+token)
+	oldTokenRes := httptest.NewRecorder()
+	handler.ServeHTTP(oldTokenRes, oldToken)
+	if oldTokenRes.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted account bearer status = %d body=%s", oldTokenRes.Code, oldTokenRes.Body.String())
+	}
+
+	bootstrapBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + userID + `","client_id":"deleted-client","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
+	bootstrap := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(bootstrapBody))
+	bootstrap.Header.Set("Content-Type", "application/json")
+	bootstrap.Header.Set("X-Ksync-User", userID)
+	bootstrap.Header.Set("Authorization", "Bearer "+token)
+	bootstrapRes := httptest.NewRecorder()
+	handler.ServeHTTP(bootstrapRes, bootstrap)
+	if bootstrapRes.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted account bootstrap status = %d body=%s", bootstrapRes.Code, bootstrapRes.Body.String())
+	}
+
+	applied, err := store.ImportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
+		Apps: []string{"inbe"}, Data: []string{"encrypted_records"},
+	}, []MeshEncryptedRecord{{
+		UserIDHash: userID,
+		PublicKey:  hex.EncodeToString(publicKey),
+		Record: EncryptedRecord{
+			Collection: "inbe.habits", ID: "deleted-habit", KeyID: "main",
+			Nonce: "n1", Ciphertext: "ciphertext", UpdatedAt: "2026-09-04T12:00:00Z",
+		},
+	}})
+	if err != nil || applied != 0 {
+		t.Fatalf("deleted account mesh import applied=%d err=%v", applied, err)
+	}
+	assertCount(t, store, "server_users", 0)
 }
 
 func TestPostAccountDeleteRouteMatchesKryonClient(t *testing.T) {
@@ -530,17 +686,6 @@ func TestDaochiHeaderAliases(t *testing.T) {
 	var login LoginResponse
 	if err := json.Unmarshal(loginRes.Body.Bytes(), &login); err != nil {
 		t.Fatal(err)
-	}
-
-	processBody := []byte(`{"user_id_hash":"` + userID + `","id":"daochi-alias-process","type":"consent","title":"Daochi aliases","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
-	processReq := httptest.NewRequest(http.MethodPost, "/api/v1/processes", bytes.NewReader(processBody))
-	processReq.Header.Set("Content-Type", "application/json")
-	processReq.Header.Set("X-Daochi-User", userID)
-	processReq.Header.Set("Authorization", "Bearer "+login.AuthToken)
-	processRes := httptest.NewRecorder()
-	handler.ServeHTTP(processRes, processReq)
-	if processRes.Code != http.StatusCreated {
-		t.Fatalf("daochi process create status = %d body=%s", processRes.Code, processRes.Body.String())
 	}
 
 	envelopeReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader([]byte(`{"v":1,"nonce":"n1","ciphertext":"payload"}`)))
@@ -1035,7 +1180,6 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 		t.Fatal(err)
 	}
 	foundInbe := false
-	foundUkuvota := false
 	for _, app := range registry.Apps {
 		if app.AppID == "inbe" {
 			foundInbe = true
@@ -1070,28 +1214,12 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 				}
 			}
 		}
-		if app.AppID == "uku" {
-			t.Fatalf("deprecated uku app should not be listed: %#v", registry.Apps)
-		}
-		if app.AppID == "ukuvota" {
-			foundUkuvota = true
-			if app.CompatibilityUntil != "" || len(app.LegacyProtocols) != 0 ||
-				!containsString(app.Capabilities, "public-records") {
-				t.Fatalf("ukuvota should be registered without legacy policy: %#v", app)
-			}
-			if containsString(app.Capabilities, "aliases") {
-				t.Fatalf("aliases should be a Daochi server capability, not an ukuvota app capability: %#v", app)
-			}
-			if len(app.TokenPolicies) != 2 {
-				t.Fatalf("ukuvota chi token policies missing: %#v", app.TokenPolicies)
-			}
+		if app.AppID != "inbe" {
+			t.Fatalf("only Inbe may be seeded by Daochi: %#v", registry.Apps)
 		}
 	}
 	if !foundInbe {
 		t.Fatalf("inbe app not seeded: %#v", registry.Apps)
-	}
-	if !foundUkuvota {
-		t.Fatalf("ukuvota app not seeded: %#v", registry.Apps)
 	}
 
 	detail := httptest.NewRecorder()
@@ -1108,26 +1236,53 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 	}
 }
 
-func TestSeedBuiltinAppsPrunesDeprecatedUku(t *testing.T) {
+func TestSeedBuiltinAppsPreservesAppOwnedRegistrations(t *testing.T) {
 	_, store, _ := testServer(t)
 	if err := store.UpsertApp(context.Background(), AppRegistration{
-		AppID:       "uku",
-		DisplayName: "Uku",
+		AppID:       "ukuvota",
+		DisplayName: "Ukuvota",
 		Status:      appStatusActive,
+		Collections: []AppCollection{{
+			CollectionPrefix: "public.ukuvota.v1.records.*",
+			Visibility:       "public",
+		}},
 	}); err != nil {
 		t.Fatal(err)
-	}
-	if _, found, err := store.AppByID(context.Background(), "uku"); err != nil || !found {
-		t.Fatalf("expected deprecated app fixture before prune, found=%v err=%v", found, err)
 	}
 	if err := store.SeedBuiltinApps(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := store.AppByID(context.Background(), "uku"); err != nil || found {
-		t.Fatalf("deprecated uku app still present, found=%v err=%v", found, err)
+	app, found, err := store.AppByID(context.Background(), "ukuvota")
+	if err != nil || !found || len(app.Collections) != 1 {
+		t.Fatalf("app-owned registration changed during seed, app=%#v found=%v err=%v", app, found, err)
 	}
-	if _, found, err := store.AppByID(context.Background(), "ukuvota"); err != nil || !found {
-		t.Fatalf("ukuvota missing after prune, found=%v err=%v", found, err)
+}
+
+func TestSeedBuiltinAppsPreservesSignedInbeManifest(t *testing.T) {
+	_, store, _ := testServer(t)
+	if err := store.UpsertApp(context.Background(), AppRegistration{
+		AppID:       "inbe",
+		DisplayName: "Inner Breeze",
+		Status:      appStatusActive,
+		Collections: []AppCollection{{
+			CollectionPrefix: "private.inbe.v2.records.*",
+			Visibility:       "private",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`
+INSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,status)
+VALUES('inbe',1,'{}','signed-inbe-test','signature','approval','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SeedBuiltinApps(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	app, found, err := store.AppByID(context.Background(), "inbe")
+	if err != nil || !found || len(app.Collections) != 1 ||
+		app.Collections[0].CollectionPrefix != "private.inbe.v2.records.*" {
+		t.Fatalf("signed Inbe manifest was overwritten: app=%#v found=%v err=%v", app, found, err)
 	}
 }
 
@@ -1160,7 +1315,7 @@ func TestInbeLegacyCompatibilityPolicyKeepsOldClientsWorking(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+identity.Token)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
-	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "legacy protocol not allowed for app_id") {
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "unknown app_id") {
 		t.Fatalf("ukuvota v5 compatibility status = %d body=%s", res.Code, res.Body.String())
 	}
 }
@@ -1204,12 +1359,16 @@ func TestProtocolV5AppIDCompatibilityAndProtocolV6StrictRegistry(t *testing.T) {
 }
 
 func TestAppGrantsGateCrossAppEncryptedRecords(t *testing.T) {
-	server, _, _ := testServer(t)
+	server, store, _ := testServer(t)
 	server.cfg.AdminToken = "admin-test-token"
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x5b)
+	_, appPrivate, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	registerBody := []byte(`{"app_id":"habitreader","display_name":"Habit Reader","status":"active","collections":[{"collection_prefix":"private.habitreader.v1.*","visibility":"private","schema_version":1}],"capabilities":["encrypted-records"]}`)
+	registerBody := []byte(`{"app_id":"ukuvota","display_name":"Ukuvota","status":"active","collections":[{"collection_prefix":"private.ukuvota.v1.*","visibility":"private","schema_version":1}],"capabilities":["encrypted-records"]}`)
 	register := httptest.NewRequest(http.MethodPost, "/api/v1/apps", bytes.NewReader(registerBody))
 	register.Header.Set("Content-Type", "application/json")
 	register.Header.Set("X-Ksync-Admin", "admin-test-token")
@@ -1218,21 +1377,26 @@ func TestAppGrantsGateCrossAppEncryptedRecords(t *testing.T) {
 	if registerRes.Code != http.StatusOK {
 		t.Fatalf("register app status = %d body=%s", registerRes.Code, registerRes.Body.String())
 	}
+	if _, err := store.db.Exec(`
+INSERT INTO server_app_keys(app_id,key_id,algorithm,public_key,purpose,status)
+VALUES('ukuvota','main-key','Ed25519',?1,'signing','active')`, hex.EncodeToString(appPrivate.Public().(ed25519.PublicKey))); err != nil {
+		t.Fatal(err)
+	}
 
 	writeBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"test-client-v5-shared","encrypted_records":[{"collection":"shared.inbe.v1.habits","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"shared-ciphertext","updated_at":"2026-08-29T12:00:00Z"}]}`)
 	_ = syncWithBody(t, handler, "", identity.UserID, identity.Token, writeBody)
 
-	queryPath := "/api/v1/account/app-records?source_app_id=inbe&target_app_id=habitreader&collection_prefix=shared.inbe.v1.*"
+	queryPath := "/api/v1/account/app-records?source_app_id=inbe&target_app_id=ukuvota&collection_prefix=shared.inbe.v1.*"
 	denied := httptest.NewRequest(http.MethodGet, queryPath, nil)
 	denied.Header.Set("Authorization", "Bearer "+identity.Token)
 	denied.Header.Set("X-Ksync-User", identity.UserID)
 	deniedRes := httptest.NewRecorder()
 	handler.ServeHTTP(deniedRes, denied)
-	if deniedRes.Code != http.StatusForbidden {
+	if deniedRes.Code != http.StatusUnauthorized {
 		t.Fatalf("records without grant status = %d body=%s", deniedRes.Code, deniedRes.Body.String())
 	}
 
-	grantBody := []byte(`{"source_app_id":"inbe","target_app_id":"habitreader","collection_prefix":"shared.inbe.v1.*"}`)
+	grantBody := []byte(`{"source_app_id":"inbe","target_app_id":"ukuvota","collection_prefix":"shared.inbe.v1.*"}`)
 	grant := httptest.NewRequest(http.MethodPost, "/api/v1/account/app-grants", bytes.NewReader(grantBody))
 	grant.Header.Set("Content-Type", "application/json")
 	grant.Header.Set("Authorization", "Bearer "+identity.Token)
@@ -1250,6 +1414,7 @@ func TestAppGrantsGateCrossAppEncryptedRecords(t *testing.T) {
 	allowed := httptest.NewRequest(http.MethodGet, queryPath, nil)
 	allowed.Header.Set("Authorization", "Bearer "+identity.Token)
 	allowed.Header.Set("X-Ksync-User", identity.UserID)
+	allowed.Header.Set("X-Daochi-Tx", signedTxHeader(t, identity.UserID, "ukuvota", "main-key", http.MethodGet, "/api/v1/account/app-records", nil, appPrivate, "tx-app-records-1"))
 	allowedRes := httptest.NewRecorder()
 	handler.ServeHTTP(allowedRes, allowed)
 	if allowedRes.Code != http.StatusOK {
@@ -1500,6 +1665,13 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("mesh export without token status = %d body=%s", unauthorized.Code, unauthorized.Body.String())
 	}
+	unscoped := httptest.NewRequest(http.MethodPost, "/api/v1/node/mesh/export", strings.NewReader(`{}`))
+	unscoped.Header.Set("Authorization", "Bearer mesh-secret")
+	unscopedRes := httptest.NewRecorder()
+	sourceHandler.ServeHTTP(unscopedRes, unscoped)
+	if unscopedRes.Code != http.StatusBadRequest {
+		t.Fatalf("unscoped mesh export status = %d body=%s", unscopedRes.Code, unscopedRes.Body.String())
+	}
 
 	exportReq := NodeMeshExportRequest{
 		Limit: 10,
@@ -1607,6 +1779,29 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	}
 	if appliedAgain != 0 {
 		t.Fatalf("idempotent mesh import applied %d records, want 0", appliedAgain)
+	}
+}
+
+func TestMeshCursorDoesNotSkipLateOlderTimestamp(t *testing.T) {
+	server, store, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x6c)
+	policy := NodeSyncPolicy{
+		Apps: []string{"inbe"}, Collections: []string{"inbe.*"}, Data: []string{"encrypted_records"},
+	}
+
+	firstBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"mesh-order-client","encrypted_records":[{"collection":"inbe.habits","id":"newer","key_id":"main","nonce":"n1","ciphertext":"newer","updated_at":"2026-09-04T12:00:00Z"}]}`)
+	syncWithBody(t, handler, "", identity.UserID, identity.Token, firstBody)
+	first, cursor, truncated, err := store.ExportMeshEncryptedRecords(context.Background(), policy, "", 1)
+	if err != nil || len(first) != 1 || !truncated || cursor == "" {
+		t.Fatalf("first mesh page records=%#v cursor=%q truncated=%v err=%v", first, cursor, truncated, err)
+	}
+
+	lateBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"mesh-order-client","encrypted_records":[{"collection":"inbe.habits","id":"late-older","key_id":"main","nonce":"n2","ciphertext":"late","updated_at":"2020-01-01T00:00:00Z"}]}`)
+	syncWithBody(t, handler, "", identity.UserID, identity.Token, lateBody)
+	late, _, _, err := store.ExportMeshEncryptedRecords(context.Background(), policy, cursor, 10)
+	if err != nil || len(late) != 1 || late[0].Record.ID != "late-older" {
+		t.Fatalf("late mesh page records=%#v err=%v", late, err)
 	}
 }
 
@@ -2820,7 +3015,7 @@ func TestAliasRejectsCrossAccountAndMissingAccount(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+missingToken)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
-	if res.Code != http.StatusNotFound {
+	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("missing account alias status = %d body=%s", res.Code, res.Body.String())
 	}
 }
@@ -3362,259 +3557,6 @@ func TestDeleteWithExportedKeyDeletesAccount(t *testing.T) {
 	assertCount(t, store, "server_users", 0)
 }
 
-func TestUkuProcessesVisibilityAndMutationAuth(t *testing.T) {
-	server, _, _ := testServer(t)
-	handler := server.Routes()
-	identity := newTestIdentity(t, handler, 0x72)
-	other := newTestIdentity(t, handler, 0x73)
-
-	publicBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"public-process","type":"consent","title":"Where should we meet?","description":"Choose a place","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
-	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, publicBody)
-	if res.Code != http.StatusCreated {
-		t.Fatalf("create public status = %d body=%s", res.Code, res.Body.String())
-	}
-	var process UkuProcess
-	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
-		t.Fatal(err)
-	}
-	if process.ID != "public-process" || process.OwnerUserIDHash != identity.UserID || len(process.Proposals) != 2 {
-		t.Fatalf("unexpected process: %#v", process)
-	}
-
-	privateBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"secret-process","type":"consent","title":"Private vote","visibility":"unlisted","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, privateBody)
-	if res.Code != http.StatusCreated {
-		t.Fatalf("create unlisted status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	list := httptest.NewRecorder()
-	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/processes", nil))
-	if list.Code != http.StatusOK {
-		t.Fatalf("list status = %d body=%s", list.Code, list.Body.String())
-	}
-	if !strings.Contains(list.Body.String(), "public-process") || strings.Contains(list.Body.String(), "secret-process") {
-		t.Fatalf("public list leaked or missed process: %s", list.Body.String())
-	}
-
-	direct := httptest.NewRecorder()
-	handler.ServeHTTP(direct, httptest.NewRequest(http.MethodGet, "/api/v1/processes/secret-process", nil))
-	if direct.Code != http.StatusOK || !strings.Contains(direct.Body.String(), "Private vote") {
-		t.Fatalf("direct unlisted status = %d body=%s", direct.Code, direct.Body.String())
-	}
-
-	unauth := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/public-process/proposals", identity.UserID, "", []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe"}`))
-	if unauth.Code != http.StatusUnauthorized {
-		t.Fatalf("unauth proposal status = %d body=%s", unauth.Code, unauth.Body.String())
-	}
-
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/public-process/proposals", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe","description":"Near transit"}`))
-	if res.Code != http.StatusOK {
-		t.Fatalf("proposal status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/public-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","display_name":"wao","scores":{"prop-1":3,"status-quo":-1},"reason":"Cafe is close and status quo is harder for transit."}`))
-	if res.Code != http.StatusOK {
-		t.Fatalf("vote status = %d body=%s", res.Code, res.Body.String())
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
-		t.Fatal(err)
-	}
-	if len(process.Votes) != 1 || process.Votes[0].Scores["prop-1"] != 3 || process.Votes[0].Reason == "" {
-		t.Fatalf("unexpected votes: %#v", process.Votes)
-	}
-
-	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/processes/public-process/proposals/prop-1", other.UserID, other.Token, nil)
-	if res.Code != http.StatusForbidden {
-		t.Fatalf("other proposal delete status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/processes/public-process/proposals/prop-1", identity.UserID, identity.Token, nil)
-	if res.Code != http.StatusOK {
-		t.Fatalf("proposal delete status = %d body=%s", res.Code, res.Body.String())
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
-		t.Fatal(err)
-	}
-	for _, proposal := range process.Proposals {
-		if proposal.ID == "prop-1" {
-			t.Fatalf("deleted proposal still returned: %#v", process.Proposals)
-		}
-	}
-
-	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/processes/public-process", other.UserID, other.Token, nil)
-	if res.Code != http.StatusForbidden {
-		t.Fatalf("other process delete status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodDelete, "/api/v1/processes/public-process", identity.UserID, identity.Token, nil)
-	if res.Code != http.StatusOK {
-		t.Fatalf("process delete status = %d body=%s", res.Code, res.Body.String())
-	}
-	deleted := httptest.NewRecorder()
-	handler.ServeHTTP(deleted, httptest.NewRequest(http.MethodGet, "/api/v1/processes/public-process", nil))
-	if deleted.Code != http.StatusNotFound {
-		t.Fatalf("deleted process get status = %d body=%s", deleted.Code, deleted.Body.String())
-	}
-}
-
-func TestUkuDataCascadesOnAccountDelete(t *testing.T) {
-	server, store, _ := testServer(t)
-	handler := server.Routes()
-	identity := newTestIdentity(t, handler, 0x31)
-
-	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"delete-me","type":"consent","title":"Delete?","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
-	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, body)
-	if res.Code != http.StatusCreated {
-		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/delete-me/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"status-quo":1},"reason":"Keep it simple."}`))
-	if res.Code != http.StatusOK {
-		t.Fatalf("vote status = %d body=%s", res.Code, res.Body.String())
-	}
-	assertCount(t, store, "uku_processes", 1)
-	assertCount(t, store, "uku_proposals", 2)
-	assertCount(t, store, "uku_votes", 1)
-
-	issueChallenge(t, handler, "", identity.UserID)
-	deleteBody := []byte(`{"user_id_hash":"` + identity.UserID + `"}`)
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/account", bytes.NewReader(deleteBody))
-	deleteReq.Header.Set("Content-Type", "application/json")
-	deleteReq.Header.Set("X-Ksync-User", identity.UserID)
-	deleteReq.Header.Set("X-Ksync-Signature", identity.Signature)
-	deleteRes := httptest.NewRecorder()
-	handler.ServeHTTP(deleteRes, deleteReq)
-	if deleteRes.Code != http.StatusOK {
-		t.Fatalf("delete status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
-	}
-	assertCount(t, store, "server_users", 0)
-	assertCount(t, store, "uku_processes", 0)
-	assertCount(t, store, "uku_proposals", 0)
-	assertCount(t, store, "uku_votes", 0)
-}
-
-func TestUkuProcessMetadataAndExport(t *testing.T) {
-	server, _, _ := testServer(t)
-	handler := server.Routes()
-	identity := newTestIdentity(t, handler, 0x42)
-
-	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"consent-process","type":"consent","title":"Adopt the policy?","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":5,"quorum_percent":60,"quorum_votes":3}`)
-	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, body)
-	if res.Code != http.StatusCreated {
-		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
-	}
-	var process UkuProcess
-	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
-		t.Fatal(err)
-	}
-	if process.Type != "consent" || process.Title != "Adopt the policy?" || process.QuorumPercent != 60 || process.QuorumVotes != 3 || process.RequireReason {
-		t.Fatalf("unexpected process metadata: %#v", process)
-	}
-
-	invalid := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"bad-quorum","type":"consent","title":"Bad","proposal_minutes":60,"voting_minutes":60,"quorum_votes":1001}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, invalid)
-	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "invalid quorum_votes") {
-		t.Fatalf("invalid quorum_votes status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/consent-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"status-quo":1}}`))
-	if res.Code != http.StatusOK {
-		t.Fatalf("no-reason vote status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/consent-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","display_name":"wao","scores":{"status-quo":1},"reason":"This is acceptable."}`))
-	if res.Code != http.StatusOK {
-		t.Fatalf("vote status = %d body=%s", res.Code, res.Body.String())
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
-		t.Fatal(err)
-	}
-	if len(process.Votes) != 1 || process.Votes[0].Reason != "This is acceptable." {
-		t.Fatalf("unexpected vote reason: %#v", process.Votes)
-	}
-
-	update := []byte(`{"user_id_hash":"` + identity.UserID + `","quorum_percent":0,"quorum_votes":5,"outcome":"accepted","review_at":"2026-08-01"}`)
-	res = ukuJSONRequest(t, handler, http.MethodPatch, "/api/v1/processes/consent-process", identity.UserID, identity.Token, update)
-	if res.Code != http.StatusOK {
-		t.Fatalf("update status = %d body=%s", res.Code, res.Body.String())
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
-		t.Fatal(err)
-	}
-	if process.QuorumPercent != 0 || process.QuorumVotes != 5 || process.Outcome != "accepted" || process.ReviewAt != "2026-08-01" {
-		t.Fatalf("unexpected update: %#v", process)
-	}
-
-	export := httptest.NewRecorder()
-	handler.ServeHTTP(export, httptest.NewRequest(http.MethodGet, "/api/v1/processes/consent-process/export", nil))
-	if export.Code != http.StatusOK {
-		t.Fatalf("export status = %d body=%s", export.Code, export.Body.String())
-	}
-	var packet struct {
-		PacketType string     `json:"packet_type"`
-		Process    UkuProcess `json:"process"`
-	}
-	if err := json.Unmarshal(export.Body.Bytes(), &packet); err != nil {
-		t.Fatal(err)
-	}
-	if packet.PacketType != "uku-process-packet-v1" || packet.Process.QuorumVotes != 5 || len(packet.Process.Audit) < 3 {
-		t.Fatalf("unexpected export packet: %#v", packet)
-	}
-}
-
-func TestUkuOptionProcessTypes(t *testing.T) {
-	server, store, _ := testServer(t)
-	handler := server.Routes()
-	identity := newTestIdentity(t, handler, 0x52)
-
-	pollBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"poll-process","type":"poll","title":"Pick a place","visibility":"public","voting_minutes":60,"options":[{"id":"cafe","label":"Cafe"},{"id":"park","label":"Park"}]}`)
-	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, pollBody)
-	if res.Code != http.StatusCreated {
-		t.Fatalf("create poll status = %d body=%s", res.Code, res.Body.String())
-	}
-	var process UkuProcess
-	if err := json.Unmarshal(res.Body.Bytes(), &process); err != nil {
-		t.Fatal(err)
-	}
-	if process.Type != "poll" || len(process.Options) != 2 || len(process.Proposals) != 0 || process.ProposalMinutes != 0 || process.NegativeWeight != 0 {
-		t.Fatalf("unexpected poll process: %#v", process)
-	}
-
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/poll-process/proposals", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","id":"prop-1","title":"Cafe"}`))
-	if res.Code != http.StatusBadRequest {
-		t.Fatalf("poll proposal status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/poll-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"cafe":1,"park":0}}`))
-	if res.Code != http.StatusOK {
-		t.Fatalf("poll vote status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/poll-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"prop-1":1}}`))
-	if res.Code != http.StatusBadRequest {
-		t.Fatalf("invalid poll vote status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	rankedBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"ranked-process","type":"ranked_choice","title":"Rank a place","visibility":"public","voting_minutes":60,"options":[{"id":"cafe","label":"Cafe"},{"id":"park","label":"Park"},{"id":"hall","label":"Hall"}]}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, rankedBody)
-	if res.Code != http.StatusCreated {
-		t.Fatalf("create ranked status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/ranked-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"cafe":1,"park":1}}`))
-	if res.Code != http.StatusBadRequest {
-		t.Fatalf("duplicate rank status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/ranked-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"cafe":1,"park":2,"hall":0}}`))
-	if res.Code != http.StatusOK {
-		t.Fatalf("ranked vote status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	collectionBody := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"collection-process","type":"collection","title":"Collect ideas","visibility":"public","proposal_minutes":60}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, collectionBody)
-	if res.Code != http.StatusCreated {
-		t.Fatalf("create collection status = %d body=%s", res.Code, res.Body.String())
-	}
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/collection-process/votes", identity.UserID, identity.Token, []byte(`{"user_id_hash":"`+identity.UserID+`","scores":{"anything":1}}`))
-	if res.Code != http.StatusBadRequest {
-		t.Fatalf("collection vote status = %d body=%s", res.Code, res.Body.String())
-	}
-	assertCount(t, store, "uku_options", 5)
-}
-
 func issueChallenge(t *testing.T, target any, baseURL, userID string) string {
 	t.Helper()
 	req := newTestRequest(t, http.MethodGet, baseURL, "/api/v1/sync/challenge?user_id="+userID, nil)
@@ -3752,6 +3694,10 @@ type moneroTransfer struct {
 	Confirmations int64
 	Major         int
 	Minor         int
+	Height        int64
+	UnlockTime    int64
+	Locked        bool
+	DoubleSpend   bool
 }
 
 type fakeMoneroWalletRPC struct {
@@ -3801,13 +3747,17 @@ func newFakeMoneroWalletRPC(t *testing.T) *fakeMoneroWalletRPC {
 			wallet.mu.Lock()
 			items := make([]map[string]any, 0, len(wallet.transfers))
 			for _, transfer := range wallet.transfers {
-				if transfer.Minor != minor {
+				if minor >= 0 && transfer.Minor != minor {
 					continue
 				}
 				items = append(items, map[string]any{
-					"txid":          transfer.TxID,
-					"amount":        transfer.Amount,
-					"confirmations": transfer.Confirmations,
+					"txid":              transfer.TxID,
+					"amount":            transfer.Amount,
+					"confirmations":     transfer.Confirmations,
+					"height":            transfer.Height,
+					"unlock_time":       transfer.UnlockTime,
+					"locked":            transfer.Locked,
+					"double_spend_seen": transfer.DoubleSpend,
 					"subaddr_index": map[string]any{
 						"major": transfer.Major,
 						"minor": transfer.Minor,
@@ -4137,43 +4087,6 @@ func testTableHasColumn(t *testing.T, store *Store, table, column string) bool {
 		t.Fatal(err)
 	}
 	return false
-}
-
-func TestUkuVoteDisplayNameUniqueness(t *testing.T) {
-	server, _, _ := testServer(t)
-	handler := server.Routes()
-	identity := newTestIdentity(t, handler, 0x61)
-	other := newTestIdentity(t, handler, 0x62)
-
-	body := []byte(`{"user_id_hash":"` + identity.UserID + `","id":"name-process","type":"consent","title":"Pick a name?","visibility":"public","proposal_minutes":60,"voting_minutes":60,"negative_weight":3}`)
-	res := ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes", identity.UserID, identity.Token, body)
-	if res.Code != http.StatusCreated {
-		t.Fatalf("create status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	vote := []byte(`{"user_id_hash":"` + identity.UserID + `","display_name":"wao","scores":{"status-quo":1},"reason":"fine"}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/name-process/votes", identity.UserID, identity.Token, vote)
-	if res.Code != http.StatusOK {
-		t.Fatalf("first vote status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	duplicate := []byte(`{"user_id_hash":"` + other.UserID + `","display_name":"Wao","scores":{"status-quo":2},"reason":"also fine"}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/name-process/votes", other.UserID, other.Token, duplicate)
-	if res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "display name taken") {
-		t.Fatalf("duplicate name status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	renamed := []byte(`{"user_id_hash":"` + other.UserID + `","display_name":"wao-2","scores":{"status-quo":2},"reason":"also fine"}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/name-process/votes", other.UserID, other.Token, renamed)
-	if res.Code != http.StatusOK {
-		t.Fatalf("renamed vote status = %d body=%s", res.Code, res.Body.String())
-	}
-
-	update := []byte(`{"user_id_hash":"` + identity.UserID + `","display_name":"wao","scores":{"status-quo":3},"reason":"still fine"}`)
-	res = ukuJSONRequest(t, handler, http.MethodPost, "/api/v1/processes/name-process/votes", identity.UserID, identity.Token, update)
-	if res.Code != http.StatusOK {
-		t.Fatalf("own-name update status = %d body=%s", res.Code, res.Body.String())
-	}
 }
 
 func TestAllowedCORSOrigin(t *testing.T) {

@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -18,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,16 +60,19 @@ var ksyncServerCapabilities = []string{
 	"profile-stats",
 	"pub-relay",
 	"node-mesh-encrypted-records",
+	"monero-account-addresses",
+	"monero-gifts",
 }
 
 type Server struct {
-	cfg        Config
-	store      *Store
-	challenges *ChallengeStore
-	verifier   Verifier
-	syncHub    *syncHub
-	limiter    *RateLimiter
-	metrics    *ServerMetrics
+	cfg             Config
+	store           *Store
+	challenges      *ChallengeStore
+	verifier        Verifier
+	syncHub         *syncHub
+	limiter         *RateLimiter
+	metrics         *ServerMetrics
+	moneroAddressMu sync.Mutex
 }
 
 func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
@@ -108,6 +111,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/tokens/purchases/google/verify", s.handleGooglePurchaseVerify)
 	mux.HandleFunc("POST /api/v1/tokens/purchases/monero/invoices", s.handleMoneroInvoices)
 	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/invoices/", s.handleMoneroInvoiceRoute)
+	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/address", s.handleMoneroAddress)
+	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/address/", s.handleMoneroAddress)
+	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/deposits", s.handleMoneroDeposits)
 	mux.HandleFunc("GET /api/v1/tokens/checkpoints/latest", s.handleTokenCheckpointLatest)
 	mux.HandleFunc("GET /api/v1/tokens/receipts/", s.handleTokenReceipt)
 	mux.HandleFunc("POST /api/v1/admin/tokens/manual-credit", s.handleAdminManualCredit)
@@ -133,21 +139,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/friends/requests", s.handleFriendRequests)
 	mux.HandleFunc("POST /api/v1/friends/requests", s.handleFriendRequestCreate)
 	mux.HandleFunc("POST /api/v1/friends/requests/", s.handleFriendRequestRoute)
-	mux.HandleFunc("GET /api/v1/boards", s.handleBoards)
-	mux.HandleFunc("POST /api/v1/boards", s.handleBoards)
-	mux.HandleFunc("GET /api/v1/boards/", s.handleBoardRoute)
-	mux.HandleFunc("POST /api/v1/boards/", s.handleBoardRoute)
-	mux.HandleFunc("PATCH /api/v1/boards/", s.handleBoardRoute)
-	mux.HandleFunc("PUT /api/v1/boards/", s.handleBoardRoute)
-	mux.HandleFunc("DELETE /api/v1/boards/", s.handleBoardRoute)
 	mux.HandleFunc("PUT /api/v1/profile/stats", s.handleProfileStatsPut)
 	mux.HandleFunc("GET /api/v1/friends/stats", s.handleFriendStats)
-	mux.HandleFunc("GET /api/v1/processes", s.handleProcessList)
-	mux.HandleFunc("POST /api/v1/processes", s.handleProcessCreate)
-	mux.HandleFunc("GET /api/v1/processes/", s.handleProcessRoute)
-	mux.HandleFunc("PATCH /api/v1/processes/", s.handleProcessRoute)
-	mux.HandleFunc("POST /api/v1/processes/", s.handleProcessRoute)
-	mux.HandleFunc("DELETE /api/v1/processes/", s.handleProcessRoute)
 	return s.withCommonHeaders(mux)
 }
 
@@ -176,8 +169,8 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		if s.tokenIssuerStatus() != "ok" {
 			checks["token_direct_purchases"] = "issuer_private_key_missing"
 			status = http.StatusServiceUnavailable
-		} else if !hasMoneroTokenProduct(s.cfg.TokenProducts) {
-			checks["token_direct_purchases"] = "monero_product_missing"
+		} else if !hasMoneroTokenProduct(s.cfg.TokenProducts) && !validMoneroRate(s.cfg) {
+			checks["token_direct_purchases"] = "monero_rate_or_product_missing"
 			status = http.StatusServiceUnavailable
 		} else if strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
 			checks["token_direct_purchases"] = "monero_wallet_rpc_missing"
@@ -296,9 +289,13 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	s.metrics.syncRequests.Add(1)
 	syncOK := false
+	var signedTx *SignedTxEnvelope
 	defer func() {
 		if !syncOK {
 			s.metrics.syncFailures.Add(1)
+			if signedTx != nil {
+				s.store.ForgetSignedTx(r.Context(), *signedTx)
+			}
 		}
 	}()
 	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
@@ -353,6 +350,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			s.writeAuthError(w, err)
 			return
 		}
+		signedTx = &tx
 	}
 	normalizeMeditationDurations(req.MeditationLogs)
 
@@ -928,7 +926,7 @@ func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "friend target not found")
 		return
 	}
-	id, err := randomUkuID()
+	id, err := randomResourceID()
 	if err != nil {
 		slog.Error("generate friend request id", "error", err)
 		writeError(w, http.StatusInternalServerError, "friend request failed")
@@ -1044,213 +1042,6 @@ func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
 	s.cacheSocialSnapshot(r.Context(), userID,
 		"leaderboard."+app+"."+practice+"."+metric, response)
 	writeJSON(w, http.StatusOK, response)
-}
-
-func (s *Server) handleProcessList(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListUkuPublicProcesses(r.Context(), 50)
-	if err != nil {
-		slog.Error("list uku processes", "error", err)
-		writeError(w, http.StatusInternalServerError, "process list failed")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"processes": items})
-}
-
-func (s *Server) handleProcessCreate(w http.ResponseWriter, r *http.Request) {
-	req, err := readUkuCreateProcessRequest(w, r, s.cfg.MaxBodyBytes)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
-		s.writeAuthError(w, err)
-		return
-	}
-	if req.ID == "" {
-		req.ID, err = randomUkuID()
-		if err != nil {
-			slog.Error("generate uku process id", "error", err)
-			writeError(w, http.StatusInternalServerError, "process create failed")
-			return
-		}
-	}
-	process, err := s.store.CreateUkuProcess(r.Context(), req)
-	if err != nil {
-		slog.Error("create uku process", "user", logText(req.UserIDHash), "error", err)
-		writeError(w, http.StatusInternalServerError, "process create failed")
-		return
-	}
-	writeJSON(w, http.StatusCreated, process)
-}
-
-func (s *Server) handleProcessRoute(w http.ResponseWriter, r *http.Request) {
-	processID, action, ok := parseProcessPath(r.URL.Path)
-	if !ok || !validUkuID(processID) {
-		writeError(w, http.StatusNotFound, "process not found")
-		return
-	}
-	if r.Method == http.MethodGet && action == "" {
-		process, found, err := s.store.UkuProcess(r.Context(), processID)
-		if err != nil {
-			slog.Error("load uku process", "process", logText(processID), "error", err)
-			writeError(w, http.StatusInternalServerError, "process load failed")
-			return
-		}
-		if !found {
-			writeError(w, http.StatusNotFound, "process not found")
-			return
-		}
-		writeJSON(w, http.StatusOK, process)
-		return
-	}
-	if r.Method == http.MethodGet && action == "export" {
-		process, found, err := s.store.UkuDecisionPacket(r.Context(), processID)
-		if err != nil {
-			slog.Error("export uku process", "process", logText(processID), "error", err)
-			writeError(w, http.StatusInternalServerError, "process export failed")
-			return
-		}
-		if !found {
-			writeError(w, http.StatusNotFound, "process not found")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"packet_type": "uku-process-packet-v1",
-			"process":     process,
-		})
-		return
-	}
-	if r.Method == http.MethodPatch && action == "" {
-		req, err := readUkuUpdateProcessRequest(w, r, s.cfg.MaxBodyBytes)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
-			s.writeAuthError(w, err)
-			return
-		}
-		process, err := s.store.UpdateUkuProcess(r.Context(), processID, req)
-		if err != nil {
-			writeUkuMutationError(w, err, "process update failed")
-			return
-		}
-		writeJSON(w, http.StatusOK, process)
-		return
-	}
-	if r.Method == http.MethodDelete && action == "" {
-		userID, ok := s.bearerUser(w, r)
-		if !ok {
-			return
-		}
-		if err := s.store.DeleteUkuProcess(r.Context(), processID, userID); err != nil {
-			writeUkuMutationError(w, err, "process delete failed")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		return
-	}
-	if r.Method == http.MethodPost && action == "proposals" {
-		req, err := readUkuProposalRequest(w, r, s.cfg.MaxBodyBytes)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
-			s.writeAuthError(w, err)
-			return
-		}
-		if req.ID == "" {
-			req.ID, err = randomUkuID()
-			if err != nil {
-				slog.Error("generate uku proposal id", "error", err)
-				writeError(w, http.StatusInternalServerError, "proposal failed")
-				return
-			}
-		}
-		process, err := s.store.UpsertUkuProposal(r.Context(), processID, req)
-		if err != nil {
-			writeUkuMutationError(w, err, "proposal failed")
-			return
-		}
-		writeJSON(w, http.StatusOK, process)
-		return
-	}
-	if r.Method == http.MethodDelete && strings.HasPrefix(action, "proposals/") {
-		userID, ok := s.bearerUser(w, r)
-		if !ok {
-			return
-		}
-		proposalID := strings.TrimPrefix(action, "proposals/")
-		if !validUkuID(proposalID) {
-			writeError(w, http.StatusNotFound, "proposal not found")
-			return
-		}
-		process, err := s.store.DeleteUkuProposal(r.Context(), processID, proposalID, userID)
-		if err != nil {
-			writeUkuMutationError(w, err, "proposal delete failed")
-			return
-		}
-		writeJSON(w, http.StatusOK, process)
-		return
-	}
-	if r.Method == http.MethodPost && action == "votes" {
-		req, err := readUkuVoteRequest(w, r, s.cfg.MaxBodyBytes)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := s.applyBearerUser(r, &req.UserIDHash); err != nil {
-			s.writeAuthError(w, err)
-			return
-		}
-		process, err := s.store.UpsertUkuVote(r.Context(), processID, req)
-		if err != nil {
-			writeUkuMutationError(w, err, "vote failed")
-			return
-		}
-		writeJSON(w, http.StatusOK, process)
-		return
-	}
-	writeError(w, http.StatusNotFound, "process not found")
-}
-
-func (s *Server) applyBearerUser(r *http.Request, bodyUser *string) error {
-	if err := applyHeaderUser(r, bodyUser); err != nil {
-		return authError{status: http.StatusBadRequest, message: err.Error()}
-	}
-	tokenUser, err := s.authenticateToken(r)
-	if err != nil {
-		return err
-	}
-	if tokenUser != *bodyUser {
-		return authError{status: http.StatusUnauthorized, message: "token user mismatch"}
-	}
-	return nil
-}
-
-func writeUkuMutationError(w http.ResponseWriter, err error, fallback string) {
-	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "process not found")
-		return
-	}
-	if errors.Is(err, ErrSyncUserNotFound) {
-		writeError(w, http.StatusForbidden, "not process owner")
-		return
-	}
-	if errors.Is(err, ErrUkuVoteReasonRequired) {
-		writeError(w, http.StatusBadRequest, "vote reason required")
-		return
-	}
-	if errors.Is(err, ErrUkuDisplayNameTaken) {
-		writeError(w, http.StatusConflict, "display name taken")
-		return
-	}
-	if errors.Is(err, ErrInvalidUkuProcessAction) {
-		writeError(w, http.StatusBadRequest, "invalid process action")
-		return
-	}
-	writeError(w, http.StatusInternalServerError, fallback)
 }
 
 func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
@@ -1655,6 +1446,24 @@ func (s *Server) authenticateToken(r *http.Request) (string, error) {
 	if err != nil {
 		return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
 	}
+	_, found, err := s.store.PublicKey(r.Context(), userID)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		// Released Inbe clients can bootstrap a missing account through sync by
+		// presenting the matching public key in the signed payload.
+		if r.URL.Path == "/api/v1/sync" {
+			deleted, err := s.store.AccountTombstoned(r.Context(), userID)
+			if err != nil {
+				return "", err
+			}
+			if !deleted {
+				return userID, nil
+			}
+		}
+		return "", authError{status: http.StatusUnauthorized, message: "sync account not found"}
+	}
 	return userID, nil
 }
 
@@ -1862,169 +1671,6 @@ func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int
 	return req, nil
 }
 
-func readUkuCreateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuCreateProcessRequest, error) {
-	var req UkuCreateProcessRequest
-	body, err := readJSONBody(w, r, maxBody)
-	if err != nil {
-		return req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	req.ID = strings.TrimSpace(req.ID)
-	req.Type = normalizeUkuProcessType(req.Type)
-	req.Title = strings.TrimSpace(req.Title)
-	req.Description = strings.TrimSpace(req.Description)
-	req.Visibility = normalizeUkuVisibility(req.Visibility)
-	if req.ID != "" && !validUkuID(req.ID) {
-		return req, errors.New("invalid process id")
-	}
-	if !validUkuProcessType(req.Type) {
-		return req, errors.New("invalid type")
-	}
-	if req.Title == "" {
-		return req, errors.New("title required")
-	}
-	if !validUkuVisibility(req.Visibility) {
-		return req, errors.New("invalid visibility")
-	}
-	if ukuProcessHasProposals(req.Type) && (req.ProposalMinutes <= 0 || req.ProposalMinutes > 525600) {
-		return req, errors.New("invalid proposal_minutes")
-	}
-	if !ukuProcessHasProposals(req.Type) {
-		req.ProposalMinutes = 0
-	}
-	if ukuProcessHasVoting(req.Type) && (req.VotingMinutes <= 0 || req.VotingMinutes > 525600) {
-		return req, errors.New("invalid voting_minutes")
-	}
-	if !ukuProcessHasVoting(req.Type) {
-		req.VotingMinutes = 0
-	}
-	if ukuProcessUsesNegativeWeight(req.Type) && (req.NegativeWeight < 0 || req.NegativeWeight > 1000000) {
-		return req, errors.New("invalid negative_weight")
-	}
-	if !ukuProcessUsesNegativeWeight(req.Type) {
-		req.NegativeWeight = 0
-	}
-	if req.QuorumPercent < 0 || req.QuorumPercent > 100 {
-		return req, errors.New("invalid quorum_percent")
-	}
-	if ukuProcessHasVoting(req.Type) && (req.QuorumVotes < 0 || req.QuorumVotes > 1000) {
-		return req, errors.New("invalid quorum_votes")
-	}
-	if !ukuProcessHasVoting(req.Type) {
-		req.QuorumVotes = 0
-	}
-	req.RequireReason = false
-	if ukuProcessHasOptions(req.Type) {
-		seen := make(map[string]bool)
-		if len(req.Options) < 2 {
-			return req, errors.New("at least two options required")
-		}
-		for i := range req.Options {
-			req.Options[i].ID = strings.TrimSpace(req.Options[i].ID)
-			req.Options[i].Label = strings.TrimSpace(req.Options[i].Label)
-			req.Options[i].Description = strings.TrimSpace(req.Options[i].Description)
-			if req.Options[i].ID == "" {
-				req.Options[i].ID = fmt.Sprintf("option-%d", i+1)
-			}
-			if !validUkuID(req.Options[i].ID) {
-				return req, errors.New("invalid option id")
-			}
-			if seen[req.Options[i].ID] {
-				return req, errors.New("duplicate option id")
-			}
-			if req.Options[i].Label == "" {
-				return req, errors.New("option label required")
-			}
-			req.Options[i].Position = i
-			seen[req.Options[i].ID] = true
-		}
-	} else {
-		req.Options = nil
-	}
-	return req, nil
-}
-
-func readUkuUpdateProcessRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuUpdateProcessRequest, error) {
-	var req UkuUpdateProcessRequest
-	body, err := readJSONBody(w, r, maxBody)
-	if err != nil {
-		return req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	req.Title = strings.TrimSpace(req.Title)
-	req.Description = strings.TrimSpace(req.Description)
-	req.Visibility = strings.TrimSpace(req.Visibility)
-	if req.Visibility != "" {
-		req.Visibility = normalizeUkuVisibility(req.Visibility)
-	}
-	req.Outcome = strings.TrimSpace(req.Outcome)
-	req.ReviewAt = strings.TrimSpace(req.ReviewAt)
-	if req.Visibility != "" && !validUkuVisibility(req.Visibility) {
-		return req, errors.New("invalid visibility")
-	}
-	if req.QuorumPercent != nil && (*req.QuorumPercent < 0 || *req.QuorumPercent > 100) {
-		return req, errors.New("invalid quorum_percent")
-	}
-	if req.QuorumVotes != nil && (*req.QuorumVotes < 0 || *req.QuorumVotes > 1000) {
-		return req, errors.New("invalid quorum_votes")
-	}
-	return req, nil
-}
-
-func readUkuProposalRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuProposalRequest, error) {
-	var req UkuProposalRequest
-	body, err := readJSONBody(w, r, maxBody)
-	if err != nil {
-		return req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	req.ID = strings.TrimSpace(req.ID)
-	req.Title = strings.TrimSpace(req.Title)
-	req.Description = strings.TrimSpace(req.Description)
-	if req.ID != "" && !validUkuID(req.ID) {
-		return req, errors.New("invalid proposal id")
-	}
-	if req.Title == "" {
-		return req, errors.New("title required")
-	}
-	return req, nil
-}
-
-func readUkuVoteRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (UkuVoteRequest, error) {
-	var req UkuVoteRequest
-	body, err := readJSONBody(w, r, maxBody)
-	if err != nil {
-		return req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	req.DisplayName = strings.TrimSpace(req.DisplayName)
-	req.Reason = strings.TrimSpace(req.Reason)
-	if len(req.Scores) == 0 {
-		return req, errors.New("scores required")
-	}
-	for proposalID, score := range req.Scores {
-		if !validUkuID(proposalID) {
-			return req, errors.New("invalid proposal id")
-		}
-		if score < -3 || score > 3 {
-			return req, errors.New("score out of range")
-		}
-	}
-	return req, nil
-}
-
 func readDeleteWithKeyRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (DeleteWithKeyRequest, error) {
 	var req DeleteWithKeyRequest
 	body, err := readJSONBody(w, r, maxBody)
@@ -2073,82 +1719,8 @@ func validClientID(value string) bool {
 	return clientIDPattern.MatchString(value)
 }
 
-func validUkuID(value string) bool {
+func validResourceID(value string) bool {
 	return ukuIDPattern.MatchString(value)
-}
-
-func normalizeUkuVisibility(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return "public"
-	}
-	if value == "unlisted" || value == "private" || value == "private_link" {
-		return "unlisted"
-	}
-	return value
-}
-
-func validUkuVisibility(value string) bool {
-	return value == "public" || value == "unlisted"
-}
-
-func normalizeUkuProcessType(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return "consent"
-	}
-	return value
-}
-
-func validUkuProcessType(value string) bool {
-	switch value {
-	case "consent", "poll", "approval", "ranked_choice", "collection":
-		return true
-	default:
-		return false
-	}
-}
-
-func ukuProcessHasProposals(processType string) bool {
-	return processType == "consent" || processType == "collection"
-}
-
-func ukuProcessHasVoting(processType string) bool {
-	return processType != "collection"
-}
-
-func ukuProcessHasOptions(processType string) bool {
-	return processType == "poll" || processType == "approval" || processType == "ranked_choice"
-}
-
-func ukuProcessUsesReason(processType string) bool {
-	return processType == "consent" || processType == "approval"
-}
-
-func ukuProcessUsesNegativeWeight(processType string) bool {
-	return processType == "consent"
-}
-
-func parseProcessPath(path string) (processID string, action string, ok bool) {
-	const prefix = "/api/v1/processes/"
-	rest := strings.TrimPrefix(path, prefix)
-	if rest == path || rest == "" {
-		return "", "", false
-	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) == 1 {
-		return parts[0], "", true
-	}
-	if len(parts) == 2 && (parts[1] == "proposals" || parts[1] == "votes") {
-		return parts[0], parts[1], true
-	}
-	if len(parts) == 2 && parts[1] == "export" {
-		return parts[0], parts[1], true
-	}
-	if len(parts) == 3 && parts[1] == "proposals" && validUkuID(parts[2]) {
-		return parts[0], "proposals/" + parts[2], true
-	}
-	return "", "", false
 }
 
 func parseFriendRequestPath(path string) (requestID string, action string, ok bool) {
@@ -2158,13 +1730,13 @@ func parseFriendRequestPath(path string) (requestID string, action string, ok bo
 		return "", "", false
 	}
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) == 2 && validUkuID(parts[0]) && (parts[1] == "accept" || parts[1] == "decline") {
+	if len(parts) == 2 && validResourceID(parts[0]) && (parts[1] == "accept" || parts[1] == "decline") {
 		return parts[0], parts[1], true
 	}
 	return "", "", false
 }
 
-func randomUkuID() (string, error) {
+func randomResourceID() (string, error) {
 	var bytes [16]byte
 	if _, err := rand.Read(bytes[:]); err != nil {
 		return "", err

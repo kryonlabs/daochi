@@ -23,11 +23,12 @@ const (
 )
 
 type MeshEncryptedRecord struct {
-	UserIDHash string `json:"user_id_hash"`
-	PublicKey  string `json:"public_key"`
-	CreatedAt  string `json:"created_at,omitempty"`
-	LastSeenAt string `json:"last_seen_at,omitempty"`
-	Record     EncryptedRecord
+	UserIDHash  string `json:"user_id_hash"`
+	PublicKey   string `json:"public_key"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	LastSeenAt  string `json:"last_seen_at,omitempty"`
+	MeshVersion int64  `json:"mesh_version,omitempty"`
+	Record      EncryptedRecord
 }
 
 type NodeMeshExportRequest struct {
@@ -55,6 +56,7 @@ type NodeMeshImportResponse struct {
 }
 
 type meshCursor struct {
+	Seq        int64  `json:"seq,omitempty"`
 	UpdatedAt  string `json:"updated_at"`
 	UserIDHash string `json:"user_id_hash"`
 	Collection string `json:"collection"`
@@ -76,6 +78,10 @@ func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid mesh export request")
 			return
 		}
+	}
+	if !validInboundMeshPolicy(req.Policy) {
+		writeError(w, http.StatusBadRequest, "explicit mesh policy required")
+		return
 	}
 	limit := meshBatchLimit(req.Limit, s.cfg.NodeSyncBatchLimit)
 	records, nextCursor, truncated, err := s.store.ExportMeshEncryptedRecords(r.Context(), req.Policy, req.Cursor, limit)
@@ -104,6 +110,10 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 	var req NodeMeshImportRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid mesh import request")
+		return
+	}
+	if !validInboundMeshPolicy(req.Policy) {
+		writeError(w, http.StatusBadRequest, "explicit mesh policy required")
 		return
 	}
 	applied, err := s.store.ImportMeshEncryptedRecords(r.Context(), req.Policy, req.Records)
@@ -214,9 +224,12 @@ func (s *Server) pullNodePeer(ctx context.Context, peer NodePeer) error {
 			return err
 		}
 		slog.Info("mesh peer pull applied records", "peer", peer.Name, "url", baseURL, "records", len(exported.Records), "applied", applied)
-		lastCursor, err := meshCursorForRecord(exported.Records[len(exported.Records)-1])
-		if err != nil {
-			return err
+		lastCursor := exported.NextCursor
+		if lastCursor == "" {
+			lastCursor, err = meshCursorForRecord(exported.Records[len(exported.Records)-1])
+			if err != nil {
+				return err
+			}
 		}
 		if err := s.store.SaveNodeSyncCursor(ctx, peerKey, lastCursor); err != nil {
 			return err
@@ -282,6 +295,7 @@ func meshPeerCursorKey(baseURL string, policy NodeSyncPolicy) string {
 
 func meshCursorForRecord(record MeshEncryptedRecord) (string, error) {
 	return encodeMeshCursor(meshCursor{
+		Seq:        record.MeshVersion,
 		UpdatedAt:  record.Record.UpdatedAt,
 		UserIDHash: record.UserIDHash,
 		Collection: record.Record.Collection,
@@ -299,6 +313,16 @@ func nodePolicyIncludesData(policy *NodeSyncPolicy, dataType string) bool {
 		}
 	}
 	return false
+}
+
+func validInboundMeshPolicy(policy NodeSyncPolicy) bool {
+	if len(policy.Apps) == 0 && len(policy.Collections) == 0 {
+		return false
+	}
+	if len(policy.Data) == 0 {
+		return false
+	}
+	return nodePolicyIncludesData(&policy, "encrypted_records")
 }
 
 func encodeMeshCursor(cursor meshCursor) (string, error) {

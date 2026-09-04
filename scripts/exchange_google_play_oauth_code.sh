@@ -2,9 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-client_file="${KSYNC_GOOGLE_OAUTH_CLIENT_JSON_FILE:-$repo_root/secrets/google_play_oauth_client.json}"
+client_file="${DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE:-$repo_root/secrets/google_play_oauth_client.json}"
 code_file="${1:-/mnt/storage/Documents/google_oauth_code.txt}"
-out_file="${KSYNC_GOOGLE_OAUTH_REFRESH_TOKEN_FILE:-$repo_root/secrets/google_play_refresh_token.txt}"
+out_file="${DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE:-$repo_root/secrets/google_play_refresh_token.txt}"
 
 if [ ! -f "$client_file" ]; then
   echo "missing OAuth client file: $client_file" >&2

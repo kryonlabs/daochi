@@ -104,6 +104,9 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits tokens with app policy and idempotency enforcement.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/purchases/monero/invoices</code><p>Creates a bearer-authenticated invoice for a configured token product.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/invoices/{id}</code><p>Returns invoice status and settles a confirmed payment against the authenticated account.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/address</code><p>Returns the authenticated account's permanent Monero purchase address.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/address/{recipient}</code><p>Resolves an alias or public ID and returns the recipient's permanent Monero gift address.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/deposits</code><p>Returns the authenticated account's detected and credited Monero deposits.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/account/app-grants</code><p>Lists or creates bearer-authenticated grants for sharing registered app collection prefixes across apps.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/account/app-records</code><p>Returns encrypted records from a granted collection prefix for cross-app use.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
@@ -306,6 +309,36 @@ func openAPISpec() map[string]any {
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Direct payment invoice status"},
 						"404": map[string]any{"description": "Invoice not found"},
+					},
+				},
+			},
+			"/api/v1/tokens/purchases/monero/address": map[string]any{
+				"get": map[string]any{
+					"summary":  "Get permanent Monero purchase address",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Permanent account payment address and conversion rate"},
+					},
+				},
+			},
+			"/api/v1/tokens/purchases/monero/address/{recipient}": map[string]any{
+				"get": map[string]any{
+					"summary": "Get permanent Monero gift address",
+					"parameters": []map[string]any{
+						{"name": "recipient", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Resolved recipient and permanent payment address"},
+						"404": map[string]any{"description": "Recipient not found"},
+					},
+				},
+			},
+			"/api/v1/tokens/purchases/monero/deposits": map[string]any{
+				"get": map[string]any{
+					"summary":  "List Monero deposits",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Detected and credited account deposits"},
 					},
 				},
 			},
@@ -867,9 +900,10 @@ func openAPISpec() map[string]any {
 				"TokenPolicy": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"asset_id":   map[string]any{"type": "string"},
-						"permission": map[string]any{"type": "string"},
-						"status":     map[string]any{"type": "string"},
+						"asset_id":              map[string]any{"type": "string"},
+						"permission":            map[string]any{"type": "string"},
+						"status":                map[string]any{"type": "string"},
+						"legacy_unsigned_until": map[string]any{"type": "integer", "format": "int64"},
 					},
 				},
 				"LoginRequest": map[string]any{

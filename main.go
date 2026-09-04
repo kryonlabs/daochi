@@ -8,6 +8,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -46,10 +49,21 @@ func main() {
 	}
 
 	daochi := NewServer(cfg, store, verifier)
+	runtimeContext, stopRuntime := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopRuntime()
+	var workers sync.WaitGroup
 	if cfg.TokenDirectPurchasesEnabled {
-		go daochi.runMoneroInvoiceReconciler(context.Background(), time.Minute)
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			daochi.runMoneroInvoiceReconciler(runtimeContext, time.Minute)
+		}()
 	}
-	go daochi.runNodeSync(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		daochi.runNodeSync(runtimeContext)
+	}()
 	handler := daochi.Routes()
 	server := &http.Server{
 		Addr:              cfg.Addr,
@@ -60,9 +74,19 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		ErrorLog:          log.New(os.Stderr, "http: ", log.LstdFlags),
 	}
+	go func() {
+		<-runtimeContext.Done()
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			slog.Error("HTTP shutdown failed", "error", err)
+		}
+	}()
 
 	slog.Info("Daochi sync server listening", "url", localHTTPURL(cfg.Addr), "addr", cfg.Addr, "base_url", cfg.BaseURL, "db", cfg.DBPath)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("serve: %v", err)
+		slog.Error("serve failed", "error", err)
 	}
+	stopRuntime()
+	workers.Wait()
 }

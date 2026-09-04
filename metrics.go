@@ -230,21 +230,11 @@ func metricRoute(path string) string {
 	if strings.HasPrefix(path, "/api/v1/tokens/purchases/monero/invoices/") {
 		return "/api/v1/tokens/purchases/monero/invoices/{id}"
 	}
+	if strings.HasPrefix(path, "/api/v1/tokens/purchases/monero/address/") {
+		return "/api/v1/tokens/purchases/monero/address/{recipient}"
+	}
 	if strings.HasPrefix(path, "/api/v1/tokens/receipts/") {
 		return "/api/v1/tokens/receipts/{receipt_id}"
-	}
-	if strings.HasPrefix(path, "/api/v1/processes/") {
-		rest := strings.TrimPrefix(path, "/api/v1/processes/")
-		switch {
-		case strings.HasSuffix(rest, "/proposals"):
-			return "/api/v1/processes/{id}/proposals"
-		case strings.Contains(rest, "/proposals/"):
-			return "/api/v1/processes/{id}/proposals/{proposal_id}"
-		case strings.HasSuffix(rest, "/votes"):
-			return "/api/v1/processes/{id}/votes"
-		default:
-			return "/api/v1/processes/{id}"
-		}
 	}
 	return path
 }

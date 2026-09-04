@@ -30,7 +30,7 @@ func runInspect(ctx context.Context, args []string, opts InspectOptions) error {
 		return err
 	}
 	if opts.DBPath == "" {
-		opts.DBPath = envString("DAOCHI_DB", envString("KSYNC_DB", "daochi.db"))
+		opts.DBPath = envString("DAOCHI_DB", "daochi.db")
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {

@@ -12,7 +12,7 @@ Protocol clients may also sync `encrypted_records`: opaque per-account private r
 
 Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Daochi-Since-Version`. Existing typed clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
 
-Daochi keeps an app registry so data ownership is app-neutral and can be shared across apps without hard-coding product behavior. Registered apps can send `app_id` in v5 compatibility mode only when that app's registered compatibility policy allows it. Older shipped Inbe clients without `app_id` continue to sync during the compatibility window. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections that belong to that registered app.
+Daochi keeps an app registry so data ownership is app-neutral and no product behavior is hard-coded into the service. Inbe is the sole built-in registration because its released sync formats are a compatibility contract. Every other app installs and maintains its own signed manifest, keys, collection scopes, and token policy. Registered apps can send `app_id` in v5 compatibility mode only when their manifest explicitly allows that protocol. Older shipped Inbe clients without `app_id` continue to sync during the compatibility window. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections declared by that app.
 
 Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01** for legacy clients covered by app policy. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid. App manifests declare their own compatibility windows through `compatibility_until` and `legacy_protocols`.
 
@@ -21,7 +21,6 @@ API access is scoped by account, with explicit shared surfaces:
 - accepted friends can see the account alias and selected profile/leaderboard stats;
 - user-created app grants can share `shared.*`, `friends.*`, or `public.*` encrypted record prefixes with another registered app;
 - pending friend request participants can see the request metadata;
-- public governance processes, proposals, and votes are public by design.
 
 ## Endpoints
 
@@ -48,6 +47,9 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/tokens/purchases/google/verify`
 - `POST /api/v1/tokens/purchases/monero/invoices`
 - `GET /api/v1/tokens/purchases/monero/invoices/{id}`
+- `GET /api/v1/tokens/purchases/monero/address` (authenticated account)
+- `GET /api/v1/tokens/purchases/monero/address/{alias-or-public-id}` (gift recipient)
+- `GET /api/v1/tokens/purchases/monero/deposits`
 - `GET /api/v1/tokens/checkpoints/latest`
 - `GET /api/v1/tokens/receipts/{receipt_id}`
 - `POST /api/v1/admin/tokens/manual-credit`
@@ -67,12 +69,6 @@ API access is scoped by account, with explicit shared surfaces:
 - `DELETE /api/v1/friends/{user_id_hash}`
 - `PUT /api/v1/profile/stats`
 - `GET /api/v1/friends/stats?app=&practice=&metric=`
-- `GET /api/v1/processes`
-- `POST /api/v1/processes`
-- `GET /api/v1/processes/{id}`
-- `PATCH /api/v1/processes/{id}`
-- `POST /api/v1/processes/{id}/proposals`
-- `POST /api/v1/processes/{id}/votes`
 - `DELETE /api/v1/account`
 - `POST /api/v1/account/delete-with-key`
 - `GET /openapi.json`
@@ -189,7 +185,7 @@ Without Nix, install liboqs headers and library on the host, then:
 CGO_ENABLED=1 go build -o daochi .
 ```
 
-Runtime configuration. `DAOCHI_*` names are preferred. Existing `KSYNC_*` names remain accepted as compatibility fallbacks:
+Runtime configuration:
 
 ```sh
 DAOCHI_ADDR=127.0.0.1:8080
@@ -214,9 +210,14 @@ DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE=/run/secrets/google_play_service_account
 DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE=/run/secrets/google_play_oauth_client.json
 DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE=/run/secrets/google_play_refresh_token.txt
 DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED=1
-DAOCHI_MONERO_WALLET_RPC_URL=http://127.0.0.1:18083
-DAOCHI_MONERO_WALLET_RPC_USER=<wallet rpc user>
-DAOCHI_MONERO_WALLET_RPC_PASSWORD=<wallet rpc password>
+MONERO_WALLET_RPC_URL=http://127.0.0.1:18083
+MONERO_WALLET_RPC_USER=<wallet rpc user>
+MONERO_WALLET_RPC_PASSWORD_FILE=/run/credentials/daochi.service/monero_rpc_password
+MONERO_NETWORK=stagenet
+MONERO_RATE_ATOMIC_AMOUNT=1000000000000
+MONERO_RATE_TOKEN_UNITS=5000000
+MONERO_MINIMUM_ATOMIC_AMOUNT=1000
+MONERO_CONFIRMATIONS_REQUIRED=10
 DAOCHI_CHALLENGE_TTL_SECONDS=60
 DAOCHI_TOKEN_TTL_SECONDS=3600
 DAOCHI_MAX_BODY_BYTES=1048576
@@ -225,7 +226,37 @@ DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES=0
 DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS=0
 ```
 
-`DAOCHI_KNOWN_NODES` is a comma-separated public peer-node list. Entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`; `/api/v1/node` publishes that list as `known_nodes` so clients and the nodes page can discover node-to-node connections. A peer entry can add semicolon-separated sync policy fields: `sync=<pull|push|bidirectional|none>`, `apps=inbe+ukuvota`, `collections=inbe.*+profile.public`, and `data=encrypted_records+app_registry`. These policies control what the node sync worker pulls from trusted peers.
+When `MONERO_RATE_ATOMIC_AMOUNT` and `MONERO_RATE_TOKEN_UNITS` are set, every
+Daochi account receives one permanent Monero subaddress on first use. Sending
+XMR to that address credits the account at the configured integer ratio after
+the transfer reaches `MONERO_CONFIRMATIONS_REQUIRED`, is unlocked, has zero
+`unlock_time`, and has not been marked as a double spend. Looking up an alias or
+public ID returns the same address, so purchasing for yourself and gifting use
+the same payment flow. Rate values are snapshotted when a transfer is first
+observed. Existing product invoices remain available during migration.
+
+The wallet RPC should open a view-only wallet, bind only to loopback, and
+require RPC authentication. Daochi needs the wallet-state-changing
+`create_address` method, so do not enable `--restricted-rpc`; the view-only
+wallet itself prevents spending. The full wallet, mnemonic seed, private spend
+key, and their backups must never be copied to the Daochi node.
+
+Create the cold wallet and encrypted view-only deployment bundle on the trusted
+computer with:
+
+```sh
+MONERO_NETWORK=stagenet MONERO_RESTORE_HEIGHT=0 \
+  ./scripts/create_monero_merchant_wallet.sh
+```
+
+The script generates independent random wallet and RPC passwords, displays the
+mnemonic only through the Monero CLI for offline transcription, and creates two
+GPG-encrypted files under `secrets/monero/`. The cold archive contains the
+spend-capable wallet. The node archive contains only the view-only wallet and
+its runtime credentials. For mainnet, restore the mnemonic offline and verify
+the primary address before deploying the view-only archive.
+
+`DAOCHI_KNOWN_NODES` is a comma-separated public peer-node list. Entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`; `/api/v1/node` publishes that list as `known_nodes` so clients and the nodes page can discover node-to-node connections. A peer entry can add semicolon-separated sync policy fields: `sync=<pull|push|bidirectional|none>`, `apps=inbe`, `collections=inbe.*`, and `data=encrypted_records+app_registry`. These policies control what the node sync worker pulls from trusted peers.
 
 Node-to-node mesh sync is disabled until `DAOCHI_NODE_SYNC_TOKEN` is set. Trusted peers call `POST /api/v1/node/mesh/export` and `POST /api/v1/node/mesh/import` with either `Authorization: Bearer <token>` or `X-Daochi-Node-Token: <token>`. `DAOCHI_NODE_SYNC_INTERVAL_SECONDS` enables the background pull worker for peers whose policy is `sync=pull` or `sync=bidirectional`; `DAOCHI_NODE_SYNC_BATCH_LIMIT` caps each export page. The first implemented replication surface is encrypted app records plus the account public key needed to create the local account row; social/account projections and opaque encrypted envelopes remain client/API owned.
 
@@ -255,7 +286,7 @@ Daochi records app-scoped token events, but it does not yet move value between s
 
 ## Signed App Registration
 
-Nodes can accept self-contained app manifests through `POST /api/v1/apps/register-signed`. The request body contains:
+Nodes can accept self-contained, app-owned manifests through `POST /api/v1/apps/register-signed`. The request body contains:
 
 - `manifest`, including `manifest_version`, `app_id`, display metadata, Ed25519 app keys, collection prefixes, capabilities, and optional token policies;
 - `manifest_signature`, an Ed25519 signature from one active app key over `daochi-app-manifest-v1\n<canonical manifest json>`;
@@ -274,6 +305,8 @@ New v5 collection names use a dotted hierarchy:
 - `shared.<app>.v<version>.<collection>` for user-grantable cross-app records;
 - `friends.<app>.v<version>.<collection>` for friend-visible app records;
 - `public.<app>.v<version>.<collection>` for intentionally public encrypted/public-record namespaces.
+
+The app ID in every declared collection scope must match the manifest's `app_id`, and the first segment must match the declared visibility. Features may reference only scopes declared in that same manifest. This prevents one app from claiming or describing another app's data.
 
 Future private features should add or extend encrypted collections first. Existing v4 encrypted collections may continue to sync without another migration; new private namespaces should use the v5 hierarchy. Legacy typed schema additions are reserved for compatibility with older clients or for public/server-readable projections.
 

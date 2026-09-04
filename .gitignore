@@ -7,3 +7,4 @@ secrets/
 *.sqlite
 *.sqlite3
 daochi
+monero-wallet-cli.log

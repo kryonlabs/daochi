@@ -24,15 +24,13 @@ func (s *Store) ExportMeshEncryptedRecords(ctx context.Context, policy NodeSyncP
 	rows, err := s.db.QueryContext(ctx, `
 SELECT r.user_id_hash,u.public_key,u.created_at,u.last_seen_at,
        r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,
-       r.content_hash,r.schema_version,r.parent_id
-FROM server_encrypted_records r
+       r.content_hash,r.schema_version,r.parent_id,e.seq
+FROM server_mesh_changes e
+JOIN server_encrypted_records r
+  ON r.user_id_hash=e.user_id_hash AND r.collection=e.collection AND r.id=e.record_id
 JOIN server_users u ON u.user_id_hash=r.user_id_hash
-WHERE r.updated_at>?1
-   OR (r.updated_at=?1 AND r.user_id_hash>?2)
-   OR (r.updated_at=?1 AND r.user_id_hash=?2 AND r.collection>?3)
-   OR (r.updated_at=?1 AND r.user_id_hash=?2 AND r.collection=?3 AND r.id>?4)
-ORDER BY r.updated_at,r.user_id_hash,r.collection,r.id`,
-		cursor.UpdatedAt, cursor.UserIDHash, cursor.Collection, cursor.ID)
+WHERE e.seq>?1
+ORDER BY e.seq`, cursor.Seq)
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -47,7 +45,8 @@ ORDER BY r.updated_at,r.user_id_hash,r.collection,r.id`,
 		if err := rows.Scan(&item.UserIDHash, &publicKey, &item.CreatedAt, &item.LastSeenAt,
 			&item.Record.Collection, &item.Record.ID, &item.Record.KeyID, &item.Record.Nonce,
 			&item.Record.Ciphertext, &item.Record.UpdatedAt, &item.Record.DeletedAt,
-			&item.Record.ContentHash, &item.Record.SchemaVersion, &item.Record.ParentID); err != nil {
+			&item.Record.ContentHash, &item.Record.SchemaVersion, &item.Record.ParentID,
+			&item.MeshVersion); err != nil {
 			return nil, "", false, err
 		}
 		if !meshPolicyAllowsRecord(policy, matchers, item.Record.Collection) {
@@ -56,6 +55,7 @@ ORDER BY r.updated_at,r.user_id_hash,r.collection,r.id`,
 		item.PublicKey = hex.EncodeToString(publicKey)
 		records = append(records, item)
 		last = meshCursor{
+			Seq:        item.MeshVersion,
 			UpdatedAt:  item.Record.UpdatedAt,
 			UserIDHash: item.UserIDHash,
 			Collection: item.Record.Collection,
@@ -108,6 +108,14 @@ func (s *Store) ImportMeshEncryptedRecords(ctx context.Context, policy NodeSyncP
 			return 0, fmt.Errorf("invalid mesh encrypted record")
 		}
 		if !meshPolicyAllowsRecord(policy, matchers, item.Record.Collection) {
+			continue
+		}
+		var deleted int
+		if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, item.UserIDHash).Scan(&deleted); err != nil {
+			return 0, err
+		}
+		if deleted != 0 {
 			continue
 		}
 		if err := upsertMeshUser(ctx, tx, item, publicKey); err != nil {

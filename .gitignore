@@ -6,3 +6,4 @@ secrets/
 *.db-wal
 *.sqlite
 *.sqlite3
+daochi

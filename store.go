@@ -424,6 +424,35 @@ CREATE TABLE IF NOT EXISTS server_encrypted_records (
 	PRIMARY KEY(user_id_hash, collection, id)
 );
 
+CREATE TABLE IF NOT EXISTS server_boards (
+	id TEXT PRIMARY KEY,
+	owner_user_id_hash TEXT NOT NULL,
+	app_id TEXT NOT NULL DEFAULT 'krait',
+	title TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS server_board_members (
+	board_id TEXT NOT NULL REFERENCES server_boards(id) ON DELETE CASCADE,
+	user_id_hash TEXT NOT NULL,
+	permission TEXT NOT NULL DEFAULT 'read',
+	invited_by TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY(board_id, user_id_hash)
+);
+
+CREATE TABLE IF NOT EXISTS server_board_records (
+	board_id TEXT NOT NULL REFERENCES server_boards(id) ON DELETE CASCADE,
+	record_id TEXT NOT NULL,
+	author_user_id_hash TEXT NOT NULL,
+	payload TEXT NOT NULL,
+	updated_at INTEGER NOT NULL,
+	deleted_at INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(board_id, record_id)
+);
+
 CREATE TABLE IF NOT EXISTS server_apps (
 	app_id TEXT PRIMARY KEY,
 	display_name TEXT NOT NULL,

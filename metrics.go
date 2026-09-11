@@ -21,6 +21,7 @@ type ServerMetrics struct {
 	webSocketRejected     atomic.Uint64
 	authFailures          atomic.Uint64
 	legacyClientHints     atomic.Uint64
+	moneroStuckInvoices   atomic.Uint64
 
 	mu               sync.Mutex
 	httpRequests     map[string]uint64
@@ -86,6 +87,7 @@ func (m *ServerMetrics) recordWebSocketReject(reason string) {
 
 func (m *ServerMetrics) writePrometheus(w http.ResponseWriter, usage NodeUsage, storage NodeStorageUsage) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	fmt.Fprintf(w, "# TYPE daochi_build_info gauge\ndaochi_build_info{version=%q} 1\n", version)
 	writeScalarMetric(w, "daochi_sync_requests_total", "counter", m.syncRequests.Load())
 	writeScalarMetric(w, "daochi_sync_failures_total", "counter", m.syncFailures.Load())
 	writeScalarMetric(w, "daochi_sync_full_snapshots_total", "counter", m.syncFullSnapshots.Load())
@@ -96,6 +98,7 @@ func (m *ServerMetrics) writePrometheus(w http.ResponseWriter, usage NodeUsage, 
 	writeScalarMetric(w, "daochi_legacy_client_hints_total", "counter", m.legacyClientHints.Load())
 	writeScalarMetric(w, "daochi_websocket_accepted_total", "counter", m.webSocketAccepted.Load())
 	writeScalarMetric(w, "daochi_websocket_rejected_total", "counter", m.webSocketRejected.Load())
+	writeScalarMetric(w, "daochi_monero_stuck_invoices_total", "counter", m.moneroStuckInvoices.Load())
 	writeScalarMetric(w, "daochi_websocket_active", "gauge", uint64(usage.ConnectedWebSocketClients))
 	writeScalarMetric(w, "daochi_connected_users", "gauge", uint64(usage.ConnectedUsers))
 	writeScalarMetric(w, "daochi_registered_users", "gauge", uint64(usage.RegisteredUsers))

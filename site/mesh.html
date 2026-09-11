@@ -72,6 +72,17 @@
         <p>The important boundary is that product behavior stays outside the relay. Daochi should provide reusable sync primitives, not app-specific UI or domain rules.</p>
       </div>
     </section>
+
+    <section>
+      <h2>Small node target</h2>
+      <p>Daochi should stay practical on modest machines: one Go process, SQLite on local disk, a reverse proxy for TLS, bounded sync batches, and idle CPU close to zero when no sync or reconciliation work is active.</p>
+      <p>Operators should be able to inspect the node identity, accepted protocol versions, app registry authority, active collection prefixes, paired peers, and which data surfaces are server-readable by design.</p>
+      <div class="panel">
+        <div class="panel-row"><strong>Operations</strong><span><a href="https://github.com/kryonlabs/daochi/blob/master/docs/operations-small-node.md">Small node guide</a></span></div>
+        <div class="panel-row"><strong>Status</strong><span><code>GET /api/v1/node</code>, <code>GET /api/v1/node/peers</code>, <code>GET /metrics</code></span></div>
+        <div class="panel-row"><strong>Storage</strong><span>SQLite-first, local disk, explicit backups</span></div>
+      </div>
+    </section>
   </main>
 
   <footer class="footer">

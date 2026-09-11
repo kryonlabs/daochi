@@ -69,6 +69,7 @@
       <h2>Sync surfaces</h2>
       <p>The legacy typed sync surface stores rows and JSON payloads that the server can read and compact. It remains available for clients that shipped before encrypted private records were primary.</p>
       <p>Encrypted records are keyed by <code>collection</code> and <code>id</code>. The server validates names, versions the records, relays them to newer clients, exports them, and deletes them with the account, but does not need to inspect the ciphertext. Protocol v5 treats encrypted records as the primary private-data surface and returns legacy private rows only when clients explicitly request them. The relay stores opaque ciphertext; apps remain responsible for their record encryption scheme, nonce discipline, and key rotation.</p>
+      <p>New clients should follow the recommended encrypted record profile: bind account, app, collection, record ID, and schema as associated data; use fresh nonces; and rotate keys by writing new record versions with new key IDs.</p>
       <div class="grid">
         <article class="card">
           <h3>v4 transition</h3>
@@ -101,6 +102,16 @@
       <h2>Private key boundary</h2>
       <p>Normal login, sync, signed transactions, and account deletion do not upload the account private key. The website deletion helper can accept an exported account key file for recovery and support cases; it signs a fixed deletion proof, verifies that proof against the registered public key, deletes the account data, and does not store the uploaded key.</p>
       <p>This distinction matters for the security claim: Daochi's account authority is post-quantum through ML-DSA-44 signatures, while encrypted record confidentiality is provided by client-side ciphertext that the relay is designed to move without reading.</p>
+    </section>
+
+    <section>
+      <h2>Developer path</h2>
+      <p>A new app should be able to create an account key, login, register a signed manifest, write one encrypted record, read it back, and inspect trust state without learning every legacy surface first.</p>
+      <div class="panel">
+        <div class="panel-row"><strong>Profile</strong><span><a href="https://github.com/kryonlabs/daochi/blob/master/docs/encrypted-record-profile-v1.md">Encrypted record profile v1</a></span></div>
+        <div class="panel-row"><strong>Quickstart</strong><span><a href="https://github.com/kryonlabs/daochi/blob/master/docs/developer-quickstart.md">Developer quickstart</a></span></div>
+        <div class="panel-row"><strong>Contract</strong><span><a href="/openapi.json">OpenAPI JSON</a></span></div>
+      </div>
     </section>
 
     <section>

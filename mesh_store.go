@@ -6,79 +6,128 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
-func (s *Store) ExportMeshEncryptedRecords(ctx context.Context, policy NodeSyncPolicy, rawCursor string, limit int) ([]MeshEncryptedRecord, string, bool, error) {
+// ExportMeshEncryptedRecords walks the change log in seq order and emits
+// both record upserts and deletion tombstones. Upsert entries whose
+// record row is gone (deleted later in the log) are skipped; their
+// tombstone follows in the same stream, so consumers still converge.
+func (s *Store) ExportMeshEncryptedRecords(ctx context.Context, policy NodeSyncPolicy, rawCursor string, limit int) ([]MeshEncryptedRecord, []MeshEncryptedRecordDeletion, string, bool, error) {
 	cursor, err := decodeMeshCursor(rawCursor)
 	if err != nil {
-		return nil, "", false, err
+		return nil, nil, "", false, err
 	}
 	if !nodePolicyIncludesData(&policy, "encrypted_records") {
-		return []MeshEncryptedRecord{}, "", false, nil
+		return []MeshEncryptedRecord{}, nil, "", false, nil
 	}
 	matchers, err := s.appCollectionMatchers(ctx)
 	if err != nil {
-		return nil, "", false, err
+		return nil, nil, "", false, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT r.user_id_hash,u.public_key,u.created_at,u.last_seen_at,
-       r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,
-       r.content_hash,r.schema_version,r.parent_id,e.seq
+SELECT e.seq,e.op,e.user_id_hash,e.collection,e.record_id,e.deleted_at,
+       r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,
+       r.content_hash,r.schema_version,r.parent_id,u.public_key,u.created_at,u.last_seen_at
 FROM server_mesh_changes e
-JOIN server_encrypted_records r
-  ON r.user_id_hash=e.user_id_hash AND r.collection=e.collection AND r.id=e.record_id
-JOIN server_users u ON u.user_id_hash=r.user_id_hash
+LEFT JOIN server_encrypted_records r
+  ON e.op!='delete' AND r.user_id_hash=e.user_id_hash AND r.collection=e.collection AND r.id=e.record_id
+LEFT JOIN server_users u ON u.user_id_hash=e.user_id_hash
 WHERE e.seq>?1
 ORDER BY e.seq`, cursor.Seq)
 	if err != nil {
-		return nil, "", false, err
+		return nil, nil, "", false, err
 	}
 	defer rows.Close()
 
 	limit = meshBatchLimit(limit, limit)
 	records := make([]MeshEncryptedRecord, 0, limit)
-	var last meshCursor
+	deletions := []MeshEncryptedRecordDeletion{}
+	var lastSeq int64
+	emitted := 0
 	for rows.Next() {
-		var item MeshEncryptedRecord
+		var seq int64
+		var op, changeUser, changeCollection, changeRecord, changeDeletedAt string
+		var recordID, keyID, nonce, ciphertext, updatedAt, contentHash, parentID sql.NullString
+		var recordDeletedAt, schemaVersion sql.NullInt64
 		var publicKey []byte
-		if err := rows.Scan(&item.UserIDHash, &publicKey, &item.CreatedAt, &item.LastSeenAt,
-			&item.Record.Collection, &item.Record.ID, &item.Record.KeyID, &item.Record.Nonce,
-			&item.Record.Ciphertext, &item.Record.UpdatedAt, &item.Record.DeletedAt,
-			&item.Record.ContentHash, &item.Record.SchemaVersion, &item.Record.ParentID,
-			&item.MeshVersion); err != nil {
-			return nil, "", false, err
+		var userCreatedAt, userLastSeenAt sql.NullString
+		if err := rows.Scan(&seq, &op, &changeUser, &changeCollection, &changeRecord, &changeDeletedAt,
+			&recordID, &keyID, &nonce, &ciphertext, &updatedAt, &recordDeletedAt,
+			&contentHash, &schemaVersion, &parentID, &publicKey, &userCreatedAt, &userLastSeenAt); err != nil {
+			return nil, nil, "", false, err
 		}
-		if !meshPolicyAllowsRecord(policy, matchers, item.Record.Collection) {
+		if !meshPolicyAllowsRecord(policy, matchers, changeCollection) {
 			continue
 		}
+		if op == "delete" {
+			deletions = append(deletions, MeshEncryptedRecordDeletion{
+				UserIDHash:  changeUser,
+				Collection:  changeCollection,
+				ID:          changeRecord,
+				DeletedAt:   changeDeletedAt,
+				MeshVersion: seq,
+			})
+			lastSeq = seq
+			emitted++
+			if emitted == limit {
+				break
+			}
+			continue
+		}
+		if !recordID.Valid || !userCreatedAt.Valid {
+			// Record (or its user) no longer exists; a tombstone for it
+			// appears later in the log.
+			continue
+		}
+		item := MeshEncryptedRecord{
+			UserIDHash:  changeUser,
+			CreatedAt:   userCreatedAt.String,
+			LastSeenAt:  userLastSeenAt.String,
+			MeshVersion: seq,
+			Record: EncryptedRecord{
+				Collection: changeCollection,
+				ID:         changeRecord,
+			},
+		}
+		item.Record.KeyID = keyID.String
+		item.Record.Nonce = nonce.String
+		item.Record.Ciphertext = ciphertext.String
+		item.Record.UpdatedAt = updatedAt.String
+		item.Record.DeletedAt = recordDeletedAt.Int64
+		item.Record.ContentHash = contentHash.String
+		item.Record.SchemaVersion = int(schemaVersion.Int64)
+		item.Record.ParentID = parentID.String
 		item.PublicKey = hex.EncodeToString(publicKey)
 		records = append(records, item)
-		last = meshCursor{
-			Seq:        item.MeshVersion,
-			UpdatedAt:  item.Record.UpdatedAt,
-			UserIDHash: item.UserIDHash,
-			Collection: item.Record.Collection,
-			ID:         item.Record.ID,
-		}
-		if len(records) == limit {
+		lastSeq = seq
+		emitted++
+		if emitted == limit {
 			break
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, "", false, err
+		return nil, nil, "", false, err
 	}
-	if len(records) < limit {
-		return records, "", false, nil
+	if emitted < limit {
+		return records, deletions, "", false, nil
 	}
-	nextCursor, err := encodeMeshCursor(last)
+	nextCursor, err := encodeMeshCursor(meshCursor{Seq: lastSeq})
 	if err != nil {
-		return nil, "", false, err
+		return nil, nil, "", false, err
 	}
-	return records, nextCursor, true, nil
+	return records, deletions, nextCursor, true, nil
 }
 
 func (s *Store) ImportMeshEncryptedRecords(ctx context.Context, policy NodeSyncPolicy, records []MeshEncryptedRecord) (int, error) {
+	return s.ImportMeshEncryptedBatch(ctx, policy, records, nil)
+}
+
+// ImportMeshEncryptedBatch applies upserts and deletions together,
+// ordered by their change-log seq so a delete-then-recreate sequence in
+// one batch converges to the recreated record.
+func (s *Store) ImportMeshEncryptedBatch(ctx context.Context, policy NodeSyncPolicy, records []MeshEncryptedRecord, deletions []MeshEncryptedRecordDeletion) (int, error) {
 	if !nodePolicyIncludesData(&policy, "encrypted_records") {
 		return 0, nil
 	}
@@ -86,14 +135,64 @@ func (s *Store) ImportMeshEncryptedRecords(ctx context.Context, policy NodeSyncP
 	if err != nil {
 		return 0, err
 	}
+	type meshChange struct {
+		seq      int64
+		record   *MeshEncryptedRecord
+		deletion *MeshEncryptedRecordDeletion
+	}
+	changes := make([]meshChange, 0, len(records)+len(deletions))
+	for i := range records {
+		changes = append(changes, meshChange{seq: records[i].MeshVersion, record: &records[i]})
+	}
+	for i := range deletions {
+		changes = append(changes, meshChange{seq: deletions[i].MeshVersion, deletion: &deletions[i]})
+	}
+	sort.SliceStable(changes, func(i, j int) bool { return changes[i].seq < changes[j].seq })
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
+	tombstonedUsers := map[string]bool{}
+	userTombstoned := func(userID string) (bool, error) {
+		if cached, ok := tombstonedUsers[userID]; ok {
+			return cached, nil
+		}
+		var deleted int
+		if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, userID).Scan(&deleted); err != nil {
+			return false, err
+		}
+		tombstonedUsers[userID] = deleted != 0
+		return deleted != 0, nil
+	}
+
 	applied := 0
-	for _, item := range records {
+	for _, change := range changes {
+		if change.deletion != nil {
+			if !validUserID(change.deletion.UserIDHash) {
+				return 0, fmt.Errorf("invalid mesh deletion user_id_hash")
+			}
+			if !meshPolicyAllowsRecord(policy, matchers, change.deletion.Collection) {
+				continue
+			}
+			deleted, err := userTombstoned(change.deletion.UserIDHash)
+			if err != nil {
+				return 0, err
+			}
+			if deleted {
+				continue
+			}
+			n, err := applyMeshRecordDeletion(ctx, tx, *change.deletion)
+			if err != nil {
+				return 0, err
+			}
+			applied += n
+			continue
+		}
+		item := *change.record
 		if !validUserID(item.UserIDHash) {
 			return 0, fmt.Errorf("invalid mesh user_id_hash")
 		}
@@ -104,18 +203,17 @@ func (s *Store) ImportMeshEncryptedRecords(ctx context.Context, policy NodeSyncP
 		if err := validateUserIDForPublicKey(item.UserIDHash, publicKey); err != nil {
 			return 0, err
 		}
-		if !validEncryptedRecordForProtocol(item.Record, ksyncLatestProtocol) {
+		if !validEncryptedRecordForProtocol(item.Record, latestProtocol) {
 			return 0, fmt.Errorf("invalid mesh encrypted record")
 		}
 		if !meshPolicyAllowsRecord(policy, matchers, item.Record.Collection) {
 			continue
 		}
-		var deleted int
-		if err := tx.QueryRowContext(ctx, `
-SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, item.UserIDHash).Scan(&deleted); err != nil {
+		deleted, err := userTombstoned(item.UserIDHash)
+		if err != nil {
 			return 0, err
 		}
-		if deleted != 0 {
+		if deleted {
 			continue
 		}
 		if err := upsertMeshUser(ctx, tx, item, publicKey); err != nil {
@@ -129,6 +227,31 @@ SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, i
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
+	}
+	return applied, nil
+}
+
+// applyMeshRecordDeletion removes a record when the tombstone is at least
+// as new as the stored row. The local delete trigger then logs our own
+// tombstone, so the deletion keeps propagating to further peers.
+func applyMeshRecordDeletion(ctx context.Context, tx *sql.Tx, deletion MeshEncryptedRecordDeletion) (int, error) {
+	if !validNamespace(strings.TrimSpace(deletion.Collection)) ||
+		!encryptedRecordIDPattern.MatchString(strings.TrimSpace(deletion.ID)) {
+		return 0, fmt.Errorf("invalid mesh deletion target")
+	}
+	deletedAt := normalizeTime(deletion.DeletedAt, "")
+	res, err := tx.ExecContext(ctx, `
+DELETE FROM server_encrypted_records
+WHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4`,
+		deletion.UserIDHash, deletion.Collection, deletion.ID, deletedAt)
+	if err != nil {
+		return 0, err
+	}
+	applied := rowsAffected(res)
+	if applied > 0 {
+		if _, err := nextUserVersion(ctx, tx, deletion.UserIDHash); err != nil {
+			return 0, err
+		}
 	}
 	return applied, nil
 }
@@ -178,6 +301,12 @@ VALUES(?1,0)`, item.UserIDHash)
 	return err
 }
 
+// meshRecordContentKey breaks exact-timestamp ties deterministically so
+// every node converges to the same record regardless of pull order.
+func meshRecordContentKey(item EncryptedRecord) string {
+	return item.ContentHash + "\x00" + item.Ciphertext
+}
+
 func upsertMeshEncryptedRecord(ctx context.Context, tx *sql.Tx, userID string, item EncryptedRecord) (int, error) {
 	updatedAt := normalizeTime(item.UpdatedAt, "")
 	var existing EncryptedRecord
@@ -192,7 +321,9 @@ WHERE user_id_hash=?1 AND collection=?2 AND id=?3`,
 		return 0, err
 	}
 	if err == nil {
-		if updatedAt <= normalizeTime(existing.UpdatedAt, "") {
+		existingUpdated := normalizeTime(existing.UpdatedAt, "")
+		if updatedAt < existingUpdated ||
+			(updatedAt == existingUpdated && meshRecordContentKey(item) <= meshRecordContentKey(existing)) {
 			return 0, nil
 		}
 	}
@@ -213,7 +344,7 @@ ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
 	schema_version=excluded.schema_version,
 	parent_id=excluded.parent_id,
 	server_version=excluded.server_version
-WHERE excluded.updated_at > server_encrypted_records.updated_at`,
+WHERE excluded.updated_at >= server_encrypted_records.updated_at`,
 		userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
 		updatedAt, item.DeletedAt, item.ContentHash, item.SchemaVersion, item.ParentID, version)
 	if err != nil {

@@ -14,6 +14,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
+      - name: Cache vendored liboqs build
+        uses: actions/cache@v4
+        with:
+          path: build/liboqs
+          key: liboqs-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('vendor/liboqs/CMakeLists.txt') }}
+
+      - name: Build liboqs
+        run: make liboqs
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - name: Lint
+        run: golangci-lint run --timeout=5m
+        env:
+          CGO_ENABLED: "1"
+          GOFLAGS: "-mod=mod"
+          CGO_CFLAGS: "-I${{ github.workspace }}/build/liboqs/install/include"
+          CGO_LDFLAGS: "-L${{ github.workspace }}/build/liboqs/install/lib -loqs"
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -48,8 +83,17 @@ jobs:
         run: make test
 
       - name: Race test
-        if: matrix.go-version == '1.26.x'
         run: make test GOFLAGS="-mod=mod -race"
+
+      - name: Report coverage
+        if: matrix.go-version == '1.26.x'
+        run: |
+          CGO_ENABLED=1 GOFLAGS="-mod=mod" \
+            CGO_CFLAGS="-I$(pwd)/build/liboqs/install/include" \
+            CGO_LDFLAGS="-L$(pwd)/build/liboqs/install/lib -loqs" \
+            GOCACHE=/tmp/daochi-gocache \
+            go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
 
   docker-build:
     runs-on: ubuntu-latest
@@ -59,4 +103,4 @@ jobs:
           submodules: recursive
 
       - name: Build container image
-        run: docker build --pull -t daochi:ci .
+        run: docker build --pull --build-arg VERSION=ci-${{ github.sha }} -t daochi:ci .

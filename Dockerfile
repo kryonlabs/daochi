@@ -9,11 +9,12 @@ RUN cmake -GNinja -S . -B build -DBUILD_SHARED_LIBS=ON -DOQS_BUILD_ONLY_LIB=ON -
     && cmake --install build
 
 FROM golang:1.26-bookworm AS build
+ARG VERSION=dev
 COPY --from=liboqs /usr/local /usr/local
 WORKDIR /src
 COPY . .
 ENV CGO_ENABLED=1
-RUN go build -mod=mod -o /out/daochi .
+RUN go build -mod=mod -ldflags "-X main.version=${VERSION}" -o /out/daochi .
 
 FROM debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \

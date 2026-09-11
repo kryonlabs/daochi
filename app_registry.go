@@ -38,6 +38,8 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 			{CollectionPrefix: "inbe.habit_days", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit-day records."},
 			{CollectionPrefix: "inbe.sessions", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted session records."},
 			{CollectionPrefix: "private.inbe.v1.*", Visibility: "private", SchemaVersion: 1, Description: "Future private Inbe records."},
+			{CollectionPrefix: "private.inbe.v1.elist-lists", Visibility: "private", SchemaVersion: 1, Description: "Encrypted Inbe EList list records."},
+			{CollectionPrefix: "private.inbe.v1.elist-items", Visibility: "private", SchemaVersion: 1, Description: "Encrypted Inbe EList item records."},
 			{CollectionPrefix: "shared.inbe.v1.*", Visibility: "shared", SchemaVersion: 1, Description: "User-grantable Inbe records."},
 			{CollectionPrefix: "friends.inbe.v1.*", Visibility: "friends", SchemaVersion: 1, Description: "Friend-visible Inbe records."},
 			{CollectionPrefix: "public.inbe.v1.*", Visibility: "public", SchemaVersion: 1, Description: "Public Inbe records."},
@@ -45,6 +47,7 @@ func (s *Store) SeedBuiltinApps(ctx context.Context) error {
 		Capabilities: []string{"sync", "encrypted-records", "profile-stats", "leaderboard"},
 		Features: []AppFeature{
 			{ID: "sync.private_records", Collections: []string{"private.inbe.v1.*", "inbe.habits", "inbe.habit_days", "inbe.sessions"}, RequiresSignedTx: true},
+			{ID: "sync.elist", Collections: []string{"private.inbe.v1.elist-lists", "private.inbe.v1.elist-items"}, RequiresSignedTx: true},
 			{ID: "sync.shared_records", Collections: []string{"shared.inbe.v1.*"}, RequiresSignedTx: true},
 			{ID: "profile.stats", RequiresSignedTx: false},
 		},
@@ -940,16 +943,16 @@ func validCollectionPrefix(value string) bool {
 func validCollectionPrefixWildcardBase(value string) bool {
 	parts := strings.Split(strings.TrimSpace(value), ".")
 	if len(parts) == 2 && parts[0] == "account" {
-		return ksyncVersionSegmentPattern.MatchString(parts[1])
+		return versionSegmentPattern.MatchString(parts[1])
 	}
 	if len(parts) >= 3 && (parts[0] == "private" || parts[0] == "shared" ||
 		parts[0] == "friends" || parts[0] == "public") {
-		if !ksyncNamespaceSegmentPattern.MatchString(parts[1]) ||
-			!ksyncVersionSegmentPattern.MatchString(parts[2]) {
+		if !namespaceSegmentPattern.MatchString(parts[1]) ||
+			!versionSegmentPattern.MatchString(parts[2]) {
 			return false
 		}
 		for _, part := range parts[3:] {
-			if !ksyncNamespaceSegmentPattern.MatchString(part) {
+			if !namespaceSegmentPattern.MatchString(part) {
 				return false
 			}
 		}

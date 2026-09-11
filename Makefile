@@ -7,6 +7,7 @@ LIBOQS_A := $(LIBOQS_PREFIX)/lib/liboqs.a
 GO ?= go
 CMAKE ?= cmake
 GOFLAGS ?= -mod=mod
+VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 CGO_ENV := CGO_ENABLED=1 \
 	GOFLAGS="$(GOFLAGS)" \
@@ -30,7 +31,7 @@ $(LIBOQS_A): $(LIBOQS_DIR)/CMakeLists.txt
 	$(CMAKE) --build $(LIBOQS_BUILD_DIR) --target install
 
 build: $(LIBOQS_A)
-	$(CGO_ENV) $(GO) build -o daochi .
+	$(CGO_ENV) $(GO) build -ldflags "-X main.version=$(VERSION)" -o daochi .
 
 test: $(LIBOQS_A)
 	$(CGO_ENV) GOCACHE=/tmp/daochi-gocache $(GO) test ./...

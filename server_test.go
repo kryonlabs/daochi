@@ -914,7 +914,7 @@ func TestProtocolV4AdvertisesDualWriteTransition(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.LatestProtocol != ksyncLatestProtocol || payload.ProtocolVersion != 4 {
+	if payload.LatestProtocol != latestProtocol || payload.ProtocolVersion != 4 {
 		t.Fatalf("unexpected protocol response: %#v", payload)
 	}
 	if payload.TransitionMode != "dual_write" {
@@ -941,7 +941,7 @@ func TestProtocolV5EncryptedPrimaryHidesLegacyPrivateDataByDefault(t *testing.T)
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.LatestProtocol != ksyncLatestProtocol || payload.ProtocolVersion != 5 ||
+	if payload.LatestProtocol != latestProtocol || payload.ProtocolVersion != 5 ||
 		payload.TransitionMode != "encrypted_primary" {
 		t.Fatalf("unexpected v5 response metadata: %#v", payload)
 	}
@@ -1012,7 +1012,7 @@ func TestProtocolV1ThroughV5RemainAcceptedThroughCompatibilityDeadline(t *testin
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x4f)
 
-	for version := ksyncMinSupportedProtocol; version <= 5; version++ {
+	for version := minSupportedProtocol; version <= 5; version++ {
 		clientID := "compat-client-" + strconv.Itoa(version)
 		body := []byte(`{"protocol_version":` + strconv.Itoa(version) + `,"user_id_hash":"` + identity.UserID + `","client_id":"` + clientID + `","since_server_version":0}`)
 		res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
@@ -1021,16 +1021,16 @@ func TestProtocolV1ThroughV5RemainAcceptedThroughCompatibilityDeadline(t *testin
 			t.Fatal(err)
 		}
 		if payload.Status != "ok" ||
-			payload.MinSupportedProtocol != ksyncMinSupportedProtocol ||
-			payload.LatestProtocol != ksyncLatestProtocol ||
-			!containsString(payload.ServerCapabilities, "protocol-v1-v5-valid-through-"+ksyncCompatibilityDeadline) {
+			payload.MinSupportedProtocol != minSupportedProtocol ||
+			payload.LatestProtocol != latestProtocol ||
+			!containsString(payload.ServerCapabilities, "protocol-v1-v5-valid-through-"+compatibilityDeadline) {
 			t.Fatalf("protocol %d compatibility response = %#v", version, payload)
 		}
 	}
 }
 
 func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
-	server, _, _ := testServer(t)
+	server, store, _ := testServer(t)
 	nodePublic, nodePrivate, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1090,6 +1090,15 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 		len(registered.Keys) != 1 || len(registered.TokenPolicies) != 1 ||
 		registered.AppSchemaVersion != 0 {
 		t.Fatalf("registered app missing manifest fields: %#v", registered)
+	}
+	if err := store.RegisterDeviceKey(context.Background(), DeviceKey{
+		AccountID: identity.UserID,
+		AppID:     "testapp",
+		KeyID:     "key-main1",
+		ClientID:  "test-client-v6-good",
+		PublicKey: hex.EncodeToString(appPublic),
+	}, "register-v6-device"); err != nil {
+		t.Fatal(err)
 	}
 
 	v6Body := []byte(`{"protocol_version":6,"app_id":"testapp","user_id_hash":"` + identity.UserID + `","client_id":"test-client-v6-good","encrypted_records":[{"collection":"private.testapp.v1.notes","id":"note-1","key_id":"main","nonce":"n1","ciphertext":"ciphertext-v1","updated_at":"2026-08-29T12:00:00Z"}]}`)
@@ -1377,9 +1386,13 @@ func TestAppGrantsGateCrossAppEncryptedRecords(t *testing.T) {
 	if registerRes.Code != http.StatusOK {
 		t.Fatalf("register app status = %d body=%s", registerRes.Code, registerRes.Body.String())
 	}
-	if _, err := store.db.Exec(`
-INSERT INTO server_app_keys(app_id,key_id,algorithm,public_key,purpose,status)
-VALUES('ukuvota','main-key','Ed25519',?1,'signing','active')`, hex.EncodeToString(appPrivate.Public().(ed25519.PublicKey))); err != nil {
+	if err := store.RegisterDeviceKey(context.Background(), DeviceKey{
+		AccountID: identity.UserID,
+		AppID:     "ukuvota",
+		KeyID:     "main-key",
+		ClientID:  "app-records-client",
+		PublicKey: hex.EncodeToString(appPrivate.Public().(ed25519.PublicKey)),
+	}, "register-app-records-device"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1545,8 +1558,8 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	if nodePayload.Status != "ok" ||
-		nodePayload.Protocol.MinSupported != ksyncMinSupportedProtocol ||
-		nodePayload.Protocol.Latest != ksyncLatestProtocol ||
+		nodePayload.Protocol.MinSupported != minSupportedProtocol ||
+		nodePayload.Protocol.Latest != latestProtocol ||
 		!containsString(nodePayload.Capabilities, "aliases") ||
 		!containsString(nodePayload.Capabilities, "friends") ||
 		len(nodePayload.KnownNodes) != 1 ||
@@ -1739,7 +1752,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull node peer: %v", err)
 	}
-	imported, _, _, err := target.store.ExportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
+	imported, _, _, _, err := target.store.ExportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
 		Apps:        []string{"inbe"},
 		Collections: []string{"inbe.*"},
 		Data:        []string{"encrypted_records"},
@@ -1792,14 +1805,14 @@ func TestMeshCursorDoesNotSkipLateOlderTimestamp(t *testing.T) {
 
 	firstBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"mesh-order-client","encrypted_records":[{"collection":"inbe.habits","id":"newer","key_id":"main","nonce":"n1","ciphertext":"newer","updated_at":"2026-09-04T12:00:00Z"}]}`)
 	syncWithBody(t, handler, "", identity.UserID, identity.Token, firstBody)
-	first, cursor, truncated, err := store.ExportMeshEncryptedRecords(context.Background(), policy, "", 1)
+	first, _, cursor, truncated, err := store.ExportMeshEncryptedRecords(context.Background(), policy, "", 1)
 	if err != nil || len(first) != 1 || !truncated || cursor == "" {
 		t.Fatalf("first mesh page records=%#v cursor=%q truncated=%v err=%v", first, cursor, truncated, err)
 	}
 
 	lateBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"mesh-order-client","encrypted_records":[{"collection":"inbe.habits","id":"late-older","key_id":"main","nonce":"n2","ciphertext":"late","updated_at":"2020-01-01T00:00:00Z"}]}`)
 	syncWithBody(t, handler, "", identity.UserID, identity.Token, lateBody)
-	late, _, _, err := store.ExportMeshEncryptedRecords(context.Background(), policy, cursor, 10)
+	late, _, _, _, err := store.ExportMeshEncryptedRecords(context.Background(), policy, cursor, 10)
 	if err != nil || len(late) != 1 || late[0].Record.ID != "late-older" {
 		t.Fatalf("late mesh page records=%#v err=%v", late, err)
 	}
@@ -1827,7 +1840,7 @@ func TestEncryptedSyncEnvelopeStoresAndRelaysOpaquely(t *testing.T) {
 		t.Fatal(err)
 	}
 	if first.Status != "ok" || first.TransitionMode != "encrypted_payload" ||
-		first.ProtocolVersion != ksyncLatestProtocol || first.ServerVersion == 0 ||
+		first.ProtocolVersion != latestProtocol || first.ServerVersion == 0 ||
 		len(first.EncryptedPayloads) != 1 {
 		t.Fatalf("unexpected encrypted envelope response: %#v", first)
 	}
@@ -3612,14 +3625,14 @@ func syncWithBody(t *testing.T, target any, baseURL, userID, token string, body 
 	return res
 }
 
-func signedTxHeader(t *testing.T, accountID, appID, appKeyID, method, path string, body []byte, appPrivate ed25519.PrivateKey, txID string) string {
+func signedTxHeader(t *testing.T, accountID, appID, deviceKeyID, method, path string, body []byte, devicePrivate ed25519.PrivateKey, txID string) string {
 	t.Helper()
 	tx := SignedTxEnvelope{
 		ProtocolVersion: 6,
 		TxID:            txID,
 		AccountID:       accountID,
 		AppID:           appID,
-		AppKeyID:        appKeyID,
+		DeviceKeyID:     deviceKeyID,
 		Method:          method,
 		Path:            path,
 		BodySHA256:      sha256Hex(body),
@@ -3627,7 +3640,8 @@ func signedTxHeader(t *testing.T, accountID, appID, appKeyID, method, path strin
 		ExpiresAt:       time.Now().Add(time.Minute).Unix(),
 		Signature:       hex.EncodeToString(bytes.Repeat([]byte{0x7a}, mlDSA44SignatureSize)),
 	}
-	tx.AppSignature = hex.EncodeToString(ed25519.Sign(appPrivate, canonicalSignedTxMessage(tx)))
+	tx.DeviceSignature = hex.EncodeToString(ed25519.Sign(devicePrivate,
+		canonicalSignedTxMessage(tx)))
 	data, err := json.Marshal(tx)
 	if err != nil {
 		t.Fatal(err)
@@ -3703,9 +3717,11 @@ type moneroTransfer struct {
 type fakeMoneroWalletRPC struct {
 	URL string
 
-	mu        sync.Mutex
-	nextIndex int
-	transfers []moneroTransfer
+	mu           sync.Mutex
+	nextIndex    int
+	transfers    []moneroTransfer
+	minHeights   []int64 // min_height values received for whole-wallet scans
+	walletHeight int64
 }
 
 func newFakeMoneroWalletRPC(t *testing.T) *fakeMoneroWalletRPC {
@@ -3734,6 +3750,9 @@ func newFakeMoneroWalletRPC(t *testing.T) *fakeMoneroWalletRPC {
 		case "get_transfers":
 			var params struct {
 				SubaddrIndices []int `json:"subaddr_indices"`
+				MinHeight      int64 `json:"min_height"`
+				In             bool  `json:"in"`
+				Pool           bool  `json:"pool"`
 			}
 			if err := json.Unmarshal(req.Params, &params); err != nil {
 				t.Errorf("decode get_transfers params: %v", err)
@@ -3745,9 +3764,16 @@ func newFakeMoneroWalletRPC(t *testing.T) *fakeMoneroWalletRPC {
 				minor = params.SubaddrIndices[0]
 			}
 			wallet.mu.Lock()
+			if len(params.SubaddrIndices) == 0 {
+				wallet.minHeights = append(wallet.minHeights, params.MinHeight)
+			}
 			items := make([]map[string]any, 0, len(wallet.transfers))
 			for _, transfer := range wallet.transfers {
 				if minor >= 0 && transfer.Minor != minor {
+					continue
+				}
+				if len(params.SubaddrIndices) == 0 && params.MinHeight > 0 &&
+					transfer.Height > 0 && transfer.Height < params.MinHeight {
 					continue
 				}
 				items = append(items, map[string]any{
@@ -3764,8 +3790,23 @@ func newFakeMoneroWalletRPC(t *testing.T) *fakeMoneroWalletRPC {
 					},
 				})
 			}
+			result := map[string]any{}
+			if params.In {
+				result["in"] = items
+			}
+			if params.Pool && !params.In {
+				result["pool"] = items
+			}
+			if !params.In && !params.Pool {
+				result["in"] = items
+			}
 			wallet.mu.Unlock()
-			writeFakeMoneroResult(w, map[string]any{"in": items})
+			writeFakeMoneroResult(w, result)
+		case "get_height":
+			wallet.mu.Lock()
+			height := wallet.walletHeight
+			wallet.mu.Unlock()
+			writeFakeMoneroResult(w, map[string]any{"height": height})
 		default:
 			t.Errorf("unexpected monero rpc method %q", req.Method)
 			writeFakeMoneroError(w, "unexpected method")

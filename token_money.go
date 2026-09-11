@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
@@ -37,6 +38,15 @@ var (
 	errTokenIssuerReadOnly = errors.New("token issuer private key unavailable")
 	errPaymentUnavailable  = errors.New("payment verifier unavailable")
 )
+
+// googleHTTPClient bounds Google API calls (androidpublisher + OAuth
+// token endpoints); http.DefaultClient has no timeout, so a hung call
+// would pin the request goroutine indefinitely.
+var googleHTTPClient = &http.Client{Timeout: 20 * time.Second}
+
+// googlePlayAPIBaseURL is the androidpublisher API root; a package var
+// so tests can point it at a fake server.
+var googlePlayAPIBaseURL = "https://androidpublisher.googleapis.com/androidpublisher/v3"
 
 type tokenEventInput struct {
 	AccountID   string
@@ -604,6 +614,11 @@ func (s *Server) handleTokenReceipt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid receipt_id")
 		return
 	}
+	// Receipt IDs are 128-bit capabilities; rate-limit probing by IP.
+	if !s.allowRequest(r, "token-receipt:"+clientAddress(r), 60, time.Minute) {
+		writeError(w, http.StatusTooManyRequests, "too many receipt requests")
+		return
+	}
 	receipt, found, err := s.store.TokenReceipt(r.Context(), receiptID)
 	if err != nil {
 		slog.Error("token receipt", "receipt", logText(receiptID), "error", err)
@@ -849,36 +864,101 @@ func (s *Server) trySettleOrExpireMoneroInvoice(ctx context.Context, userID stri
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}
-	paymentID, seen, confirmed, err := verifyMoneroInvoicePayment(ctx, s.cfg, invoice)
+	payment, err := inspectMoneroInvoicePayment(ctx, s.cfg, invoice)
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}
-	if !confirmed {
-		if !seen && moneroInvoiceExpired(invoice) {
-			if err := s.store.MarkMoneroInvoiceExpired(ctx, userID, invoice.ID); err != nil {
-				return MoneroInvoiceResponse{}, err
-			}
-			updated, _, err := s.store.MoneroInvoice(ctx, userID, invoice.ID)
-			return updated, err
+	// A fully-covered invoice settles even after expiry: funds arriving
+	// late must never disappear into an expired row.
+	if payment.ConfirmedAtomic >= invoice.AtomicAmount {
+		receipt, _, err := s.store.CreditTokenPayment(ctx, signer, "monero", payment.PaymentID, tokenEventInput{
+			AccountID:   userID,
+			AppID:       invoice.AppID,
+			EventType:   "credit",
+			AmountDelta: invoice.TokenUnits,
+			SourceType:  "monero",
+			SourceRef:   payment.PaymentID,
+		})
+		if err != nil {
+			return MoneroInvoiceResponse{}, err
 		}
-		return MoneroInvoiceResponse{}, nil
+		if err := s.store.MarkMoneroInvoicePaid(ctx, userID, invoice.ID, receipt.ReceiptID, payment.PaymentID); err != nil {
+			return MoneroInvoiceResponse{}, err
+		}
+		updated, _, err := s.store.MoneroInvoice(ctx, userID, invoice.ID)
+		return updated, err
 	}
-	receipt, _, err := s.store.CreditTokenPayment(ctx, signer, "monero", paymentID, tokenEventInput{
-		AccountID:   userID,
-		AppID:       invoice.AppID,
-		EventType:   "credit",
-		AmountDelta: invoice.TokenUnits,
-		SourceType:  "monero",
-		SourceRef:   paymentID,
-	})
+	if moneroInvoiceExpired(invoice) {
+		if err := s.store.MarkMoneroInvoiceExpired(ctx, userID, invoice.ID); err != nil {
+			return MoneroInvoiceResponse{}, err
+		}
+		updated, _, err := s.store.MoneroInvoice(ctx, userID, invoice.ID)
+		return updated, err
+	}
+	return MoneroInvoiceResponse{}, nil
+}
+
+// reconcileMoneroExpiredInvoices sweeps invoices that expired unpaid:
+// late full payments are still credited at the invoice's rate, and
+// partial funds are reported once per invoice as stuck for manual
+// disposition (a view-only wallet cannot refund them automatically).
+func (s *Server) reconcileMoneroExpiredInvoices(ctx context.Context, limit int) error {
+	if strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
+		return nil
+	}
+	invoices, err := s.store.ExpiredMoneroInvoices(ctx, limit)
 	if err != nil {
-		return MoneroInvoiceResponse{}, err
+		return err
 	}
-	if err := s.store.MarkMoneroInvoicePaid(ctx, userID, invoice.ID, receipt.ReceiptID, paymentID); err != nil {
-		return MoneroInvoiceResponse{}, err
+	if len(invoices) == 0 {
+		return nil
 	}
-	updated, _, err := s.store.MoneroInvoice(ctx, userID, invoice.ID)
-	return updated, err
+	signer, err := s.requireTokenIssuer()
+	if err != nil {
+		return err
+	}
+	for _, item := range invoices {
+		payment, err := inspectMoneroInvoicePayment(ctx, s.cfg, item.Invoice)
+		if err != nil {
+			slog.Warn("expired monero invoice sweep failed", "invoice", logText(item.Invoice.ID), "error", err)
+			continue
+		}
+		if payment.ConfirmedAtomic >= item.Invoice.AtomicAmount {
+			receipt, _, err := s.store.CreditTokenPayment(ctx, signer, "monero", payment.PaymentID, tokenEventInput{
+				AccountID:   item.AccountID,
+				AppID:       item.Invoice.AppID,
+				EventType:   "credit",
+				AmountDelta: item.Invoice.TokenUnits,
+				SourceType:  "monero",
+				SourceRef:   payment.PaymentID,
+			})
+			if err != nil {
+				slog.Warn("expired monero invoice credit failed", "invoice", logText(item.Invoice.ID), "error", err)
+				continue
+			}
+			if err := s.store.SettleExpiredMoneroInvoice(ctx, item.AccountID, item.Invoice.ID, receipt.ReceiptID, payment.PaymentID); err != nil {
+				slog.Warn("expired monero invoice settle failed", "invoice", logText(item.Invoice.ID), "error", err)
+				continue
+			}
+			slog.Info("credited late monero invoice payment", "invoice", logText(item.Invoice.ID),
+				"account", logText(item.AccountID), "payment", logText(payment.PaymentID))
+			continue
+		}
+		if payment.SeenAtomic > 0 {
+			s.reportStuckMoneroInvoice(item.Invoice.ID, item.AccountID, payment)
+		}
+	}
+	return nil
+}
+
+func (s *Server) reportStuckMoneroInvoice(invoiceID, accountID string, payment moneroInvoicePaymentState) {
+	if _, already := s.moneroStuckNotified.LoadOrStore(invoiceID, true); already {
+		return
+	}
+	s.metrics.moneroStuckInvoices.Add(1)
+	slog.Warn("monero invoice has uncredited funds", "invoice", logText(invoiceID),
+		"account", logText(accountID), "seen_atomic", payment.SeenAtomic,
+		"confirmed_atomic", payment.ConfirmedAtomic)
 }
 
 func moneroInvoiceExpired(invoice MoneroInvoiceResponse) bool {
@@ -895,6 +975,9 @@ func (s *Server) runMoneroInvoiceReconciler(ctx context.Context, interval time.D
 	for {
 		if err := s.reconcileMoneroInvoices(ctx, 100); err != nil {
 			slog.Warn("monero invoice reconciliation failed", "error", err)
+		}
+		if err := s.reconcileMoneroExpiredInvoices(ctx, 50); err != nil {
+			slog.Warn("monero expired invoice sweep failed", "error", err)
 		}
 		if err := s.reconcileMoneroAccountDeposits(ctx); err != nil {
 			slog.Warn("monero account deposit reconciliation failed", "error", err)
@@ -1008,7 +1091,8 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		writeError(w, http.StatusForbidden, "admin disabled")
 		return false
 	}
-	if requestHeaderAlias(r, "X-Daochi-Admin", "X-Ksync-Admin") != s.cfg.AdminToken {
+	provided := requestHeaderAlias(r, "X-Daochi-Admin", "X-Ksync-Admin")
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(s.cfg.AdminToken)) != 1 {
 		writeError(w, http.StatusUnauthorized, "admin token required")
 		return false
 	}
@@ -1166,7 +1250,7 @@ func verifyGooglePlayPurchase(ctx context.Context, cfg Config, req GooglePurchas
 	if err != nil {
 		return "", errPaymentUnavailable
 	}
-	endpoint := "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/" +
+	endpoint := googlePlayAPIBaseURL + "/applications/" +
 		url.PathEscape(req.PackageName) + "/purchases/products/" +
 		url.PathEscape(req.ProductID) + "/tokens/" + url.PathEscape(req.PurchaseToken)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -1174,7 +1258,7 @@ func verifyGooglePlayPurchase(ctx context.Context, cfg Config, req GooglePurchas
 		return "", err
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+accessToken)
-	res, err := http.DefaultClient.Do(httpReq)
+	res, err := googleHTTPClient.Do(httpReq)
 	if err != nil {
 		return "", errPaymentUnavailable
 	}
@@ -1214,7 +1298,7 @@ func consumeGooglePlayPurchase(ctx context.Context, cfg Config, req GooglePurcha
 	if err != nil {
 		return err
 	}
-	endpoint := "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/" +
+	endpoint := googlePlayAPIBaseURL + "/applications/" +
 		url.PathEscape(req.PackageName) + "/purchases/products/" +
 		url.PathEscape(req.ProductID) + "/tokens/" + url.PathEscape(req.PurchaseToken) + ":consume"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
@@ -1222,7 +1306,7 @@ func consumeGooglePlayPurchase(ctx context.Context, cfg Config, req GooglePurcha
 		return err
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+accessToken)
-	res, err := http.DefaultClient.Do(httpReq)
+	res, err := googleHTTPClient.Do(httpReq)
 	if err != nil {
 		return err
 	}
@@ -1309,7 +1393,7 @@ func googleServiceAccountAccessToken(ctx context.Context, raw string) (string, e
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	res, err := http.DefaultClient.Do(req)
+	res, err := googleHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -1356,7 +1440,7 @@ func googleRefreshAccessToken(ctx context.Context, rawClient, refreshToken strin
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	res, err := http.DefaultClient.Do(req)
+	res, err := googleHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -1394,7 +1478,7 @@ func (s *Store) CreateMoneroInvoice(ctx context.Context, accountID, appID string
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}
-	expiresAt := time.Now().UTC().Add(45 * time.Minute).Format(time.RFC3339)
+	expiresAt := time.Now().UTC().Add(45 * time.Minute).Format(canonicalTimestampLayout)
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO token_payment_intents(id,provider,account_id,app_id,product_id,asset_id,token_units,
 	provider_amount,provider_address,provider_ref,status,expires_at)
@@ -1513,6 +1597,61 @@ WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='pending'`,
 	return err
 }
 
+// ExpiredMoneroInvoices lists expired unpaid invoices from the recent
+// lookback window for the late-payment sweep.
+func (s *Store) ExpiredMoneroInvoices(ctx context.Context, limit int) ([]moneroInvoiceRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(canonicalTimestampLayout)
+	rows, err := s.db.QueryContext(ctx, `
+SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,
+	provider_address,provider_ref,provider_payment_id,expires_at,receipt_id
+FROM token_payment_intents
+WHERE provider='monero' AND status='expired' AND receipt_id='' AND expires_at>=?1
+ORDER BY created_at
+LIMIT ?2`, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []moneroInvoiceRecord{}
+	for rows.Next() {
+		var item moneroInvoiceRecord
+		var receiptID string
+		if err := rows.Scan(&item.AccountID, &item.Invoice.ID, &item.Invoice.AppID,
+			&item.Invoice.Status, &item.Invoice.ProductID, &item.Invoice.AssetID,
+			&item.Invoice.TokenUnits, &item.Invoice.AtomicAmount, &item.Invoice.Address,
+			&item.Invoice.AddressIndex, &item.Invoice.PaymentID, &item.Invoice.ExpiresAt,
+			&receiptID); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// SettleExpiredMoneroInvoice transitions an expired invoice to paid after
+// a late payment was credited by the sweep.
+func (s *Store) SettleExpiredMoneroInvoice(ctx context.Context, accountID, id, receiptID, paymentRef string) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE token_payment_intents
+SET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP
+WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='expired' AND receipt_id=''`,
+		accountID, id, receiptID, paymentRef)
+	if err != nil {
+		return err
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return errors.New("expired invoice no longer unsettled")
+	}
+	return nil
+}
+
 func createMoneroSubaddress(ctx context.Context, cfg Config, label string) (string, int, error) {
 	if cfg.MoneroWalletRPCURL == "" {
 		return "", 0, errPaymentUnavailable
@@ -1533,9 +1672,19 @@ func createMoneroSubaddress(ctx context.Context, cfg Config, label string) (stri
 	return result.Address, result.AddressIndex, nil
 }
 
-func verifyMoneroInvoicePayment(ctx context.Context, cfg Config, invoice MoneroInvoiceResponse) (string, bool, bool, error) {
+// moneroInvoicePaymentState aggregates every transfer made to an invoice
+// subaddress so partial payments can accumulate until they cover the
+// price instead of only the first sufficiently-large transfer counting.
+type moneroInvoicePaymentState struct {
+	PaymentID       string // deterministic: sorted tx ids joined with "+"
+	SeenAtomic      int64  // every transfer amount, confirmed or not
+	ConfirmedAtomic int64  // transfers past the confirmation policy
+}
+
+func inspectMoneroInvoicePayment(ctx context.Context, cfg Config, invoice MoneroInvoiceResponse) (moneroInvoicePaymentState, error) {
+	state := moneroInvoicePaymentState{}
 	if cfg.MoneroWalletRPCURL == "" {
-		return "", false, false, errPaymentUnavailable
+		return state, errPaymentUnavailable
 	}
 	var result struct {
 		In   []moneroTransferRPC `json:"in"`
@@ -1549,18 +1698,33 @@ func verifyMoneroInvoicePayment(ctx context.Context, cfg Config, invoice MoneroI
 		"account_index":   0,
 		"subaddr_indices": []int{invoice.AddressIndex},
 	}, &result); err != nil {
-		return "", false, false, err
+		return state, err
 	}
+	txids := []string{}
+	seenTX := map[string]bool{}
 	for _, tx := range append(result.Pool, result.In...) {
-		if tx.Amount >= invoice.AtomicAmount &&
-			tx.SubaddrIndex.Major == 0 && tx.SubaddrIndex.Minor == invoice.AddressIndex && tx.TxID != "" {
-			paymentID := fmt.Sprintf("%s:%d:%d", tx.TxID, tx.SubaddrIndex.Major, tx.SubaddrIndex.Minor)
-			confirmed := tx.Confirmations >= moneroConfirmationsRequired(cfg) &&
-				!tx.Locked && tx.UnlockTime == 0 && !tx.DoubleSpendSeen
-			return paymentID, true, confirmed, nil
+		if tx.TxID == "" || tx.Amount <= 0 ||
+			tx.SubaddrIndex.Major != 0 || tx.SubaddrIndex.Minor != invoice.AddressIndex {
+			continue
+		}
+		if seenTX[tx.TxID] {
+			continue
+		}
+		seenTX[tx.TxID] = true
+		state.SeenAtomic += tx.Amount
+		txids = append(txids, tx.TxID)
+		if tx.DoubleSpendSeen {
+			continue
+		}
+		if tx.Confirmations >= moneroConfirmationsRequired(cfg) && !tx.Locked && tx.UnlockTime == 0 {
+			state.ConfirmedAtomic += tx.Amount
 		}
 	}
-	return "", false, false, nil
+	if len(txids) > 0 {
+		sort.Strings(txids)
+		state.PaymentID = strings.Join(txids, "+") + ":0:" + strconv.Itoa(invoice.AddressIndex)
+	}
+	return state, nil
 }
 
 func moneroRPC(ctx context.Context, cfg Config, method string, params map[string]any, out any) error {

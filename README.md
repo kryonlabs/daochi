@@ -2,6 +2,23 @@
 
 Daochi is a mesh-native sync network for app-owned data. It stores public keys and mirrored app data, but never stores client private keys. New clients should use the `X-Daochi-*` wire headers. The server still accepts shipped `X-Ksync-*` and `X-Inbe-*` compatibility headers.
 
+## Philosophy
+
+Daochi is built for imperfect networks, older devices, and changing servers.
+Its design rules are:
+
+- local first: account authority begins on the user's device;
+- respect old hardware: keep the relay useful on modest machines, old phones, small home nodes, and low-power servers;
+- store less, reveal less: move and order private records without reading them whenever clients can carry that responsibility;
+- keep old paths open: compatibility windows and migrations are part of the product;
+- make trust inspectable: keys, signatures, app ownership, protocol versions, and node relationships should be understandable.
+
+## Guides
+
+- [Encrypted record profile v1](docs/encrypted-record-profile-v1.md) defines the recommended client-side envelope for private records.
+- [Developer quickstart](docs/developer-quickstart.md) shows the shortest path from account key to encrypted sync.
+- [Small node operations](docs/operations-small-node.md) records low-resource targets and trust inspection checks.
+
 ## Privacy Model
 
 Daochi uses the client account key for identity and authentication. A client proves control of the account by signing a short-lived challenge with ML-DSA-44, and the server then issues a bearer token for normal sync and social API calls.
@@ -36,6 +53,13 @@ API access is scoped by account, with explicit shared surfaces:
 - `GET /api/v1/apps/{app_id}`
 - `GET /api/v1/apps/{app_id}/collections`
 - `GET /api/v1/node`
+- `POST /api/v1/node/pairing/invites`
+- `POST /api/v1/node/pairing/accept`
+- `POST /api/v1/node/pairing/complete`
+- `GET /api/v1/node/peers`
+- `POST /api/v1/namespaces`
+- `POST /api/v1/namespaces/claims`
+- `GET /api/v1/namespaces/resolve?space_id=<id>&name=<name>`
 - `POST /api/v1/node/mesh/export`
 - `POST /api/v1/node/mesh/import`
 - `GET /api/v1/tokens/assets`
@@ -191,11 +215,14 @@ Runtime configuration:
 DAOCHI_ADDR=127.0.0.1:8080
 DAOCHI_BASE_URL=https://api.example.com
 DAOCHI_DB=/var/lib/daochi/daochi.db
-DAOCHI_ADMIN_TOKEN=<optional app registry write token>
+DAOCHI_ADMIN_TOKEN=<optional admin token; also gates GET /metrics and app registry writes when set>
 DAOCHI_TOKEN_SECRET_HEX=<stable 64+ hex chars shared by every server instance>
 DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX=<ed25519 public key hex for signed app approvals>
 DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE=/run/secrets/node_registry_public.hex
-DAOCHI_KNOWN_NODES=Mirror=https://mirror.example;sync=pull;apps=inbe;collections=inbe.*;data=encrypted_records
+DAOCHI_NODE_NAME=Home
+DAOCHI_NODE_IDENTITY_KEY_FILE=/var/lib/daochi/node.key
+DAOCHI_LAN_DISCOVERY=1
+DAOCHI_KNOWN_NODES=Public=https://api.example.com;sync=pull;apps=inbe;collections=private.inbe.v1.*;data=app_registry+encrypted_records
 DAOCHI_NODE_SYNC_TOKEN=<shared secret for trusted node-to-node mesh sync>
 DAOCHI_NODE_SYNC_INTERVAL_SECONDS=60
 DAOCHI_NODE_SYNC_BATCH_LIMIT=500
@@ -235,6 +262,18 @@ public ID returns the same address, so purchasing for yourself and gifting use
 the same payment flow. Rate values are snapshotted when a transfer is first
 observed. Existing product invoices remain available during migration.
 
+The background reconciler runs whenever `MONERO_WALLET_RPC_URL` is configured,
+even with `DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED` unset, so confirmed deposits
+keep settling while purchase creation is disabled. The deposit scan keeps a
+persisted height bookmark and only fetches transfers from that height onward,
+plus the mempool pool. Fixed-price invoices accept partial payments that
+accumulate across transfers until they cover the price. A payment that lands
+after an invoice expired is still credited by the expired-invoice sweep;
+partial funds on an expired invoice cannot be credited or refunded
+automatically from a view-only wallet, so they are reported once through the
+`daochi_monero_stuck_invoices_total` metric and a warning log for manual
+disposition.
+
 The wallet RPC should open a view-only wallet, bind only to loopback, and
 require RPC authentication. Daochi needs the wallet-state-changing
 `create_address` method, so do not enable `--restricted-rpc`; the view-only
@@ -256,9 +295,23 @@ spend-capable wallet. The node archive contains only the view-only wallet and
 its runtime credentials. For mainnet, restore the mnemonic offline and verify
 the primary address before deploying the view-only archive.
 
-`DAOCHI_KNOWN_NODES` is a comma-separated public peer-node list. Entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`; `/api/v1/node` publishes that list as `known_nodes` so clients and the nodes page can discover node-to-node connections. A peer entry can add semicolon-separated sync policy fields: `sync=<pull|push|bidirectional|none>`, `apps=inbe`, `collections=inbe.*`, and `data=encrypted_records+app_registry`. These policies control what the node sync worker pulls from trusted peers.
+Each node has a persistent Ed25519 identity. By default it is stored beside the database as a mode-`0600` key; production deployments should set `DAOCHI_NODE_IDENTITY_KEY_FILE` explicitly or supply `DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX_FILE`. `DAOCHI_LAN_DISCOVERY=1` advertises `_daochi._tcp.local` with mDNS. Discovery only finds candidates: it never grants trust or starts replication.
 
-Node-to-node mesh sync is disabled until `DAOCHI_NODE_SYNC_TOKEN` is set. Trusted peers call `POST /api/v1/node/mesh/export` and `POST /api/v1/node/mesh/import` with either `Authorization: Bearer <token>` or `X-Daochi-Node-Token: <token>`. `DAOCHI_NODE_SYNC_INTERVAL_SECONDS` enables the background pull worker for peers whose policy is `sync=pull` or `sync=bidirectional`; `DAOCHI_NODE_SYNC_BATCH_LIMIT` caps each export page. The first implemented replication surface is encrypted app records plus the account public key needed to create the local account row; social/account projections and opaque encrypted envelopes remain client/API owned.
+Pairing is operator-controlled. Create a short-lived, signed invite with `POST /api/v1/node/pairing/invites`, transfer its JSON as text or a QR payload, and accept it on the other node with `POST /api/v1/node/pairing/accept`. Acceptance automatically posts a signed completion to the inviter, so one invite establishes reciprocal trust while storing directional policy from each node's perspective. The invite is single-use and fixes the peer identity, addresses, direction, apps, collections, trust spaces, and data classes. Paired requests are signed, time-bounded, and replay-protected. If `DAOCHI_ADMIN_TOKEN` is configured, pairing and namespace writes require `X-Daochi-Admin`; without it they are limited to loopback callers. Both nodes need reachable `DAOCHI_BASE_URL` values during pairing.
+
+`DAOCHI_KNOWN_NODES` remains the convenient public-node/bootstrap path. It is a comma-separated peer list whose entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`. A peer can add `sync=<pull|push|bidirectional|none>`, `apps=inbe`, `collections=private.inbe.v1.*`, `spaces=<space-id>`, and `data=app_registry+encrypted_records+names`. The node worker tries configured and paired peers with pull permission. `DAOCHI_NODE_SYNC_INTERVAL_SECONDS` controls polling and `DAOCHI_NODE_SYNC_BATCH_LIMIT` caps record pages.
+
+The mesh replicates signed app manifests, opaque encrypted app records, deletion tombstones, and signed trust-space names. App manifests are verified against the receiving node's configured registry authority and are installed before records, so a new home or neighbor node can validate collection ownership offline. Social/account projections, payments, and opaque whole-request envelopes remain API or online-authority owned. The old shared `DAOCHI_NODE_SYNC_TOKEN` is still accepted for configured-node migration, but signed pairing is the preferred trust path.
+
+Trust-space naming is an application-level ICANN alternative, not public DNS. An operator creates a local authority with `POST /api/v1/namespaces`, signs names such as `daochi://<space-id>/home` through `POST /api/v1/namespaces/claims`, and resolves them with `GET /api/v1/namespaces/resolve`. Claims replicate to approved peers, but the authority private key does not. Different neighborhoods may intentionally resolve the same label differently; there is no global blockchain or automatic claim that browsers and the public DNS root will recognize these names.
+
+Deletions replicate too: exports carry record tombstones in a separate
+`deletions` field, and imports apply them when the tombstone timestamp is at
+least as new as the stored record. Older peers that do not know the field
+ignore it, so mixed-version meshes keep working. Account deletion and full
+client re-syncs (`full_sync_requested`) propagate as per-record tombstones,
+and applying an imported delete re-logs it locally, letting a deletion travel
+multiple hops.
 
 Generate a token secret once and keep it stable across restarts and every deployed instance:
 
@@ -267,6 +320,8 @@ openssl rand -hex 32
 ```
 
 If `DAOCHI_TOKEN_SECRET_HEX` is missing, Daochi generates a random in-memory secret at startup. That is only suitable for single-process local development: existing bearer tokens become invalid after restart, and multi-instance deployments will reject tokens issued by another instance.
+
+Malformed environment values abort startup with the offending key name instead of silently falling back. `GET /metrics` is public only while no admin token is configured; once `DAOCHI_ADMIN_TOKEN` is set, scrape it with `X-Daochi-Admin: <token>`. The exposition includes a `daochi_build_info{version=...}` gauge identifying the running build when the binary was stamped via `make build VERSION=<...>` or the Docker/CI build args.
 
 Encrypted envelope limits are disabled by default to avoid surprising existing clients. Set `DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN` to cap each envelope response, `DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES` to reject writes that would exceed an account quota, and `DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS` only after clients can tolerate older envelope pruning.
 

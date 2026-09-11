@@ -30,6 +30,10 @@ type Config struct {
 	NodeSyncToken                   string
 	NodeSyncInterval                time.Duration
 	NodeSyncBatchLimit              int
+	NodeIdentityKeyFile             string
+	NodeIdentityPrivateKey          ed25519.PrivateKey
+	NodeDisplayName                 string
+	LANDiscovery                    bool
 	WaoziIssuerPublicKey            ed25519.PublicKey
 	WaoziIssuerPrivateKey           ed25519.PrivateKey
 	TokenProducts                   map[string]TokenProduct
@@ -75,6 +79,15 @@ func loadConfig() Config {
 		issuerPublic = issuerPrivate.Public().(ed25519.PublicKey)
 	}
 	baseURL := envString("DAOCHI_BASE_URL", "https://api.example.com")
+	nodeKeyBytes := envBytesHexOrFile("DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX", "DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX_FILE", nil)
+	var nodePrivateKey ed25519.PrivateKey
+	if len(nodeKeyBytes) == ed25519.SeedSize {
+		nodePrivateKey = ed25519.NewKeyFromSeed(nodeKeyBytes)
+	} else if len(nodeKeyBytes) == ed25519.PrivateKeySize {
+		nodePrivateKey = ed25519.PrivateKey(nodeKeyBytes)
+	} else if len(nodeKeyBytes) != 0 {
+		log.Fatal("DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX must contain a 32-byte Ed25519 seed or 64-byte private key")
+	}
 	return Config{
 		Addr:                            envString("DAOCHI_ADDR", "127.0.0.1:8080"),
 		BaseURL:                         baseURL,
@@ -93,6 +106,10 @@ func loadConfig() Config {
 		NodeSyncToken:                   envString("DAOCHI_NODE_SYNC_TOKEN", ""),
 		NodeSyncInterval:                envDurationSeconds("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", 0),
 		NodeSyncBatchLimit:              envInt("DAOCHI_NODE_SYNC_BATCH_LIMIT", 500),
+		NodeIdentityKeyFile:             envString("DAOCHI_NODE_IDENTITY_KEY_FILE", envString("DAOCHI_DB", "daochi.db")+".node-key"),
+		NodeIdentityPrivateKey:          nodePrivateKey,
+		NodeDisplayName:                 envString("DAOCHI_NODE_NAME", "Daochi Node"),
+		LANDiscovery:                    envBool("DAOCHI_LAN_DISCOVERY", true),
 		WaoziIssuerPublicKey:            issuerPublic,
 		WaoziIssuerPrivateKey:           issuerPrivate,
 		TokenProducts:                   envTokenProductsValue(envString("DAOCHI_TOKEN_PRODUCTS", "")),
@@ -122,7 +139,10 @@ func envString(key, fallback string) string {
 func envDurationSeconds(key string, fallback time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		seconds, err := strconv.Atoi(value)
-		if err == nil && seconds > 0 {
+		if err != nil {
+			log.Fatalf("invalid %s: not an integer: %q", key, value)
+		}
+		if seconds > 0 {
 			return time.Duration(seconds) * time.Second
 		}
 	}
@@ -132,7 +152,10 @@ func envDurationSeconds(key string, fallback time.Duration) time.Duration {
 func envDurationDays(key string, fallback time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		days, err := strconv.Atoi(value)
-		if err == nil && days > 0 {
+		if err != nil {
+			log.Fatalf("invalid %s: not an integer: %q", key, value)
+		}
+		if days > 0 {
 			return time.Duration(days) * 24 * time.Hour
 		}
 	}
@@ -142,7 +165,10 @@ func envDurationDays(key string, fallback time.Duration) time.Duration {
 func envInt(key string, fallback int) int {
 	if value := os.Getenv(key); value != "" {
 		n, err := strconv.Atoi(value)
-		if err == nil && n > 0 {
+		if err != nil {
+			log.Fatalf("invalid %s: not an integer: %q", key, value)
+		}
+		if n > 0 {
 			return n
 		}
 	}
@@ -152,7 +178,10 @@ func envInt(key string, fallback int) int {
 func envInt64(key string, fallback int64) int64 {
 	if value := os.Getenv(key); value != "" {
 		n, err := strconv.ParseInt(value, 10, 64)
-		if err == nil && n > 0 {
+		if err != nil {
+			log.Fatalf("invalid %s: not an integer: %q", key, value)
+		}
+		if n > 0 {
 			return n
 		}
 	}
@@ -169,9 +198,12 @@ func envBool(key string, fallback bool) bool {
 func envBytesHex(key string, fallback []byte) []byte {
 	if value := os.Getenv(key); value != "" {
 		decoded, err := hex.DecodeString(value)
-		if err == nil {
-			return decoded
+		if err != nil {
+			// A malformed secret must abort startup, not silently fall
+			// back (e.g. to an ephemeral token secret).
+			log.Fatalf("invalid %s: not valid hex: %q", key, value)
 		}
+		return decoded
 	}
 	return fallback
 }
@@ -277,6 +309,8 @@ func envNodeSyncPolicyValue(fields []string) *NodeSyncPolicy {
 			policy.Apps = splitNodeSyncList(value)
 		case "collection", "collections":
 			policy.Collections = splitNodeSyncList(value)
+		case "space", "spaces", "space_id", "space_ids":
+			policy.Spaces = splitNodeSyncList(value)
 		case "data", "type", "types":
 			policy.Data = splitNodeSyncList(value)
 		case "enabled":
@@ -285,7 +319,8 @@ func envNodeSyncPolicyValue(fields []string) *NodeSyncPolicy {
 			}
 		}
 	}
-	if policy.Direction == "" && len(policy.Apps) == 0 && len(policy.Collections) == 0 && len(policy.Data) == 0 {
+	if policy.Direction == "" && len(policy.Apps) == 0 && len(policy.Collections) == 0 &&
+		len(policy.Spaces) == 0 && len(policy.Data) == 0 {
 		return nil
 	}
 	if policy.Direction == "" {

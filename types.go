@@ -39,15 +39,17 @@ type LoginResponse struct {
 }
 
 type NodePeer struct {
-	Name string          `json:"name,omitempty"`
-	URL  string          `json:"url"`
-	Sync *NodeSyncPolicy `json:"sync,omitempty"`
+	Name   string          `json:"name,omitempty"`
+	URL    string          `json:"url"`
+	NodeID string          `json:"node_id,omitempty"`
+	Sync   *NodeSyncPolicy `json:"sync,omitempty"`
 }
 
 type NodeSyncPolicy struct {
 	Direction   string   `json:"direction,omitempty"`
 	Apps        []string `json:"apps,omitempty"`
 	Collections []string `json:"collections,omitempty"`
+	Spaces      []string `json:"spaces,omitempty"`
 	Data        []string `json:"data,omitempty"`
 }
 
@@ -165,6 +167,8 @@ type SyncResponse struct {
 	MinSupportedProtocol              int                `json:"min_supported_protocol,omitempty"`
 	LatestProtocol                    int                `json:"latest_protocol,omitempty"`
 	LegacyClients                     []string           `json:"legacy_clients,omitempty"`
+	LegacyWriteRequired               bool               `json:"legacy_write_required"`
+	LegacyProjectionEpoch             int64              `json:"legacy_projection_epoch,omitempty"`
 	Diagnostics                       *SyncDiagnostics   `json:"diagnostics,omitempty"`
 }
 

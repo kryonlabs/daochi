@@ -26,7 +26,7 @@ type SignedTxEnvelope struct {
 	TxID             string `json:"tx_id"`
 	AccountID        string `json:"account_id"`
 	AppID            string `json:"app_id"`
-	AppKeyID         string `json:"app_key_id"`
+	DeviceKeyID      string `json:"device_key_id"`
 	Method           string `json:"method"`
 	Path             string `json:"path"`
 	BodySHA256       string `json:"body_sha256"`
@@ -34,7 +34,7 @@ type SignedTxEnvelope struct {
 	ExpiresAt        int64  `json:"expires_at"`
 	SignatureContext string `json:"signature_context,omitempty"`
 	Signature        string `json:"signature"`
-	AppSignature     string `json:"app_signature"`
+	DeviceSignature  string `json:"device_signature"`
 }
 
 type SignedAppGrantRequest struct {
@@ -113,14 +113,14 @@ func normalizeSignedTx(tx *SignedTxEnvelope) {
 	tx.TxID = strings.TrimSpace(tx.TxID)
 	tx.AccountID = strings.ToLower(strings.TrimSpace(tx.AccountID))
 	tx.AppID = strings.TrimSpace(tx.AppID)
-	tx.AppKeyID = strings.TrimSpace(tx.AppKeyID)
+	tx.DeviceKeyID = strings.TrimSpace(tx.DeviceKeyID)
 	tx.Method = strings.ToUpper(strings.TrimSpace(tx.Method))
 	tx.Path = strings.TrimSpace(tx.Path)
 	tx.BodySHA256 = strings.ToLower(strings.TrimSpace(tx.BodySHA256))
 	tx.Nonce = strings.TrimSpace(tx.Nonce)
 	tx.SignatureContext = strings.TrimSpace(tx.SignatureContext)
 	tx.Signature = strings.TrimSpace(tx.Signature)
-	tx.AppSignature = strings.TrimSpace(tx.AppSignature)
+	tx.DeviceSignature = strings.TrimSpace(tx.DeviceSignature)
 }
 
 func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byte, tx SignedTxEnvelope, accountID, appID string) error {
@@ -167,7 +167,7 @@ func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byt
 	if !s.verifier.Verify(publicKey, message, signature) {
 		return authError{status: http.StatusUnauthorized, message: "signed transaction rejected"}
 	}
-	if err := s.verifyAppSignedTx(ctx, tx, message); err != nil {
+	if err := s.verifyDeviceSignedTx(ctx, tx, message); err != nil {
 		return err
 	}
 	if err := s.store.RecordSignedTx(ctx, tx); err != nil {
@@ -176,33 +176,34 @@ func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byt
 		}
 		return err
 	}
+	if err := s.store.TouchDeviceKey(ctx, tx.AccountID, tx.AppID, tx.DeviceKeyID); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (s *Server) verifyAppSignedTx(ctx context.Context, tx SignedTxEnvelope, message []byte) error {
-	if !validClientID(tx.AppKeyID) {
-		return authError{status: http.StatusBadRequest, message: "invalid app key id"}
+func (s *Server) verifyDeviceSignedTx(ctx context.Context, tx SignedTxEnvelope, message []byte) error {
+	if !validClientID(tx.DeviceKeyID) {
+		return authError{status: http.StatusBadRequest, message: "invalid device key id"}
 	}
-	appKey, found, err := s.store.ActiveAppKey(ctx, tx.AppID, tx.AppKeyID)
+	deviceKey, found, err := s.store.ActiveDeviceKey(ctx, tx.AccountID, tx.AppID,
+		tx.DeviceKeyID)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return authError{status: http.StatusUnauthorized, message: "app key not registered"}
+		return authError{status: http.StatusUnauthorized, message: "device key not registered"}
 	}
-	if !strings.EqualFold(appKey.Algorithm, "Ed25519") {
-		return authError{status: http.StatusUnauthorized, message: "unsupported app key algorithm"}
-	}
-	publicKey, err := decodeBinaryField(appKey.PublicKey)
+	publicKey, err := decodeBinaryField(deviceKey.PublicKey)
 	if err != nil || len(publicKey) != ed25519.PublicKeySize {
 		return authError{status: http.StatusUnauthorized, message: "invalid app public key"}
 	}
-	signature, err := decodeBinaryField(tx.AppSignature)
+	signature, err := decodeBinaryField(tx.DeviceSignature)
 	if err != nil || len(signature) != ed25519.SignatureSize {
-		return authError{status: http.StatusBadRequest, message: "invalid app signature"}
+		return authError{status: http.StatusBadRequest, message: "invalid device signature"}
 	}
 	if !ed25519.Verify(publicKey, message, signature) {
-		return authError{status: http.StatusUnauthorized, message: "app signature rejected"}
+		return authError{status: http.StatusUnauthorized, message: "device signature rejected"}
 	}
 	return nil
 }
@@ -219,7 +220,7 @@ func canonicalSignedTxMessage(tx SignedTxEnvelope) []byte {
 	b.WriteByte('\n')
 	b.WriteString(tx.AppID)
 	b.WriteByte('\n')
-	b.WriteString(tx.AppKeyID)
+	b.WriteString(tx.DeviceKeyID)
 	b.WriteByte('\n')
 	b.WriteString(tx.Method)
 	b.WriteByte('\n')

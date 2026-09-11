@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -27,6 +28,13 @@ func localHTTPURL(addr string) string {
 
 func main() {
 	cfg := loadConfig()
+	if len(cfg.NodeIdentityPrivateKey) == 0 {
+		nodeKey, nodeErr := loadOrCreateNodeIdentityKey(cfg.NodeIdentityKeyFile)
+		if nodeErr != nil {
+			log.Fatalf("load node identity: %v", nodeErr)
+		}
+		cfg.NodeIdentityPrivateKey = nodeKey
+	}
 	if len(os.Args) > 1 && os.Args[1] == "inspect" {
 		if err := runInspect(context.Background(), os.Args[2:], InspectOptions{DBPath: cfg.DBPath}); err != nil {
 			log.Fatalf("inspect: %v", err)
@@ -52,7 +60,10 @@ func main() {
 	runtimeContext, stopRuntime := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopRuntime()
 	var workers sync.WaitGroup
-	if cfg.TokenDirectPurchasesEnabled {
+	// The reconciler must run whenever a wallet is configured: even with
+	// purchases disabled it settles confirmed deposits and sweeps late
+	// invoice payments that arrived after expiry.
+	if cfg.TokenDirectPurchasesEnabled || strings.TrimSpace(cfg.MoneroWalletRPCURL) != "" {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
@@ -63,6 +74,11 @@ func main() {
 	go func() {
 		defer workers.Done()
 		daochi.runNodeSync(runtimeContext)
+	}()
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		daochi.runLANDiscovery(runtimeContext)
 	}()
 	handler := daochi.Routes()
 	server := &http.Server{

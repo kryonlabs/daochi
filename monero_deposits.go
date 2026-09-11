@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -91,12 +92,17 @@ func (s *Server) handleMoneroAddress(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.moneroAddressMu.Lock()
+	// Serialize allocation per account (the store row's primary key is the
+	// real guard); different accounts must not block each other behind one
+	// wallet RPC.
+	lockAny, _ := s.moneroAddressLocks.LoadOrStore(accountID, &sync.Mutex{})
+	addressLock := lockAny.(*sync.Mutex)
+	addressLock.Lock()
 	address, found, err := s.store.MoneroAccountAddress(r.Context(), accountID)
 	if err == nil && !found {
 		address, err = s.store.CreateMoneroAccountAddress(r.Context(), accountID, s.cfg)
 	}
-	s.moneroAddressMu.Unlock()
+	addressLock.Unlock()
 	if err != nil {
 		slog.Error("allocate monero account address", "account", logText(accountID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero address unavailable")
@@ -183,6 +189,33 @@ VALUES(?1,0,?2,?3,?4)`, accountID, index, address, allocationID); err != nil {
 	return out, err
 }
 
+// MoneroScanHeight returns the last wallet height whose transfers were
+// already scanned; 0 means "never scanned".
+func (s *Store) MoneroScanHeight(ctx context.Context) (int64, error) {
+	var height int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT last_height FROM monero_wallet_state WHERE wallet_id='default'`).Scan(&height)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return height, err
+}
+
+// SaveMoneroScanHeight advances the scan bookmark; it never moves
+// backwards, so a reorg cannot skip transfers.
+func (s *Store) SaveMoneroScanHeight(ctx context.Context, height int64) error {
+	if height <= 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO monero_wallet_state(wallet_id,last_height,updated_at)
+VALUES('default',?1,?2)
+ON CONFLICT(wallet_id) DO UPDATE SET
+	last_height=MAX(monero_wallet_state.last_height,excluded.last_height),
+	updated_at=excluded.updated_at`, height, canonicalNow())
+	return err
+}
+
 func (s *Store) moneroAddressOwners(ctx context.Context) (map[[2]int]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT account_index,address_index,account_id
@@ -204,18 +237,52 @@ WHERE disabled_at=''`)
 	return out, rows.Err()
 }
 
-func listMoneroTransfers(ctx context.Context, cfg Config) ([]moneroTransferRPC, error) {
-	var result struct {
-		In   []moneroTransferRPC `json:"in"`
-		Pool []moneroTransferRPC `json:"pool"`
-	}
-	if err := moneroRPC(ctx, cfg, "get_transfers", map[string]any{
-		"in": true, "pool": true, "pending": true, "failed": false, "account_index": 0,
-	}, &result); err != nil {
+// listMoneroTransfers returns incoming transfers for the whole wallet
+// without rescanning the entire history every poll: confirmed transfers
+// are requested from the persisted scan bookmark onward, pool transfers
+// (height 0, filtered out by min_height) are fetched separately.
+func (s *Server) listMoneroTransfers(ctx context.Context) ([]moneroTransferRPC, error) {
+	bookmark, err := s.store.MoneroScanHeight(ctx)
+	if err != nil {
 		return nil, err
 	}
-	byPayment := make(map[string]moneroTransferRPC, len(result.Pool)+len(result.In))
-	for _, transfer := range append(result.Pool, result.In...) {
+	var confirmed struct {
+		In      []moneroTransferRPC `json:"in"`
+		Pending []moneroTransferRPC `json:"pending"`
+	}
+	if err := moneroRPC(ctx, s.cfg, "get_transfers", map[string]any{
+		"in": true, "pending": true, "failed": false, "account_index": 0,
+		"min_height": bookmark,
+	}, &confirmed); err != nil {
+		return nil, err
+	}
+	var pool struct {
+		Pool []moneroTransferRPC `json:"pool"`
+	}
+	if err := moneroRPC(ctx, s.cfg, "get_transfers", map[string]any{
+		"pool": true, "account_index": 0,
+	}, &pool); err != nil {
+		return nil, err
+	}
+	maxHeight := bookmark
+	var walletHeight struct {
+		Height int64 `json:"height"`
+	}
+	if err := moneroRPC(ctx, s.cfg, "get_height", map[string]any{}, &walletHeight); err == nil && walletHeight.Height > maxHeight {
+		maxHeight = walletHeight.Height
+	}
+	for _, transfer := range confirmed.In {
+		if transfer.Height > maxHeight {
+			maxHeight = transfer.Height
+		}
+	}
+	if maxHeight > bookmark {
+		if err := s.store.SaveMoneroScanHeight(ctx, maxHeight); err != nil {
+			return nil, err
+		}
+	}
+	byPayment := make(map[string]moneroTransferRPC, len(pool.Pool)+len(confirmed.In)+len(confirmed.Pending))
+	for _, transfer := range append(pool.Pool, append(confirmed.In, confirmed.Pending...)...) {
 		key := fmt.Sprintf("%s:%d:%d", transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
 		if previous, ok := byPayment[key]; !ok || transfer.Confirmations >= previous.Confirmations {
 			byPayment[key] = transfer
@@ -239,7 +306,7 @@ func (s *Server) reconcileMoneroAccountDeposits(ctx context.Context) error {
 	if len(owners) == 0 {
 		return nil
 	}
-	transfers, err := listMoneroTransfers(ctx, s.cfg)
+	transfers, err := s.listMoneroTransfers(ctx)
 	if err != nil {
 		return err
 	}

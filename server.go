@@ -25,25 +25,25 @@ var userIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
 var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
 var ukuIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{4,128}$`)
-var ksyncNamespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
-var ksyncNamespaceSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9_:-]{1,64}$`)
-var ksyncVersionSegmentPattern = regexp.MustCompile(`^v[1-9][0-9]{0,3}$`)
+var namespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
+var namespaceSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9_:-]{1,64}$`)
+var versionSegmentPattern = regexp.MustCompile(`^v[1-9][0-9]{0,3}$`)
 var encryptedRecordIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
 var contentHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const (
 	daochiSignatureContext          = "daochi-sync-v1"
-	ksyncSignatureContext           = "ksync-sync-v1"
+	legacySyncSignatureContext      = "ksync-sync-v1"
 	legacyInbeSignatureContext      = "inbe-sync-v1"
-	ksyncMinSupportedProtocol       = 1
-	ksyncLatestProtocol             = 6
-	ksyncCompatibilityDeadline      = "2027-09-01"
-	ksyncPreviousVersionGrace       = 365
+	minSupportedProtocol            = 1
+	latestProtocol                  = 6
+	compatibilityDeadline           = "2027-09-01"
+	previousVersionGraceDays        = 365
 	nodeUsageRecentWindowDays       = 30
 	webSocketConnectionLimitPerUser = 8
 )
 
-var ksyncServerCapabilities = []string{
+var serverCapabilities = []string{
 	"aliases",
 	"friends",
 	"v3-typed-sync",
@@ -60,22 +60,34 @@ var ksyncServerCapabilities = []string{
 	"profile-stats",
 	"pub-relay",
 	"node-mesh-encrypted-records",
+	"node-identity-v1",
+	"node-pairing-v1",
+	"trust-space-names-v1",
 	"monero-account-addresses",
 	"monero-gifts",
 }
 
 type Server struct {
-	cfg             Config
-	store           *Store
-	challenges      *ChallengeStore
-	verifier        Verifier
-	syncHub         *syncHub
-	limiter         *RateLimiter
-	metrics         *ServerMetrics
-	moneroAddressMu sync.Mutex
+	cfg        Config
+	store      *Store
+	challenges *ChallengeStore
+	verifier   Verifier
+	syncHub    *syncHub
+	limiter    *RateLimiter
+	metrics    *ServerMetrics
+	node       NodeIdentity
+	// Per-account Monero address allocation locks; key is account ID.
+	moneroAddressLocks sync.Map
+	// Invoice IDs already reported as carrying uncredited funds, so the
+	// expired-invoice sweep logs and counts each one once per process.
+	moneroStuckNotified sync.Map
 }
 
 func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
+	node, err := newNodeIdentity(cfg.NodeIdentityPrivateKey)
+	if err != nil {
+		panic(err)
+	}
 	return &Server{
 		cfg:        cfg,
 		store:      store,
@@ -84,6 +96,7 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 		syncHub:    newSyncHub(),
 		limiter:    NewRateLimiter(),
 		metrics:    &ServerMetrics{},
+		node:       node,
 	}
 }
 
@@ -94,6 +107,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("GET /api/v1/node", s.handleNodeInfo)
+	mux.HandleFunc("POST /api/v1/node/pairing/invites", s.handleCreatePairingInvite)
+	mux.HandleFunc("POST /api/v1/node/pairing/accept", s.handleAcceptPairingInvite)
+	mux.HandleFunc("POST /api/v1/node/pairing/complete", s.handleCompletePairing)
+	mux.HandleFunc("GET /api/v1/node/peers", s.handleListTrustedPeers)
+	mux.HandleFunc("POST /api/v1/namespaces", s.handleCreateTrustSpace)
+	mux.HandleFunc("POST /api/v1/namespaces/claims", s.handleRegisterNameClaim)
+	mux.HandleFunc("GET /api/v1/namespaces/resolve", s.handleResolveName)
 	mux.HandleFunc("POST /api/v1/node/mesh/export", s.handleNodeMeshExport)
 	mux.HandleFunc("POST /api/v1/node/mesh/import", s.handleNodeMeshImport)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
@@ -126,6 +146,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
 	mux.HandleFunc("POST /api/v1/account/profile-icon", s.handleProfileIcon)
 	mux.HandleFunc("GET /api/v1/account/export", s.handleAccountExport)
+	mux.HandleFunc("GET /api/v1/account/devices", s.handleAccountDevices)
+	mux.HandleFunc("POST /api/v1/account/devices", s.handleAccountDevices)
+	mux.HandleFunc("DELETE /api/v1/account/devices", s.handleAccountDevices)
 	mux.HandleFunc("GET /api/v1/account/app-grants", s.handleAppGrants)
 	mux.HandleFunc("POST /api/v1/account/app-grants", s.handleAppGrants)
 	mux.HandleFunc("POST /api/v1/account/app-grants/signed", s.handleSignedAppGrant)
@@ -205,20 +228,29 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":       "ok",
-		"base_url":     strings.TrimSpace(s.cfg.BaseURL),
-		"capabilities": ksyncServerCapabilities,
-		"known_nodes":  knownNodes,
-		"usage":        usage,
-		"storage":      storage,
+		"status":          "ok",
+		"node_id":         s.node.ID,
+		"node_public_key": hex.EncodeToString(s.node.PublicKey),
+		"node_name":       s.cfg.NodeDisplayName,
+		"base_url":        strings.TrimSpace(s.cfg.BaseURL),
+		"capabilities":    serverCapabilities,
+		"known_nodes":     knownNodes,
+		"usage":           usage,
+		"storage":         storage,
 		"protocol": map[string]int{
-			"min_supported": ksyncMinSupportedProtocol,
-			"latest":        ksyncLatestProtocol,
+			"min_supported": minSupportedProtocol,
+			"latest":        latestProtocol,
 		},
 	})
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	// Metrics expose user counts, traffic, and topology; when an admin
+	// token is configured, require it. Deployments without one keep the
+	// historical public endpoint (health checks use /healthz and /readyz).
+	if s.cfg.AdminToken != "" && !s.requireAdmin(w, r) {
+		return
+	}
 	usage, err := s.nodeUsage(r.Context())
 	if err != nil {
 		slog.Error("load metrics usage", "error", err)
@@ -473,7 +505,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	response := SyncResponse{
 		ProtocolVersion:      req.ProtocolVersion,
 		Status:               "ok",
-		ServerCapabilities:   ksyncServerCapabilities,
+		ServerCapabilities:   serverCapabilities,
 		TransitionMode:       syncTransitionMode(req),
 		Applied:              result,
 		AccountAlias:         accountAlias,
@@ -487,8 +519,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		AcceptedOps:          acceptedOps,
 		Ops:                  remoteOps,
 		Changes:              changes,
-		MinSupportedProtocol: ksyncMinSupportedProtocol,
-		LatestProtocol:       ksyncLatestProtocol,
+		MinSupportedProtocol: minSupportedProtocol,
+		LatestProtocol:       latestProtocol,
 		Diagnostics: &SyncDiagnostics{
 			SnapshotReason:              snapshotReason,
 			RequestedSinceServerVersion: req.SinceServerVersion,
@@ -562,7 +594,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "delete logs failed")
 			return
 		}
-		response.LegacyClients, err = s.store.LegacyClients(r.Context(), req.UserIDHash, 3)
+		response.LegacyClients, err = s.store.LegacyClients(
+			r.Context(), req.UserIDHash, latestProtocol)
 		if err != nil {
 			slog.Error("load legacy clients", "user", logText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "legacy clients failed")
@@ -571,6 +604,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		if len(response.LegacyClients) > 0 {
 			s.metrics.legacyClientHints.Add(uint64(len(response.LegacyClients)))
 		}
+	}
+	response.LegacyWriteRequired, response.LegacyProjectionEpoch, err =
+		s.store.LegacyWritePolicy(r.Context(), req.UserIDHash)
+	if err != nil {
+		slog.Error("load legacy write policy", "user", logText(req.UserIDHash), "error", err)
+		writeError(w, http.StatusInternalServerError, "legacy write policy failed")
+		return
 	}
 	if response.Diagnostics != nil {
 		response.Diagnostics.ReturnedChanges = syncChangesResult(response.Changes)
@@ -669,13 +709,13 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "encrypted sync failed")
 		return false
 	}
-	if err := s.store.RecordClientSync(r.Context(), userID, clientID, sinceVersion, serverVersion, ksyncLatestProtocol, serverVersion); err != nil {
+	if err := s.store.RecordClientSync(r.Context(), userID, clientID, sinceVersion, serverVersion, latestProtocol, serverVersion); err != nil {
 		slog.Error("record encrypted sync client", "user", logText(userID), "client", logText(clientID), "error", err)
 	}
 	if err := s.store.RecordSyncAudit(r.Context(), SyncAuditEntry{
 		UserIDHash:            userID,
 		ClientID:              clientID,
-		ProtocolVersion:       ksyncLatestProtocol,
+		ProtocolVersion:       latestProtocol,
 		SinceServerVersion:    sinceVersion,
 		ClientClock:           sinceVersion,
 		ServerVersion:         serverVersion,
@@ -687,17 +727,17 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 	s.metrics.syncEncryptedPayloads.Add(1)
 	s.syncHub.publish(userID, serverVersion)
 	response := SyncResponse{
-		ProtocolVersion:      ksyncLatestProtocol,
+		ProtocolVersion:      latestProtocol,
 		Status:               "ok",
-		ServerCapabilities:   ksyncServerCapabilities,
+		ServerCapabilities:   serverCapabilities,
 		TransitionMode:       "encrypted_payload",
 		ServerVersion:        serverVersion,
 		ServerClock:          serverVersion,
 		ChangesComplete:      true,
 		Changes:              emptySyncChanges(),
 		EncryptedPayloads:    payloads,
-		MinSupportedProtocol: ksyncMinSupportedProtocol,
-		LatestProtocol:       ksyncLatestProtocol,
+		MinSupportedProtocol: minSupportedProtocol,
+		LatestProtocol:       latestProtocol,
 	}
 	if truncated {
 		response.EncryptedPayloadsTruncated = true
@@ -1164,7 +1204,7 @@ func validProfileIcon(profileIcon int) bool {
 }
 
 func validNamespace(value string) bool {
-	return ksyncNamespacePattern.MatchString(value)
+	return namespacePattern.MatchString(value)
 }
 
 func validEncryptedRecord(item EncryptedRecord) bool {
@@ -1210,17 +1250,17 @@ func validEncryptedRecordMetadata(item EncryptedRecord) bool {
 func validEncryptedHierarchyCollection(collection string) bool {
 	parts := strings.Split(strings.TrimSpace(collection), ".")
 	if len(parts) == 3 && parts[0] == "account" {
-		return ksyncVersionSegmentPattern.MatchString(parts[1]) &&
-			ksyncNamespaceSegmentPattern.MatchString(parts[2])
+		return versionSegmentPattern.MatchString(parts[1]) &&
+			namespaceSegmentPattern.MatchString(parts[2])
 	}
 	if len(parts) >= 4 && (parts[0] == "private" || parts[0] == "shared" ||
 		parts[0] == "friends" || parts[0] == "public") {
-		if !ksyncNamespaceSegmentPattern.MatchString(parts[1]) ||
-			!ksyncVersionSegmentPattern.MatchString(parts[2]) {
+		if !namespaceSegmentPattern.MatchString(parts[1]) ||
+			!versionSegmentPattern.MatchString(parts[2]) {
 			return false
 		}
 		for _, part := range parts[3:] {
-			if !ksyncNamespaceSegmentPattern.MatchString(part) {
+			if !namespaceSegmentPattern.MatchString(part) {
 				return false
 			}
 		}
@@ -1510,12 +1550,12 @@ func requestSignatureHeader(r *http.Request) (string, string) {
 		return value, daochiSignatureContext
 	}
 	if value := strings.TrimSpace(r.Header.Get("X-Ksync-Signature")); value != "" {
-		return value, ksyncSignatureContext
+		return value, legacySyncSignatureContext
 	}
 	if value := strings.TrimSpace(r.Header.Get("X-Inbe-Signature")); value != "" {
 		return value, legacyInbeSignatureContext
 	}
-	return "", ksyncSignatureContext
+	return "", legacySyncSignatureContext
 }
 
 func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, SyncRequest, error) {

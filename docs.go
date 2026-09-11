@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 )
 
 func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
@@ -80,12 +81,18 @@ a{color:#0b625d}
 <article class="card"><h2>Post-quantum account authority</h2><p>The durable account key is ML-DSA-44. Clients prove control with short-lived challenges before receiving operational bearer tokens.</p></article>
 <article class="card"><h2>App-owned records</h2><p>Applications keep ownership of their data while the relay stores versions, opaque encrypted payloads, and shared projections.</p></article>
 <article class="card"><h2>Remote events</h2><p>WebSocket events wake clients when fresh sync data is available without exposing bearer tokens through URLs.</p></article>
-<article class="card"><h2>Mesh roadmap</h2><p>The protocol is shaped for local-first and cross-device sync, with server relay as the current deployment path.</p></article>
+<article class="card"><h2>Trusted mesh</h2><p>Signed pairing, local discovery, scoped replication, and trust-space names keep approved app data available through home and neighbor nodes.</p></article>
 </section>
 <section class="security" aria-label="Security posture">
 <p><strong>Key creation starts offline.</strong> A device can create its account key before the first network request; first login registers the public key, and later logins prove control with fresh signatures.</p>
 <p><strong>Private records stay client encrypted.</strong> Daochi validates metadata and versions ciphertext, but plaintext and record encryption choices remain with clients and apps.</p>
 <p><strong>The post-quantum proof is account authority.</strong> Daochi uses ML-DSA-44 signatures for identity and account authorization; app manifest keys and token issuer keys are separate Ed25519 authorities.</p>
+</section>
+<h2 class="section-title">Implementation guides</h2>
+<section class="grid" aria-label="Daochi implementation guides">
+<article class="card"><h2>Encrypted record profile</h2><p>Recommended private-record envelope, nonce rules, AAD, key rotation, and test-vector shape.</p></article>
+<article class="card"><h2>Developer quickstart</h2><p>Shortest path from account key to login, signed app manifest, encrypted sync, and diagnostics.</p></article>
+<article class="card"><h2>Small node operations</h2><p>Low-resource deployment targets, trust inspection checklist, and rollout checks for home or modest nodes.</p></article>
 </section>
 <h2 class="section-title">API surface</h2>
 <p>Protocol v5 makes encrypted records the primary private-data surface while legacy typed rows remain available for compatibility. Protocol v1 through v5 remain valid through 2027-09-01.</p>
@@ -96,8 +103,15 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/ws</code><p>Upgrades to a WebSocket event stream authenticated with <code>Authorization: Bearer &lt;token&gt;</code>, or browser subprotocols <code>daochi-sync-v1, bearer.&lt;token&gt;</code>.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/sync</code><p>Applies typed local changes or stores an encrypted envelope, then returns remote changes newer than the requested server version.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/sync/diagnostics</code><p>Returns bearer-authenticated sync state, table counts, compaction position, legacy client hints, and recent sync audit metadata.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/mesh/export</code><p>Exports policy-filtered encrypted app records to an authenticated peer node.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/mesh/import</code><p>Imports policy-filtered encrypted app records from an authenticated peer node.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/pairing/invites</code><p>Creates a short-lived signed pairing payload with explicit replication scope.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/pairing/accept</code><p>Verifies and consumes a pairing invite, then pins the peer identity and approved scope.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/pairing/complete</code><p>Authenticates the accepting node back to the inviter and completes reciprocal trust.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/node/peers</code><p>Lists paired nodes and their approved addresses and replication policies.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/namespaces</code><p>Creates a local trust-space authority for signed mesh-native names.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/namespaces/claims</code><p>Signs or updates a name claim in a locally controlled trust space.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/namespaces/resolve</code><p>Resolves a trust-space name to signed service endpoints.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/mesh/export</code><p>Exports policy-filtered signed app manifests, encrypted records, deletion tombstones, and names to an authenticated peer node.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/node/mesh/import</code><p>Verifies and imports policy-filtered app manifests, encrypted records, deletion tombstones, and names from an authenticated peer node.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the configured token issuer key.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct payment prices when direct purchases are enabled.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's token balance computed from signed ledger events.</p></section>
@@ -127,10 +141,20 @@ a{color:#0b625d}
 </html>`, statusHTML)
 }
 
+// openAPISpecJSON marshals the spec once; it is static per process, and
+// rebuilding the map tree per request was pure waste.
+var openAPISpecJSON = sync.OnceValue(func() []byte {
+	encoded, err := json.Marshal(openAPISpec())
+	if err != nil {
+		panic(fmt.Sprintf("marshal openapi spec: %v", err))
+	}
+	return append(encoded, '\n')
+})
+
 func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.oai.openapi+json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(openAPISpec())
+	_, _ = w.Write(openAPISpecJSON())
 }
 
 func openAPISpec() map[string]any {
@@ -141,16 +165,16 @@ func openAPISpec() map[string]any {
 			"version":     "1.0.0",
 			"description": "Mesh-native sync API for app-owned data. Protocol v1 through v5 remain valid through 2027-09-01; after any future deprecation, the immediately previous version stays valid for at least one additional year.",
 			"x-daochi-protocol-policy": map[string]any{
-				"min_supported_protocol":          ksyncMinSupportedProtocol,
-				"latest_protocol":                 ksyncLatestProtocol,
-				"v1_v5_valid_through":             ksyncCompatibilityDeadline,
-				"previous_version_grace_days_min": ksyncPreviousVersionGrace,
+				"min_supported_protocol":          minSupportedProtocol,
+				"latest_protocol":                 latestProtocol,
+				"v1_v5_valid_through":             compatibilityDeadline,
+				"previous_version_grace_days_min": previousVersionGraceDays,
 			},
 			"x-ksync-protocol-policy": map[string]any{
-				"min_supported_protocol":          ksyncMinSupportedProtocol,
-				"latest_protocol":                 ksyncLatestProtocol,
-				"v1_v5_valid_through":             ksyncCompatibilityDeadline,
-				"previous_version_grace_days_min": ksyncPreviousVersionGrace,
+				"min_supported_protocol":          minSupportedProtocol,
+				"latest_protocol":                 latestProtocol,
+				"v1_v5_valid_through":             compatibilityDeadline,
+				"previous_version_grace_days_min": previousVersionGraceDays,
 			},
 		},
 		"paths": map[string]any{
@@ -186,12 +210,81 @@ func openAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/node/pairing/invites": map[string]any{
+				"post": map[string]any{
+					"summary":     "Create a signed node-pairing invite",
+					"description": "Operator-only. The invite contains the node identity, addresses, expiry, and explicit replication policy.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Signed pairing invite"},
+						"403": map[string]any{"description": "Operator authorization required"},
+					},
+				},
+			},
+			"/api/v1/node/pairing/accept": map[string]any{
+				"post": map[string]any{
+					"summary":     "Accept a signed node-pairing invite",
+					"description": "Operator-only. Verifies the invite, pins the peer key and policy, and rejects expired or reused invites.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Trusted peer"},
+						"400": map[string]any{"description": "Invalid or expired invite"},
+						"409": map[string]any{"description": "Invite already consumed"},
+					},
+				},
+			},
+			"/api/v1/node/pairing/complete": map[string]any{
+				"post": map[string]any{
+					"summary":     "Complete reciprocal node pairing",
+					"description": "Verifies a signed acceptance against a locally issued, single-use invite and stores the accepting peer with the inverse directional policy.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Reciprocal peer trust established"},
+						"400": map[string]any{"description": "Invalid invite or acceptance signature"},
+						"409": map[string]any{"description": "Invite missing, expired, or already claimed"},
+					},
+				},
+			},
+			"/api/v1/node/peers": map[string]any{
+				"get": map[string]any{
+					"summary": "List paired peer nodes",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Trusted peers and their approved scopes"},
+						"403": map[string]any{"description": "Operator authorization required"},
+					},
+				},
+			},
+			"/api/v1/namespaces": map[string]any{
+				"post": map[string]any{
+					"summary": "Create a local trust-space naming authority",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "New trust space"},
+						"403": map[string]any{"description": "Operator authorization required"},
+					},
+				},
+			},
+			"/api/v1/namespaces/claims": map[string]any{
+				"post": map[string]any{
+					"summary": "Sign or update a trust-space name claim",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Signed name claim"},
+						"403": map[string]any{"description": "Operator authorization required"},
+					},
+				},
+			},
+			"/api/v1/namespaces/resolve": map[string]any{
+				"get": map[string]any{
+					"summary":     "Resolve a signed trust-space name",
+					"description": "Accepts space_id and name query parameters. Trust spaces are local views and do not replace public DNS.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Signed service claim"},
+						"404": map[string]any{"description": "Name not found"},
+					},
+				},
+			},
 			"/api/v1/node/mesh/export": map[string]any{
 				"post": map[string]any{
-					"summary":     "Export encrypted records to a trusted peer node",
-					"description": "Requires Authorization: Bearer <DAOCHI_NODE_SYNC_TOKEN> or X-Daochi-Node-Token. The response is filtered by the requested node sync policy.",
+					"summary":     "Export approved mesh data to a trusted peer node",
+					"description": "Requires a signed paired-node request or the migration node token. The response is filtered by the requested and paired sync policies.",
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Policy-filtered encrypted records"},
+						"200": map[string]any{"description": "Policy-filtered app manifests, encrypted records, tombstones, and names"},
 						"401": map[string]any{"description": "Invalid node token"},
 						"503": map[string]any{"description": "Node sync is not configured"},
 					},
@@ -199,8 +292,8 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/node/mesh/import": map[string]any{
 				"post": map[string]any{
-					"summary":     "Import encrypted records from a trusted peer node",
-					"description": "Requires Authorization: Bearer <DAOCHI_NODE_SYNC_TOKEN> or X-Daochi-Node-Token. Incoming records are filtered by the requested node sync policy and applied idempotently.",
+					"summary":     "Import approved mesh data from a trusted peer node",
+					"description": "Requires a signed paired-node request or the migration node token. Incoming objects are signature-checked, scope-checked, and applied idempotently.",
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Import result"},
 						"400": map[string]any{"description": "Invalid record payload"},
@@ -623,6 +716,51 @@ func openAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/account/devices": map[string]any{
+				"get": map[string]any{
+					"summary":     "List account device keys",
+					"description": "Lists per-installation Ed25519 keys registered by the authenticated account.",
+					"parameters":  bearerHeaderParameters(),
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Registered device keys"},
+						"401": map[string]any{"description": "Bearer token rejected"},
+					},
+				},
+				"post": map[string]any{
+					"summary":     "Register an account device key",
+					"description": "Registers a revocable Ed25519 installation key authorized by an ML-DSA account signature.",
+					"parameters":  bearerHeaderParameters(),
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"type": "object"}},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Device key registered"},
+						"400": map[string]any{"description": "Invalid registration"},
+						"401": map[string]any{"description": "Account signature rejected"},
+						"409": map[string]any{"description": "Registration replay"},
+					},
+				},
+				"delete": map[string]any{
+					"summary":     "Revoke an account device key",
+					"description": "Revokes an Ed25519 installation key using a fresh ML-DSA account-signed request.",
+					"parameters":  bearerHeaderParameters(),
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"type": "object"}},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Device key revoked"},
+						"400": map[string]any{"description": "Invalid revocation"},
+						"401": map[string]any{"description": "Account signature rejected"},
+						"409": map[string]any{"description": "Revocation replay"},
+					},
+				},
+			},
 			"/api/v1/account/delete-with-key": map[string]any{
 				"post": map[string]any{
 					"summary":     "Delete remote account using exported key",
@@ -638,6 +776,41 @@ func openAPISpec() map[string]any {
 						"400": map[string]any{"description": "Invalid request or exported key"},
 						"401": map[string]any{"description": "Exported key does not match sync account"},
 						"404": map[string]any{"description": "Sync account not found"},
+					},
+				},
+			},
+			"/api/v1/account/alias": map[string]any{
+				"post": map[string]any{
+					"summary":    "Set account alias",
+					"parameters": bearerHeaderParameters(),
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/AliasRequest"}},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Alias stored"},
+						"400": map[string]any{"description": "Invalid alias"},
+						"401": map[string]any{"description": "Bearer token rejected"},
+						"409": map[string]any{"description": "Alias taken"},
+					},
+				},
+			},
+			"/api/v1/account/profile-icon": map[string]any{
+				"post": map[string]any{
+					"summary":    "Set account profile icon",
+					"parameters": bearerHeaderParameters(),
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ProfileIconRequest"}},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Profile icon stored"},
+						"400": map[string]any{"description": "Invalid icon"},
+						"401": map[string]any{"description": "Bearer token rejected"},
 					},
 				},
 			},
@@ -674,6 +847,28 @@ func openAPISpec() map[string]any {
 						"201": map[string]any{"description": "Friend request created"},
 						"404": map[string]any{"description": "Target account not found"},
 						"409": map[string]any{"description": "Already friends or self-request"},
+					},
+				},
+			},
+			"/api/v1/friends/requests/{request_id}/accept": map[string]any{
+				"post": map[string]any{
+					"summary":    "Accept friend request",
+					"parameters": bearerHeaderParameters(),
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Request accepted"},
+						"401": map[string]any{"description": "Bearer token rejected"},
+						"404": map[string]any{"description": "Request not found"},
+					},
+				},
+			},
+			"/api/v1/friends/requests/{request_id}/decline": map[string]any{
+				"post": map[string]any{
+					"summary":    "Decline friend request",
+					"parameters": bearerHeaderParameters(),
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Request declined"},
+						"401": map[string]any{"description": "Bearer token rejected"},
+						"404": map[string]any{"description": "Request not found"},
 					},
 				},
 			},
@@ -1004,6 +1199,22 @@ func openAPISpec() map[string]any {
 					"properties": map[string]any{
 						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 						"exported_key": map[string]any{"type": "string", "description": "Full text of the exported account key file."},
+					},
+				},
+				"AliasRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"user_id_hash", "alias"},
+					"properties": map[string]any{
+						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+						"alias":        map[string]any{"type": "string", "description": "Account alias (3-24 chars, normalized lowercase)."},
+					},
+				},
+				"ProfileIconRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"user_id_hash", "profile_icon"},
+					"properties": map[string]any{
+						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
+						"profile_icon": map[string]any{"type": "integer", "description": "Icon selector value."},
 					},
 				},
 				"Habit": map[string]any{

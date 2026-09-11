@@ -240,6 +240,14 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := store.ensureMeshTrustSchema(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.canonicalizeStoredTimestamps(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := store.AutoMigrateAllAccounts(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -406,7 +414,9 @@ CREATE TABLE IF NOT EXISTS server_mesh_changes (
 	user_id_hash TEXT NOT NULL,
 	collection TEXT NOT NULL,
 	record_id TEXT NOT NULL,
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	op TEXT NOT NULL DEFAULT 'upsert',
+	deleted_at TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TRIGGER IF NOT EXISTS server_encrypted_records_mesh_insert
@@ -421,6 +431,14 @@ AFTER UPDATE ON server_encrypted_records
 BEGIN
 	INSERT INTO server_mesh_changes(user_id_hash,collection,record_id)
 	VALUES(NEW.user_id_hash,NEW.collection,NEW.id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS server_encrypted_records_mesh_delete
+AFTER DELETE ON server_encrypted_records
+BEGIN
+	INSERT INTO server_mesh_changes(user_id_hash,collection,record_id,op,deleted_at)
+	VALUES(OLD.user_id_hash,OLD.collection,OLD.id,'delete',
+		strftime('%Y-%m-%dT%H:%M:%S','now')||'.000000000Z');
 END;
 
 CREATE TABLE IF NOT EXISTS server_apps (
@@ -481,6 +499,25 @@ CREATE TABLE IF NOT EXISTS server_app_keys (
 	expires_at INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY(app_id, key_id)
+);
+
+CREATE TABLE IF NOT EXISTS server_device_keys (
+	account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	app_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,
+	device_key_id TEXT NOT NULL,
+	client_id TEXT NOT NULL,
+	public_key TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	revoked_at TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY(account_id, app_id, device_key_id)
+);
+
+CREATE TABLE IF NOT EXISTS server_device_registration_nonces (
+	account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	nonce TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(account_id, nonce)
 );
 
 CREATE TABLE IF NOT EXISTS server_app_revocations (
@@ -721,6 +758,12 @@ CREATE TABLE IF NOT EXISTS monero_deposits (
 	PRIMARY KEY(tx_id, account_index, address_index)
 );
 
+CREATE TABLE IF NOT EXISTS monero_wallet_state (
+	wallet_id TEXT PRIMARY KEY,
+	last_height INTEGER NOT NULL DEFAULT 0,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS token_checkpoints (
 	ledger_seq INTEGER PRIMARY KEY,
 	issuer_id TEXT NOT NULL,
@@ -757,6 +800,9 @@ WHERE NOT EXISTS (
 	SELECT 1 FROM server_mesh_changes c
 	WHERE c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id
 )`); err != nil {
+		return err
+	}
+	if err := s.ensureMeshChangeColumns(ctx); err != nil {
 		return err
 	}
 	if err := s.migrateMeditationLogPrimaryKey(ctx); err != nil {
@@ -818,6 +864,7 @@ WHERE alias IS NOT NULL AND alias<>''`); err != nil {
 		`CREATE INDEX IF NOT EXISTS server_app_grants_lookup ON server_app_grants(user_id_hash,source_app_id,target_app_id,collection_prefix,status)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS server_app_grants_active_unique ON server_app_grants(user_id_hash,source_app_id,target_app_id,collection_prefix,permission) WHERE status='active'`,
 		`CREATE INDEX IF NOT EXISTS server_signed_transactions_expiry ON server_signed_transactions(expires_at)`,
+		`CREATE INDEX IF NOT EXISTS server_device_keys_active ON server_device_keys(account_id,app_id,revoked_at,last_used_at)`,
 		`CREATE INDEX IF NOT EXISTS server_encrypted_records_collection ON server_encrypted_records(user_id_hash,collection,server_version)`,
 		`CREATE INDEX IF NOT EXISTS server_encrypted_payloads_user_version ON server_encrypted_payloads(user_id_hash,server_version,id)`,
 		`CREATE INDEX IF NOT EXISTS server_sync_audit_user_created ON server_sync_audit(user_id_hash,created_at,id)`,
@@ -890,6 +937,34 @@ PRAGMA foreign_keys=ON;`)
 		return err
 	}
 	return nil
+}
+
+// ensureMeshChangeColumns upgrades pre-tombstone databases in place so
+// delete propagation has somewhere to be recorded.
+func (s *Store) ensureMeshChangeColumns(ctx context.Context) error {
+	if err := s.addColumnIfMissing(ctx, "server_mesh_changes", "op",
+		`ALTER TABLE server_mesh_changes ADD COLUMN op TEXT NOT NULL DEFAULT 'upsert'`); err != nil {
+		return err
+	}
+	return s.addColumnIfMissing(ctx, "server_mesh_changes", "deleted_at",
+		`ALTER TABLE server_mesh_changes ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''`)
+}
+
+func (s *Store) addColumnIfMissing(ctx context.Context, table, column, ddl string) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT 1 FROM pragma_table_info(?1) WHERE name=?2`, table, column)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return nil
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, ddl)
+	return err
 }
 
 func (s *Store) migrateSocialCacheTable(ctx context.Context) error {
@@ -1048,8 +1123,7 @@ ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
 	count=excluded.count,
 	updated_at=excluded.updated_at,
 	server_version=excluded.server_version
-WHERE excluded.updated_at > server_habit_days.updated_at
-OR excluded.updated_at = server_habit_days.updated_at`,
+WHERE excluded.updated_at >= server_habit_days.updated_at`,
 			req.UserIDHash, day.HabitID, day.LocalDate, boolInt(day.Completed), normalizedHabitDayCount(day), normalizeTime(day.UpdatedAt, ""), version)
 		if err != nil {
 			return SyncResult{}, nil, err
@@ -1123,9 +1197,6 @@ func applySyncOps(ctx context.Context, tx *sql.Tx, userID string, ops []SyncOp, 
 		}
 		payload := string(op.Payload)
 		createdAt := normalizeTime(op.CreatedAt, "")
-		if createdAt == "" {
-			createdAt = time.Now().UTC().Format(time.RFC3339)
-		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_sync_ops(user_id_hash,op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at,server_version)
 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`,
@@ -1343,8 +1414,8 @@ func (s *Store) AccountAlias(ctx context.Context, userID string) (string, error)
 func (s *Store) SetAccountAlias(ctx context.Context, userID, alias string) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE server_users
-SET alias=?2,last_seen_at=CURRENT_TIMESTAMP
-WHERE user_id_hash=?1`, userID, alias)
+SET alias=?2,last_seen_at=?3
+WHERE user_id_hash=?1`, userID, alias, canonicalNow())
 	if err != nil {
 		return err
 	}
@@ -1369,8 +1440,8 @@ func (s *Store) AccountProfileIcon(ctx context.Context, userID string) (int, err
 func (s *Store) SetAccountProfileIcon(ctx context.Context, userID string, profileIcon int) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE server_users
-SET profile_icon=?2,last_seen_at=CURRENT_TIMESTAMP
-WHERE user_id_hash=?1`, userID, profileIcon)
+SET profile_icon=?2,last_seen_at=?3
+WHERE user_id_hash=?1`, userID, profileIcon, canonicalNow())
 	if err != nil {
 		return err
 	}
@@ -1898,24 +1969,24 @@ func (s *Store) FriendStats(ctx context.Context, userID, app, practice, metric s
 func (s *Store) RecordClientLogin(ctx context.Context, userID, clientID string) error {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_login_at)
-VALUES(?1,?2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+VALUES(?1,?2,?3,?3)
 ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
-	last_seen_at=CURRENT_TIMESTAMP,
-	last_login_at=CURRENT_TIMESTAMP`, userID, clientID)
+	last_seen_at=excluded.last_seen_at,
+	last_login_at=excluded.last_login_at`, userID, clientID, canonicalNow())
 	return err
 }
 
 func (s *Store) RecordClientSync(ctx context.Context, userID, clientID string, sinceVersion, serverVersion int64, protocolVersion int, clientClock int64) error {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_sync_at,last_since_server_version,last_seen_server_version,protocol_version,last_client_clock)
-VALUES(?1,?2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?3,?4,?5,?6)
+VALUES(?1,?2,?3,?3,?4,?5,?6,?7)
 ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
-	last_seen_at=CURRENT_TIMESTAMP,
-	last_sync_at=CURRENT_TIMESTAMP,
+	last_seen_at=excluded.last_seen_at,
+	last_sync_at=excluded.last_sync_at,
 	last_since_server_version=excluded.last_since_server_version,
 	last_seen_server_version=excluded.last_seen_server_version,
 	protocol_version=excluded.protocol_version,
-	last_client_clock=excluded.last_client_clock`, userID, clientID, sinceVersion, serverVersion, protocolVersion, clientClock)
+	last_client_clock=excluded.last_client_clock`, userID, clientID, canonicalNow(), sinceVersion, serverVersion, protocolVersion, clientClock)
 	return err
 }
 
@@ -1933,8 +2004,8 @@ func (s *Store) StoreEncryptedPayload(ctx context.Context, userID, clientID stri
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_encrypted_payloads(user_id_hash,client_id,payload_json,server_version)
-VALUES(?1,?2,?3,?4)`, userID, clientID, string(payload), version); err != nil {
+INSERT INTO server_encrypted_payloads(user_id_hash,client_id,payload_json,server_version,created_at)
+VALUES(?1,?2,?3,?4,?5)`, userID, clientID, string(payload), version, canonicalNow()); err != nil {
 		return 0, err
 	}
 	return version, tx.Commit()
@@ -2042,7 +2113,7 @@ func (s *Store) PruneEncryptedPayloads(ctx context.Context, userID string, maxAg
 	}
 	defer tx.Rollback()
 	if maxAge > 0 {
-		cutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339)
+		cutoff := time.Now().UTC().Add(-maxAge).Format(canonicalTimestampLayout)
 		res, err := tx.ExecContext(ctx, `
 DELETE FROM server_encrypted_payloads
 WHERE user_id_hash=?1 AND created_at<?2`, userID, cutoff)
@@ -2171,7 +2242,7 @@ func (s *Store) CompactSyncOps(ctx context.Context, userID string) error {
 		return tx.Commit()
 	}
 
-	cutoff := time.Now().UTC().Add(-syncClientActiveRetention).Format(time.RFC3339)
+	cutoff := time.Now().UTC().Add(-syncClientActiveRetention).Format(canonicalTimestampLayout)
 	var floor sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `
 SELECT MIN(last_client_clock)
@@ -2551,6 +2622,29 @@ ORDER BY last_seen_at DESC,client_id`, userID, minProtocol)
 		clients = append(clients, id)
 	}
 	return clients, rows.Err()
+}
+
+const legacyWriteWindow = 180 * 24 * time.Hour
+
+func (s *Store) LegacyWritePolicy(ctx context.Context, userID string) (bool, int64, error) {
+	cutoff := canonicalTimestamp(time.Now().Add(-legacyWriteWindow))
+	var latest sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+SELECT MAX(last_sync_at)
+FROM server_clients
+WHERE user_id_hash=?1 AND protocol_version<?2 AND last_sync_at>=?3`,
+		userID, latestProtocol, cutoff).Scan(&latest)
+	if err != nil {
+		return false, 0, err
+	}
+	if !latest.Valid || latest.String == "" {
+		return false, 0, nil
+	}
+	lastSync, err := time.Parse(canonicalTimestampLayout, latest.String)
+	if err != nil {
+		return false, 0, err
+	}
+	return true, lastSync.Unix(), nil
 }
 
 func (s *Store) CleanupOrphanHabitDays(ctx context.Context, userID string) error {
@@ -3497,7 +3591,7 @@ func upsertUser(ctx context.Context, tx *sql.Tx, userID string, publicKey []byte
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_users(user_id_hash,public_key)
 VALUES(?1,?2)
-ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP`, userID, publicKey); err != nil {
+ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=?3`, userID, publicKey, canonicalNow()); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
@@ -3509,8 +3603,8 @@ VALUES(?1,0)`, userID)
 func touchUser(ctx context.Context, tx *sql.Tx, userID string) error {
 	res, err := tx.ExecContext(ctx, `
 UPDATE server_users
-SET last_seen_at=CURRENT_TIMESTAMP
-WHERE user_id_hash=?1`, userID)
+SET last_seen_at=?2
+WHERE user_id_hash=?1`, userID, canonicalNow())
 	if err != nil {
 		return err
 	}
@@ -4109,18 +4203,50 @@ func rowsAffected(res sql.Result) int {
 	return int(n)
 }
 
+// canonicalTimestampLayout is RFC 3339 with a fixed-width nanosecond
+// fraction and UTC offset: every canonical timestamp has the same length,
+// so lexicographic string order equals chronological order. Stored
+// timestamps must use this layout — time.RFC3339Nano trims trailing
+// fraction zeros, which makes "…:00.5Z" sort before "…:00Z".
+const canonicalTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// minCanonicalTimestamp is the smallest canonical timestamp. Values that
+// cannot be parsed are mapped to it so they deterministically lose
+// last-write-wins comparisons instead of comparing unpredictably.
+const minCanonicalTimestamp = "0001-01-01T00:00:00.000000000Z"
+
+func canonicalNow() string {
+	return time.Now().UTC().Format(canonicalTimestampLayout)
+}
+
+func canonicalTimestamp(t time.Time) string {
+	return t.UTC().Format(canonicalTimestampLayout)
+}
+
+// parseTimestamp accepts RFC 3339 timestamps plus the space-separated
+// format SQLite's CURRENT_TIMESTAMP produces.
+func parseTimestamp(value string) (time.Time, bool) {
+	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
 func normalizeTime(primary, fallback string) string {
 	value := primary
 	if value == "" {
 		value = fallback
 	}
 	if value == "" {
-		return time.Now().UTC().Format(time.RFC3339Nano)
+		return canonicalNow()
 	}
-	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return t.UTC().Format(time.RFC3339Nano)
+	if t, ok := parseTimestamp(value); ok {
+		return canonicalTimestamp(t)
 	}
-	return value
+	return minCanonicalTimestamp
 }
 
 func normalizedHabitDayCount(day HabitDay) int {

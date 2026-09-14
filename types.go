@@ -165,11 +165,14 @@ type SyncResponse struct {
 	EncryptedPayloadsTruncated        bool               `json:"encrypted_payloads_truncated,omitempty"`
 	UpgradeNotice                     string             `json:"upgrade_notice,omitempty"`
 	MinSupportedProtocol              int                `json:"min_supported_protocol,omitempty"`
-	LatestProtocol                    int                `json:"latest_protocol,omitempty"`
-	LegacyClients                     []string           `json:"legacy_clients,omitempty"`
-	LegacyWriteRequired               bool               `json:"legacy_write_required"`
-	LegacyProjectionEpoch             int64              `json:"legacy_projection_epoch,omitempty"`
-	Diagnostics                       *SyncDiagnostics   `json:"diagnostics,omitempty"`
+	// LatestProtocol echoes the negotiated protocol for shipped clients that
+	// interpret a higher value as an application upgrade warning.
+	LatestProtocol        int              `json:"latest_protocol,omitempty"`
+	ServerLatestProtocol  int              `json:"server_latest_protocol,omitempty"`
+	LegacyClients         []string         `json:"legacy_clients,omitempty"`
+	LegacyWriteRequired   bool             `json:"legacy_write_required"`
+	LegacyProjectionEpoch int64            `json:"legacy_projection_epoch,omitempty"`
+	Diagnostics           *SyncDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type CleanData struct {

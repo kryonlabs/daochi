@@ -914,7 +914,7 @@ func TestProtocolV4AdvertisesDualWriteTransition(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.LatestProtocol != latestProtocol || payload.ProtocolVersion != 4 {
+	if payload.LatestProtocol != 4 || payload.ServerLatestProtocol != latestProtocol || payload.ProtocolVersion != 4 {
 		t.Fatalf("unexpected protocol response: %#v", payload)
 	}
 	if payload.TransitionMode != "dual_write" {
@@ -941,7 +941,7 @@ func TestProtocolV5EncryptedPrimaryHidesLegacyPrivateDataByDefault(t *testing.T)
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.LatestProtocol != latestProtocol || payload.ProtocolVersion != 5 ||
+	if payload.LatestProtocol != 5 || payload.ServerLatestProtocol != latestProtocol || payload.ProtocolVersion != 5 ||
 		payload.TransitionMode != "encrypted_primary" {
 		t.Fatalf("unexpected v5 response metadata: %#v", payload)
 	}
@@ -1022,7 +1022,9 @@ func TestProtocolV1ThroughV5RemainAcceptedThroughCompatibilityDeadline(t *testin
 		}
 		if payload.Status != "ok" ||
 			payload.MinSupportedProtocol != minSupportedProtocol ||
-			payload.LatestProtocol != latestProtocol ||
+			payload.LatestProtocol != version ||
+			payload.ServerLatestProtocol != latestProtocol ||
+			payload.UpgradeNotice != "" ||
 			!containsString(payload.ServerCapabilities, "protocol-v1-v5-valid-through-"+compatibilityDeadline) {
 			t.Fatalf("protocol %d compatibility response = %#v", version, payload)
 		}

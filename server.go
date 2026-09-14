@@ -520,7 +520,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		Ops:                  remoteOps,
 		Changes:              changes,
 		MinSupportedProtocol: minSupportedProtocol,
-		LatestProtocol:       latestProtocol,
+		LatestProtocol:       req.ProtocolVersion,
+		ServerLatestProtocol: latestProtocol,
 		Diagnostics: &SyncDiagnostics{
 			SnapshotReason:              snapshotReason,
 			RequestedSinceServerVersion: req.SinceServerVersion,
@@ -737,7 +738,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		Changes:              emptySyncChanges(),
 		EncryptedPayloads:    payloads,
 		MinSupportedProtocol: minSupportedProtocol,
-		LatestProtocol:       latestProtocol,
+		ServerLatestProtocol: latestProtocol,
 	}
 	if truncated {
 		response.EncryptedPayloadsTruncated = true

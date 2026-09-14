@@ -27,7 +27,9 @@ jobs:
           path: build/liboqs
           key: liboqs-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('vendor/liboqs/CMakeLists.txt') }}
       - name: Build and test
-        run: make test
+        run: |
+          python3 -B scripts/test_migrate_env.py
+          make test
 
   deploy:
     needs: test
@@ -93,6 +95,7 @@ jobs:
               printf '%s\n' '[Service]' 'Environment=DAOCHI_NODE_SYNC_TOKEN=$mesh_token' > /etc/systemd/system/ksync.service.d/20-daochi-mesh.conf
               systemctl daemon-reload
             fi
+            python3 /opt/ksync-src/scripts/migrate-legacy-env.py /etc/ksync/ksync.env --apply
             systemctl restart ksync.service
             sleep 3
             systemctl is-active --quiet ksync.service

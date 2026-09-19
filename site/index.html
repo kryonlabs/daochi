@@ -2,35 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <link rel="canonical" href="https://daochi.net/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Daochi</title>
-  <meta name="description" content="Mesh-native sync with offline-first account keys, post-quantum signed identity, encrypted records, remote events, and signed token receipts.">
+  <title>Daochi — Your data. Your keys. A shared thread.</title>
+  <meta name="description" content="Local-first sync for app-owned data. Client-held account keys, encrypted private records, and nodes you can inspect or run yourself.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://daochi.net/">
-  <meta property="og:title" content="Daochi">
+  <meta property="og:title" content="Daochi — Your data. Your keys. A shared thread.">
   <meta property="og:description" content="Offline-first account keys, post-quantum signed identity, and encrypted app-owned records.">
-  <meta property="og:image" content="https://daochi.net/og-image.png">
-  <meta property="og:image:secure_url" content="https://daochi.net/og-image.png">
-  <meta property="og:image:alt" content="Daochi post-quantum sync with encrypted app-owned records.">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:image" content="https://daochi.net/social-card-square.png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="1200">
+  <meta property="og:image" content="https://daochi.net/assets/editorial/connected-islands.png">
+  <meta property="og:image:secure_url" content="https://daochi.net/assets/editorial/connected-islands.png">
+  <meta property="og:image:alt" content="Quiet islands joined by small bridges, illustrated in ink and sage watercolor.">
+  <meta property="og:image:width" content="1536">
+  <meta property="og:image:height" content="1024">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Daochi">
+  <meta name="twitter:title" content="Daochi — Your data. Your keys. A shared thread.">
   <meta name="twitter:description" content="Offline-first account keys, post-quantum signed identity, and encrypted app-owned records.">
-  <meta name="twitter:image" content="https://daochi.net/og-image.png">
-  <meta name="twitter:image:alt" content="Daochi post-quantum sync with encrypted app-owned records.">
-  <meta name="theme-color" content="#061820">
+  <meta name="twitter:image" content="https://daochi.net/assets/editorial/connected-islands.png">
+  <meta name="twitter:image:alt" content="Quiet islands joined by small bridges, illustrated in ink and sage watercolor.">
+  <meta name="theme-color" content="#f7f3eb">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
   <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=editorial-20260919">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <header class="topbar">
     <a class="brand" href="/">Daochi</a>
     <nav class="nav" aria-label="Primary">
@@ -39,89 +38,81 @@
       <a href="/apps.html">Apps</a>
       <a href="/nodes.html">Nodes</a>
       <a href="/tokens.html">Tokens</a>
-      <a href="/openapi.json">API</a>
+      <a href="https://api.waozi.xyz/openapi.json">API</a>
     </nav>
   </header>
 
-  <main>
+  <main id="main">
     <section class="hero">
-      <img class="hero-logo" src="/assets/daochi-logo-pixel-128.png" width="128" height="128" alt="">
-      <p class="eyebrow">Offline-first keys for mesh-native sync</p>
-      <h1>Daochi</h1>
-      <p class="lead">A sync relay and protocol surface where the account's root authority is a device-created ML-DSA-44 keypair: a post-quantum proof of account control for encrypted, app-owned records.</p>
-      <div class="actions">
-        <a class="button" href="/protocol.html">Protocol</a>
-        <a class="button secondary" href="/mesh.html">Mesh model</a>
+      <div class="hero-copy">
+        <p class="eyebrow">Local-first sync. Open by design.</p>
+        <h1>Your data.<br>Your keys.<br><em>A shared thread.</em></h1>
+        <p class="lead">Keep your apps connected without giving up the keys. Daochi relays app-owned records between devices, with account authority that begins with you.</p>
+        <div class="actions">
+          <a class="button" href="https://github.com/kryonlabs/daochi/blob/master/docs/developer-quickstart.md">Start building <span aria-hidden="true">→</span></a>
+          <a class="text-link" href="/nodes.html">Explore the nodes →</a>
+        </div>
+        <div class="hero-notes"><span>Open source</span><span>Client-held keys</span><span>Self-hostable</span></div>
+      </div>
+      <figure class="hero-art">
+        <img src="/assets/editorial/connected-islands.webp" width="1536" height="1024" alt="Three quiet islands connected by small bridges.">
+        <figcaption>Independent places. Connected when it matters.</figcaption>
+      </figure>
+    </section>
+
+    <section id="how-it-works">
+      <p class="eyebrow">A little closer to your data</p>
+      <h2>Keep the key.<br>Let the records travel.</h2>
+      <p>Daochi is the sync layer behind your app. Devices keep their account keys; the relay helps records find their way between them.</p>
+      <div class="grid">
+        <article class="card">
+          <span class="number" aria-hidden="true">01</span>
+          <h3>Begin on your device.</h3>
+          <p>Create an account key locally, even before the first connection. Sign a fresh challenge to prove the account is yours.</p>
+          <a class="text-link" href="/protocol.html">How identity works →</a>
+        </article>
+        <article class="card">
+          <span class="number" aria-hidden="true">02</span>
+          <h3>Give records a home.</h3>
+          <p>Each app declares its collections and permissions. Clients encrypt private records before the relay stores and versions them.</p>
+          <a class="text-link" href="/apps.html">Explore app ownership →</a>
+        </article>
+        <article class="card">
+          <span class="number" aria-hidden="true">03</span>
+          <h3>Connect on your terms.</h3>
+          <p>Use a public node or operate your own. Inspect its identity, supported apps, and explicit peer relationships.</p>
+          <a class="text-link" href="/nodes.html">Find a node →</a>
+        </article>
       </div>
     </section>
 
-    <section>
-      <p class="eyebrow">What it does</p>
-      <h2>Server-assisted today, designed for keys and records that do not depend on the server.</h2>
-      <p>Daochi stores public keys, account metadata, app registrations, sync versions, encrypted records, and selected public or social projections. Account keys are generated client-side and can exist before the first network request. The relay never stores client private keys. Existing clients can keep using the compatibility wire names while the product name moves from Ksync to Daochi.</p>
-      <div class="grid">
-        <article class="card">
-          <h3>Offline-first keys</h3>
-          <p>Clients create and retain the durable account key locally. The server sees the public key, its account hash, and signatures, not the private key.</p>
-        </article>
-        <article class="card">
-          <h3>Post-quantum identity</h3>
-          <p>The ML-DSA-44 account key is the root authority. Login, deletion, and strict transactions prove control with post-quantum signatures.</p>
-        </article>
-        <article class="card">
-          <h3>Encrypted records</h3>
-          <p>Private data is written as opaque versioned ciphertext. The relay stores, orders, exports, and deletes the blobs without parsing their contents.</p>
-        </article>
-        <article class="card">
-          <h3>App ownership</h3>
-          <p>Registered apps declare signing keys, collection prefixes, visibility classes, capabilities, and optional token policies so data ownership is not hard-coded to one client.</p>
-        </article>
-        <article class="card">
-          <h3>Remote events</h3>
-          <p>WebSocket events notify clients when newer data exists while keeping bearer tokens out of request URLs.</p>
-        </article>
+    <section class="principles">
+      <div>
+        <p class="eyebrow">Made for the real world</p>
+        <h2>Imperfect networks.<br>Long-lived tools.</h2>
+        <p>Small devices and working clients deserve care. Daochi keeps authority close to the person using the software.</p>
+        <a class="text-link" href="/mesh.html">Read the mesh model →</a>
       </div>
-    </section>
-
-    <section>
-      <p class="eyebrow">Five rules</p>
-      <h2>Built for imperfect networks, older devices, and changing servers.</h2>
-      <p>Daochi is shaped by a small set of product rules: keep authority close to the person using the software, spend server power carefully, and make long-lived clients worth caring for.</p>
-      <div class="grid">
-        <article class="card">
-          <h3>Local first</h3>
-          <p>An account should begin on the user's device, with keys created and kept there before any relay is trusted.</p>
-        </article>
-        <article class="card">
-          <h3>Respect old hardware</h3>
-          <p>Daochi should stay useful on modest machines, old phones, small home nodes, and low-power servers.</p>
-        </article>
-        <article class="card">
-          <h3>Store less, reveal less</h3>
-          <p>The relay should move and order data without reading private records whenever clients can carry that responsibility.</p>
-        </article>
-        <article class="card">
-          <h3>Keep old paths open</h3>
-          <p>Working clients should not be broken casually; compatibility windows and migrations are part of the product.</p>
-        </article>
-        <article class="card">
-          <h3>Make trust inspectable</h3>
-          <p>Keys, signatures, app ownership, protocol versions, and node relationships should be visible enough to understand.</p>
-        </article>
-      </div>
+      <ul class="principle-list">
+        <li><strong>Local first.</strong><span>Your account starts with keys on your device.</span></li>
+        <li><strong>Respect old hardware.</strong><span>Built with modest machines and small home nodes in mind.</span></li>
+        <li><strong>Store less. Reveal less.</strong><span>Relay encrypted private records without reading their contents.</span></li>
+        <li><strong>Keep old paths open.</strong><span>Compatibility windows give working clients time to evolve.</span></li>
+        <li><strong>Make trust inspectable.</strong><span>Clear identities, app permissions, and node relationships.</span></li>
+      </ul>
     </section>
 
     <section>
       <p class="eyebrow">Security posture</p>
-      <h2>The server coordinates sync; the user's root authority stays in the account key.</h2>
+      <h2>Clear boundaries. Understandable trust.</h2>
       <div class="security-list">
         <article>
           <h3>Key creation starts offline</h3>
           <p>A new client can generate its ML-DSA-44 account key before it talks to Daochi. First login registers the public key, and future logins prove control by signing fresh challenges.</p>
         </article>
         <article>
-          <h3>Private records stay client encrypted</h3>
-          <p>Protocol v5 makes encrypted records the primary private-data surface. Daochi validates record metadata and versions ciphertext, but plaintext and record encryption choices stay with clients and apps.</p>
+          <h3>Know what is encrypted</h3>
+          <p>Upgraded clients encrypt private records before syncing. Legacy typed records, account metadata, and public or social projections can remain readable by the server. Encryption choices stay with clients and apps.</p>
         </article>
         <article>
           <h3>Post-quantum where authority is proven</h3>
@@ -132,9 +123,11 @@
 
     <section id="milestones">
       <p class="eyebrow">Milestones</p>
-      <h2>From compatible sync to a mesh-native post-quantum proof standard.</h2>
+      <h2>A protocol that grows carefully.</h2>
       <p>Daochi keeps older clients working while moving each protocol generation away from server-owned trust. The shipped post-quantum claim is account authority: the durable account key is ML-DSA-44. Full post-quantum record confidentiality still needs a specified client encryption profile.</p>
 
+      <details class="history-disclosure">
+        <summary>Explore the protocol history</summary>
       <div class="milestone-shell">
         <div class="timeline-topline">
           <div>
@@ -149,49 +142,49 @@
 
         <div class="timeline-viewport">
           <div class="milestone-rail" role="tablist" aria-label="Protocol release timeline">
-            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v1">
+            <button class="milestone-step" type="button" role="tab" id="milestone-v1" aria-controls="milestone-panel" tabindex="-1" aria-selected="false" data-id="v1">
               <span class="timeline-dot">v1</span>
               <span class="timeline-version">v1</span>
               <span class="timeline-name">signed base</span>
               <span class="timeline-date">2026-06-19</span>
               <code>5e3f0b1</code>
             </button>
-            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v2">
+            <button class="milestone-step" type="button" role="tab" id="milestone-v2" aria-controls="milestone-panel" tabindex="-1" aria-selected="false" data-id="v2">
               <span class="timeline-dot">v2</span>
               <span class="timeline-version">v2</span>
               <span class="timeline-name">operation log</span>
               <span class="timeline-date">2026-06-28</span>
               <code>046490d</code>
             </button>
-            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v3">
+            <button class="milestone-step" type="button" role="tab" id="milestone-v3" aria-controls="milestone-panel" tabindex="-1" aria-selected="false" data-id="v3">
               <span class="timeline-dot">v3</span>
               <span class="timeline-version">v3</span>
               <span class="timeline-name">clean reads</span>
               <span class="timeline-date">2026-07-01</span>
               <code>1db0206</code>
             </button>
-            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v4">
+            <button class="milestone-step" type="button" role="tab" id="milestone-v4" aria-controls="milestone-panel" tabindex="-1" aria-selected="false" data-id="v4">
               <span class="timeline-dot">v4</span>
               <span class="timeline-version">v4</span>
               <span class="timeline-name">encrypted transition</span>
               <span class="timeline-date">2026-08-29</span>
               <code>bfa46f9</code>
             </button>
-            <button class="milestone-step" type="button" role="tab" aria-selected="false" data-id="v5">
+            <button class="milestone-step" type="button" role="tab" id="milestone-v5" aria-controls="milestone-panel" tabindex="-1" aria-selected="false" data-id="v5">
               <span class="timeline-dot">v5</span>
               <span class="timeline-version">v5</span>
               <span class="timeline-name">encrypted primary</span>
               <span class="timeline-date">2026-08-31</span>
               <code>57f54a1</code>
             </button>
-            <button class="milestone-step" type="button" role="tab" aria-selected="true" data-id="v6">
+            <button class="milestone-step" type="button" role="tab" id="milestone-v6" aria-controls="milestone-panel" tabindex="0" aria-selected="true" data-id="v6">
               <span class="timeline-dot">v6</span>
               <span class="timeline-version">v6</span>
               <span class="timeline-name">signed tx</span>
               <span class="timeline-date">2026-08-31</span>
               <code>11a70e9</code>
             </button>
-            <button class="milestone-step target" type="button" role="tab" aria-selected="false" data-id="next">
+            <button class="milestone-step target" type="button" role="tab" id="milestone-next" aria-controls="milestone-panel" tabindex="-1" aria-selected="false" data-id="next">
               <span class="timeline-dot">+</span>
               <span class="timeline-version">next</span>
               <span class="timeline-name">mesh standard</span>
@@ -201,7 +194,7 @@
           </div>
         </div>
 
-        <article class="milestone-detail" aria-live="polite">
+        <article class="milestone-detail" id="milestone-panel" role="tabpanel" aria-labelledby="milestone-v6" tabindex="0" aria-live="polite">
           <div class="version" id="milestone-version">Protocol v6</div>
           <h3 id="milestone-title">Strict signed transactions</h3>
           <p id="milestone-summary">X-Daochi-Tx binds account authority, app authority, body hash, path, nonce, and expiry.</p>
@@ -227,13 +220,14 @@
           <div class="standard-note" id="milestone-note"><span>current shipped milestone</span></div>
         </article>
       </div>
+      </details>
     </section>
 
     <section>
       <div class="split">
         <div>
           <p class="eyebrow">Compatibility</p>
-          <h2>The public name changes; the shipped wire contract stays stable.</h2>
+          <h2>Working clients deserve a steady path.</h2>
           <p>Current server code still accepts the <code>ksync-sync-v1</code> signature context and <code>X-Ksync-*</code> headers. Protocol v1 through v5 remain valid through 2027-09-01, and every future deprecation keeps the previous protocol valid for at least 365 days. Protocol v6 adds signed transaction envelopes for strict app-owned requests.</p>
         </div>
         <div class="panel" aria-label="Compatibility facts">
@@ -247,7 +241,8 @@
   </main>
 
   <footer class="footer">
-    <span>&copy; 2026 <a href="https://kryonlabs.com">Kryon Labs</a></span>
+    <span>Daochi · A <a href="https://kryonlabs.com">Kryon Labs</a> project</span>
+    <a href="https://waozi.xyz/#labs">More from Waozi ↗</a>
     <a href="https://github.com/kryonlabs/daochi">Source</a>
   </footer>
 
@@ -370,6 +365,7 @@
       const stepRect = step.getBoundingClientRect();
       const targetLeft = rail.scrollLeft + stepRect.left - railRect.left + stepRect.width / 2 - railRect.width / 2;
       const left = Math.max(0, targetLeft);
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) behavior = "auto";
       if (behavior === "auto") {
         rail.scrollLeft = left;
       } else {
@@ -392,7 +388,12 @@
         return li;
       }));
       note.firstElementChild.textContent = item.note;
-      steps.forEach(step => step.setAttribute("aria-selected", String(step.dataset.id === id)));
+      steps.forEach(step => {
+        const selected = step.dataset.id === id;
+        step.setAttribute("aria-selected", String(selected));
+        step.tabIndex = selected ? 0 : -1;
+      });
+      document.getElementById("milestone-panel").setAttribute("aria-labelledby", `milestone-${id}`);
       const step = steps.find(item => item.dataset.id === id);
       if (step) centerStep(step, behavior);
     }
@@ -411,6 +412,21 @@
       window.setTimeout(() => showMilestone("v6", "auto"), 120);
     }
 
+    rail.addEventListener("keydown", event => {
+      const current = steps.findIndex(step => step.dataset.id === selectedMilestone);
+      let next;
+      if (event.key === "ArrowRight") next = (current + 1) % steps.length;
+      else if (event.key === "ArrowLeft") next = (current - 1 + steps.length) % steps.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = steps.length - 1;
+      else return;
+      event.preventDefault();
+      showMilestone(steps[next].dataset.id);
+      steps[next].focus({ preventScroll: true });
+    });
+    document.querySelector(".history-disclosure").addEventListener("toggle", event => {
+      if (event.target.open) showMilestone(selectedMilestone, "auto");
+    });
     showCurrentMilestone();
     window.addEventListener("load", showCurrentMilestone);
   </script>

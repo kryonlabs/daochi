@@ -4,8 +4,8 @@
   "description": "Mesh-native sync with offline-first account keys and post-quantum proof of account authority.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f7ede2",
-  "theme_color": "#f7ede2",
+  "background_color": "#f7f3eb",
+  "theme_color": "#f7f3eb",
   "icons": [
     {
       "src": "/icon-192.png",

@@ -1652,6 +1652,33 @@ ORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID)
 	return items, rows.Err()
 }
 
+// AuthoritativeSocial returns the current social state from the friendship
+// tables. server_social_snapshots is only a cache populated by the standalone
+// social endpoints, so it must not decide what a newly restored client sees.
+func (s *Store) AuthoritativeSocial(ctx context.Context, userID string) ([]SocialCache, error) {
+	friends, err := s.ListFriends(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	incoming, outgoing, err := s.ListFriendRequests(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	friendsJSON, err := json.Marshal(FriendsResponse{Friends: friends})
+	if err != nil {
+		return nil, err
+	}
+	requestsJSON, err := json.Marshal(FriendRequestsResponse{Incoming: incoming, Outgoing: outgoing})
+	if err != nil {
+		return nil, err
+	}
+	now := canonicalNow()
+	return []SocialCache{
+		{Kind: "friends.list", JSON: friendsJSON, UpdatedAt: now},
+		{Kind: "friends.requests", JSON: requestsJSON, UpdatedAt: now},
+	}, nil
+}
+
 func (s *Store) RemoveFriend(ctx context.Context, userID, friendID string) error {
 	a, b := friendPair(userID, friendID)
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -2410,7 +2437,7 @@ func (s *Store) CleanData(ctx context.Context, userID string) (*CleanData, error
 	if err != nil {
 		return nil, err
 	}
-	social, err := s.cleanSocialCache(ctx, userID)
+	social, err := s.AuthoritativeSocial(ctx, userID)
 	if err != nil {
 		return nil, err
 	}

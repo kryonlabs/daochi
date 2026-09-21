@@ -1824,6 +1824,16 @@ func TestEncryptedSyncEnvelopeStoresAndRelaysOpaquely(t *testing.T) {
 	server, store, _ := testServer(t)
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x62)
+	friend := newTestIdentity(t, handler, 0x63)
+	setAlias(t, handler, identity, "waozi")
+	setAlias(t, handler, friend, "emerald")
+	friendRequest := createFriendRequest(t, handler, identity, friend.UserID)
+	friendRes := friendJSONRequest(t, handler, http.MethodPost,
+		"/api/v1/friends/requests/"+friendRequest.ID+"/accept", friend, []byte(`{}`))
+	if friendRes.Code != http.StatusOK {
+		t.Fatalf("accept friend status = %d body=%s", friendRes.Code, friendRes.Body.String())
+	}
+	assertCount(t, store, "server_social_snapshots", 0)
 
 	body := []byte(`{"v":1,"nonce":"nonce-1","ciphertext":"ciphertext-1","aad":{"app":"inbe"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(body))
@@ -1845,6 +1855,13 @@ func TestEncryptedSyncEnvelopeStoresAndRelaysOpaquely(t *testing.T) {
 		first.ProtocolVersion != latestProtocol || first.ServerVersion == 0 ||
 		len(first.EncryptedPayloads) != 1 {
 		t.Fatalf("unexpected encrypted envelope response: %#v", first)
+	}
+	if first.AccountAlias != "waozi" {
+		t.Fatalf("encrypted envelope alias = %q, want waozi", first.AccountAlias)
+	}
+	if len(first.Changes.SocialCache) != 2 ||
+		!bytes.Contains(first.Changes.SocialCache[0].JSON, []byte(friend.UserID)) {
+		t.Fatalf("encrypted envelope social state = %#v", first.Changes.SocialCache)
 	}
 	if !bytes.Equal(first.EncryptedPayloads[0].Payload, body) {
 		t.Fatalf("payload was not relayed opaquely: %s", first.EncryptedPayloads[0].Payload)
@@ -2743,6 +2760,14 @@ func TestSocialCacheIsServerOwnedAndSynced(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("accept status = %d body=%s", res.Code, res.Body.String())
 	}
+	assertCount(t, store, "server_social_snapshots", 0)
+	clean, err := store.CleanData(context.Background(), alice.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clean.Social) != 2 || !bytes.Contains(clean.Friends, []byte(bob.UserID)) {
+		t.Fatalf("clean data omitted authoritative friend: %#v", clean)
+	}
 
 	upload := []byte(`{"protocol_version":2,"user_id_hash":"` + alice.UserID + `","client_id":"test-client-social","social_cache":[{"kind":"friends.list","json":{"friends":[{"user_id_hash":"hacked"}]},"updated_at":"2026-06-28T00:00:00Z"}]}`)
 	raw := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(upload))
@@ -2768,7 +2793,7 @@ func TestSocialCacheIsServerOwnedAndSynced(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &synced); err != nil {
 		t.Fatal(err)
 	}
-	if len(synced.Changes.SocialCache) != 1 ||
+	if len(synced.Changes.SocialCache) != 2 ||
 		synced.Changes.SocialCache[0].Kind != "friends.list" ||
 		!bytes.Contains(synced.Changes.SocialCache[0].JSON, []byte(bob.UserID)) ||
 		bytes.Contains(synced.Changes.SocialCache[0].JSON, []byte("hacked")) {

@@ -456,6 +456,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "changes failed")
 		return
 	}
+	changes.SocialCache, err = s.store.AuthoritativeSocial(r.Context(), req.UserIDHash)
+	if err != nil {
+		slog.Error("load authoritative social state", "user", logText(req.UserIDHash), "error", err)
+		writeError(w, http.StatusInternalServerError, "social state failed")
+		return
+	}
 	if req.ProtocolVersion >= 2 {
 		if fullSnapshotRequired {
 			remoteOps = []SyncOp{}
@@ -689,6 +695,24 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 			return false
 		}
 	}
+	accountAlias, err := s.store.AccountAlias(r.Context(), userID)
+	if err != nil {
+		slog.Error("load encrypted sync account alias", "user", logText(userID), "error", err)
+		writeError(w, http.StatusInternalServerError, "alias failed")
+		return false
+	}
+	profileIcon, err := s.store.AccountProfileIcon(r.Context(), userID)
+	if err != nil {
+		slog.Error("load encrypted sync profile icon", "user", logText(userID), "error", err)
+		writeError(w, http.StatusInternalServerError, "profile icon failed")
+		return false
+	}
+	social, err := s.store.AuthoritativeSocial(r.Context(), userID)
+	if err != nil {
+		slog.Error("load encrypted sync social state", "user", logText(userID), "error", err)
+		writeError(w, http.StatusInternalServerError, "social state failed")
+		return false
+	}
 	serverVersion, err := s.store.StoreEncryptedPayload(r.Context(), userID, clientID, body)
 	if err != nil {
 		if errors.Is(err, ErrSyncUserNotFound) {
@@ -732,6 +756,8 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		Status:               "ok",
 		ServerCapabilities:   serverCapabilities,
 		TransitionMode:       "encrypted_payload",
+		AccountAlias:         accountAlias,
+		ProfileIcon:          profileIcon,
 		ServerVersion:        serverVersion,
 		ServerClock:          serverVersion,
 		ChangesComplete:      true,
@@ -740,6 +766,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		MinSupportedProtocol: minSupportedProtocol,
 		ServerLatestProtocol: latestProtocol,
 	}
+	response.Changes.SocialCache = social
 	if truncated {
 		response.EncryptedPayloadsTruncated = true
 		response.EncryptedPayloadsNextSinceVersion = payloads[len(payloads)-1].ServerVersion

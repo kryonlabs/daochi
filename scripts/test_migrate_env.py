@@ -26,6 +26,22 @@ class MigrationTest(unittest.TestCase):
         original = "DAOCHI_DB=/data/existing.db\nMONERO_NETWORK=mainnet\n"
         self.assertEqual(migration.migrate(original), original)
 
+    def test_canonical_only_removes_legacy_and_renamed_keys(self):
+        original = (
+            "# production\n"
+            "KSYNC_TOKEN_SECRET_HEX=example\n"
+            "DAOCHI_TOKEN_SECRET_HEX=example\n"
+            "DAOCHI_WAOZI_ISSUER_PRIVATE_KEY_HEX_FILE=/private/issuer.key\n"
+            "DAOCHI_MONERO_WALLET_RPC_URL=http://127.0.0.1:18082/json_rpc\n"
+        )
+        updated = migration.migrate(original, canonical_only=True)
+        self.assertNotIn("KSYNC_", updated)
+        self.assertNotIn("DAOCHI_WAOZI_", updated)
+        self.assertNotIn("DAOCHI_MONERO_WALLET_RPC_URL", updated)
+        self.assertIn("DAOCHI_TOKEN_SECRET_HEX=example\n", updated)
+        self.assertIn("DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE=/private/issuer.key\n", updated)
+        self.assertIn("MONERO_WALLET_RPC_URL=http://127.0.0.1:18082/json_rpc\n", updated)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,175 @@
+// Daochi client wire values shared by apps. The caller owns account keys,
+// hashing, HTTP transport, and the destination buffers.
+
+WriteByte :: (output: []u8, cursor: *s64, byte: u8) -> bool {
+    if cursor.* < 0 || cursor.* + 1 >= output.count {
+        return false
+    }
+    output[cursor.*] = byte
+    cursor.* += 1
+    output[cursor.*] = cast(u8)0
+    return true
+}
+
+WriteText :: (output: []u8, cursor: *s64, value: string) -> bool {
+    if cursor.* < 0 || value.count >= output.count - cursor.* {
+        return false
+    }
+    index: s64 = 0
+    while index < cast(s64)value.count {
+        output[cursor.*] = value[index]
+        cursor.* += 1
+        index += 1
+    }
+    output[cursor.*] = cast(u8)0
+    return true
+}
+
+HexDigit :: (byte: u8) -> bool {
+    return (byte >= cast(u8)48 && byte <= cast(u8)57) ||
+        (byte >= cast(u8)65 && byte <= cast(u8)70) ||
+        (byte >= cast(u8)97 && byte <= cast(u8)102)
+}
+
+Hex64 :: (value: string) -> bool {
+    if value.count != 64 {
+        return false
+    }
+    index: s64 = 0
+    while index < 64 {
+        if !HexDigit(value[index]) {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+HexUpper :: (value: u8) -> u8 {
+    if value < 10 {
+        return cast(u8)48 + value
+    }
+    return cast(u8)65 + value - cast(u8)10
+}
+
+AppendJsonQuoted :: (output: []u8, cursor: *s64,
+    value: string) -> bool {
+    if !WriteByte(output, cursor, cast(u8)34) {
+        return false
+    }
+    index: s64 = 0
+    while index < cast(s64)value.count {
+        byte := value[index]
+        if byte == cast(u8)34 || byte == cast(u8)92 {
+            if !WriteByte(output, cursor, cast(u8)92) ||
+                !WriteByte(output, cursor, byte) {
+                return false
+            }
+        } else if byte == cast(u8)8 || byte == cast(u8)12 ||
+            byte == cast(u8)10 || byte == cast(u8)13 ||
+            byte == cast(u8)9 {
+            escape := cast(u8)98
+            if byte == cast(u8)12 {
+                escape = cast(u8)102
+            }
+            if byte == cast(u8)10 {
+                escape = cast(u8)110
+            }
+            if byte == cast(u8)13 {
+                escape = cast(u8)114
+            }
+            if byte == cast(u8)9 {
+                escape = cast(u8)116
+            }
+            if !WriteByte(output, cursor, cast(u8)92) ||
+                !WriteByte(output, cursor, escape) {
+                return false
+            }
+        } else if byte < cast(u8)32 {
+            if !WriteByte(output, cursor, cast(u8)92) ||
+                !WriteByte(output, cursor, cast(u8)117) ||
+                !WriteByte(output, cursor, cast(u8)48) ||
+                !WriteByte(output, cursor, cast(u8)48) ||
+                !WriteByte(output, cursor, HexUpper(byte / cast(u8)16)) ||
+                !WriteByte(output, cursor, HexUpper(byte % cast(u8)16)) {
+                return false
+            }
+        } else if !WriteByte(output, cursor, byte) {
+            return false
+        }
+        index += 1
+    }
+    return WriteByte(output, cursor, cast(u8)34)
+}
+
+#scope_export
+#program_export
+BuildChallengePath :: (account_id: string, output: []u8) -> bool {
+    if output.count == 0 {
+        return false
+    }
+    output[0] = cast(u8)0
+    if !Hex64(account_id) {
+        return false
+    }
+    cursor: s64 = 0
+    if !WriteText(output, *cursor,
+        "/api/v1/sync/challenge?user_id=") ||
+        !WriteText(output, *cursor, account_id) {
+        output[0] = cast(u8)0
+        return false
+    }
+    return true
+}
+
+#scope_export
+#program_export
+BuildLoginBody :: (account_id: string, client_id: string,
+    public_key: string, output: []u8) -> bool {
+    if output.count == 0 {
+        return false
+    }
+    output[0] = cast(u8)0
+    if !Hex64(account_id) || client_id.count == 0 ||
+        public_key.count == 0 {
+        return false
+    }
+    cursor: s64 = 0
+    if !WriteText(output, *cursor, "{\"user_id_hash\":") ||
+        !AppendJsonQuoted(output, *cursor, account_id) ||
+        !WriteText(output, *cursor, ",\"client_id\":") ||
+        !AppendJsonQuoted(output, *cursor, client_id) ||
+        !WriteText(output, *cursor, ",\"public_key\":") ||
+        !AppendJsonQuoted(output, *cursor, public_key) ||
+        !WriteByte(output, *cursor, cast(u8)125) {
+        output[0] = cast(u8)0
+        return false
+    }
+    return true
+}
+
+// The caller hashes the exact body bytes. This function fixes the signed
+// message layout and prevents an app from choosing a different path or context.
+#scope_export
+#program_export
+BuildLoginMessageHash :: (body_sha256_hex: string,
+    nonce_hex: string, output: []u8) -> bool {
+    if output.count == 0 {
+        return false
+    }
+    output[0] = cast(u8)0
+    if !Hex64(body_sha256_hex) || !Hex64(nonce_hex) {
+        return false
+    }
+    cursor: s64 = 0
+    if !WriteText(output, *cursor,
+        "daochi-sync-v1\nPOST\n/api/v1/sync/login\n") ||
+        !WriteText(output, *cursor, body_sha256_hex) ||
+        !WriteByte(output, *cursor, cast(u8)10) ||
+        !WriteText(output, *cursor, nonce_hex) ||
+        !WriteByte(output, *cursor, cast(u8)10) {
+        output[0] = cast(u8)0
+        return false
+    }
+    return true
+}

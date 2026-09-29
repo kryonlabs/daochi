@@ -1,0 +1,121 @@
+// Sync wire records retain the released JSON schema and raw payload types.
+
+#import "protocol";
+
+json :: #system_library "go:encoding/json";
+RawMessage :: #type #foreign json;
+
+SyncRequest :: struct {
+    ProtocolVersion: isize #go_tag "json:\"protocol_version,omitempty\""
+    AppID: string #go_tag "json:\"app_id,omitempty\""
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    ClientID: string #go_tag "json:\"client_id\""
+    ClientCapabilities: []string #go_tag "json:\"client_capabilities,omitempty\""
+    IncludeLegacyData: bool #go_tag "json:\"include_legacy_data,omitempty\""
+    ClientClock: s64 #go_tag "json:\"client_clock,omitempty\""
+    PublicKey: string #go_tag "json:\"public_key,omitempty\""
+    SinceServerVersion: s64 #go_tag "json:\"since_server_version,omitempty\""
+    ClientStateHash: string #go_tag "json:\"client_state_hash,omitempty\""
+    LastServerStateHash: string #go_tag "json:\"last_server_state_hash,omitempty\""
+    FullSyncRequested: bool #go_tag "json:\"full_sync_requested,omitempty\""
+    Bootstrap: bool #go_tag "json:\"bootstrap,omitempty\""
+    Ops: []SyncOp #go_tag "json:\"ops,omitempty\""
+    MeditationLogs: []MeditationLog #go_tag "json:\"meditation_logs,omitempty\""
+    Habits: []Habit #go_tag "json:\"habits,omitempty\""
+    HabitDays: []HabitDay #go_tag "json:\"habit_days,omitempty\""
+    Sessions: []Session #go_tag "json:\"sessions,omitempty\""
+    SocialCache: []SocialSnapshot #go_tag "json:\"social_cache,omitempty\""
+    EncryptedRecords: []EncryptedRecord #go_tag "json:\"encrypted_records,omitempty\""
+}
+
+SyncChanges :: struct {
+    Habits: []Habit #go_tag "json:\"habits\""
+    HabitDays: []HabitDay #go_tag "json:\"habit_days\""
+    Sessions: []Session #go_tag "json:\"sessions\""
+    MeditationLogs: []MeditationLog #go_tag "json:\"meditation_logs\""
+    SocialCache: []SocialSnapshot #go_tag "json:\"social_cache\""
+    EncryptedRecords: []EncryptedRecord #go_tag "json:\"encrypted_records,omitempty\""
+}
+
+SyncResponse :: struct {
+    ProtocolVersion: isize #go_tag "json:\"protocol_version,omitempty\""
+    Status: string #go_tag "json:\"status\""
+    ServerCapabilities: []string #go_tag "json:\"server_capabilities,omitempty\""
+    TransitionMode: string #go_tag "json:\"transition_mode,omitempty\""
+    Applied: SyncResult #go_tag "json:\"applied\""
+    AccountAlias: string #go_tag "json:\"account_alias,omitempty\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+    ServerVersion: s64 #go_tag "json:\"server_version\""
+    ServerClock: s64 #go_tag "json:\"server_clock,omitempty\""
+    ServerStateHash: string #go_tag "json:\"server_state_hash,omitempty\""
+    BaseStateHash: string #go_tag "json:\"base_state_hash,omitempty\""
+    ChangesComplete: bool #go_tag "json:\"changes_complete\""
+    FullSnapshotRequired: bool #go_tag "json:\"full_snapshot_required\""
+    AcceptedOps: []string #go_tag "json:\"accepted_ops,omitempty\""
+    Ops: []SyncOp #go_tag "json:\"ops,omitempty\""
+    Changes: SyncChanges #go_tag "json:\"changes\""
+    Data: *CleanData #go_tag "json:\"data,omitempty\""
+    Logs: []SyncLog #go_tag "json:\"logs,omitempty\""
+    Deletes: []SyncLog #go_tag "json:\"deletes,omitempty\""
+    EncryptedPayloads: []EncryptedPayload #go_tag "json:\"encrypted_payloads,omitempty\""
+    EncryptedPayloadsNextSinceVersion: s64 #go_tag "json:\"encrypted_payloads_next_since_version,omitempty\""
+    EncryptedPayloadsTruncated: bool #go_tag "json:\"encrypted_payloads_truncated,omitempty\""
+    UpgradeNotice: string #go_tag "json:\"upgrade_notice,omitempty\""
+    MinSupportedProtocol: isize #go_tag "json:\"min_supported_protocol,omitempty\""
+    // LatestProtocol echoes the negotiated protocol for shipped clients that
+    // interpret a higher value as an application upgrade warning.
+    LatestProtocol: isize #go_tag "json:\"latest_protocol,omitempty\""
+    ServerLatestProtocol: isize #go_tag "json:\"server_latest_protocol,omitempty\""
+    LegacyClients: []string #go_tag "json:\"legacy_clients,omitempty\""
+    LegacyWriteRequired: bool #go_tag "json:\"legacy_write_required\""
+    LegacyProjectionEpoch: s64 #go_tag "json:\"legacy_projection_epoch,omitempty\""
+    Diagnostics: *SyncDiagnostics #go_tag "json:\"diagnostics,omitempty\""
+}
+
+CleanData :: struct {
+    Habits: []Habit #go_tag "json:\"habits\""
+    HabitDays: []CleanHabitDay #go_tag "json:\"habit_days\""
+    Sessions: []Session #go_tag "json:\"sessions\""
+    MeditationLogs: []MeditationLog #go_tag "json:\"meditation_logs\""
+    Social: []SocialSnapshot #go_tag "json:\"social,omitempty\""
+    EncryptedRecords: []EncryptedRecord #go_tag "json:\"encrypted_records,omitempty\""
+    Friends: RawMessage #go_tag "json:\"friends,omitempty\""
+    FriendRequests: RawMessage #go_tag "json:\"friend_requests,omitempty\""
+}
+
+SyncLog :: struct {
+    ServerVersion: s64 #go_tag "json:\"server_version\""
+    Kind: string #go_tag "json:\"kind\""
+    EntityType: string #go_tag "json:\"entity_type\""
+    EntityID: string #go_tag "json:\"entity_id\""
+    LocalDate: isize #go_tag "json:\"local_date,omitempty\""
+    OpType: string #go_tag "json:\"op_type,omitempty\""
+    Payload: RawMessage #go_tag "json:\"payload,omitempty\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+}
+
+SyncOp :: struct {
+    OpID: string #go_tag "json:\"op_id\""
+    ClientID: string #go_tag "json:\"client_id\""
+    Seq: s64 #go_tag "json:\"seq\""
+    EntityType: string #go_tag "json:\"entity_type\""
+    EntityID: string #go_tag "json:\"entity_id\""
+    LocalDate: isize #go_tag "json:\"local_date,omitempty\""
+    OpType: string #go_tag "json:\"op_type\""
+    Payload: RawMessage #go_tag "json:\"payload,omitempty\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+}
+
+SocialSnapshot :: struct {
+    Kind: string #go_tag "json:\"kind\""
+    JSON: RawMessage #go_tag "json:\"json\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+}
+
+EncryptedPayload :: struct {
+    ID: s64 #go_tag "json:\"id\""
+    ClientID: string #go_tag "json:\"client_id,omitempty\""
+    Payload: RawMessage #go_tag "json:\"payload\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+    ServerVersion: s64 #go_tag "json:\"server_version\""
+}

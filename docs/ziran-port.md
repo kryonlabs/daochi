@@ -70,7 +70,7 @@ field names, Go storage types, order and reflection tags.
 | `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
 | `trust_handlers.go` | Go with ported callers | Pairing and namespace HTTP handlers |
 | `trust_store.go` | Go with ported callers | Peer trust, pairing, claims, nonce persistence |
-| `types.go` | Partial Ziran | 67 records and profile constants in Ziran; 10 records and the `SocialCache` alias remain Go |
+| `types.go` | Partial Ziran | 75 records and profile constants in Ziran; only the two map-bearing records remain Go |
 | `verifier.go` | Go | Signature verifier contract |
 | `verifier_nocgo.go` | Go | Unsupported-build error path |
 | `verifier_oqs.go` | Go | ML-DSA-44 foreign-library boundary and resource ownership |
@@ -82,6 +82,10 @@ modules; they do not represent additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Their HTTP/database
 operations still need to move.
+`sync_types.zi` owns sync requests, responses, changes, snapshots and operation
+records. Its `RawMessage` declaration aliases `encoding/json.RawMessage`,
+preserving raw JSON payloads and Go type identity. Maintained callers use
+`SocialSnapshot` directly; released `social_cache` fields are unchanged.
 
 ## Compiler work exercised by this port
 
@@ -99,9 +103,10 @@ and saved IR in C, C++, Go, and the portable runtime.
 ## Next dependencies
 
 Protocol fields now support checked Go reflection tags, including JSON names
-and omission rules. Remaining records need external Go types such as
-`json.RawMessage`, type aliases and dynamic maps. Network and database code
-also needs interfaces, multiple results/error handling, method calls,
+and omission rules. Opaque foreign Go type declarations preserve imported
+type identity, interface values, zero values and custom JSON methods in source
+and saved IR. The two remaining records need dynamic maps. Network and database
+code also needs interfaces, multiple results/error handling, method calls,
 variadic SQL arguments, contexts, synchronization, and worker lifecycle support.
 These are reusable compiler/runtime capabilities to implement upstream in
 Ziran as the corresponding application code moves; wrapping existing Go

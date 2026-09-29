@@ -2084,6 +2084,467 @@
         "type": "AppGrantRequest",
         "tag": "json:\"grant\""
       }
+    ],
+    "SyncRequest": [
+      {
+        "name": "ProtocolVersion",
+        "type": "int",
+        "tag": "json:\"protocol_version,omitempty\""
+      },
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id,omitempty\""
+      },
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "ClientID",
+        "type": "string",
+        "tag": "json:\"client_id\""
+      },
+      {
+        "name": "ClientCapabilities",
+        "type": "[]string",
+        "tag": "json:\"client_capabilities,omitempty\""
+      },
+      {
+        "name": "IncludeLegacyData",
+        "type": "bool",
+        "tag": "json:\"include_legacy_data,omitempty\""
+      },
+      {
+        "name": "ClientClock",
+        "type": "int64",
+        "tag": "json:\"client_clock,omitempty\""
+      },
+      {
+        "name": "PublicKey",
+        "type": "string",
+        "tag": "json:\"public_key,omitempty\""
+      },
+      {
+        "name": "SinceServerVersion",
+        "type": "int64",
+        "tag": "json:\"since_server_version,omitempty\""
+      },
+      {
+        "name": "ClientStateHash",
+        "type": "string",
+        "tag": "json:\"client_state_hash,omitempty\""
+      },
+      {
+        "name": "LastServerStateHash",
+        "type": "string",
+        "tag": "json:\"last_server_state_hash,omitempty\""
+      },
+      {
+        "name": "FullSyncRequested",
+        "type": "bool",
+        "tag": "json:\"full_sync_requested,omitempty\""
+      },
+      {
+        "name": "Bootstrap",
+        "type": "bool",
+        "tag": "json:\"bootstrap,omitempty\""
+      },
+      {
+        "name": "Ops",
+        "type": "[]SyncOp",
+        "tag": "json:\"ops,omitempty\""
+      },
+      {
+        "name": "MeditationLogs",
+        "type": "[]MeditationLog",
+        "tag": "json:\"meditation_logs,omitempty\""
+      },
+      {
+        "name": "Habits",
+        "type": "[]Habit",
+        "tag": "json:\"habits,omitempty\""
+      },
+      {
+        "name": "HabitDays",
+        "type": "[]HabitDay",
+        "tag": "json:\"habit_days,omitempty\""
+      },
+      {
+        "name": "Sessions",
+        "type": "[]Session",
+        "tag": "json:\"sessions,omitempty\""
+      },
+      {
+        "name": "SocialCache",
+        "type": "[]SocialSnapshot",
+        "tag": "json:\"social_cache,omitempty\""
+      },
+      {
+        "name": "EncryptedRecords",
+        "type": "[]EncryptedRecord",
+        "tag": "json:\"encrypted_records,omitempty\""
+      }
+    ],
+    "SyncChanges": [
+      {
+        "name": "Habits",
+        "type": "[]Habit",
+        "tag": "json:\"habits\""
+      },
+      {
+        "name": "HabitDays",
+        "type": "[]HabitDay",
+        "tag": "json:\"habit_days\""
+      },
+      {
+        "name": "Sessions",
+        "type": "[]Session",
+        "tag": "json:\"sessions\""
+      },
+      {
+        "name": "MeditationLogs",
+        "type": "[]MeditationLog",
+        "tag": "json:\"meditation_logs\""
+      },
+      {
+        "name": "SocialCache",
+        "type": "[]SocialSnapshot",
+        "tag": "json:\"social_cache\""
+      },
+      {
+        "name": "EncryptedRecords",
+        "type": "[]EncryptedRecord",
+        "tag": "json:\"encrypted_records,omitempty\""
+      }
+    ],
+    "SyncResponse": [
+      {
+        "name": "ProtocolVersion",
+        "type": "int",
+        "tag": "json:\"protocol_version,omitempty\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "ServerCapabilities",
+        "type": "[]string",
+        "tag": "json:\"server_capabilities,omitempty\""
+      },
+      {
+        "name": "TransitionMode",
+        "type": "string",
+        "tag": "json:\"transition_mode,omitempty\""
+      },
+      {
+        "name": "Applied",
+        "type": "SyncResult",
+        "tag": "json:\"applied\""
+      },
+      {
+        "name": "AccountAlias",
+        "type": "string",
+        "tag": "json:\"account_alias,omitempty\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon,omitempty\""
+      },
+      {
+        "name": "ServerVersion",
+        "type": "int64",
+        "tag": "json:\"server_version\""
+      },
+      {
+        "name": "ServerClock",
+        "type": "int64",
+        "tag": "json:\"server_clock,omitempty\""
+      },
+      {
+        "name": "ServerStateHash",
+        "type": "string",
+        "tag": "json:\"server_state_hash,omitempty\""
+      },
+      {
+        "name": "BaseStateHash",
+        "type": "string",
+        "tag": "json:\"base_state_hash,omitempty\""
+      },
+      {
+        "name": "ChangesComplete",
+        "type": "bool",
+        "tag": "json:\"changes_complete\""
+      },
+      {
+        "name": "FullSnapshotRequired",
+        "type": "bool",
+        "tag": "json:\"full_snapshot_required\""
+      },
+      {
+        "name": "AcceptedOps",
+        "type": "[]string",
+        "tag": "json:\"accepted_ops,omitempty\""
+      },
+      {
+        "name": "Ops",
+        "type": "[]SyncOp",
+        "tag": "json:\"ops,omitempty\""
+      },
+      {
+        "name": "Changes",
+        "type": "SyncChanges",
+        "tag": "json:\"changes\""
+      },
+      {
+        "name": "Data",
+        "type": "*CleanData",
+        "tag": "json:\"data,omitempty\""
+      },
+      {
+        "name": "Logs",
+        "type": "[]SyncLog",
+        "tag": "json:\"logs,omitempty\""
+      },
+      {
+        "name": "Deletes",
+        "type": "[]SyncLog",
+        "tag": "json:\"deletes,omitempty\""
+      },
+      {
+        "name": "EncryptedPayloads",
+        "type": "[]EncryptedPayload",
+        "tag": "json:\"encrypted_payloads,omitempty\""
+      },
+      {
+        "name": "EncryptedPayloadsNextSinceVersion",
+        "type": "int64",
+        "tag": "json:\"encrypted_payloads_next_since_version,omitempty\""
+      },
+      {
+        "name": "EncryptedPayloadsTruncated",
+        "type": "bool",
+        "tag": "json:\"encrypted_payloads_truncated,omitempty\""
+      },
+      {
+        "name": "UpgradeNotice",
+        "type": "string",
+        "tag": "json:\"upgrade_notice,omitempty\""
+      },
+      {
+        "name": "MinSupportedProtocol",
+        "type": "int",
+        "tag": "json:\"min_supported_protocol,omitempty\""
+      },
+      {
+        "name": "LatestProtocol",
+        "type": "int",
+        "tag": "json:\"latest_protocol,omitempty\""
+      },
+      {
+        "name": "ServerLatestProtocol",
+        "type": "int",
+        "tag": "json:\"server_latest_protocol,omitempty\""
+      },
+      {
+        "name": "LegacyClients",
+        "type": "[]string",
+        "tag": "json:\"legacy_clients,omitempty\""
+      },
+      {
+        "name": "LegacyWriteRequired",
+        "type": "bool",
+        "tag": "json:\"legacy_write_required\""
+      },
+      {
+        "name": "LegacyProjectionEpoch",
+        "type": "int64",
+        "tag": "json:\"legacy_projection_epoch,omitempty\""
+      },
+      {
+        "name": "Diagnostics",
+        "type": "*SyncDiagnostics",
+        "tag": "json:\"diagnostics,omitempty\""
+      }
+    ],
+    "CleanData": [
+      {
+        "name": "Habits",
+        "type": "[]Habit",
+        "tag": "json:\"habits\""
+      },
+      {
+        "name": "HabitDays",
+        "type": "[]CleanHabitDay",
+        "tag": "json:\"habit_days\""
+      },
+      {
+        "name": "Sessions",
+        "type": "[]Session",
+        "tag": "json:\"sessions\""
+      },
+      {
+        "name": "MeditationLogs",
+        "type": "[]MeditationLog",
+        "tag": "json:\"meditation_logs\""
+      },
+      {
+        "name": "Social",
+        "type": "[]SocialSnapshot",
+        "tag": "json:\"social,omitempty\""
+      },
+      {
+        "name": "EncryptedRecords",
+        "type": "[]EncryptedRecord",
+        "tag": "json:\"encrypted_records,omitempty\""
+      },
+      {
+        "name": "Friends",
+        "type": "json.RawMessage",
+        "tag": "json:\"friends,omitempty\""
+      },
+      {
+        "name": "FriendRequests",
+        "type": "json.RawMessage",
+        "tag": "json:\"friend_requests,omitempty\""
+      }
+    ],
+    "SyncLog": [
+      {
+        "name": "ServerVersion",
+        "type": "int64",
+        "tag": "json:\"server_version\""
+      },
+      {
+        "name": "Kind",
+        "type": "string",
+        "tag": "json:\"kind\""
+      },
+      {
+        "name": "EntityType",
+        "type": "string",
+        "tag": "json:\"entity_type\""
+      },
+      {
+        "name": "EntityID",
+        "type": "string",
+        "tag": "json:\"entity_id\""
+      },
+      {
+        "name": "LocalDate",
+        "type": "int",
+        "tag": "json:\"local_date,omitempty\""
+      },
+      {
+        "name": "OpType",
+        "type": "string",
+        "tag": "json:\"op_type,omitempty\""
+      },
+      {
+        "name": "Payload",
+        "type": "json.RawMessage",
+        "tag": "json:\"payload,omitempty\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at,omitempty\""
+      }
+    ],
+    "SyncOp": [
+      {
+        "name": "OpID",
+        "type": "string",
+        "tag": "json:\"op_id\""
+      },
+      {
+        "name": "ClientID",
+        "type": "string",
+        "tag": "json:\"client_id\""
+      },
+      {
+        "name": "Seq",
+        "type": "int64",
+        "tag": "json:\"seq\""
+      },
+      {
+        "name": "EntityType",
+        "type": "string",
+        "tag": "json:\"entity_type\""
+      },
+      {
+        "name": "EntityID",
+        "type": "string",
+        "tag": "json:\"entity_id\""
+      },
+      {
+        "name": "LocalDate",
+        "type": "int",
+        "tag": "json:\"local_date,omitempty\""
+      },
+      {
+        "name": "OpType",
+        "type": "string",
+        "tag": "json:\"op_type\""
+      },
+      {
+        "name": "Payload",
+        "type": "json.RawMessage",
+        "tag": "json:\"payload,omitempty\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at,omitempty\""
+      }
+    ],
+    "SocialSnapshot": [
+      {
+        "name": "Kind",
+        "type": "string",
+        "tag": "json:\"kind\""
+      },
+      {
+        "name": "JSON",
+        "type": "json.RawMessage",
+        "tag": "json:\"json\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at\""
+      }
+    ],
+    "EncryptedPayload": [
+      {
+        "name": "ID",
+        "type": "int64",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "ClientID",
+        "type": "string",
+        "tag": "json:\"client_id,omitempty\""
+      },
+      {
+        "name": "Payload",
+        "type": "json.RawMessage",
+        "tag": "json:\"payload\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at,omitempty\""
+      },
+      {
+        "name": "ServerVersion",
+        "type": "int64",
+        "tag": "json:\"server_version\""
+      }
     ]
   }
 }

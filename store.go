@@ -1655,7 +1655,7 @@ ORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID)
 // AuthoritativeSocial returns the current social state from the friendship
 // tables. server_social_snapshots is only a cache populated by the standalone
 // social endpoints, so it must not decide what a newly restored client sees.
-func (s *Store) AuthoritativeSocial(ctx context.Context, userID string) ([]SocialCache, error) {
+func (s *Store) AuthoritativeSocial(ctx context.Context, userID string) ([]SocialSnapshot, error) {
 	friends, err := s.ListFriends(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -1673,7 +1673,7 @@ func (s *Store) AuthoritativeSocial(ctx context.Context, userID string) ([]Socia
 		return nil, err
 	}
 	now := canonicalNow()
-	return []SocialCache{
+	return []SocialSnapshot{
 		{Kind: "friends.list", JSON: friendsJSON, UpdatedAt: now},
 		{Kind: "friends.requests", JSON: requestsJSON, UpdatedAt: now},
 	}, nil
@@ -2582,7 +2582,7 @@ ORDER BY completed_at DESC,id`, userID)
 	return items, rows.Err()
 }
 
-func (s *Store) cleanSocialCache(ctx context.Context, userID string) ([]SocialCache, error) {
+func (s *Store) cleanSocialCache(ctx context.Context, userID string) ([]SocialSnapshot, error) {
 	return s.snapshotSocialCache(ctx, userID, 0)
 }
 
@@ -3563,7 +3563,7 @@ ORDER BY server_version,completed_at,id`, userID, sinceVersion)
 	return items, rows.Err()
 }
 
-func (s *Store) snapshotSocialCache(ctx context.Context, userID string, sinceVersion int64) ([]SocialCache, error) {
+func (s *Store) snapshotSocialCache(ctx context.Context, userID string, sinceVersion int64) ([]SocialSnapshot, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT kind,json,updated_at
 FROM server_social_snapshots
@@ -3574,9 +3574,9 @@ ORDER BY server_version,kind`, userID, sinceVersion)
 	}
 	defer rows.Close()
 
-	items := []SocialCache{}
+	items := []SocialSnapshot{}
 	for rows.Next() {
-		var item SocialCache
+		var item SocialSnapshot
 		var payload string
 		if err := rows.Scan(&item.Kind, &payload, &item.UpdatedAt); err != nil {
 			return nil, err
@@ -3714,7 +3714,7 @@ VALUES(?1,?2,?3,?4,?5)`, userID, session.ID, round.RoundIndex, round.Breaths, ro
 	return applied, nil
 }
 
-func upsertSocialCache(ctx context.Context, tx *sql.Tx, userID string, item SocialCache) (int, error) {
+func upsertSocialCache(ctx context.Context, tx *sql.Tx, userID string, item SocialSnapshot) (int, error) {
 	kind := strings.TrimSpace(item.Kind)
 	payload := item.JSON
 	var same int
@@ -3761,7 +3761,7 @@ func (s *Store) SetSocialCacheJSON(ctx context.Context, userID, kind string, pay
 		return 0, err
 	}
 	defer tx.Rollback()
-	applied, err := upsertSocialCache(ctx, tx, userID, SocialCache{
+	applied, err := upsertSocialCache(ctx, tx, userID, SocialSnapshot{
 		Kind: kind,
 		JSON: json.RawMessage(payload),
 	})

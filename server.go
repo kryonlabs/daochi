@@ -1591,7 +1591,7 @@ func emptySyncChanges() SyncChanges {
 		HabitDays:        []HabitDay{},
 		Sessions:         []Session{},
 		MeditationLogs:   []MeditationLog{},
-		SocialCache:      []SocialCache{},
+		SocialCache:      []SocialSnapshot{},
 		EncryptedRecords: []EncryptedRecord{},
 	}
 }

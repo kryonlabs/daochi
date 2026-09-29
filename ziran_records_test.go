@@ -26,6 +26,14 @@ func TestZiranProtocolRecordsKeepReleasedLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	records := []any{
+		SyncRequest{},
+		SyncChanges{},
+		SyncResponse{},
+		CleanData{},
+		SyncLog{},
+		SyncOp{},
+		SocialSnapshot{},
+		EncryptedPayload{},
 		SignedAppGrantRequest{},
 		AppRegistryResponse{},
 		AppRegistration{},

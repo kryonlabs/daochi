@@ -96,7 +96,7 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 		InviteID:    randomHex(16),
 		NodeID:      s.node.ID,
 		PublicKey:   hex.EncodeToString(s.node.PublicKey),
-		DisplayName: defaultString(strings.TrimSpace(req.DisplayName), s.cfg.NodeDisplayName),
+		DisplayName: Manifest_DefaultString(strings.TrimSpace(req.DisplayName), s.cfg.NodeDisplayName),
 		Addresses:   addresses,
 		SpaceID:     strings.TrimSpace(req.SpaceID),
 		ExpiresAt:   time.Now().Add(lifetime).Unix(),

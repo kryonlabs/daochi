@@ -765,7 +765,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 	if req.AppSchemaVersion < 0 || req.AppSchemaVersion > 65535 {
 		return req, errors.New("invalid app_schema_version")
 	}
-	if req.CompatibilityUntil != "" && !validDateString(req.CompatibilityUntil) {
+	if req.CompatibilityUntil != "" && !Manifest_ValidDate(req.CompatibilityUntil) {
 		return req, errors.New("invalid compatibility_until")
 	}
 	if len(req.Collections) > 64 || len(req.Capabilities) > 64 ||
@@ -813,7 +813,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		if !Identity_ValidNamespace(req.LegacyProtocols[i].Name) ||
 			req.LegacyProtocols[i].Version < 0 ||
 			!Scope_ValidLegacyProtocolStatus(req.LegacyProtocols[i].Status) ||
-			!validDateString(req.LegacyProtocols[i].ValidUntil) {
+			!Manifest_ValidDate(req.LegacyProtocols[i].ValidUntil) {
 			return req, errors.New("invalid legacy protocol")
 		}
 	}
@@ -821,7 +821,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		policy := &req.TokenPolicies[i]
 		policy.AssetID = strings.TrimSpace(policy.AssetID)
 		policy.Permission = strings.TrimSpace(policy.Permission)
-		policy.Status = defaultString(strings.TrimSpace(policy.Status), appStatusActive)
+		policy.Status = Manifest_DefaultString(strings.TrimSpace(policy.Status), appStatusActive)
 		if policy.AssetID == "" || !Scope_ValidTokenPolicyPermission(policy.Permission) ||
 			(policy.Status != appStatusActive && policy.Status != appStatusSuspended) ||
 			policy.LegacyUnsignedUntil < 0 ||
@@ -877,14 +877,6 @@ func readSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody i
 		return req, nil, errors.New("invalid app grant")
 	}
 	return req, body, nil
-}
-
-func validDateString(value string) bool {
-	if value == "" {
-		return false
-	}
-	_, err := time.Parse("2006-01-02", value)
-	return err == nil
 }
 
 func auditJSON(value any) string {

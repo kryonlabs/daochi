@@ -31,8 +31,8 @@ The existing Go tests remain regression oracles during the port; they have not
 yet been ported in full.
 
 Additional regression cases compare binary decoding, identifier grammars,
-bearer-token bytes, HMAC results, malformed inputs, integer limits, and expiry
-boundaries against the original contracts and Go standard library.
+bearer-token bytes, HMAC results, malformed inputs, Gregorian dates,
+manifest scope/key policy, integer limits, and expiry boundaries against the original contracts and Go standard library.
 A fixture extracted from the baseline protects the ported protocol records'
 field names, Go storage types, order and reflection tags.
 
@@ -40,7 +40,7 @@ field names, Go storage types, order and reflection tags.
 
 | Baseline file | Status | Remaining work or canonical source |
 |---|---|---|
-| `app_manifest.go` | Go with ported callers | Manifest normalization, validation, signatures, registry transactions |
+| `app_manifest.go` | Partial Ziran | Normalization, validation and active-key verification in `manifest.zi`; JSON, approval verification and registry transactions remain Go |
 | `app_registry.go` | Partial Ziran | Scope grammar/ownership/matching/SQL escaping in `scope.zi`; grants, registry, handlers remain Go |
 | `challenge.go` | Go | Random challenges, expiry, locking, single-use consumption |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
@@ -81,7 +81,10 @@ field names, Go storage types, order and reflection tags.
 modules; they do not represent additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Their HTTP/database
-operations still need to move.
+operations still need to move. Manifest normalization and validation preserve
+error text, byte limits, scopes, Gregorian dates and explicit expiry boundaries.
+Active-key verification selects eligible keys in Ziran and uses Go Ed25519.
+
 `sync_types.zi` owns sync requests, responses, changes, snapshots and operation
 records. Its `RawMessage` declaration aliases `encoding/json.RawMessage`,
 preserving raw JSON payloads and Go type identity. Maintained callers use

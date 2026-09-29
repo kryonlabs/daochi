@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAppRegistrationOwnsItsDeclaredScopes(t *testing.T) {
@@ -46,7 +47,7 @@ func TestAppFeatureReferencesDeclaredScope(t *testing.T) {
 			PublicKey: strings.Repeat("00", 32),
 		}},
 	}
-	if err := validateAppManifest(manifest); err == nil {
+	if problem := Manifest_Validate(manifest, time.Now().Unix()); problem == "" {
 		t.Fatal("manifest feature accepted an undeclared scope")
 	}
 }

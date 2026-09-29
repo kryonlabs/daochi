@@ -1,4 +1,14 @@
 #import "protocol"
+#import "identity"
+#import "codec"
+#import "scope"
+
+go_strings :: #system_library "go:strings";
+TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";
+EqualFold :: (left: string, right: string) -> bool #foreign go_strings;
+
+go_ed25519 :: #system_library "go:crypto/ed25519";
+Verify :: (publicKey: []u8, message: []u8, signature: []u8) -> bool #foreign go_ed25519;
 
 AppKey :: struct {
     KeyID: string #go_tag "json:\"key_id\""
@@ -73,4 +83,249 @@ AppRegistration :: struct {
 
 AppRegistryResponse :: struct {
     Apps: []AppRegistration #go_tag "json:\"apps\""
+}
+
+Normalize :: (manifest: *AppManifest) {
+    manifest.AppID = TrimSpace(manifest.AppID)
+    manifest.DisplayName = TrimSpace(manifest.DisplayName)
+    manifest.Description = TrimSpace(manifest.Description)
+    manifest.HomepageURL = TrimSpace(manifest.HomepageURL)
+    manifest.SourceURL = TrimSpace(manifest.SourceURL)
+    manifest.Status = TrimSpace(manifest.Status)
+    if manifest.Status == "" {
+        manifest.Status = "active"
+    }
+    index: s64 = 0
+    inner: s64 = 0
+    index = 0
+    while index < manifest.Keys.count {
+        manifest.Keys[index].KeyID = TrimSpace(manifest.Keys[index].KeyID)
+        manifest.Keys[index].Algorithm = TrimSpace(manifest.Keys[index].Algorithm)
+        manifest.Keys[index].PublicKey = TrimSpace(manifest.Keys[index].PublicKey)
+        manifest.Keys[index].Purpose = TrimSpace(manifest.Keys[index].Purpose)
+        manifest.Keys[index].Status = TrimSpace(manifest.Keys[index].Status)
+        index += 1
+    }
+    index = 0
+    while index < manifest.Collections.count {
+        manifest.Collections[index].AppID = manifest.AppID
+        manifest.Collections[index].CollectionPrefix = TrimSpace(manifest.Collections[index].CollectionPrefix)
+        manifest.Collections[index].Visibility = TrimSpace(manifest.Collections[index].Visibility)
+        manifest.Collections[index].Description = TrimSpace(manifest.Collections[index].Description)
+        index += 1
+    }
+    index = 0
+    while index < manifest.Capabilities.count {
+        manifest.Capabilities[index] = TrimSpace(manifest.Capabilities[index])
+        index += 1
+    }
+    index = 0
+    while index < manifest.Features.count {
+        manifest.Features[index].ID = TrimSpace(manifest.Features[index].ID)
+        manifest.Features[index].Description = TrimSpace(manifest.Features[index].Description)
+        inner = 0
+        while inner < manifest.Features[index].Collections.count {
+            manifest.Features[index].Collections[inner] = TrimSpace(manifest.Features[index].Collections[inner])
+            inner += 1
+        }
+        index += 1
+    }
+    index = 0
+    while index < manifest.LegacyProtocols.count {
+        manifest.LegacyProtocols[index].Name = TrimSpace(manifest.LegacyProtocols[index].Name)
+        manifest.LegacyProtocols[index].Status = TrimSpace(manifest.LegacyProtocols[index].Status)
+        manifest.LegacyProtocols[index].ValidUntil = TrimSpace(manifest.LegacyProtocols[index].ValidUntil)
+        index += 1
+    }
+    manifest.MinClientVersion = TrimSpace(manifest.MinClientVersion)
+    manifest.CurrentVersion = TrimSpace(manifest.CurrentVersion)
+    manifest.CompatibilityUntil = TrimSpace(manifest.CompatibilityUntil)
+    index = 0
+    while index < manifest.TokenPolicies.count {
+        manifest.TokenPolicies[index].AssetID = TrimSpace(manifest.TokenPolicies[index].AssetID)
+        manifest.TokenPolicies[index].Permission = TrimSpace(manifest.TokenPolicies[index].Permission)
+        manifest.TokenPolicies[index].Status = TrimSpace(manifest.TokenPolicies[index].Status)
+        if manifest.TokenPolicies[index].Status == "" {
+            manifest.TokenPolicies[index].Status = "active"
+        }
+        index += 1
+    }
+}
+
+// The released date grammar is Go's date-only layout: four ASCII year digits,
+// two month/day digits, and the Gregorian calendar (including year zero).
+ValidDate :: (value: string) -> bool {
+    if value.count != 10 || value[4] != cast(u8)45 || value[7] != cast(u8)45 {
+        return false
+    }
+    index: s64 = 0
+    while index < 10 {
+        if index != 4 && index != 7 {
+            if value[index] < cast(u8)48 || value[index] > cast(u8)57 {
+                return false
+            }
+        }
+        index += 1
+    }
+    year: s64 = 0
+    index = 0
+    while index < 4 {
+        year = year * 10 + cast(s64)value[index] - 48
+        index += 1
+    }
+    month: s64 = (cast(s64)value[5] - 48) * 10 + cast(s64)value[6] - 48
+    day: s64 = (cast(s64)value[8] - 48) * 10 + cast(s64)value[9] - 48
+    if month < 1 || month > 12 || day < 1 {
+        return false
+    }
+    days: s64 = 31
+    if month == 4 || month == 6 || month == 9 || month == 11 {
+        days = 30
+    }
+    if month == 2 {
+        days = 28
+        if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            days = 29
+        }
+    }
+    return day <= days
+}
+
+DefaultString :: (value: string, fallback: string) -> string {
+    if TrimSpace(value) == "" {
+        return fallback
+    }
+    return value
+}
+
+// Return the released error text; the HTTP/database boundary makes Go errors.
+// The caller supplies the current Unix time for deterministic expiry checks.
+Validate :: (manifest: AppManifest, now: s64) -> string {
+    if manifest.ManifestVersion != cast(isize)1 {
+        return "unsupported manifest_version"
+    }
+    if !ValidNamespace(manifest.AppID) {
+        return "invalid app_id"
+    }
+    if manifest.DisplayName == "" || manifest.DisplayName.count > 80 {
+        return "invalid display_name"
+    }
+    if manifest.Status != "active" && manifest.Status != "suspended" {
+        return "invalid status"
+    }
+    if manifest.Keys.count == 0 || manifest.Keys.count > 16 {
+        return "invalid app keys"
+    }
+    if manifest.AppSchemaVersion < cast(isize)0 || manifest.AppSchemaVersion > cast(isize)65535 {
+        return "invalid app_schema_version"
+    }
+    if manifest.CompatibilityUntil != "" && !ValidDate(manifest.CompatibilityUntil) {
+        return "invalid compatibility_until"
+    }
+    if manifest.Collections.count > 64 || manifest.Capabilities.count > 64 || manifest.Features.count > 128 || manifest.LegacyProtocols.count > 64 || manifest.TokenPolicies.count > 64 {
+        return "too many manifest fields"
+    }
+    index: s64 = 0
+    while index < manifest.Keys.count {
+        key: AppKey = manifest.Keys[index]
+        if !ValidClientID(key.KeyID) || !EqualFold(key.Algorithm, "Ed25519") {
+            return "invalid app key"
+        }
+        publicKey: BinaryField = DecodeBinaryField(key.PublicKey)
+        if publicKey.error != "" || publicKey.value.count != 32 {
+            return "invalid app public key"
+        }
+        if key.Status != "" && key.Status != "active" && key.Status != "suspended" {
+            return "invalid app key status"
+        }
+        index += 1
+    }
+    index = 0
+    while index < manifest.Collections.count {
+        collection: AppCollection = manifest.Collections[index]
+        if !ValidCollectionPrefix(collection.CollectionPrefix) || !ValidAppVisibility(collection.Visibility) || !AppOwnsDeclaredScope(manifest.AppID, collection) {
+            return "invalid app collection"
+        }
+        index += 1
+    }
+    index = 0
+    while index < manifest.Capabilities.count {
+        if !ValidNamespace(manifest.Capabilities[index]) {
+            return "invalid capability"
+        }
+        index += 1
+    }
+    index = 0
+    while index < manifest.Features.count {
+        feature: AppFeature = manifest.Features[index]
+        if !ValidNamespace(feature.ID) || feature.Collections.count > 16 {
+            return "invalid app feature"
+        }
+        inner: s64 = 0
+        while inner < feature.Collections.count {
+            if !DeclaresCollection(manifest.Collections, feature.Collections[inner]) {
+                return "invalid app feature collection"
+            }
+            inner += 1
+        }
+        index += 1
+    }
+    index = 0
+    while index < manifest.LegacyProtocols.count {
+        legacy: LegacyProtocol = manifest.LegacyProtocols[index]
+        if !ValidNamespace(legacy.Name) || legacy.Version < cast(isize)0 || !ValidLegacyProtocolStatus(legacy.Status) || !ValidDate(legacy.ValidUntil) {
+            return "invalid legacy protocol"
+        }
+        index += 1
+    }
+    index = 0
+    while index < manifest.TokenPolicies.count {
+        policy: TokenPolicy = manifest.TokenPolicies[index]
+        if !ValidTokenPolicyPermission(policy.Permission) || TrimSpace(policy.AssetID) == "" {
+            return "invalid token policy"
+        }
+        if policy.Status != "" && policy.Status != "active" && policy.Status != "suspended" {
+            return "invalid token policy status"
+        }
+        // Compare a positive distance to avoid overflowing the Unix bound.
+        if policy.LegacyUnsignedUntil < 0 || (policy.LegacyUnsignedUntil > now && cast(u64)policy.LegacyUnsignedUntil - cast(u64)now > cast(u64)31536000) {
+            return "invalid legacy_unsigned_until"
+        }
+        index += 1
+    }
+    if manifest.ExpiresAt > 0 && now > manifest.ExpiresAt {
+        return "manifest expired"
+    }
+    return ""
+}
+
+SignedByActiveKey :: (manifest: AppManifest, message: []u8, signature: []u8, now: s64) -> bool {
+    index: s64 = 0
+    while index < manifest.Keys.count {
+        key: AppKey = manifest.Keys[index]
+        index += 1
+        if DefaultString(key.Status, "active") != "active" {
+            continue
+        }
+        if key.ExpiresAt > 0 && now > key.ExpiresAt {
+            continue
+        }
+        if !EqualFold(key.Algorithm, "Ed25519") {
+            continue
+        }
+        decoded: BinaryField = DecodeBinaryField(key.PublicKey)
+        if decoded.error != "" || decoded.value.count != 32 {
+            continue
+        }
+        publicKey: [32]u8
+        byteIndex: s64 = 0
+        while byteIndex < 32 {
+            publicKey[byteIndex] = decoded.value[byteIndex]
+            byteIndex += 1
+        }
+        if Verify(publicKey[:], message, signature) {
+            return true
+        }
+    }
+    return false
 }

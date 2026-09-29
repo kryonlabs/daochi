@@ -75,7 +75,7 @@ ON CONFLICT(app_id) DO UPDATE SET
 INSERT INTO server_app_keys(app_id,key_id,algorithm,public_key,purpose,status,expires_at)
 VALUES(?1,?2,?3,?4,?5,?6,?7)`,
 			manifest.AppID, key.KeyID, key.Algorithm, key.PublicKey,
-			defaultString(key.Purpose, "signing"), defaultString(key.Status, appStatusActive),
+			Manifest_DefaultString(key.Purpose, "signing"), Manifest_DefaultString(key.Status, appStatusActive),
 			key.ExpiresAt); err != nil {
 			return err
 		}
@@ -87,7 +87,7 @@ VALUES(?1,?2,?3,?4,?5,?6,?7)`,
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until)
 VALUES(?1,?2,?3,?4,?5)`,
-			manifest.AppID, policy.AssetID, policy.Permission, defaultString(policy.Status, appStatusActive),
+			manifest.AppID, policy.AssetID, policy.Permission, Manifest_DefaultString(policy.Status, appStatusActive),
 			policy.LegacyUnsignedUntil); err != nil {
 			return err
 		}
@@ -160,7 +160,7 @@ VALUES(?1,?2)`, app.AppID, capability); err != nil {
 INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until)
 VALUES(?1,?2,?3,?4,?5)`,
 			app.AppID, policy.AssetID, policy.Permission,
-			defaultString(policy.Status, appStatusActive), policy.LegacyUnsignedUntil); err != nil {
+			Manifest_DefaultString(policy.Status, appStatusActive), policy.LegacyUnsignedUntil); err != nil {
 			return err
 		}
 	}
@@ -338,11 +338,11 @@ func readSignedAppRegistrationRequest(w http.ResponseWriter, r *http.Request, ma
 	if err := json.Unmarshal(body, &req); err != nil {
 		return req, errors.New("invalid json")
 	}
-	normalizeAppManifest(&req.Manifest)
+	Manifest_Normalize(&req.Manifest)
 	req.ManifestSignature = strings.TrimSpace(req.ManifestSignature)
 	req.ApprovalSignature = strings.TrimSpace(req.ApprovalSignature)
-	if err := validateAppManifest(req.Manifest); err != nil {
-		return req, err
+	if problem := Manifest_Validate(req.Manifest, time.Now().Unix()); problem != "" {
+		return req, errors.New(problem)
 	}
 	return req, nil
 }
@@ -362,7 +362,7 @@ func validateSignedAppRegistration(req SignedAppRegistrationRequest, nodePublicK
 		return nil, "", authError{status: http.StatusBadRequest, message: "invalid manifest signature"}
 	}
 	manifestMsg := append([]byte(daochiAppManifestContext+"\n"), manifestBytes...)
-	if !manifestSignedByActiveKey(req.Manifest, manifestMsg, manifestSig) {
+	if !Manifest_SignedByActiveKey(req.Manifest, manifestMsg, manifestSig, time.Now().Unix()) {
 		return nil, "", authError{status: http.StatusUnauthorized, message: "manifest signature rejected"}
 	}
 	approvalSigField := Codec_DecodeBinaryField(req.ApprovalSignature)
@@ -376,174 +376,6 @@ func validateSignedAppRegistration(req SignedAppRegistrationRequest, nodePublicK
 	return manifestBytes, manifestHash, nil
 }
 
-func manifestSignedByActiveKey(manifest AppManifest, message, signature []byte) bool {
-	now := time.Now().Unix()
-	for _, key := range manifest.Keys {
-		if defaultString(key.Status, appStatusActive) != appStatusActive {
-			continue
-		}
-		if key.ExpiresAt > 0 && now > key.ExpiresAt {
-			continue
-		}
-		if !strings.EqualFold(key.Algorithm, "Ed25519") {
-			continue
-		}
-		publicKeyField := Codec_DecodeBinaryField(key.PublicKey)
-		publicKey := []byte(publicKeyField.Value)
-		if publicKeyField.Error != "" || len(publicKey) != ed25519.PublicKeySize {
-			continue
-		}
-		if ed25519.Verify(publicKey, message, signature) {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeAppManifest(manifest *AppManifest) {
-	manifest.AppID = strings.TrimSpace(manifest.AppID)
-	manifest.DisplayName = strings.TrimSpace(manifest.DisplayName)
-	manifest.Description = strings.TrimSpace(manifest.Description)
-	manifest.HomepageURL = strings.TrimSpace(manifest.HomepageURL)
-	manifest.SourceURL = strings.TrimSpace(manifest.SourceURL)
-	manifest.Status = strings.TrimSpace(manifest.Status)
-	if manifest.Status == "" {
-		manifest.Status = appStatusActive
-	}
-	for i := range manifest.Keys {
-		manifest.Keys[i].KeyID = strings.TrimSpace(manifest.Keys[i].KeyID)
-		manifest.Keys[i].Algorithm = strings.TrimSpace(manifest.Keys[i].Algorithm)
-		manifest.Keys[i].PublicKey = strings.TrimSpace(manifest.Keys[i].PublicKey)
-		manifest.Keys[i].Purpose = strings.TrimSpace(manifest.Keys[i].Purpose)
-		manifest.Keys[i].Status = strings.TrimSpace(manifest.Keys[i].Status)
-	}
-	for i := range manifest.Collections {
-		manifest.Collections[i].AppID = manifest.AppID
-		manifest.Collections[i].CollectionPrefix = strings.TrimSpace(manifest.Collections[i].CollectionPrefix)
-		manifest.Collections[i].Visibility = strings.TrimSpace(manifest.Collections[i].Visibility)
-		manifest.Collections[i].Description = strings.TrimSpace(manifest.Collections[i].Description)
-	}
-	for i := range manifest.Capabilities {
-		manifest.Capabilities[i] = strings.TrimSpace(manifest.Capabilities[i])
-	}
-	for i := range manifest.Features {
-		manifest.Features[i].ID = strings.TrimSpace(manifest.Features[i].ID)
-		manifest.Features[i].Description = strings.TrimSpace(manifest.Features[i].Description)
-		for j := range manifest.Features[i].Collections {
-			manifest.Features[i].Collections[j] = strings.TrimSpace(manifest.Features[i].Collections[j])
-		}
-	}
-	for i := range manifest.LegacyProtocols {
-		manifest.LegacyProtocols[i].Name = strings.TrimSpace(manifest.LegacyProtocols[i].Name)
-		manifest.LegacyProtocols[i].Status = strings.TrimSpace(manifest.LegacyProtocols[i].Status)
-		manifest.LegacyProtocols[i].ValidUntil = strings.TrimSpace(manifest.LegacyProtocols[i].ValidUntil)
-	}
-	manifest.MinClientVersion = strings.TrimSpace(manifest.MinClientVersion)
-	manifest.CurrentVersion = strings.TrimSpace(manifest.CurrentVersion)
-	manifest.CompatibilityUntil = strings.TrimSpace(manifest.CompatibilityUntil)
-	for i := range manifest.TokenPolicies {
-		manifest.TokenPolicies[i].AssetID = strings.TrimSpace(manifest.TokenPolicies[i].AssetID)
-		manifest.TokenPolicies[i].Permission = strings.TrimSpace(manifest.TokenPolicies[i].Permission)
-		manifest.TokenPolicies[i].Status = strings.TrimSpace(manifest.TokenPolicies[i].Status)
-		if manifest.TokenPolicies[i].Status == "" {
-			manifest.TokenPolicies[i].Status = appStatusActive
-		}
-	}
-}
-
-func validateAppManifest(manifest AppManifest) error {
-	if manifest.ManifestVersion != 1 {
-		return errors.New("unsupported manifest_version")
-	}
-	if !Identity_ValidNamespace(manifest.AppID) {
-		return errors.New("invalid app_id")
-	}
-	if manifest.DisplayName == "" || len(manifest.DisplayName) > 80 {
-		return errors.New("invalid display_name")
-	}
-	if manifest.Status != appStatusActive && manifest.Status != appStatusSuspended {
-		return errors.New("invalid status")
-	}
-	if len(manifest.Keys) == 0 || len(manifest.Keys) > 16 {
-		return errors.New("invalid app keys")
-	}
-	if manifest.AppSchemaVersion < 0 || manifest.AppSchemaVersion > 65535 {
-		return errors.New("invalid app_schema_version")
-	}
-	if manifest.CompatibilityUntil != "" && !validDateString(manifest.CompatibilityUntil) {
-		return errors.New("invalid compatibility_until")
-	}
-	if len(manifest.Collections) > 64 || len(manifest.Capabilities) > 64 ||
-		len(manifest.Features) > 128 || len(manifest.LegacyProtocols) > 64 ||
-		len(manifest.TokenPolicies) > 64 {
-		return errors.New("too many manifest fields")
-	}
-	for _, key := range manifest.Keys {
-		if !Identity_ValidClientID(key.KeyID) || !strings.EqualFold(key.Algorithm, "Ed25519") {
-			return errors.New("invalid app key")
-		}
-		publicKeyField := Codec_DecodeBinaryField(key.PublicKey)
-		publicKey := []byte(publicKeyField.Value)
-		if publicKeyField.Error != "" || len(publicKey) != ed25519.PublicKeySize {
-			return errors.New("invalid app public key")
-		}
-		if key.Status != "" && key.Status != appStatusActive && key.Status != appStatusSuspended {
-			return errors.New("invalid app key status")
-		}
-	}
-	for _, collection := range manifest.Collections {
-		if !Scope_ValidCollectionPrefix(collection.CollectionPrefix) ||
-			!Scope_ValidAppVisibility(collection.Visibility) ||
-			!Scope_AppOwnsDeclaredScope(manifest.AppID, collection) {
-			return errors.New("invalid app collection")
-		}
-	}
-	for _, capability := range manifest.Capabilities {
-		if !Identity_ValidNamespace(capability) {
-			return errors.New("invalid capability")
-		}
-	}
-	for _, feature := range manifest.Features {
-		if !Identity_ValidNamespace(feature.ID) || len(feature.Collections) > 16 {
-			return errors.New("invalid app feature")
-		}
-		for _, collection := range feature.Collections {
-			if !Scope_DeclaresCollection(manifest.Collections, collection) {
-				return errors.New("invalid app feature collection")
-			}
-		}
-	}
-	for _, legacy := range manifest.LegacyProtocols {
-		if !Identity_ValidNamespace(legacy.Name) || legacy.Version < 0 ||
-			!Scope_ValidLegacyProtocolStatus(legacy.Status) || !validDateString(legacy.ValidUntil) {
-			return errors.New("invalid legacy protocol")
-		}
-	}
-	for _, policy := range manifest.TokenPolicies {
-		if !Scope_ValidTokenPolicyPermission(policy.Permission) || strings.TrimSpace(policy.AssetID) == "" {
-			return errors.New("invalid token policy")
-		}
-		if policy.Status != "" && policy.Status != appStatusActive && policy.Status != appStatusSuspended {
-			return errors.New("invalid token policy status")
-		}
-		if policy.LegacyUnsignedUntil < 0 ||
-			policy.LegacyUnsignedUntil > time.Now().Add(365*24*time.Hour).Unix() {
-			return errors.New("invalid legacy_unsigned_until")
-		}
-	}
-	if manifest.ExpiresAt > 0 && time.Now().Unix() > manifest.ExpiresAt {
-		return errors.New("manifest expired")
-	}
-	return nil
-}
-
-func defaultString(value, fallback string) string {
-	if strings.TrimSpace(value) == "" {
-		return fallback
-	}
-	return value
-}
-
 func manifestDigest(manifest AppManifest) (string, error) {
 	data, err := canonicalJSON(manifest)
 	if err != nil {
@@ -554,9 +386,9 @@ func manifestDigest(manifest AppManifest) (string, error) {
 }
 
 func formatAppManifestForTest(manifest AppManifest) ([]byte, string, error) {
-	normalizeAppManifest(&manifest)
-	if err := validateAppManifest(manifest); err != nil {
-		return nil, "", err
+	Manifest_Normalize(&manifest)
+	if problem := Manifest_Validate(manifest, time.Now().Unix()); problem != "" {
+		return nil, "", errors.New(problem)
 	}
 	data, err := canonicalJSON(manifest)
 	if err != nil {

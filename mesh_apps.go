@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type storedManifestVersion struct {
@@ -78,12 +79,12 @@ func (s *Server) ImportMeshApps(
 	allowedApps := normalizedStringSet(policy.Apps)
 	applied := 0
 	for _, registration := range registrations {
-		normalizeAppManifest(&registration.Manifest)
+		Manifest_Normalize(&registration.Manifest)
 		if !allowedApps[strings.ToLower(registration.Manifest.AppID)] {
 			return 0, fmt.Errorf("app %q exceeds mesh policy", registration.Manifest.AppID)
 		}
-		if err := validateAppManifest(registration.Manifest); err != nil {
-			return 0, fmt.Errorf("invalid mesh app %q: %w", registration.Manifest.AppID, err)
+		if problem := Manifest_Validate(registration.Manifest, time.Now().Unix()); problem != "" {
+			return 0, fmt.Errorf("invalid mesh app %q: %w", registration.Manifest.AppID, errors.New(problem))
 		}
 
 		manifestBytes, manifestHash, err := validateSignedAppRegistration(

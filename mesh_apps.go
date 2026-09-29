@@ -23,7 +23,7 @@ func (s *Store) ExportMeshApps(
 		return []SignedAppRegistrationRequest{}, nil
 	}
 
-	allowedApps := normalizedStringSet(policy.Apps)
+	allowedApps := Sets_Normalize(policy.Apps)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT app_id,manifest_json,manifest_signature,approval_signature
 FROM server_app_manifests
@@ -76,7 +76,7 @@ func (s *Server) ImportMeshApps(
 		return 0, nil
 	}
 
-	allowedApps := normalizedStringSet(policy.Apps)
+	allowedApps := Sets_Normalize(policy.Apps)
 	applied := 0
 	for _, registration := range registrations {
 		Manifest_Normalize(&registration.Manifest)
@@ -144,15 +144,4 @@ WHERE app_id=?1`, appID).Scan(&current.Version, &current.Hash)
 		return storedManifestVersion{}, false, err
 	}
 	return current, true, nil
-}
-
-func normalizedStringSet(values []string) map[string]bool {
-	set := make(map[string]bool, len(values))
-	for _, value := range values {
-		normalized := strings.ToLower(strings.TrimSpace(value))
-		if normalized != "" {
-			set[normalized] = true
-		}
-	}
-	return set
 }

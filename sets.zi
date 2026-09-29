@@ -1,0 +1,33 @@
+#import "map_go"
+
+go_strings :: #system_library "go:strings";
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+ToLower :: (value: string) -> string #foreign go_strings;
+
+StringSet :: Map(string, bool)
+
+FromEnvironment :: (raw: string) -> StringSet {
+    result: StringSet
+    MapInit(result)
+    values := Split(raw, ",")
+    for value: values {
+        item := TrimSpace(value)
+        if item != "" {
+            MapSet(result, item, true)
+        }
+    }
+    return result
+}
+
+Normalize :: (values: []string) -> StringSet {
+    result: StringSet
+    MapInit(result)
+    for value: values {
+        item := ToLower(TrimSpace(value))
+        if item != "" {
+            MapSet(result, item, true)
+        }
+    }
+    return result
+}

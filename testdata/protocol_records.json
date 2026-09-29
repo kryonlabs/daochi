@@ -2545,6 +2545,90 @@
         "type": "int64",
         "tag": "json:\"server_version\""
       }
+    ],
+    "AccountExportResponse": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "AccountAlias",
+        "type": "string",
+        "tag": "json:\"account_alias,omitempty\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon,omitempty\""
+      },
+      {
+        "name": "Tables",
+        "type": "map[string][]map[string]interface {}",
+        "tag": "json:\"tables\""
+      }
+    ],
+    "SyncDiagnosticReport": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "ServerVersion",
+        "type": "int64",
+        "tag": "json:\"server_version\""
+      },
+      {
+        "name": "StateHash",
+        "type": "string",
+        "tag": "json:\"state_hash\""
+      },
+      {
+        "name": "CompactedThroughVersion",
+        "type": "int64",
+        "tag": "json:\"compacted_through_version\""
+      },
+      {
+        "name": "TableCounts",
+        "type": "map[string]int",
+        "tag": "json:\"table_counts\""
+      },
+      {
+        "name": "EncryptedPayloadBytes",
+        "type": "int64",
+        "tag": "json:\"encrypted_payload_bytes,omitempty\""
+      },
+      {
+        "name": "LegacyClients",
+        "type": "[]string",
+        "tag": "json:\"legacy_clients,omitempty\""
+      },
+      {
+        "name": "ActiveWebSocketSupported",
+        "type": "bool",
+        "tag": "json:\"active_websocket_supported\""
+      },
+      {
+        "name": "RecentSyncAudit",
+        "type": "[]SyncAuditEntry",
+        "tag": "json:\"recent_sync_audit,omitempty\""
+      },
+      {
+        "name": "RecentEncryptedPayloads",
+        "type": "[]EncryptedPayload",
+        "tag": "json:\"recent_encrypted_payloads,omitempty\""
+      }
     ]
   }
 }

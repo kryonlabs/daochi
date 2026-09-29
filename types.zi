@@ -1,0 +1,27 @@
+// Export and diagnostic records preserve native Go map wire shapes.
+#import "protocol";
+#import "sync_types";
+#import "map_go";
+#import "go_types";
+
+AccountExportResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    AccountAlias: string #go_tag "json:\"account_alias,omitempty\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+    Tables: Map(string, []Map(string, Any)) #go_tag "json:\"tables\""
+}
+
+SyncDiagnosticReport :: struct {
+    Status: string #go_tag "json:\"status\""
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    ServerVersion: s64 #go_tag "json:\"server_version\""
+    StateHash: string #go_tag "json:\"state_hash\""
+    CompactedThroughVersion: s64 #go_tag "json:\"compacted_through_version\""
+    TableCounts: Map(string, isize) #go_tag "json:\"table_counts\""
+    EncryptedPayloadBytes: s64 #go_tag "json:\"encrypted_payload_bytes,omitempty\""
+    LegacyClients: []string #go_tag "json:\"legacy_clients,omitempty\""
+    ActiveWebSocketSupported: bool #go_tag "json:\"active_websocket_supported\""
+    RecentSyncAudit: []SyncAuditEntry #go_tag "json:\"recent_sync_audit,omitempty\""
+    RecentEncryptedPayloads: []EncryptedPayload #go_tag "json:\"recent_encrypted_payloads,omitempty\""
+}

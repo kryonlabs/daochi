@@ -113,7 +113,7 @@ func loadConfig() Config {
 		WaoziIssuerPublicKey:            issuerPublic,
 		WaoziIssuerPrivateKey:           issuerPrivate,
 		TokenProducts:                   envTokenProductsValue(envString("DAOCHI_TOKEN_PRODUCTS", "")),
-		GooglePackageNames:              envStringSetValue(envString("DAOCHI_GOOGLE_PACKAGE_NAMES", "")),
+		GooglePackageNames:              Sets_FromEnvironment(envString("DAOCHI_GOOGLE_PACKAGE_NAMES", "")),
 		GoogleServiceAccountJSON:        envStringOrFile("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON", "DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", ""),
 		GoogleOAuthClientJSON:           envStringOrFile("DAOCHI_GOOGLE_OAUTH_CLIENT_JSON", "DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE", ""),
 		GoogleOAuthRefreshToken:         envStringOrFile("DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN", "DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", ""),
@@ -239,18 +239,7 @@ func envBytesHexOrFile(key, fileKey string, fallback []byte) []byte {
 }
 
 func envStringSet(key string) map[string]bool {
-	return envStringSetValue(os.Getenv(key))
-}
-
-func envStringSetValue(raw string) map[string]bool {
-	out := map[string]bool{}
-	for _, item := range strings.Split(raw, ",") {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			out[item] = true
-		}
-	}
-	return out
+	return Sets_FromEnvironment(os.Getenv(key))
 }
 
 func envNodePeers(key string) []NodePeer {

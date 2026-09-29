@@ -1,0 +1,100 @@
+#import "identity"
+#import "protocol"
+
+go_strings :: #system_library "go:strings";
+TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";
+TrimSuffix :: (value: string, suffix: string) -> string #foreign go_strings "TrimSuffix";
+HasSuffix :: (value: string, suffix: string) -> bool #foreign go_strings "HasSuffix";
+HasPrefix :: (value: string, prefix: string) -> bool #foreign go_strings "HasPrefix";
+Split :: (value: string, separator: string) -> []string #foreign go_strings "Split";
+ReplaceAll :: (value: string, old: string, replacement: string) -> string #foreign go_strings "ReplaceAll";
+Join :: (values: []string, separator: string) -> string #foreign go_strings "Join";
+
+ValidAppVisibility :: (value: string) -> bool {
+    return value == "private" || value == "shared" || value == "friends" || value == "public"
+}
+
+ValidLegacyProtocolStatus :: (value: string) -> bool {
+    return value == "compatibility" || value == "deprecated" || value == "active"
+}
+
+ValidTokenPolicyPermission :: (value: string) -> bool {
+    return value == "spend" || value == "purchase"
+}
+
+ValidCollectionPrefix :: (input: string) -> bool {
+    value: string = TrimSpace(input)
+    if value == "" {
+        return false
+    }
+    if ValidLegacyEncryptedCollection(value) {
+        return true
+    }
+    if HasSuffix(value, ".*") {
+        return ValidCollectionPrefixWildcardBase(TrimSuffix(value, ".*"))
+    }
+    return ValidEncryptedHierarchyCollection(value)
+}
+
+ValidCollectionPrefixWildcardBase :: (value: string) -> bool {
+    parts: []string = Split(TrimSpace(value), ".")
+    if parts.count == 2 && parts[0] == "account" {
+        return ValidVersionSegment(parts[1])
+    }
+    if parts.count >= 3 && ValidAppVisibility(parts[0]) {
+        if !ValidNamespaceSegment(parts[1]) || !ValidVersionSegment(parts[2]) {
+            return false
+        }
+        index: s64 = 3
+        while index < parts.count {
+            if !ValidNamespaceSegment(parts[index]) {
+                return false
+            }
+            index += 1
+        }
+        return true
+    }
+    return false
+}
+
+AppOwnsDeclaredScope :: (appID: string, collection: AppCollection) -> bool {
+    // These collections predate namespaced app scopes in released clients.
+    if appID == "inbe" && ValidLegacyEncryptedCollection(collection.CollectionPrefix) {
+        return collection.Visibility == "private"
+    }
+    parts: []string = Split(TrimSuffix(collection.CollectionPrefix, ".*"), ".")
+    if parts.count < 3 || parts[1] != appID {
+        return false
+    }
+    return parts[0] == collection.Visibility
+}
+
+DeclaresCollection :: (collections: []AppCollection, prefix: string) -> bool {
+    index: s64 = 0
+    while index < collections.count {
+        if collections[index].CollectionPrefix == prefix {
+            return true
+        }
+        index += 1
+    }
+    return false
+}
+
+CollectionMatchesPrefix :: (collection: string, prefix: string) -> bool {
+    if collection == prefix {
+        return true
+    }
+    if HasSuffix(prefix, ".*") {
+        return HasPrefix(collection, TrimSuffix(prefix, "*"))
+    }
+    return false
+}
+
+LikePatternForCollectionPrefix :: (prefix: string) -> string {
+    base: string = TrimSuffix(prefix, ".*")
+    base = ReplaceAll(base, "\\", "\\\\")
+    base = ReplaceAll(base, "%", "\\%")
+    base = ReplaceAll(base, "_", "\\_")
+    parts: [2]string = .[base, ".%"]
+    return Join(parts[:], "")
+}

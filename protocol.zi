@@ -1,0 +1,538 @@
+// Protocol records preserve the released JSON names and omission rules.
+
+ChallengeResponse :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    Nonce: string #go_tag "json:\"nonce\""
+    ExpiresIn: s64 #go_tag "json:\"expires_in_seconds\""
+}
+
+LoginRequest :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    ClientID: string #go_tag "json:\"client_id\""
+    PublicKey: string #go_tag "json:\"public_key,omitempty\""
+}
+
+LoginResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    AuthToken: string #go_tag "json:\"auth_token\""
+    ExpiresIn: s64 #go_tag "json:\"expires_in_seconds\""
+    ServerTime: s64 #go_tag "json:\"server_time,omitempty\""
+    AccountAlias: string #go_tag "json:\"account_alias,omitempty\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+}
+
+NodePeer :: struct {
+    Name: string #go_tag "json:\"name,omitempty\""
+    URL: string #go_tag "json:\"url\""
+    NodeID: string #go_tag "json:\"node_id,omitempty\""
+    Sync: *NodeSyncPolicy #go_tag "json:\"sync,omitempty\""
+}
+
+NodeSyncPolicy :: struct {
+    Direction: string #go_tag "json:\"direction,omitempty\""
+    Apps: []string #go_tag "json:\"apps,omitempty\""
+    Collections: []string #go_tag "json:\"collections,omitempty\""
+    Spaces: []string #go_tag "json:\"spaces,omitempty\""
+    Data: []string #go_tag "json:\"data,omitempty\""
+}
+
+NodeUsage :: struct {
+    RegisteredUsers: isize #go_tag "json:\"registered_users\""
+    ActiveUsers30d: isize #go_tag "json:\"active_users_30d\""
+    RegisteredClients: isize #go_tag "json:\"registered_clients\""
+    ActiveClients30d: isize #go_tag "json:\"active_clients_30d\""
+    ConnectedUsers: isize #go_tag "json:\"connected_users\""
+    ConnectedWebSocketClients: isize #go_tag "json:\"connected_websocket_clients\""
+    RecentActivityWindowDays: isize #go_tag "json:\"recent_activity_window_days\""
+    WebSocketConnectionLimitPerUser: isize #go_tag "json:\"websocket_connection_limit_per_user\""
+}
+
+NodeStorageUsage :: struct {
+    DatabaseFileBytes: s64 #go_tag "json:\"database_file_bytes\""
+    DatabaseWALBytes: s64 #go_tag "json:\"database_wal_bytes,omitempty\""
+    DatabaseSHMBytes: s64 #go_tag "json:\"database_shm_bytes,omitempty\""
+    DatabaseTotalBytes: s64 #go_tag "json:\"database_total_bytes\""
+    SQLitePageBytes: s64 #go_tag "json:\"sqlite_page_bytes,omitempty\""
+    LogicalBytes: s64 #go_tag "json:\"logical_bytes\""
+    EncryptedRecordBytes: s64 #go_tag "json:\"encrypted_record_bytes\""
+    EncryptedPayloadBytes: s64 #go_tag "json:\"encrypted_payload_bytes\""
+    UnassignedBytes: s64 #go_tag "json:\"unassigned_bytes,omitempty\""
+    UnassignedEncryptedPayloads: StorageBucketUsage #go_tag "json:\"unassigned_encrypted_payloads,omitempty\""
+    Apps: []AppStorageUsage #go_tag "json:\"apps\""
+}
+
+AppStorageUsage :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    DisplayName: string #go_tag "json:\"display_name,omitempty\""
+    LogicalBytes: s64 #go_tag "json:\"logical_bytes\""
+    RecordBytes: s64 #go_tag "json:\"record_bytes\""
+    RecordCount: isize #go_tag "json:\"record_count\""
+    Collections: []CollectionStorageUsage #go_tag "json:\"collections\""
+}
+
+CollectionStorageUsage :: struct {
+    CollectionPrefix: string #go_tag "json:\"collection_prefix,omitempty\""
+    Collection: string #go_tag "json:\"collection\""
+    LogicalBytes: s64 #go_tag "json:\"logical_bytes\""
+    RecordBytes: s64 #go_tag "json:\"record_bytes\""
+    RecordCount: isize #go_tag "json:\"record_count\""
+}
+
+StorageBucketUsage :: struct {
+    LogicalBytes: s64 #go_tag "json:\"logical_bytes\""
+    Count: isize #go_tag "json:\"count\""
+}
+
+CleanHabitDay :: struct {
+    HabitID: string #go_tag "json:\"habit_id\""
+    HabitName: string #go_tag "json:\"habit_name,omitempty\""
+    LocalDate: isize #go_tag "json:\"local_date\""
+    Completed: bool #go_tag "json:\"completed\""
+    Count: isize #go_tag "json:\"count\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+}
+
+EncryptedRecord :: struct {
+    Collection: string #go_tag "json:\"collection\""
+    ID: string #go_tag "json:\"id\""
+    KeyID: string #go_tag "json:\"key_id,omitempty\""
+    Nonce: string #go_tag "json:\"nonce,omitempty\""
+    Ciphertext: string #go_tag "json:\"ciphertext,omitempty\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+    DeletedAt: s64 #go_tag "json:\"deleted_at,omitempty\""
+    ContentHash: string #go_tag "json:\"content_hash,omitempty\""
+    SchemaVersion: isize #go_tag "json:\"schema_version,omitempty\""
+    ParentID: string #go_tag "json:\"parent_id,omitempty\""
+}
+
+SyncDiagnostics :: struct {
+    SnapshotReason: string #go_tag "json:\"snapshot_reason,omitempty\""
+    RequestedSinceServerVersion: s64 #go_tag "json:\"requested_since_server_version\""
+    EffectiveSinceServerVersion: s64 #go_tag "json:\"effective_since_server_version\""
+    ClientClock: s64 #go_tag "json:\"client_clock\""
+    CompactedThroughVersion: s64 #go_tag "json:\"compacted_through_version,omitempty\""
+    HasLocalChanges: bool #go_tag "json:\"has_local_changes\""
+    AcceptedOps: isize #go_tag "json:\"accepted_ops\""
+    RemoteOps: isize #go_tag "json:\"remote_ops\""
+    AppliedInput: SyncResult #go_tag "json:\"applied_input\""
+    ReturnedChanges: SyncResult #go_tag "json:\"returned_changes\""
+}
+
+SyncAuditEntry :: struct {
+    ID: s64 #go_tag "json:\"id,omitempty\""
+    UserIDHash: string #go_tag "json:\"user_id_hash,omitempty\""
+    ClientID: string #go_tag "json:\"client_id,omitempty\""
+    AppID: string #go_tag "json:\"app_id,omitempty\""
+    ProtocolVersion: isize #go_tag "json:\"protocol_version\""
+    SinceServerVersion: s64 #go_tag "json:\"since_server_version\""
+    ClientClock: s64 #go_tag "json:\"client_clock\""
+    ServerVersion: s64 #go_tag "json:\"server_version\""
+    Applied: SyncResult #go_tag "json:\"applied\""
+    RemoteOps: isize #go_tag "json:\"remote_ops\""
+    FullSnapshotRequired: bool #go_tag "json:\"full_snapshot_required\""
+    SnapshotReason: string #go_tag "json:\"snapshot_reason,omitempty\""
+    EncryptedPayload: bool #go_tag "json:\"encrypted_payload\""
+    EncryptedPayloadBytes: s64 #go_tag "json:\"encrypted_payload_bytes,omitempty\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+}
+
+DeleteRequest :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+}
+
+AliasRequest :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    Alias: string #go_tag "json:\"alias\""
+}
+
+AliasResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    Alias: string #go_tag "json:\"alias\""
+}
+
+ProfileIconRequest :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon\""
+}
+
+ProfileIconResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon\""
+}
+
+FriendRequestCreateRequest :: struct {
+    Target: string #go_tag "json:\"target\""
+}
+
+FriendRequestActionRequest :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash,omitempty\""
+}
+
+FriendRequestResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    Request: FriendRequest #go_tag "json:\"request\""
+}
+
+FriendRequestsResponse :: struct {
+    Incoming: []FriendRequest #go_tag "json:\"incoming\""
+    Outgoing: []FriendRequest #go_tag "json:\"outgoing\""
+}
+
+FriendsResponse :: struct {
+    Friends: []Friend #go_tag "json:\"friends\""
+}
+
+ProfileStatsRequest :: struct {
+    App: string #go_tag "json:\"app\""
+    Metrics: []ProfileMetric #go_tag "json:\"metrics\""
+}
+
+ProfileStatsResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    Applied: isize #go_tag "json:\"applied\""
+}
+
+FriendStatsResponse :: struct {
+    Rows: []FriendStatRow #go_tag "json:\"rows\""
+}
+
+AppCollection :: struct {
+    AppID: string #go_tag "json:\"app_id,omitempty\""
+    CollectionPrefix: string #go_tag "json:\"collection_prefix\""
+    Visibility: string #go_tag "json:\"visibility\""
+    SchemaVersion: isize #go_tag "json:\"schema_version,omitempty\""
+    Description: string #go_tag "json:\"description,omitempty\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+}
+
+AppFeature :: struct {
+    ID: string #go_tag "json:\"id\""
+    Collections: []string #go_tag "json:\"collections,omitempty\""
+    RequiresSignedTx: bool #go_tag "json:\"requires_signed_tx,omitempty\""
+    Description: string #go_tag "json:\"description,omitempty\""
+}
+
+LegacyProtocol :: struct {
+    Name: string #go_tag "json:\"name\""
+    Version: isize #go_tag "json:\"version,omitempty\""
+    Status: string #go_tag "json:\"status\""
+    ValidUntil: string #go_tag "json:\"valid_until\""
+}
+
+AppGrant :: struct {
+    ID: string #go_tag "json:\"id\""
+    UserIDHash: string #go_tag "json:\"user_id_hash,omitempty\""
+    SourceAppID: string #go_tag "json:\"source_app_id\""
+    TargetAppID: string #go_tag "json:\"target_app_id\""
+    CollectionPrefix: string #go_tag "json:\"collection_prefix\""
+    Permission: string #go_tag "json:\"permission\""
+    Status: string #go_tag "json:\"status\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+    UpdatedAt: string #go_tag "json:\"updated_at,omitempty\""
+    RevokedAt: string #go_tag "json:\"revoked_at,omitempty\""
+}
+
+AppGrantRequest :: struct {
+    SourceAppID: string #go_tag "json:\"source_app_id\""
+    TargetAppID: string #go_tag "json:\"target_app_id\""
+    CollectionPrefix: string #go_tag "json:\"collection_prefix\""
+    Permission: string #go_tag "json:\"permission,omitempty\""
+}
+
+AppGrantsResponse :: struct {
+    Grants: []AppGrant #go_tag "json:\"grants\""
+}
+
+AppRecordsResponse :: struct {
+    Records: []EncryptedRecord #go_tag "json:\"records\""
+}
+
+TokenProduct :: struct {
+    ProductID: string #go_tag "json:\"product_id\""
+    TokenUnits: s64 #go_tag "json:\"token_units\""
+    MoneroAtomicAmount: s64 #go_tag "json:\"monero_atomic_amount,omitempty\""
+}
+
+TokenAsset :: struct {
+    IssuerID: string #go_tag "json:\"issuer_id\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    DisplayName: string #go_tag "json:\"display_name\""
+    Decimals: isize #go_tag "json:\"decimals\""
+    Status: string #go_tag "json:\"status\""
+}
+
+TokenAssetsResponse :: struct {
+    Assets: []TokenAsset #go_tag "json:\"assets\""
+}
+
+TokenProductsResponse :: struct {
+    Products: []TokenProduct #go_tag "json:\"products\""
+}
+
+TokenIssuerResponse :: struct {
+    IssuerID: string #go_tag "json:\"issuer_id\""
+    PublicKey: string #go_tag "json:\"public_key\""
+    Algorithm: string #go_tag "json:\"algorithm\""
+    Status: string #go_tag "json:\"status\""
+}
+
+TokenBalanceResponse :: struct {
+    AccountID: string #go_tag "json:\"account_id\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    AppID: string #go_tag "json:\"app_id,omitempty\""
+    Balance: s64 #go_tag "json:\"balance\""
+}
+
+TokenLedgerResponse :: struct {
+    Events: []TokenReceipt #go_tag "json:\"events\""
+}
+
+TokenReceipt :: struct {
+    ReceiptID: string #go_tag "json:\"receipt_id\""
+    IssuerID: string #go_tag "json:\"issuer_id\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    AccountID: string #go_tag "json:\"account_id\""
+    AppID: string #go_tag "json:\"app_id,omitempty\""
+    EventType: string #go_tag "json:\"event_type\""
+    AmountDelta: s64 #go_tag "json:\"amount_delta\""
+    LedgerSeq: s64 #go_tag "json:\"ledger_seq\""
+    PreviousHash: string #go_tag "json:\"previous_hash\""
+    EventHash: string #go_tag "json:\"event_hash\""
+    CreatedAt: string #go_tag "json:\"created_at\""
+    SourceType: string #go_tag "json:\"source_type\""
+    SourceRef: string #go_tag "json:\"source_ref\""
+    Signature: string #go_tag "json:\"signature\""
+}
+
+TokenSpendRequest :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    Amount: s64 #go_tag "json:\"amount\""
+    Action: string #go_tag "json:\"action\""
+    IdempotencyKey: string #go_tag "json:\"idempotency_key\""
+    Metadata: string #go_tag "json:\"metadata,omitempty\""
+}
+
+TokenSpendResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    Balance: s64 #go_tag "json:\"balance\""
+    Receipt: TokenReceipt #go_tag "json:\"receipt\""
+}
+
+GooglePurchaseVerifyRequest :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    PackageName: string #go_tag "json:\"package_name\""
+    ProductID: string #go_tag "json:\"product_id\""
+    PurchaseToken: string #go_tag "json:\"purchase_token\""
+}
+
+TokenPurchaseResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    Balance: s64 #go_tag "json:\"balance\""
+    Receipt: TokenReceipt #go_tag "json:\"receipt\""
+}
+
+MoneroInvoiceRequest :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    ProductID: string #go_tag "json:\"product_id\""
+}
+
+MoneroInvoiceResponse :: struct {
+    ID: string #go_tag "json:\"id\""
+    AppID: string #go_tag "json:\"app_id,omitempty\""
+    Status: string #go_tag "json:\"status\""
+    ProductID: string #go_tag "json:\"product_id\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    TokenUnits: s64 #go_tag "json:\"token_units\""
+    AtomicAmount: s64 #go_tag "json:\"atomic_amount\""
+    Address: string #go_tag "json:\"address\""
+    AddressIndex: isize #go_tag "json:\"address_index,omitempty\""
+    PaymentID: string #go_tag "json:\"payment_id,omitempty\""
+    ExpiresAt: string #go_tag "json:\"expires_at\""
+    Receipt: *TokenReceipt #go_tag "json:\"receipt,omitempty\""
+}
+
+MoneroAccountAddress :: struct {
+    AccountID: string #go_tag "json:\"account_id\""
+    Alias: string #go_tag "json:\"alias,omitempty\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+    Address: string #go_tag "json:\"address\""
+    AccountIndex: isize #go_tag "json:\"-\""
+    AddressIndex: isize #go_tag "json:\"-\""
+    CreatedAt: string #go_tag "json:\"created_at\""
+}
+
+MoneroRate :: struct {
+    AtomicAmount: s64 #go_tag "json:\"xmr_atomic_units\""
+    TokenUnits: s64 #go_tag "json:\"token_units\""
+}
+
+MoneroAddressResponse :: struct {
+    AccountID: string #go_tag "json:\"account_id\""
+    Alias: string #go_tag "json:\"alias,omitempty\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    Address: string #go_tag "json:\"address\""
+    URI: string #go_tag "json:\"uri\""
+    Network: string #go_tag "json:\"network\""
+    ConfirmationsRequired: s64 #go_tag "json:\"confirmations_required\""
+    MinimumAtomicAmount: s64 #go_tag "json:\"minimum_atomic_amount\""
+    Rate: MoneroRate #go_tag "json:\"rate\""
+}
+
+MoneroDeposit :: struct {
+    TxID: string #go_tag "json:\"tx_id\""
+    AccountID: string #go_tag "json:\"account_id,omitempty\""
+    AmountAtomic: s64 #go_tag "json:\"amount_atomic\""
+    TokenUnits: s64 #go_tag "json:\"token_units,omitempty\""
+    BlockHeight: s64 #go_tag "json:\"block_height,omitempty\""
+    Confirmations: s64 #go_tag "json:\"confirmations\""
+    Status: string #go_tag "json:\"status\""
+    FirstSeenAt: string #go_tag "json:\"first_seen_at\""
+    ConfirmedAt: string #go_tag "json:\"confirmed_at,omitempty\""
+    CreditedAt: string #go_tag "json:\"credited_at,omitempty\""
+    Receipt: *TokenReceipt #go_tag "json:\"receipt,omitempty\""
+    AccountIndex: isize #go_tag "json:\"-\""
+    AddressIndex: isize #go_tag "json:\"-\""
+    UnlockTime: s64 #go_tag "json:\"-\""
+    Locked: bool #go_tag "json:\"-\""
+    DoubleSpendSeen: bool #go_tag "json:\"-\""
+    RateAtomic: s64 #go_tag "json:\"-\""
+    RateTokenUnits: s64 #go_tag "json:\"-\""
+    ReceiptID: string #go_tag "json:\"-\""
+}
+
+MoneroDepositsResponse :: struct {
+    Deposits: []MoneroDeposit #go_tag "json:\"deposits\""
+}
+
+TokenCheckpoint :: struct {
+    LedgerSeq: s64 #go_tag "json:\"ledger_seq\""
+    IssuerID: string #go_tag "json:\"issuer_id\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    LedgerRoot: string #go_tag "json:\"ledger_root\""
+    Signature: string #go_tag "json:\"signature\""
+    CreatedAt: string #go_tag "json:\"created_at\""
+}
+
+FriendRequest :: struct {
+    ID: string #go_tag "json:\"id\""
+    RequesterUserID: string #go_tag "json:\"requester_user_id_hash\""
+    RequesterAlias: string #go_tag "json:\"requester_alias,omitempty\""
+    TargetUserID: string #go_tag "json:\"target_user_id_hash\""
+    TargetAlias: string #go_tag "json:\"target_alias,omitempty\""
+    Status: string #go_tag "json:\"status\""
+    CreatedAt: string #go_tag "json:\"created_at\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+}
+
+Friend :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    Alias: string #go_tag "json:\"alias,omitempty\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+    CreatedAt: string #go_tag "json:\"created_at\""
+}
+
+ProfileMetric :: struct {
+    Practice: string #go_tag "json:\"practice\""
+    Metric: string #go_tag "json:\"metric\""
+    Value: float64 #go_tag "json:\"value\""
+    Label: string #go_tag "json:\"label,omitempty\""
+    LocalDate: isize #go_tag "json:\"local_date,omitempty\""
+}
+
+FriendStatRow :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    Alias: string #go_tag "json:\"alias,omitempty\""
+    ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+    App: string #go_tag "json:\"app\""
+    Practice: string #go_tag "json:\"practice\""
+    Metric: string #go_tag "json:\"metric\""
+    Value: float64 #go_tag "json:\"value\""
+    Label: string #go_tag "json:\"label,omitempty\""
+    LocalDate: isize #go_tag "json:\"local_date,omitempty\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+}
+
+DeleteWithKeyRequest :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    ExportedKey: string #go_tag "json:\"exported_key,omitempty\""
+}
+
+MeditationLog :: struct {
+    ID: string #go_tag "json:\"id\""
+    SessionID: string #go_tag "json:\"session_id\""
+    DurationSeconds: isize #go_tag "json:\"duration_seconds,omitempty\""
+    Duration: isize #go_tag "json:\"duration,omitempty\""
+    CompletedAt: string #go_tag "json:\"completed_at,omitempty\""
+    Timestamp: string #go_tag "json:\"timestamp,omitempty\""
+}
+
+Habit :: struct {
+    ID: string #go_tag "json:\"id\""
+    Name: string #go_tag "json:\"name\""
+    ColorR: isize #go_tag "json:\"color_r\""
+    ColorG: isize #go_tag "json:\"color_g\""
+    ColorB: isize #go_tag "json:\"color_b\""
+    SyncMode: isize #go_tag "json:\"sync_mode\""
+    SyncActivity: isize #go_tag "json:\"sync_activity\""
+    CounterEnabled: isize #go_tag "json:\"counter_enabled\""
+    SortOrder: isize #go_tag "json:\"sort_order\""
+    DeletedAt: s64 #go_tag "json:\"deleted_at\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+}
+
+HabitDay :: struct {
+    HabitID: string #go_tag "json:\"habit_id\""
+    LocalDate: isize #go_tag "json:\"local_date\""
+    Completed: bool #go_tag "json:\"completed\""
+    Count: isize #go_tag "json:\"count\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+}
+
+Session :: struct {
+    ID: string #go_tag "json:\"id\""
+    StartedAt: string #go_tag "json:\"started_at\""
+    LocalDate: isize #go_tag "json:\"local_date\""
+    Topic: string #go_tag "json:\"topic\""
+    Activity: isize #go_tag "json:\"activity\""
+    Source: string #go_tag "json:\"source\""
+    RoundsHash: string #go_tag "json:\"rounds_hash\""
+    MoodBefore: isize #go_tag "json:\"mood_before\""
+    MoodAfter: isize #go_tag "json:\"mood_after\""
+    Energy: isize #go_tag "json:\"energy\""
+    Stress: isize #go_tag "json:\"stress\""
+    Note: string #go_tag "json:\"note\""
+    Tags: string #go_tag "json:\"tags\""
+    DeletedAt: s64 #go_tag "json:\"deleted_at\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+    Rounds: []SessionRound #go_tag "json:\"rounds,omitempty\""
+}
+
+SessionRound :: struct {
+    RoundIndex: isize #go_tag "json:\"round_index\""
+    Breaths: isize #go_tag "json:\"breaths\""
+    HoldSeconds: isize #go_tag "json:\"hold_seconds\""
+}
+
+SyncResult :: struct {
+    MeditationLogs: isize #go_tag "json:\"meditation_logs\""
+    Habits: isize #go_tag "json:\"habits\""
+    HabitDays: isize #go_tag "json:\"habit_days\""
+    Sessions: isize #go_tag "json:\"sessions\""
+    SocialCache: isize #go_tag "json:\"social_cache\""
+    EncryptedRecords: isize #go_tag "json:\"encrypted_records,omitempty\""
+}
+
+ProfileIconNone :: 0
+ProfileIconBird :: 1
+ProfileIconBowl :: 2
+ProfileIconCactus :: 3
+ProfileIconHeart :: 4
+ProfileIconIncense :: 5
+ProfileIconLotus :: 6
+ProfileIconTree1 :: 7
+ProfileIconTree2 :: 8
+ProfileIconTree3 :: 9
+ProfileIconTree4 :: 10
+ProfileIconTree5 :: 11

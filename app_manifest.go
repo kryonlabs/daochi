@@ -355,7 +355,7 @@ func validateSignedAppRegistration(req SignedAppRegistrationRequest, nodePublicK
 	if err != nil {
 		return nil, "", err
 	}
-	manifestHash := sha256Hex(manifestBytes)
+	manifestHash := Signing_SHA256Hex(manifestBytes)
 	manifestSigField := Codec_DecodeBinaryField(req.ManifestSignature)
 	manifestSig := []byte(manifestSigField.Value)
 	if manifestSigField.Error != "" || len(manifestSig) != ed25519.SignatureSize {
@@ -370,7 +370,7 @@ func validateSignedAppRegistration(req SignedAppRegistrationRequest, nodePublicK
 	if approvalSigField.Error != "" || len(approvalSig) != ed25519.SignatureSize {
 		return nil, "", authError{status: http.StatusBadRequest, message: "invalid approval signature"}
 	}
-	if !ed25519.Verify(nodePublicKey, appApprovalMessage(req.Manifest.AppID, manifestHash), approvalSig) {
+	if !ed25519.Verify(nodePublicKey, []byte(Signing_AppApprovalMessage(daochiAppApprovalContext, req.Manifest.AppID, manifestHash)), approvalSig) {
 		return nil, "", authError{status: http.StatusUnauthorized, message: "node approval rejected"}
 	}
 	return manifestBytes, manifestHash, nil
@@ -398,10 +398,6 @@ func manifestSignedByActiveKey(manifest AppManifest, message, signature []byte) 
 		}
 	}
 	return false
-}
-
-func appApprovalMessage(appID, manifestHash string) []byte {
-	return []byte(daochiAppApprovalContext + "\n" + appID + "\n" + manifestHash + "\n")
 }
 
 func normalizeAppManifest(manifest *AppManifest) {
@@ -496,9 +492,9 @@ func validateAppManifest(manifest AppManifest) error {
 		}
 	}
 	for _, collection := range manifest.Collections {
-		if !validCollectionPrefix(collection.CollectionPrefix) ||
-			!validAppVisibility(collection.Visibility) ||
-			!appOwnsDeclaredScope(manifest.AppID, collection) {
+		if !Scope_ValidCollectionPrefix(collection.CollectionPrefix) ||
+			!Scope_ValidAppVisibility(collection.Visibility) ||
+			!Scope_AppOwnsDeclaredScope(manifest.AppID, collection) {
 			return errors.New("invalid app collection")
 		}
 	}
@@ -512,19 +508,19 @@ func validateAppManifest(manifest AppManifest) error {
 			return errors.New("invalid app feature")
 		}
 		for _, collection := range feature.Collections {
-			if !declaresCollection(manifest.Collections, collection) {
+			if !Scope_DeclaresCollection(manifest.Collections, collection) {
 				return errors.New("invalid app feature collection")
 			}
 		}
 	}
 	for _, legacy := range manifest.LegacyProtocols {
 		if !Identity_ValidNamespace(legacy.Name) || legacy.Version < 0 ||
-			!validLegacyProtocolStatus(legacy.Status) || !validDateString(legacy.ValidUntil) {
+			!Scope_ValidLegacyProtocolStatus(legacy.Status) || !validDateString(legacy.ValidUntil) {
 			return errors.New("invalid legacy protocol")
 		}
 	}
 	for _, policy := range manifest.TokenPolicies {
-		if !validTokenPolicyPermission(policy.Permission) || strings.TrimSpace(policy.AssetID) == "" {
+		if !Scope_ValidTokenPolicyPermission(policy.Permission) || strings.TrimSpace(policy.AssetID) == "" {
 			return errors.New("invalid token policy")
 		}
 		if policy.Status != "" && policy.Status != appStatusActive && policy.Status != appStatusSuspended {
@@ -566,7 +562,7 @@ func formatAppManifestForTest(manifest AppManifest) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	return data, sha256Hex(data), nil
+	return data, Signing_SHA256Hex(data), nil
 }
 
 func (p TokenPolicy) String() string {

@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,12 +14,6 @@ import (
 )
 
 const nodeAuthenticationWindow = 5 * time.Minute
-
-func nodeRequestMessage(nodeID, timestamp, nonce, method, path string, body []byte) []byte {
-	sum := sha256.Sum256(body)
-	return []byte(fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s\n%s\n", nodeRequestContext,
-		nodeID, timestamp, nonce, strings.ToUpper(method), path, hex.EncodeToString(sum[:])))
-}
 
 func randomHex(bytes int) string {
 	data := make([]byte, bytes)
@@ -34,8 +26,8 @@ func randomHex(bytes int) string {
 func (s *Server) signNodeRequest(req *http.Request, body []byte) {
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	nonce := randomHex(16)
-	message := nodeRequestMessage(s.node.ID, timestamp, nonce,
-		req.Method, req.URL.EscapedPath(), body)
+	message := []byte(Signing_NodeRequestMessage(nodeRequestContext, s.node.ID, timestamp, nonce,
+		req.Method, req.URL.EscapedPath(), body))
 	signature := ed25519.Sign(s.node.PrivateKey, message)
 
 	req.Header.Set("X-Daochi-Node-ID", s.node.ID)
@@ -73,8 +65,8 @@ func (s *Server) verifyNodeRequest(ctx context.Context, req *http.Request, body 
 	if err != nil || len(signature) != ed25519.SignatureSize {
 		return errors.New("invalid node signature")
 	}
-	message := nodeRequestMessage(nodeID, timestampText, nonce,
-		req.Method, req.URL.EscapedPath(), body)
+	message := []byte(Signing_NodeRequestMessage(nodeRequestContext, nodeID, timestampText, nonce,
+		req.Method, req.URL.EscapedPath(), body))
 	if !ed25519.Verify(publicKey, message, signature) {
 		return errors.New("invalid node signature")
 	}

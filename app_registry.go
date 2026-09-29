@@ -263,7 +263,7 @@ func (s *Store) AppOwnsCollection(ctx context.Context, appID, collection string)
 		return false, err
 	}
 	for _, item := range collections {
-		if collectionMatchesPrefix(collection, item.CollectionPrefix) {
+		if Scope_CollectionMatchesPrefix(collection, item.CollectionPrefix) {
 			return true, nil
 		}
 	}
@@ -448,7 +448,7 @@ SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,
 FROM server_encrypted_records
 WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\'
 ORDER BY collection,id`
-		args[1] = likePatternForCollectionPrefix(collectionPrefix)
+		args[1] = Scope_LikePatternForCollectionPrefix(collectionPrefix)
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -612,12 +612,12 @@ func (s *Server) handleSignedAppGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid app grant")
 		return
 	}
-	if req.Tx.BodySHA256 != "" && req.Tx.BodySHA256 != sha256Hex(grantBody) {
+	if req.Tx.BodySHA256 != "" && req.Tx.BodySHA256 != Signing_SHA256Hex(grantBody) {
 		writeError(w, http.StatusBadRequest, "signed transaction body hash must cover grant payload")
 		return
 	}
 	if req.Tx.BodySHA256 == "" {
-		req.Tx.BodySHA256 = sha256Hex(grantBody)
+		req.Tx.BodySHA256 = Signing_SHA256Hex(grantBody)
 	}
 	_ = body
 	if err := s.verifySignedTx(r.Context(), r, grantBody, req.Tx, userID, req.Grant.TargetAppID); err != nil {
@@ -678,7 +678,7 @@ func (s *Server) handleAppRecords(w http.ResponseWriter, r *http.Request) {
 	sourceAppID := strings.TrimSpace(r.URL.Query().Get("source_app_id"))
 	targetAppID := strings.TrimSpace(r.URL.Query().Get("target_app_id"))
 	collectionPrefix := strings.TrimSpace(r.URL.Query().Get("collection_prefix"))
-	if !Identity_ValidNamespace(sourceAppID) || !Identity_ValidNamespace(targetAppID) || !validCollectionPrefix(collectionPrefix) {
+	if !Identity_ValidNamespace(sourceAppID) || !Identity_ValidNamespace(targetAppID) || !Scope_ValidCollectionPrefix(collectionPrefix) {
 		writeError(w, http.StatusBadRequest, "invalid app records query")
 		return
 	}
@@ -781,9 +781,9 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		if req.Collections[i].SchemaVersion < 0 {
 			return req, errors.New("invalid schema_version")
 		}
-		if !validCollectionPrefix(req.Collections[i].CollectionPrefix) ||
-			!validAppVisibility(req.Collections[i].Visibility) ||
-			!appOwnsDeclaredScope(req.AppID, req.Collections[i]) {
+		if !Scope_ValidCollectionPrefix(req.Collections[i].CollectionPrefix) ||
+			!Scope_ValidAppVisibility(req.Collections[i].Visibility) ||
+			!Scope_AppOwnsDeclaredScope(req.AppID, req.Collections[i]) {
 			return req, errors.New("invalid app collection")
 		}
 	}
@@ -801,7 +801,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		}
 		for j := range req.Features[i].Collections {
 			req.Features[i].Collections[j] = strings.TrimSpace(req.Features[i].Collections[j])
-			if !declaresCollection(req.Collections, req.Features[i].Collections[j]) {
+			if !Scope_DeclaresCollection(req.Collections, req.Features[i].Collections[j]) {
 				return req, errors.New("invalid app feature collection")
 			}
 		}
@@ -812,7 +812,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		req.LegacyProtocols[i].ValidUntil = strings.TrimSpace(req.LegacyProtocols[i].ValidUntil)
 		if !Identity_ValidNamespace(req.LegacyProtocols[i].Name) ||
 			req.LegacyProtocols[i].Version < 0 ||
-			!validLegacyProtocolStatus(req.LegacyProtocols[i].Status) ||
+			!Scope_ValidLegacyProtocolStatus(req.LegacyProtocols[i].Status) ||
 			!validDateString(req.LegacyProtocols[i].ValidUntil) {
 			return req, errors.New("invalid legacy protocol")
 		}
@@ -822,7 +822,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		policy.AssetID = strings.TrimSpace(policy.AssetID)
 		policy.Permission = strings.TrimSpace(policy.Permission)
 		policy.Status = defaultString(strings.TrimSpace(policy.Status), appStatusActive)
-		if policy.AssetID == "" || !validTokenPolicyPermission(policy.Permission) ||
+		if policy.AssetID == "" || !Scope_ValidTokenPolicyPermission(policy.Permission) ||
 			(policy.Status != appStatusActive && policy.Status != appStatusSuspended) ||
 			policy.LegacyUnsignedUntil < 0 ||
 			policy.LegacyUnsignedUntil > time.Now().Add(365*24*time.Hour).Unix() {
@@ -830,27 +830,6 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		}
 	}
 	return req, nil
-}
-
-func appOwnsDeclaredScope(appID string, collection AppCollection) bool {
-	// These names were released by Inbe before namespaced scopes existed.
-	if appID == "inbe" && Identity_ValidLegacyEncryptedCollection(collection.CollectionPrefix) {
-		return collection.Visibility == "private"
-	}
-	parts := strings.Split(strings.TrimSuffix(collection.CollectionPrefix, ".*"), ".")
-	if len(parts) < 3 || parts[1] != appID {
-		return false
-	}
-	return parts[0] == collection.Visibility
-}
-
-func declaresCollection(collections []AppCollection, prefix string) bool {
-	for _, collection := range collections {
-		if collection.CollectionPrefix == prefix {
-			return true
-		}
-	}
-	return false
 }
 
 func readAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (AppGrantRequest, error) {
@@ -870,7 +849,7 @@ func readAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) 
 		req.Permission = appGrantRead
 	}
 	if !Identity_ValidNamespace(req.SourceAppID) || !Identity_ValidNamespace(req.TargetAppID) ||
-		!validCollectionPrefix(req.CollectionPrefix) || req.Permission != appGrantRead {
+		!Scope_ValidCollectionPrefix(req.CollectionPrefix) || req.Permission != appGrantRead {
 		return req, errors.New("invalid app grant")
 	}
 	return req, nil
@@ -885,7 +864,7 @@ func readSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody i
 	if err := json.Unmarshal(body, &req); err != nil {
 		return req, nil, errors.New("invalid json")
 	}
-	normalizeSignedTx(&req.Tx)
+	Transaction_Normalize(&req.Tx)
 	req.Grant.SourceAppID = strings.TrimSpace(req.Grant.SourceAppID)
 	req.Grant.TargetAppID = strings.TrimSpace(req.Grant.TargetAppID)
 	req.Grant.CollectionPrefix = strings.TrimSpace(req.Grant.CollectionPrefix)
@@ -894,28 +873,10 @@ func readSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody i
 		req.Grant.Permission = appGrantRead
 	}
 	if !Identity_ValidNamespace(req.Grant.SourceAppID) || !Identity_ValidNamespace(req.Grant.TargetAppID) ||
-		!validCollectionPrefix(req.Grant.CollectionPrefix) || req.Grant.Permission != appGrantRead {
+		!Scope_ValidCollectionPrefix(req.Grant.CollectionPrefix) || req.Grant.Permission != appGrantRead {
 		return req, nil, errors.New("invalid app grant")
 	}
 	return req, body, nil
-}
-
-func validAppVisibility(value string) bool {
-	switch value {
-	case "private", "shared", "friends", "public":
-		return true
-	default:
-		return false
-	}
-}
-
-func validLegacyProtocolStatus(value string) bool {
-	switch value {
-	case "compatibility", "deprecated", "active":
-		return true
-	default:
-		return false
-	}
 }
 
 func validDateString(value string) bool {
@@ -924,59 +885,6 @@ func validDateString(value string) bool {
 	}
 	_, err := time.Parse("2006-01-02", value)
 	return err == nil
-}
-
-func validCollectionPrefix(value string) bool {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return false
-	}
-	if Identity_ValidLegacyEncryptedCollection(value) {
-		return true
-	}
-	if strings.HasSuffix(value, ".*") {
-		return validCollectionPrefixWildcardBase(strings.TrimSuffix(value, ".*"))
-	}
-	return Identity_ValidEncryptedHierarchyCollection(value)
-}
-
-func validCollectionPrefixWildcardBase(value string) bool {
-	parts := strings.Split(strings.TrimSpace(value), ".")
-	if len(parts) == 2 && parts[0] == "account" {
-		return Identity_ValidVersionSegment(parts[1])
-	}
-	if len(parts) >= 3 && (parts[0] == "private" || parts[0] == "shared" ||
-		parts[0] == "friends" || parts[0] == "public") {
-		if !Identity_ValidNamespaceSegment(parts[1]) ||
-			!Identity_ValidVersionSegment(parts[2]) {
-			return false
-		}
-		for _, part := range parts[3:] {
-			if !Identity_ValidNamespaceSegment(part) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
-
-func collectionMatchesPrefix(collection, prefix string) bool {
-	if collection == prefix {
-		return true
-	}
-	if strings.HasSuffix(prefix, ".*") {
-		return strings.HasPrefix(collection, strings.TrimSuffix(prefix, "*"))
-	}
-	return false
-}
-
-func likePatternForCollectionPrefix(prefix string) string {
-	base := strings.TrimSuffix(prefix, ".*")
-	base = strings.ReplaceAll(base, `\`, `\\`)
-	base = strings.ReplaceAll(base, `%`, `\%`)
-	base = strings.ReplaceAll(base, `_`, `\_`)
-	return base + ".%"
 }
 
 func auditJSON(value any) string {

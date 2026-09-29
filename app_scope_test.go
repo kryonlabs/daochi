@@ -59,7 +59,7 @@ func TestInbeReleasedAndCurrentScopesRemainValid(t *testing.T) {
 		{CollectionPrefix: "private.inbe.v1.records.*", Visibility: "private"},
 		{CollectionPrefix: "shared.inbe.v1.records.*", Visibility: "shared"},
 	} {
-		if !appOwnsDeclaredScope("inbe", scope) {
+		if !Scope_AppOwnsDeclaredScope("inbe", scope) {
 			t.Fatalf("Inbe scope rejected: %#v", scope)
 		}
 	}
@@ -67,7 +67,7 @@ func TestInbeReleasedAndCurrentScopesRemainValid(t *testing.T) {
 
 func TestSignedTransactionContextIsNotCallerDefined(t *testing.T) {
 	tx := SignedTxEnvelope{ProtocolVersion: 6, SignatureContext: "attacker-context"}
-	message := string(canonicalSignedTxMessage(tx))
+	message := Transaction_CanonicalMessage(daochiTxContext, tx)
 	if !strings.HasPrefix(message, daochiTxContext+"\n") || strings.Contains(message, "attacker-context") {
 		t.Fatalf("canonical transaction context was caller-controlled: %q", message)
 	}

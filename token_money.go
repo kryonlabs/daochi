@@ -323,7 +323,7 @@ VALUES(?1,?2,?3,?4,?5)`, input.AccountID, input.AppID, idempotencyKey, receipt.R
 
 func tokenSpendRequestHash(input tokenEventInput) string {
 	payload, _ := json.Marshal(input)
-	return sha256Hex(payload)
+	return Signing_SHA256Hex(payload)
 }
 
 func insertTokenEventTx(ctx context.Context, tx *sql.Tx, signer ed25519.PrivateKey, input tokenEventInput) (TokenReceipt, error) {
@@ -1197,7 +1197,7 @@ func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []
 		}
 		signedTx = tx
 	}
-	if !validTokenPolicyPermission(permission) {
+	if !Scope_ValidTokenPolicyPermission(permission) {
 		return signedTx, hasSignedTx, authError{status: http.StatusBadRequest, message: "invalid token permission"}
 	}
 	hasPolicy, err := s.store.HasTokenPolicy(ctx, appID)
@@ -1218,15 +1218,6 @@ func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []
 		return signedTx, false, authError{status: http.StatusUnauthorized, message: "signed transaction required"}
 	}
 	return signedTx, hasSignedTx, nil
-}
-
-func validTokenPolicyPermission(value string) bool {
-	switch value {
-	case tokenPermissionSpend, tokenPermissionPurchase:
-		return true
-	default:
-		return false
-	}
 }
 
 func writePaymentError(w http.ResponseWriter, err error) {

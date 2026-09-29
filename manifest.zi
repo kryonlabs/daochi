@@ -1,0 +1,76 @@
+#import "protocol"
+
+AppKey :: struct {
+    KeyID: string #go_tag "json:\"key_id\""
+    Algorithm: string #go_tag "json:\"algorithm\""
+    PublicKey: string #go_tag "json:\"public_key\""
+    Purpose: string #go_tag "json:\"purpose,omitempty\""
+    Status: string #go_tag "json:\"status,omitempty\""
+    ExpiresAt: s64 #go_tag "json:\"expires_at,omitempty\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+}
+
+TokenPolicy :: struct {
+    AssetID: string #go_tag "json:\"asset_id\""
+    Permission: string #go_tag "json:\"permission\""
+    Status: string #go_tag "json:\"status,omitempty\""
+    LegacyUnsignedUntil: s64 #go_tag "json:\"legacy_unsigned_until,omitempty\""
+}
+
+AppManifest :: struct {
+    ManifestVersion: isize #go_tag "json:\"manifest_version\""
+    AppID: string #go_tag "json:\"app_id\""
+    DisplayName: string #go_tag "json:\"display_name\""
+    Description: string #go_tag "json:\"description,omitempty\""
+    HomepageURL: string #go_tag "json:\"homepage_url,omitempty\""
+    SourceURL: string #go_tag "json:\"source_url,omitempty\""
+    Status: string #go_tag "json:\"status,omitempty\""
+    ExpiresAt: s64 #go_tag "json:\"expires_at,omitempty\""
+    AppSchemaVersion: isize #go_tag "json:\"app_schema_version,omitempty\""
+    MinClientVersion: string #go_tag "json:\"min_supported_client_version,omitempty\""
+    CurrentVersion: string #go_tag "json:\"current_client_version,omitempty\""
+    CompatibilityUntil: string #go_tag "json:\"compatibility_until,omitempty\""
+    Keys: []AppKey #go_tag "json:\"keys\""
+    Collections: []AppCollection #go_tag "json:\"collections,omitempty\""
+    Capabilities: []string #go_tag "json:\"capabilities,omitempty\""
+    Features: []AppFeature #go_tag "json:\"features,omitempty\""
+    LegacyProtocols: []LegacyProtocol #go_tag "json:\"legacy_protocols,omitempty\""
+    TokenPolicies: []TokenPolicy #go_tag "json:\"token_policies,omitempty\""
+}
+
+SignedAppRegistrationRequest :: struct {
+    Manifest: AppManifest #go_tag "json:\"manifest\""
+    ManifestSignature: string #go_tag "json:\"manifest_signature\""
+    ApprovalSignature: string #go_tag "json:\"approval_signature\""
+}
+
+AppRegistration :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    DisplayName: string #go_tag "json:\"display_name\""
+    Description: string #go_tag "json:\"description,omitempty\""
+    HomepageURL: string #go_tag "json:\"homepage_url,omitempty\""
+    SourceURL: string #go_tag "json:\"source_url,omitempty\""
+    PublicKey: string #go_tag "json:\"public_key,omitempty\""
+    Status: string #go_tag "json:\"status\""
+    AppSchemaVersion: isize #go_tag "json:\"app_schema_version,omitempty\""
+    MinClientVersion: string #go_tag "json:\"min_supported_client_version,omitempty\""
+    CurrentVersion: string #go_tag "json:\"current_client_version,omitempty\""
+    CompatibilityUntil: string #go_tag "json:\"compatibility_until,omitempty\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+    UpdatedAt: string #go_tag "json:\"updated_at,omitempty\""
+    ManifestVersion: isize #go_tag "json:\"manifest_version,omitempty\""
+    ManifestHash: string #go_tag "json:\"manifest_hash,omitempty\""
+    ManifestSignature: string #go_tag "json:\"manifest_signature,omitempty\""
+    ApprovalSignature: string #go_tag "json:\"approval_signature,omitempty\""
+    ManifestExpiresAt: s64 #go_tag "json:\"manifest_expires_at,omitempty\""
+    Collections: []AppCollection #go_tag "json:\"collections,omitempty\""
+    Capabilities: []string #go_tag "json:\"capabilities,omitempty\""
+    Features: []AppFeature #go_tag "json:\"features,omitempty\""
+    LegacyProtocols: []LegacyProtocol #go_tag "json:\"legacy_protocols,omitempty\""
+    Keys: []AppKey #go_tag "json:\"keys,omitempty\""
+    TokenPolicies: []TokenPolicy #go_tag "json:\"token_policies,omitempty\""
+}
+
+AppRegistryResponse :: struct {
+    Apps: []AppRegistration #go_tag "json:\"apps\""
+}

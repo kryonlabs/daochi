@@ -16,3 +16,18 @@ CanonicalMessageWithContext :: (context: string, nonce: []u8, method: string, pa
     parts: [6]string = .[context, Upper(method), path, EncodeHex(sum[:]), EncodeHex(nonce), ""]
     return Join(parts[:], "\n")
 }
+
+SHA256Hex :: (value: []u8) -> string {
+    sum: [32]u8 = Sum256(value)
+    return EncodeHex(sum[:])
+}
+
+NodeRequestMessage :: (context: string, nodeID: string, timestamp: string, nonce: string, method: string, path: string, body: []u8) -> string {
+    parts: [8]string = .[context, nodeID, timestamp, nonce, Upper(method), path, SHA256Hex(body), ""]
+    return Join(parts[:], "\n")
+}
+
+AppApprovalMessage :: (context: string, appID: string, manifestHash: string) -> string {
+    parts: [4]string = .[context, appID, manifestHash, ""]
+    return Join(parts[:], "\n")
+}

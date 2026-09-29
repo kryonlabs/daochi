@@ -1,0 +1,63 @@
+#import "protocol"
+
+go_strings :: #system_library "go:strings";
+go_strconv :: #system_library "go:strconv";
+
+TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";
+Lower :: (value: string) -> string #foreign go_strings "ToLower";
+Upper :: (value: string) -> string #foreign go_strings "ToUpper";
+Join :: (values: []string, separator: string) -> string #foreign go_strings "Join";
+FormatInteger :: (value: s64, base: isize) -> string #foreign go_strconv "FormatInt";
+
+SignedTxEnvelope :: struct {
+    protocolVersion: isize #go_tag "json:\"protocol_version\""
+    txID: string #go_tag "json:\"tx_id\""
+    accountID: string #go_tag "json:\"account_id\""
+    appID: string #go_tag "json:\"app_id\""
+    deviceKeyID: string #go_tag "json:\"device_key_id\""
+    method: string #go_tag "json:\"method\""
+    path: string #go_tag "json:\"path\""
+    bodySHA256: string #go_tag "json:\"body_sha256\""
+    nonce: string #go_tag "json:\"nonce\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+    signatureContext: string #go_tag "json:\"signature_context,omitempty\""
+    signature: string #go_tag "json:\"signature\""
+    deviceSignature: string #go_tag "json:\"device_signature\""
+}
+
+Normalize :: (tx: *SignedTxEnvelope) {
+    tx.txID = TrimSpace(tx.txID)
+    tx.accountID = Lower(TrimSpace(tx.accountID))
+    tx.appID = TrimSpace(tx.appID)
+    tx.deviceKeyID = TrimSpace(tx.deviceKeyID)
+    tx.method = Upper(TrimSpace(tx.method))
+    tx.path = TrimSpace(tx.path)
+    tx.bodySHA256 = Lower(TrimSpace(tx.bodySHA256))
+    tx.nonce = TrimSpace(tx.nonce)
+    tx.signatureContext = TrimSpace(tx.signatureContext)
+    tx.signature = TrimSpace(tx.signature)
+    tx.deviceSignature = TrimSpace(tx.deviceSignature)
+}
+
+CanonicalMessage :: (context: string, tx: SignedTxEnvelope) -> string {
+    parts: [12]string = .[
+        context,
+        FormatInteger(cast(s64)tx.protocolVersion, cast(isize)10),
+        tx.txID,
+        tx.accountID,
+        tx.appID,
+        tx.deviceKeyID,
+        tx.method,
+        tx.path,
+        tx.bodySHA256,
+        tx.nonce,
+        FormatInteger(tx.expiresAt, cast(isize)10),
+        ""
+    ]
+    return Join(parts[:], "\n")
+}
+
+SignedAppGrantRequest :: struct {
+    Tx: SignedTxEnvelope #go_tag "json:\"tx\""
+    Grant: AppGrantRequest #go_tag "json:\"grant\""
+}

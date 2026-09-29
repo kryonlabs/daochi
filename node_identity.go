@@ -121,7 +121,7 @@ func pairingInviteMessage(invite PairingInvite) []byte {
 	return []byte(fmt.Sprintf("%s\n%d\n%s\n%s\n%s\n%s\n%s\n%s\n%d\n%s\n%s\n",
 		pairingInviteContext, invite.Version, invite.InviteID, invite.NodeID,
 		invite.PublicKey, invite.DisplayName, strings.Join(addresses, ","), invite.SpaceID,
-		invite.ExpiresAt, invite.Nonce, sha256Hex(policy)))
+		invite.ExpiresAt, invite.Nonce, Signing_SHA256Hex(policy)))
 }
 
 func (n NodeIdentity) signInvite(invite *PairingInvite) {
@@ -246,5 +246,5 @@ func nameClaimMessage(claim NameClaim) []byte {
 	services, _ := canonicalJSON(claim.Services)
 	return []byte(fmt.Sprintf("%s\n%d\n%s\n%s\n%s\n%d\n%d\n%s\n",
 		nameClaimContext, claim.Version, claim.SpaceID, claim.Name, claim.NodeID,
-		claim.Sequence, claim.ExpiresAt, sha256Hex(services)))
+		claim.Sequence, claim.ExpiresAt, Signing_SHA256Hex(services)))
 }

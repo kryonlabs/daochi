@@ -1072,7 +1072,7 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 	registerBody, err := json.Marshal(SignedAppRegistrationRequest{
 		Manifest:          manifest,
 		ManifestSignature: hex.EncodeToString(ed25519.Sign(appPrivate, append([]byte(daochiAppManifestContext+"\n"), manifestBytes...))),
-		ApprovalSignature: hex.EncodeToString(ed25519.Sign(nodePrivate, appApprovalMessage("testapp", manifestHash))),
+		ApprovalSignature: hex.EncodeToString(ed25519.Sign(nodePrivate, []byte(Signing_AppApprovalMessage(daochiAppApprovalContext, "testapp", manifestHash)))),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3664,13 +3664,13 @@ func signedTxHeader(t *testing.T, accountID, appID, deviceKeyID, method, path st
 		DeviceKeyID:     deviceKeyID,
 		Method:          method,
 		Path:            path,
-		BodySHA256:      sha256Hex(body),
+		BodySHA256:      Signing_SHA256Hex(body),
 		Nonce:           txID + "-nonce",
 		ExpiresAt:       time.Now().Add(time.Minute).Unix(),
 		Signature:       hex.EncodeToString(bytes.Repeat([]byte{0x7a}, mlDSA44SignatureSize)),
 	}
 	tx.DeviceSignature = hex.EncodeToString(ed25519.Sign(devicePrivate,
-		canonicalSignedTxMessage(tx)))
+		[]byte(Transaction_CanonicalMessage(daochiTxContext, tx))))
 	data, err := json.Marshal(tx)
 	if err != nil {
 		t.Fatal(err)

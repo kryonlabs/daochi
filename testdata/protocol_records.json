@@ -1,0 +1,2089 @@
+{
+  "baseline": "30f291e",
+  "records": {
+    "ChallengeResponse": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "Nonce",
+        "type": "string",
+        "tag": "json:\"nonce\""
+      },
+      {
+        "name": "ExpiresIn",
+        "type": "int64",
+        "tag": "json:\"expires_in_seconds\""
+      }
+    ],
+    "LoginRequest": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "ClientID",
+        "type": "string",
+        "tag": "json:\"client_id\""
+      },
+      {
+        "name": "PublicKey",
+        "type": "string",
+        "tag": "json:\"public_key,omitempty\""
+      }
+    ],
+    "LoginResponse": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "AuthToken",
+        "type": "string",
+        "tag": "json:\"auth_token\""
+      },
+      {
+        "name": "ExpiresIn",
+        "type": "int64",
+        "tag": "json:\"expires_in_seconds\""
+      },
+      {
+        "name": "ServerTime",
+        "type": "int64",
+        "tag": "json:\"server_time,omitempty\""
+      },
+      {
+        "name": "AccountAlias",
+        "type": "string",
+        "tag": "json:\"account_alias,omitempty\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon,omitempty\""
+      }
+    ],
+    "NodePeer": [
+      {
+        "name": "Name",
+        "type": "string",
+        "tag": "json:\"name,omitempty\""
+      },
+      {
+        "name": "URL",
+        "type": "string",
+        "tag": "json:\"url\""
+      },
+      {
+        "name": "NodeID",
+        "type": "string",
+        "tag": "json:\"node_id,omitempty\""
+      },
+      {
+        "name": "Sync",
+        "type": "*NodeSyncPolicy",
+        "tag": "json:\"sync,omitempty\""
+      }
+    ],
+    "NodeSyncPolicy": [
+      {
+        "name": "Direction",
+        "type": "string",
+        "tag": "json:\"direction,omitempty\""
+      },
+      {
+        "name": "Apps",
+        "type": "[]string",
+        "tag": "json:\"apps,omitempty\""
+      },
+      {
+        "name": "Collections",
+        "type": "[]string",
+        "tag": "json:\"collections,omitempty\""
+      },
+      {
+        "name": "Spaces",
+        "type": "[]string",
+        "tag": "json:\"spaces,omitempty\""
+      },
+      {
+        "name": "Data",
+        "type": "[]string",
+        "tag": "json:\"data,omitempty\""
+      }
+    ],
+    "NodeUsage": [
+      {
+        "name": "RegisteredUsers",
+        "type": "int",
+        "tag": "json:\"registered_users\""
+      },
+      {
+        "name": "ActiveUsers30d",
+        "type": "int",
+        "tag": "json:\"active_users_30d\""
+      },
+      {
+        "name": "RegisteredClients",
+        "type": "int",
+        "tag": "json:\"registered_clients\""
+      },
+      {
+        "name": "ActiveClients30d",
+        "type": "int",
+        "tag": "json:\"active_clients_30d\""
+      },
+      {
+        "name": "ConnectedUsers",
+        "type": "int",
+        "tag": "json:\"connected_users\""
+      },
+      {
+        "name": "ConnectedWebSocketClients",
+        "type": "int",
+        "tag": "json:\"connected_websocket_clients\""
+      },
+      {
+        "name": "RecentActivityWindowDays",
+        "type": "int",
+        "tag": "json:\"recent_activity_window_days\""
+      },
+      {
+        "name": "WebSocketConnectionLimitPerUser",
+        "type": "int",
+        "tag": "json:\"websocket_connection_limit_per_user\""
+      }
+    ],
+    "NodeStorageUsage": [
+      {
+        "name": "DatabaseFileBytes",
+        "type": "int64",
+        "tag": "json:\"database_file_bytes\""
+      },
+      {
+        "name": "DatabaseWALBytes",
+        "type": "int64",
+        "tag": "json:\"database_wal_bytes,omitempty\""
+      },
+      {
+        "name": "DatabaseSHMBytes",
+        "type": "int64",
+        "tag": "json:\"database_shm_bytes,omitempty\""
+      },
+      {
+        "name": "DatabaseTotalBytes",
+        "type": "int64",
+        "tag": "json:\"database_total_bytes\""
+      },
+      {
+        "name": "SQLitePageBytes",
+        "type": "int64",
+        "tag": "json:\"sqlite_page_bytes,omitempty\""
+      },
+      {
+        "name": "LogicalBytes",
+        "type": "int64",
+        "tag": "json:\"logical_bytes\""
+      },
+      {
+        "name": "EncryptedRecordBytes",
+        "type": "int64",
+        "tag": "json:\"encrypted_record_bytes\""
+      },
+      {
+        "name": "EncryptedPayloadBytes",
+        "type": "int64",
+        "tag": "json:\"encrypted_payload_bytes\""
+      },
+      {
+        "name": "UnassignedBytes",
+        "type": "int64",
+        "tag": "json:\"unassigned_bytes,omitempty\""
+      },
+      {
+        "name": "UnassignedEncryptedPayloads",
+        "type": "StorageBucketUsage",
+        "tag": "json:\"unassigned_encrypted_payloads,omitempty\""
+      },
+      {
+        "name": "Apps",
+        "type": "[]AppStorageUsage",
+        "tag": "json:\"apps\""
+      }
+    ],
+    "AppStorageUsage": [
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id\""
+      },
+      {
+        "name": "DisplayName",
+        "type": "string",
+        "tag": "json:\"display_name,omitempty\""
+      },
+      {
+        "name": "LogicalBytes",
+        "type": "int64",
+        "tag": "json:\"logical_bytes\""
+      },
+      {
+        "name": "RecordBytes",
+        "type": "int64",
+        "tag": "json:\"record_bytes\""
+      },
+      {
+        "name": "RecordCount",
+        "type": "int",
+        "tag": "json:\"record_count\""
+      },
+      {
+        "name": "Collections",
+        "type": "[]CollectionStorageUsage",
+        "tag": "json:\"collections\""
+      }
+    ],
+    "CollectionStorageUsage": [
+      {
+        "name": "CollectionPrefix",
+        "type": "string",
+        "tag": "json:\"collection_prefix,omitempty\""
+      },
+      {
+        "name": "Collection",
+        "type": "string",
+        "tag": "json:\"collection\""
+      },
+      {
+        "name": "LogicalBytes",
+        "type": "int64",
+        "tag": "json:\"logical_bytes\""
+      },
+      {
+        "name": "RecordBytes",
+        "type": "int64",
+        "tag": "json:\"record_bytes\""
+      },
+      {
+        "name": "RecordCount",
+        "type": "int",
+        "tag": "json:\"record_count\""
+      }
+    ],
+    "StorageBucketUsage": [
+      {
+        "name": "LogicalBytes",
+        "type": "int64",
+        "tag": "json:\"logical_bytes\""
+      },
+      {
+        "name": "Count",
+        "type": "int",
+        "tag": "json:\"count\""
+      }
+    ],
+    "CleanHabitDay": [
+      {
+        "name": "HabitID",
+        "type": "string",
+        "tag": "json:\"habit_id\""
+      },
+      {
+        "name": "HabitName",
+        "type": "string",
+        "tag": "json:\"habit_name,omitempty\""
+      },
+      {
+        "name": "LocalDate",
+        "type": "int",
+        "tag": "json:\"local_date\""
+      },
+      {
+        "name": "Completed",
+        "type": "bool",
+        "tag": "json:\"completed\""
+      },
+      {
+        "name": "Count",
+        "type": "int",
+        "tag": "json:\"count\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at\""
+      }
+    ],
+    "EncryptedRecord": [
+      {
+        "name": "Collection",
+        "type": "string",
+        "tag": "json:\"collection\""
+      },
+      {
+        "name": "ID",
+        "type": "string",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "KeyID",
+        "type": "string",
+        "tag": "json:\"key_id,omitempty\""
+      },
+      {
+        "name": "Nonce",
+        "type": "string",
+        "tag": "json:\"nonce,omitempty\""
+      },
+      {
+        "name": "Ciphertext",
+        "type": "string",
+        "tag": "json:\"ciphertext,omitempty\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at\""
+      },
+      {
+        "name": "DeletedAt",
+        "type": "int64",
+        "tag": "json:\"deleted_at,omitempty\""
+      },
+      {
+        "name": "ContentHash",
+        "type": "string",
+        "tag": "json:\"content_hash,omitempty\""
+      },
+      {
+        "name": "SchemaVersion",
+        "type": "int",
+        "tag": "json:\"schema_version,omitempty\""
+      },
+      {
+        "name": "ParentID",
+        "type": "string",
+        "tag": "json:\"parent_id,omitempty\""
+      }
+    ],
+    "SyncDiagnostics": [
+      {
+        "name": "SnapshotReason",
+        "type": "string",
+        "tag": "json:\"snapshot_reason,omitempty\""
+      },
+      {
+        "name": "RequestedSinceServerVersion",
+        "type": "int64",
+        "tag": "json:\"requested_since_server_version\""
+      },
+      {
+        "name": "EffectiveSinceServerVersion",
+        "type": "int64",
+        "tag": "json:\"effective_since_server_version\""
+      },
+      {
+        "name": "ClientClock",
+        "type": "int64",
+        "tag": "json:\"client_clock\""
+      },
+      {
+        "name": "CompactedThroughVersion",
+        "type": "int64",
+        "tag": "json:\"compacted_through_version,omitempty\""
+      },
+      {
+        "name": "HasLocalChanges",
+        "type": "bool",
+        "tag": "json:\"has_local_changes\""
+      },
+      {
+        "name": "AcceptedOps",
+        "type": "int",
+        "tag": "json:\"accepted_ops\""
+      },
+      {
+        "name": "RemoteOps",
+        "type": "int",
+        "tag": "json:\"remote_ops\""
+      },
+      {
+        "name": "AppliedInput",
+        "type": "SyncResult",
+        "tag": "json:\"applied_input\""
+      },
+      {
+        "name": "ReturnedChanges",
+        "type": "SyncResult",
+        "tag": "json:\"returned_changes\""
+      }
+    ],
+    "SyncAuditEntry": [
+      {
+        "name": "ID",
+        "type": "int64",
+        "tag": "json:\"id,omitempty\""
+      },
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash,omitempty\""
+      },
+      {
+        "name": "ClientID",
+        "type": "string",
+        "tag": "json:\"client_id,omitempty\""
+      },
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id,omitempty\""
+      },
+      {
+        "name": "ProtocolVersion",
+        "type": "int",
+        "tag": "json:\"protocol_version\""
+      },
+      {
+        "name": "SinceServerVersion",
+        "type": "int64",
+        "tag": "json:\"since_server_version\""
+      },
+      {
+        "name": "ClientClock",
+        "type": "int64",
+        "tag": "json:\"client_clock\""
+      },
+      {
+        "name": "ServerVersion",
+        "type": "int64",
+        "tag": "json:\"server_version\""
+      },
+      {
+        "name": "Applied",
+        "type": "SyncResult",
+        "tag": "json:\"applied\""
+      },
+      {
+        "name": "RemoteOps",
+        "type": "int",
+        "tag": "json:\"remote_ops\""
+      },
+      {
+        "name": "FullSnapshotRequired",
+        "type": "bool",
+        "tag": "json:\"full_snapshot_required\""
+      },
+      {
+        "name": "SnapshotReason",
+        "type": "string",
+        "tag": "json:\"snapshot_reason,omitempty\""
+      },
+      {
+        "name": "EncryptedPayload",
+        "type": "bool",
+        "tag": "json:\"encrypted_payload\""
+      },
+      {
+        "name": "EncryptedPayloadBytes",
+        "type": "int64",
+        "tag": "json:\"encrypted_payload_bytes,omitempty\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at,omitempty\""
+      }
+    ],
+    "DeleteRequest": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      }
+    ],
+    "AliasRequest": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "Alias",
+        "type": "string",
+        "tag": "json:\"alias\""
+      }
+    ],
+    "AliasResponse": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "Alias",
+        "type": "string",
+        "tag": "json:\"alias\""
+      }
+    ],
+    "ProfileIconRequest": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon\""
+      }
+    ],
+    "ProfileIconResponse": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon\""
+      }
+    ],
+    "FriendRequestCreateRequest": [
+      {
+        "name": "Target",
+        "type": "string",
+        "tag": "json:\"target\""
+      }
+    ],
+    "FriendRequestActionRequest": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash,omitempty\""
+      }
+    ],
+    "FriendRequestResponse": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "Request",
+        "type": "FriendRequest",
+        "tag": "json:\"request\""
+      }
+    ],
+    "FriendRequestsResponse": [
+      {
+        "name": "Incoming",
+        "type": "[]FriendRequest",
+        "tag": "json:\"incoming\""
+      },
+      {
+        "name": "Outgoing",
+        "type": "[]FriendRequest",
+        "tag": "json:\"outgoing\""
+      }
+    ],
+    "FriendsResponse": [
+      {
+        "name": "Friends",
+        "type": "[]Friend",
+        "tag": "json:\"friends\""
+      }
+    ],
+    "ProfileStatsRequest": [
+      {
+        "name": "App",
+        "type": "string",
+        "tag": "json:\"app\""
+      },
+      {
+        "name": "Metrics",
+        "type": "[]ProfileMetric",
+        "tag": "json:\"metrics\""
+      }
+    ],
+    "ProfileStatsResponse": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "Applied",
+        "type": "int",
+        "tag": "json:\"applied\""
+      }
+    ],
+    "FriendStatsResponse": [
+      {
+        "name": "Rows",
+        "type": "[]FriendStatRow",
+        "tag": "json:\"rows\""
+      }
+    ],
+    "AppCollection": [
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id,omitempty\""
+      },
+      {
+        "name": "CollectionPrefix",
+        "type": "string",
+        "tag": "json:\"collection_prefix\""
+      },
+      {
+        "name": "Visibility",
+        "type": "string",
+        "tag": "json:\"visibility\""
+      },
+      {
+        "name": "SchemaVersion",
+        "type": "int",
+        "tag": "json:\"schema_version,omitempty\""
+      },
+      {
+        "name": "Description",
+        "type": "string",
+        "tag": "json:\"description,omitempty\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at,omitempty\""
+      }
+    ],
+    "AppFeature": [
+      {
+        "name": "ID",
+        "type": "string",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "Collections",
+        "type": "[]string",
+        "tag": "json:\"collections,omitempty\""
+      },
+      {
+        "name": "RequiresSignedTx",
+        "type": "bool",
+        "tag": "json:\"requires_signed_tx,omitempty\""
+      },
+      {
+        "name": "Description",
+        "type": "string",
+        "tag": "json:\"description,omitempty\""
+      }
+    ],
+    "LegacyProtocol": [
+      {
+        "name": "Name",
+        "type": "string",
+        "tag": "json:\"name\""
+      },
+      {
+        "name": "Version",
+        "type": "int",
+        "tag": "json:\"version,omitempty\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "ValidUntil",
+        "type": "string",
+        "tag": "json:\"valid_until\""
+      }
+    ],
+    "AppGrant": [
+      {
+        "name": "ID",
+        "type": "string",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash,omitempty\""
+      },
+      {
+        "name": "SourceAppID",
+        "type": "string",
+        "tag": "json:\"source_app_id\""
+      },
+      {
+        "name": "TargetAppID",
+        "type": "string",
+        "tag": "json:\"target_app_id\""
+      },
+      {
+        "name": "CollectionPrefix",
+        "type": "string",
+        "tag": "json:\"collection_prefix\""
+      },
+      {
+        "name": "Permission",
+        "type": "string",
+        "tag": "json:\"permission\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at,omitempty\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at,omitempty\""
+      },
+      {
+        "name": "RevokedAt",
+        "type": "string",
+        "tag": "json:\"revoked_at,omitempty\""
+      }
+    ],
+    "AppGrantRequest": [
+      {
+        "name": "SourceAppID",
+        "type": "string",
+        "tag": "json:\"source_app_id\""
+      },
+      {
+        "name": "TargetAppID",
+        "type": "string",
+        "tag": "json:\"target_app_id\""
+      },
+      {
+        "name": "CollectionPrefix",
+        "type": "string",
+        "tag": "json:\"collection_prefix\""
+      },
+      {
+        "name": "Permission",
+        "type": "string",
+        "tag": "json:\"permission,omitempty\""
+      }
+    ],
+    "AppGrantsResponse": [
+      {
+        "name": "Grants",
+        "type": "[]AppGrant",
+        "tag": "json:\"grants\""
+      }
+    ],
+    "AppRecordsResponse": [
+      {
+        "name": "Records",
+        "type": "[]EncryptedRecord",
+        "tag": "json:\"records\""
+      }
+    ],
+    "TokenProduct": [
+      {
+        "name": "ProductID",
+        "type": "string",
+        "tag": "json:\"product_id\""
+      },
+      {
+        "name": "TokenUnits",
+        "type": "int64",
+        "tag": "json:\"token_units\""
+      },
+      {
+        "name": "MoneroAtomicAmount",
+        "type": "int64",
+        "tag": "json:\"monero_atomic_amount,omitempty\""
+      }
+    ],
+    "TokenAsset": [
+      {
+        "name": "IssuerID",
+        "type": "string",
+        "tag": "json:\"issuer_id\""
+      },
+      {
+        "name": "AssetID",
+        "type": "string",
+        "tag": "json:\"asset_id\""
+      },
+      {
+        "name": "DisplayName",
+        "type": "string",
+        "tag": "json:\"display_name\""
+      },
+      {
+        "name": "Decimals",
+        "type": "int",
+        "tag": "json:\"decimals\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      }
+    ],
+    "TokenAssetsResponse": [
+      {
+        "name": "Assets",
+        "type": "[]TokenAsset",
+        "tag": "json:\"assets\""
+      }
+    ],
+    "TokenProductsResponse": [
+      {
+        "name": "Products",
+        "type": "[]TokenProduct",
+        "tag": "json:\"products\""
+      }
+    ],
+    "TokenIssuerResponse": [
+      {
+        "name": "IssuerID",
+        "type": "string",
+        "tag": "json:\"issuer_id\""
+      },
+      {
+        "name": "PublicKey",
+        "type": "string",
+        "tag": "json:\"public_key\""
+      },
+      {
+        "name": "Algorithm",
+        "type": "string",
+        "tag": "json:\"algorithm\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      }
+    ],
+    "TokenBalanceResponse": [
+      {
+        "name": "AccountID",
+        "type": "string",
+        "tag": "json:\"account_id\""
+      },
+      {
+        "name": "AssetID",
+        "type": "string",
+        "tag": "json:\"asset_id\""
+      },
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id,omitempty\""
+      },
+      {
+        "name": "Balance",
+        "type": "int64",
+        "tag": "json:\"balance\""
+      }
+    ],
+    "TokenLedgerResponse": [
+      {
+        "name": "Events",
+        "type": "[]TokenReceipt",
+        "tag": "json:\"events\""
+      }
+    ],
+    "TokenReceipt": [
+      {
+        "name": "ReceiptID",
+        "type": "string",
+        "tag": "json:\"receipt_id\""
+      },
+      {
+        "name": "IssuerID",
+        "type": "string",
+        "tag": "json:\"issuer_id\""
+      },
+      {
+        "name": "AssetID",
+        "type": "string",
+        "tag": "json:\"asset_id\""
+      },
+      {
+        "name": "AccountID",
+        "type": "string",
+        "tag": "json:\"account_id\""
+      },
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id,omitempty\""
+      },
+      {
+        "name": "EventType",
+        "type": "string",
+        "tag": "json:\"event_type\""
+      },
+      {
+        "name": "AmountDelta",
+        "type": "int64",
+        "tag": "json:\"amount_delta\""
+      },
+      {
+        "name": "LedgerSeq",
+        "type": "int64",
+        "tag": "json:\"ledger_seq\""
+      },
+      {
+        "name": "PreviousHash",
+        "type": "string",
+        "tag": "json:\"previous_hash\""
+      },
+      {
+        "name": "EventHash",
+        "type": "string",
+        "tag": "json:\"event_hash\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at\""
+      },
+      {
+        "name": "SourceType",
+        "type": "string",
+        "tag": "json:\"source_type\""
+      },
+      {
+        "name": "SourceRef",
+        "type": "string",
+        "tag": "json:\"source_ref\""
+      },
+      {
+        "name": "Signature",
+        "type": "string",
+        "tag": "json:\"signature\""
+      }
+    ],
+    "TokenSpendRequest": [
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id\""
+      },
+      {
+        "name": "AssetID",
+        "type": "string",
+        "tag": "json:\"asset_id\""
+      },
+      {
+        "name": "Amount",
+        "type": "int64",
+        "tag": "json:\"amount\""
+      },
+      {
+        "name": "Action",
+        "type": "string",
+        "tag": "json:\"action\""
+      },
+      {
+        "name": "IdempotencyKey",
+        "type": "string",
+        "tag": "json:\"idempotency_key\""
+      },
+      {
+        "name": "Metadata",
+        "type": "string",
+        "tag": "json:\"metadata,omitempty\""
+      }
+    ],
+    "TokenSpendResponse": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "Balance",
+        "type": "int64",
+        "tag": "json:\"balance\""
+      },
+      {
+        "name": "Receipt",
+        "type": "TokenReceipt",
+        "tag": "json:\"receipt\""
+      }
+    ],
+    "GooglePurchaseVerifyRequest": [
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id\""
+      },
+      {
+        "name": "PackageName",
+        "type": "string",
+        "tag": "json:\"package_name\""
+      },
+      {
+        "name": "ProductID",
+        "type": "string",
+        "tag": "json:\"product_id\""
+      },
+      {
+        "name": "PurchaseToken",
+        "type": "string",
+        "tag": "json:\"purchase_token\""
+      }
+    ],
+    "TokenPurchaseResponse": [
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "Balance",
+        "type": "int64",
+        "tag": "json:\"balance\""
+      },
+      {
+        "name": "Receipt",
+        "type": "TokenReceipt",
+        "tag": "json:\"receipt\""
+      }
+    ],
+    "MoneroInvoiceRequest": [
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id\""
+      },
+      {
+        "name": "ProductID",
+        "type": "string",
+        "tag": "json:\"product_id\""
+      }
+    ],
+    "MoneroInvoiceResponse": [
+      {
+        "name": "ID",
+        "type": "string",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id,omitempty\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "ProductID",
+        "type": "string",
+        "tag": "json:\"product_id\""
+      },
+      {
+        "name": "AssetID",
+        "type": "string",
+        "tag": "json:\"asset_id\""
+      },
+      {
+        "name": "TokenUnits",
+        "type": "int64",
+        "tag": "json:\"token_units\""
+      },
+      {
+        "name": "AtomicAmount",
+        "type": "int64",
+        "tag": "json:\"atomic_amount\""
+      },
+      {
+        "name": "Address",
+        "type": "string",
+        "tag": "json:\"address\""
+      },
+      {
+        "name": "AddressIndex",
+        "type": "int",
+        "tag": "json:\"address_index,omitempty\""
+      },
+      {
+        "name": "PaymentID",
+        "type": "string",
+        "tag": "json:\"payment_id,omitempty\""
+      },
+      {
+        "name": "ExpiresAt",
+        "type": "string",
+        "tag": "json:\"expires_at\""
+      },
+      {
+        "name": "Receipt",
+        "type": "*TokenReceipt",
+        "tag": "json:\"receipt,omitempty\""
+      }
+    ],
+    "MoneroAccountAddress": [
+      {
+        "name": "AccountID",
+        "type": "string",
+        "tag": "json:\"account_id\""
+      },
+      {
+        "name": "Alias",
+        "type": "string",
+        "tag": "json:\"alias,omitempty\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon,omitempty\""
+      },
+      {
+        "name": "Address",
+        "type": "string",
+        "tag": "json:\"address\""
+      },
+      {
+        "name": "AccountIndex",
+        "type": "int",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "AddressIndex",
+        "type": "int",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at\""
+      }
+    ],
+    "MoneroRate": [
+      {
+        "name": "AtomicAmount",
+        "type": "int64",
+        "tag": "json:\"xmr_atomic_units\""
+      },
+      {
+        "name": "TokenUnits",
+        "type": "int64",
+        "tag": "json:\"token_units\""
+      }
+    ],
+    "MoneroAddressResponse": [
+      {
+        "name": "AccountID",
+        "type": "string",
+        "tag": "json:\"account_id\""
+      },
+      {
+        "name": "Alias",
+        "type": "string",
+        "tag": "json:\"alias,omitempty\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon,omitempty\""
+      },
+      {
+        "name": "AssetID",
+        "type": "string",
+        "tag": "json:\"asset_id\""
+      },
+      {
+        "name": "Address",
+        "type": "string",
+        "tag": "json:\"address\""
+      },
+      {
+        "name": "URI",
+        "type": "string",
+        "tag": "json:\"uri\""
+      },
+      {
+        "name": "Network",
+        "type": "string",
+        "tag": "json:\"network\""
+      },
+      {
+        "name": "ConfirmationsRequired",
+        "type": "int64",
+        "tag": "json:\"confirmations_required\""
+      },
+      {
+        "name": "MinimumAtomicAmount",
+        "type": "int64",
+        "tag": "json:\"minimum_atomic_amount\""
+      },
+      {
+        "name": "Rate",
+        "type": "MoneroRate",
+        "tag": "json:\"rate\""
+      }
+    ],
+    "MoneroDeposit": [
+      {
+        "name": "TxID",
+        "type": "string",
+        "tag": "json:\"tx_id\""
+      },
+      {
+        "name": "AccountID",
+        "type": "string",
+        "tag": "json:\"account_id,omitempty\""
+      },
+      {
+        "name": "AmountAtomic",
+        "type": "int64",
+        "tag": "json:\"amount_atomic\""
+      },
+      {
+        "name": "TokenUnits",
+        "type": "int64",
+        "tag": "json:\"token_units,omitempty\""
+      },
+      {
+        "name": "BlockHeight",
+        "type": "int64",
+        "tag": "json:\"block_height,omitempty\""
+      },
+      {
+        "name": "Confirmations",
+        "type": "int64",
+        "tag": "json:\"confirmations\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "FirstSeenAt",
+        "type": "string",
+        "tag": "json:\"first_seen_at\""
+      },
+      {
+        "name": "ConfirmedAt",
+        "type": "string",
+        "tag": "json:\"confirmed_at,omitempty\""
+      },
+      {
+        "name": "CreditedAt",
+        "type": "string",
+        "tag": "json:\"credited_at,omitempty\""
+      },
+      {
+        "name": "Receipt",
+        "type": "*TokenReceipt",
+        "tag": "json:\"receipt,omitempty\""
+      },
+      {
+        "name": "AccountIndex",
+        "type": "int",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "AddressIndex",
+        "type": "int",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "UnlockTime",
+        "type": "int64",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "Locked",
+        "type": "bool",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "DoubleSpendSeen",
+        "type": "bool",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "RateAtomic",
+        "type": "int64",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "RateTokenUnits",
+        "type": "int64",
+        "tag": "json:\"-\""
+      },
+      {
+        "name": "ReceiptID",
+        "type": "string",
+        "tag": "json:\"-\""
+      }
+    ],
+    "MoneroDepositsResponse": [
+      {
+        "name": "Deposits",
+        "type": "[]MoneroDeposit",
+        "tag": "json:\"deposits\""
+      }
+    ],
+    "TokenCheckpoint": [
+      {
+        "name": "LedgerSeq",
+        "type": "int64",
+        "tag": "json:\"ledger_seq\""
+      },
+      {
+        "name": "IssuerID",
+        "type": "string",
+        "tag": "json:\"issuer_id\""
+      },
+      {
+        "name": "AssetID",
+        "type": "string",
+        "tag": "json:\"asset_id\""
+      },
+      {
+        "name": "LedgerRoot",
+        "type": "string",
+        "tag": "json:\"ledger_root\""
+      },
+      {
+        "name": "Signature",
+        "type": "string",
+        "tag": "json:\"signature\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at\""
+      }
+    ],
+    "FriendRequest": [
+      {
+        "name": "ID",
+        "type": "string",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "RequesterUserID",
+        "type": "string",
+        "tag": "json:\"requester_user_id_hash\""
+      },
+      {
+        "name": "RequesterAlias",
+        "type": "string",
+        "tag": "json:\"requester_alias,omitempty\""
+      },
+      {
+        "name": "TargetUserID",
+        "type": "string",
+        "tag": "json:\"target_user_id_hash\""
+      },
+      {
+        "name": "TargetAlias",
+        "type": "string",
+        "tag": "json:\"target_alias,omitempty\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at\""
+      }
+    ],
+    "Friend": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "Alias",
+        "type": "string",
+        "tag": "json:\"alias,omitempty\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon,omitempty\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at\""
+      }
+    ],
+    "ProfileMetric": [
+      {
+        "name": "Practice",
+        "type": "string",
+        "tag": "json:\"practice\""
+      },
+      {
+        "name": "Metric",
+        "type": "string",
+        "tag": "json:\"metric\""
+      },
+      {
+        "name": "Value",
+        "type": "float64",
+        "tag": "json:\"value\""
+      },
+      {
+        "name": "Label",
+        "type": "string",
+        "tag": "json:\"label,omitempty\""
+      },
+      {
+        "name": "LocalDate",
+        "type": "int",
+        "tag": "json:\"local_date,omitempty\""
+      }
+    ],
+    "FriendStatRow": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "Alias",
+        "type": "string",
+        "tag": "json:\"alias,omitempty\""
+      },
+      {
+        "name": "ProfileIcon",
+        "type": "int",
+        "tag": "json:\"profile_icon,omitempty\""
+      },
+      {
+        "name": "App",
+        "type": "string",
+        "tag": "json:\"app\""
+      },
+      {
+        "name": "Practice",
+        "type": "string",
+        "tag": "json:\"practice\""
+      },
+      {
+        "name": "Metric",
+        "type": "string",
+        "tag": "json:\"metric\""
+      },
+      {
+        "name": "Value",
+        "type": "float64",
+        "tag": "json:\"value\""
+      },
+      {
+        "name": "Label",
+        "type": "string",
+        "tag": "json:\"label,omitempty\""
+      },
+      {
+        "name": "LocalDate",
+        "type": "int",
+        "tag": "json:\"local_date,omitempty\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at\""
+      }
+    ],
+    "DeleteWithKeyRequest": [
+      {
+        "name": "UserIDHash",
+        "type": "string",
+        "tag": "json:\"user_id_hash\""
+      },
+      {
+        "name": "ExportedKey",
+        "type": "string",
+        "tag": "json:\"exported_key,omitempty\""
+      }
+    ],
+    "MeditationLog": [
+      {
+        "name": "ID",
+        "type": "string",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "SessionID",
+        "type": "string",
+        "tag": "json:\"session_id\""
+      },
+      {
+        "name": "DurationSeconds",
+        "type": "int",
+        "tag": "json:\"duration_seconds,omitempty\""
+      },
+      {
+        "name": "Duration",
+        "type": "int",
+        "tag": "json:\"duration,omitempty\""
+      },
+      {
+        "name": "CompletedAt",
+        "type": "string",
+        "tag": "json:\"completed_at,omitempty\""
+      },
+      {
+        "name": "Timestamp",
+        "type": "string",
+        "tag": "json:\"timestamp,omitempty\""
+      }
+    ],
+    "Habit": [
+      {
+        "name": "ID",
+        "type": "string",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "Name",
+        "type": "string",
+        "tag": "json:\"name\""
+      },
+      {
+        "name": "ColorR",
+        "type": "int",
+        "tag": "json:\"color_r\""
+      },
+      {
+        "name": "ColorG",
+        "type": "int",
+        "tag": "json:\"color_g\""
+      },
+      {
+        "name": "ColorB",
+        "type": "int",
+        "tag": "json:\"color_b\""
+      },
+      {
+        "name": "SyncMode",
+        "type": "int",
+        "tag": "json:\"sync_mode\""
+      },
+      {
+        "name": "SyncActivity",
+        "type": "int",
+        "tag": "json:\"sync_activity\""
+      },
+      {
+        "name": "CounterEnabled",
+        "type": "int",
+        "tag": "json:\"counter_enabled\""
+      },
+      {
+        "name": "SortOrder",
+        "type": "int",
+        "tag": "json:\"sort_order\""
+      },
+      {
+        "name": "DeletedAt",
+        "type": "int64",
+        "tag": "json:\"deleted_at\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at\""
+      }
+    ],
+    "HabitDay": [
+      {
+        "name": "HabitID",
+        "type": "string",
+        "tag": "json:\"habit_id\""
+      },
+      {
+        "name": "LocalDate",
+        "type": "int",
+        "tag": "json:\"local_date\""
+      },
+      {
+        "name": "Completed",
+        "type": "bool",
+        "tag": "json:\"completed\""
+      },
+      {
+        "name": "Count",
+        "type": "int",
+        "tag": "json:\"count\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at\""
+      }
+    ],
+    "Session": [
+      {
+        "name": "ID",
+        "type": "string",
+        "tag": "json:\"id\""
+      },
+      {
+        "name": "StartedAt",
+        "type": "string",
+        "tag": "json:\"started_at\""
+      },
+      {
+        "name": "LocalDate",
+        "type": "int",
+        "tag": "json:\"local_date\""
+      },
+      {
+        "name": "Topic",
+        "type": "string",
+        "tag": "json:\"topic\""
+      },
+      {
+        "name": "Activity",
+        "type": "int",
+        "tag": "json:\"activity\""
+      },
+      {
+        "name": "Source",
+        "type": "string",
+        "tag": "json:\"source\""
+      },
+      {
+        "name": "RoundsHash",
+        "type": "string",
+        "tag": "json:\"rounds_hash\""
+      },
+      {
+        "name": "MoodBefore",
+        "type": "int",
+        "tag": "json:\"mood_before\""
+      },
+      {
+        "name": "MoodAfter",
+        "type": "int",
+        "tag": "json:\"mood_after\""
+      },
+      {
+        "name": "Energy",
+        "type": "int",
+        "tag": "json:\"energy\""
+      },
+      {
+        "name": "Stress",
+        "type": "int",
+        "tag": "json:\"stress\""
+      },
+      {
+        "name": "Note",
+        "type": "string",
+        "tag": "json:\"note\""
+      },
+      {
+        "name": "Tags",
+        "type": "string",
+        "tag": "json:\"tags\""
+      },
+      {
+        "name": "DeletedAt",
+        "type": "int64",
+        "tag": "json:\"deleted_at\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at\""
+      },
+      {
+        "name": "Rounds",
+        "type": "[]SessionRound",
+        "tag": "json:\"rounds,omitempty\""
+      }
+    ],
+    "SessionRound": [
+      {
+        "name": "RoundIndex",
+        "type": "int",
+        "tag": "json:\"round_index\""
+      },
+      {
+        "name": "Breaths",
+        "type": "int",
+        "tag": "json:\"breaths\""
+      },
+      {
+        "name": "HoldSeconds",
+        "type": "int",
+        "tag": "json:\"hold_seconds\""
+      }
+    ],
+    "SyncResult": [
+      {
+        "name": "MeditationLogs",
+        "type": "int",
+        "tag": "json:\"meditation_logs\""
+      },
+      {
+        "name": "Habits",
+        "type": "int",
+        "tag": "json:\"habits\""
+      },
+      {
+        "name": "HabitDays",
+        "type": "int",
+        "tag": "json:\"habit_days\""
+      },
+      {
+        "name": "Sessions",
+        "type": "int",
+        "tag": "json:\"sessions\""
+      },
+      {
+        "name": "SocialCache",
+        "type": "int",
+        "tag": "json:\"social_cache\""
+      },
+      {
+        "name": "EncryptedRecords",
+        "type": "int",
+        "tag": "json:\"encrypted_records,omitempty\""
+      }
+    ],
+    "AppKey": [
+      {
+        "name": "KeyID",
+        "type": "string",
+        "tag": "json:\"key_id\""
+      },
+      {
+        "name": "Algorithm",
+        "type": "string",
+        "tag": "json:\"algorithm\""
+      },
+      {
+        "name": "PublicKey",
+        "type": "string",
+        "tag": "json:\"public_key\""
+      },
+      {
+        "name": "Purpose",
+        "type": "string",
+        "tag": "json:\"purpose,omitempty\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status,omitempty\""
+      },
+      {
+        "name": "ExpiresAt",
+        "type": "int64",
+        "tag": "json:\"expires_at,omitempty\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at,omitempty\""
+      }
+    ],
+    "TokenPolicy": [
+      {
+        "name": "AssetID",
+        "type": "string",
+        "tag": "json:\"asset_id\""
+      },
+      {
+        "name": "Permission",
+        "type": "string",
+        "tag": "json:\"permission\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status,omitempty\""
+      },
+      {
+        "name": "LegacyUnsignedUntil",
+        "type": "int64",
+        "tag": "json:\"legacy_unsigned_until,omitempty\""
+      }
+    ],
+    "AppManifest": [
+      {
+        "name": "ManifestVersion",
+        "type": "int",
+        "tag": "json:\"manifest_version\""
+      },
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id\""
+      },
+      {
+        "name": "DisplayName",
+        "type": "string",
+        "tag": "json:\"display_name\""
+      },
+      {
+        "name": "Description",
+        "type": "string",
+        "tag": "json:\"description,omitempty\""
+      },
+      {
+        "name": "HomepageURL",
+        "type": "string",
+        "tag": "json:\"homepage_url,omitempty\""
+      },
+      {
+        "name": "SourceURL",
+        "type": "string",
+        "tag": "json:\"source_url,omitempty\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status,omitempty\""
+      },
+      {
+        "name": "ExpiresAt",
+        "type": "int64",
+        "tag": "json:\"expires_at,omitempty\""
+      },
+      {
+        "name": "AppSchemaVersion",
+        "type": "int",
+        "tag": "json:\"app_schema_version,omitempty\""
+      },
+      {
+        "name": "MinClientVersion",
+        "type": "string",
+        "tag": "json:\"min_supported_client_version,omitempty\""
+      },
+      {
+        "name": "CurrentVersion",
+        "type": "string",
+        "tag": "json:\"current_client_version,omitempty\""
+      },
+      {
+        "name": "CompatibilityUntil",
+        "type": "string",
+        "tag": "json:\"compatibility_until,omitempty\""
+      },
+      {
+        "name": "Keys",
+        "type": "[]AppKey",
+        "tag": "json:\"keys\""
+      },
+      {
+        "name": "Collections",
+        "type": "[]AppCollection",
+        "tag": "json:\"collections,omitempty\""
+      },
+      {
+        "name": "Capabilities",
+        "type": "[]string",
+        "tag": "json:\"capabilities,omitempty\""
+      },
+      {
+        "name": "Features",
+        "type": "[]AppFeature",
+        "tag": "json:\"features,omitempty\""
+      },
+      {
+        "name": "LegacyProtocols",
+        "type": "[]LegacyProtocol",
+        "tag": "json:\"legacy_protocols,omitempty\""
+      },
+      {
+        "name": "TokenPolicies",
+        "type": "[]TokenPolicy",
+        "tag": "json:\"token_policies,omitempty\""
+      }
+    ],
+    "SignedAppRegistrationRequest": [
+      {
+        "name": "Manifest",
+        "type": "AppManifest",
+        "tag": "json:\"manifest\""
+      },
+      {
+        "name": "ManifestSignature",
+        "type": "string",
+        "tag": "json:\"manifest_signature\""
+      },
+      {
+        "name": "ApprovalSignature",
+        "type": "string",
+        "tag": "json:\"approval_signature\""
+      }
+    ],
+    "AppRegistration": [
+      {
+        "name": "AppID",
+        "type": "string",
+        "tag": "json:\"app_id\""
+      },
+      {
+        "name": "DisplayName",
+        "type": "string",
+        "tag": "json:\"display_name\""
+      },
+      {
+        "name": "Description",
+        "type": "string",
+        "tag": "json:\"description,omitempty\""
+      },
+      {
+        "name": "HomepageURL",
+        "type": "string",
+        "tag": "json:\"homepage_url,omitempty\""
+      },
+      {
+        "name": "SourceURL",
+        "type": "string",
+        "tag": "json:\"source_url,omitempty\""
+      },
+      {
+        "name": "PublicKey",
+        "type": "string",
+        "tag": "json:\"public_key,omitempty\""
+      },
+      {
+        "name": "Status",
+        "type": "string",
+        "tag": "json:\"status\""
+      },
+      {
+        "name": "AppSchemaVersion",
+        "type": "int",
+        "tag": "json:\"app_schema_version,omitempty\""
+      },
+      {
+        "name": "MinClientVersion",
+        "type": "string",
+        "tag": "json:\"min_supported_client_version,omitempty\""
+      },
+      {
+        "name": "CurrentVersion",
+        "type": "string",
+        "tag": "json:\"current_client_version,omitempty\""
+      },
+      {
+        "name": "CompatibilityUntil",
+        "type": "string",
+        "tag": "json:\"compatibility_until,omitempty\""
+      },
+      {
+        "name": "CreatedAt",
+        "type": "string",
+        "tag": "json:\"created_at,omitempty\""
+      },
+      {
+        "name": "UpdatedAt",
+        "type": "string",
+        "tag": "json:\"updated_at,omitempty\""
+      },
+      {
+        "name": "ManifestVersion",
+        "type": "int",
+        "tag": "json:\"manifest_version,omitempty\""
+      },
+      {
+        "name": "ManifestHash",
+        "type": "string",
+        "tag": "json:\"manifest_hash,omitempty\""
+      },
+      {
+        "name": "ManifestSignature",
+        "type": "string",
+        "tag": "json:\"manifest_signature,omitempty\""
+      },
+      {
+        "name": "ApprovalSignature",
+        "type": "string",
+        "tag": "json:\"approval_signature,omitempty\""
+      },
+      {
+        "name": "ManifestExpiresAt",
+        "type": "int64",
+        "tag": "json:\"manifest_expires_at,omitempty\""
+      },
+      {
+        "name": "Collections",
+        "type": "[]AppCollection",
+        "tag": "json:\"collections,omitempty\""
+      },
+      {
+        "name": "Capabilities",
+        "type": "[]string",
+        "tag": "json:\"capabilities,omitempty\""
+      },
+      {
+        "name": "Features",
+        "type": "[]AppFeature",
+        "tag": "json:\"features,omitempty\""
+      },
+      {
+        "name": "LegacyProtocols",
+        "type": "[]LegacyProtocol",
+        "tag": "json:\"legacy_protocols,omitempty\""
+      },
+      {
+        "name": "Keys",
+        "type": "[]AppKey",
+        "tag": "json:\"keys,omitempty\""
+      },
+      {
+        "name": "TokenPolicies",
+        "type": "[]TokenPolicy",
+        "tag": "json:\"token_policies,omitempty\""
+      }
+    ],
+    "AppRegistryResponse": [
+      {
+        "name": "Apps",
+        "type": "[]AppRegistration",
+        "tag": "json:\"apps\""
+      }
+    ],
+    "SignedAppGrantRequest": [
+      {
+        "name": "Tx",
+        "type": "SignedTxEnvelope",
+        "tag": "json:\"tx\""
+      },
+      {
+        "name": "Grant",
+        "type": "AppGrantRequest",
+        "tag": "json:\"grant\""
+      }
+    ]
+  }
+}

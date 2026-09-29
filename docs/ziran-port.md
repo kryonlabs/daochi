@@ -33,13 +33,15 @@ yet been ported in full.
 Additional regression cases compare binary decoding, identifier grammars,
 bearer-token bytes, HMAC results, malformed inputs, integer limits, and expiry
 boundaries against the original contracts and Go standard library.
+A fixture extracted from the baseline protects the ported protocol records'
+field names, Go storage types, order and reflection tags.
 
 ## Production inventory
 
 | Baseline file | Status | Remaining work or canonical source |
 |---|---|---|
 | `app_manifest.go` | Go with ported callers | Manifest normalization, validation, signatures, registry transactions |
-| `app_registry.go` | Go with ported callers | App scopes, grants, registration, handlers |
+| `app_registry.go` | Partial Ziran | Scope grammar/ownership/matching/SQL escaping in `scope.zi`; grants, registry, handlers remain Go |
 | `challenge.go` | Go | Random challenges, expiry, locking, single-use consumption |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Go | Environment settings, products, URLs, keys |
@@ -54,12 +56,12 @@ boundaries against the original contracts and Go standard library.
 | `mesh_store.go` | Go with ported callers | Mesh export/import and scope enforcement |
 | `metrics.go` | Go | Concurrent counters, aggregate usage, text output |
 | `monero_deposits.go` | Go with ported callers | Deposit reconciliation and credit transactions |
-| `node_auth.go` | Go with ported callers | Node signatures, time window, trusted-peer lookup, nonce consumption |
+| `node_auth.go` | Partial Ziran | Canonical message in `signing.zi`; signatures, time window, peer lookup, nonce consumption remain Go |
 | `node_identity.go` | Go with ported callers | Identity persistence, invites, pairing, namespace claims |
 | `rate_limit.go` | Go | Concurrent request windows and eviction |
 | `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; HTTP handlers remain Go |
-| `signed_tx.go` | Go with ported callers | Transaction decoding, normalization, signatures, replay checks |
-| `signing.go` | Ziran | `signing.zi`: canonical signed request bytes and raw-body hashing |
+| `signed_tx.go` | Partial Ziran | Record, normalization, canonical bytes in `transaction.zi`; decoding, verification and replay remain Go |
+| `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
 | `store.go` | Go with ported callers | Schema, migrations, sync transactions, conflicts, projections |
 | `store_timestamps.go` | Go | One-time timestamp migration |
 | `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
@@ -68,7 +70,7 @@ boundaries against the original contracts and Go standard library.
 | `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
 | `trust_handlers.go` | Go with ported callers | Pairing and namespace HTTP handlers |
 | `trust_store.go` | Go with ported callers | Peer trust, pairing, claims, nonce persistence |
-| `types.go` | Go | Protocol records, JSON field names/omission, dynamic payloads |
+| `types.go` | Partial Ziran | 67 records and profile constants in Ziran; 10 records and the `SocialCache` alias remain Go |
 | `verifier.go` | Go | Signature verifier contract |
 | `verifier_nocgo.go` | Go | Unsupported-build error path |
 | `verifier_oqs.go` | Go | ML-DSA-44 foreign-library boundary and resource ownership |
@@ -77,6 +79,9 @@ boundaries against the original contracts and Go standard library.
 `identity.zi` is a new canonical module extracted from `server.go`. Generated
 `vec.go`, `constant_time.go`, and `hmac_sha256_go.go` come from Ziran's standard
 modules; they do not represent additional completed baseline modules.
+`manifest.zi` owns app manifest, key, token policy and registry records.
+`transaction.zi` also owns the signed grant record. Their HTTP/database
+operations still need to move.
 
 ## Compiler work exercised by this port
 
@@ -93,8 +98,9 @@ and saved IR in C, C++, Go, and the portable runtime.
 
 ## Next dependencies
 
-Protocol records need preserved JSON field names and omission rules, external
-Go types such as `json.RawMessage`, and dynamic maps. Network and database code
+Protocol fields now support checked Go reflection tags, including JSON names
+and omission rules. Remaining records need external Go types such as
+`json.RawMessage`, type aliases and dynamic maps. Network and database code
 also needs interfaces, multiple results/error handling, method calls,
 variadic SQL arguments, contexts, synchronization, and worker lifecycle support.
 These are reusable compiler/runtime capabilities to implement upstream in

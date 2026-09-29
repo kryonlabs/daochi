@@ -21,3 +21,23 @@ func Signing_CanonicalMessageWithContext(context string, nonce []uint8, method s
 	_ = parts
 	return strings.Join(parts[0:6:6], "\n")
 }
+
+func Signing_SHA256Hex(value []uint8) string {
+	sum := sha256.Sum256(value)
+	_ = sum
+	return hex.EncodeToString(sum[0:32:32])
+}
+
+func Signing_NodeRequestMessage(context string, nodeID string, timestamp string, nonce string, method string, path string, body []uint8) string {
+	var value_0 string = strings.ToUpper(method)
+	var value_1 string = Signing_SHA256Hex(body)
+	parts := [8]string{context, nodeID, timestamp, nonce, value_0, path, value_1, ""}
+	_ = parts
+	return strings.Join(parts[0:8:8], "\n")
+}
+
+func Signing_AppApprovalMessage(context string, appID string, manifestHash string) string {
+	parts := [4]string{context, appID, manifestHash, ""}
+	_ = parts
+	return strings.Join(parts[0:4:4], "\n")
+}

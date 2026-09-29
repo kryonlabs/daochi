@@ -490,14 +490,14 @@ func (s *Server) handleAppRoute(w http.ResponseWriter, r *http.Request) {
 		appID = strings.Trim(appID, "/")
 		collections, err := s.store.AppCollections(r.Context(), appID)
 		if err != nil {
-			slog.Error("app collections", "app", logText(appID), "error", err)
+			slog.Error("app collections", "app", LogSafety_LogText(appID), "error", err)
 			writeError(w, http.StatusInternalServerError, "apps failed")
 			return
 		}
 		if len(collections) == 0 {
 			if exists, err := s.store.AppExists(r.Context(), appID); err != nil || !exists {
 				if err != nil {
-					slog.Error("app exists", "app", logText(appID), "error", err)
+					slog.Error("app exists", "app", LogSafety_LogText(appID), "error", err)
 					writeError(w, http.StatusInternalServerError, "apps failed")
 					return
 				}
@@ -512,13 +512,13 @@ func (s *Server) handleAppRoute(w http.ResponseWriter, r *http.Request) {
 		s.handleAppRegister(w, r)
 		return
 	}
-	if !validNamespace(appID) {
+	if !Identity_ValidNamespace(appID) {
 		writeError(w, http.StatusNotFound, "app not found")
 		return
 	}
 	app, found, err := s.store.AppByID(r.Context(), appID)
 	if err != nil {
-		slog.Error("load app", "app", logText(appID), "error", err)
+		slog.Error("load app", "app", LogSafety_LogText(appID), "error", err)
 		writeError(w, http.StatusInternalServerError, "apps failed")
 		return
 	}
@@ -547,13 +547,13 @@ func (s *Server) handleAppRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.UpsertApp(r.Context(), req); err != nil {
-		slog.Error("register app", "app", logText(req.AppID), "error", err)
+		slog.Error("register app", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
 	app, _, err := s.store.AppByID(r.Context(), req.AppID)
 	if err != nil {
-		slog.Error("load registered app", "app", logText(req.AppID), "error", err)
+		slog.Error("load registered app", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
@@ -581,7 +581,7 @@ func (s *Server) handleAppGrants(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			slog.Error("create app grant", "user", logText(userID), "error", err)
+			slog.Error("create app grant", "user", LogSafety_LogText(userID), "error", err)
 			writeError(w, http.StatusInternalServerError, "app grant failed")
 			return
 		}
@@ -590,7 +590,7 @@ func (s *Server) handleAppGrants(w http.ResponseWriter, r *http.Request) {
 	}
 	grants, err := s.store.ListAppGrants(r.Context(), userID)
 	if err != nil {
-		slog.Error("list app grants", "user", logText(userID), "error", err)
+		slog.Error("list app grants", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app grants failed")
 		return
 	}
@@ -640,7 +640,7 @@ func (s *Server) handleSignedAppGrant(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		slog.Error("create signed app grant", "user", logText(userID), "error", err)
+		slog.Error("create signed app grant", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app grant failed")
 		return
 	}
@@ -663,7 +663,7 @@ func (s *Server) handleAppGrantRoute(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "app grant not found")
 			return
 		}
-		slog.Error("revoke app grant", "user", logText(userID), "grant", logText(id), "error", err)
+		slog.Error("revoke app grant", "user", LogSafety_LogText(userID), "grant", LogSafety_LogText(id), "error", err)
 		writeError(w, http.StatusInternalServerError, "app grant failed")
 		return
 	}
@@ -678,7 +678,7 @@ func (s *Server) handleAppRecords(w http.ResponseWriter, r *http.Request) {
 	sourceAppID := strings.TrimSpace(r.URL.Query().Get("source_app_id"))
 	targetAppID := strings.TrimSpace(r.URL.Query().Get("target_app_id"))
 	collectionPrefix := strings.TrimSpace(r.URL.Query().Get("collection_prefix"))
-	if !validNamespace(sourceAppID) || !validNamespace(targetAppID) || !validCollectionPrefix(collectionPrefix) {
+	if !Identity_ValidNamespace(sourceAppID) || !Identity_ValidNamespace(targetAppID) || !validCollectionPrefix(collectionPrefix) {
 		writeError(w, http.StatusBadRequest, "invalid app records query")
 		return
 	}
@@ -711,7 +711,7 @@ func (s *Server) handleAppRecords(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "app not found")
 			return
 		}
-		slog.Error("read app records", "user", logText(userID), "source_app", logText(sourceAppID), "target_app", logText(targetAppID), "error", err)
+		slog.Error("read app records", "user", LogSafety_LogText(userID), "source_app", LogSafety_LogText(sourceAppID), "target_app", LogSafety_LogText(targetAppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app records failed")
 		return
 	}
@@ -753,7 +753,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 	if req.Status == "" {
 		req.Status = appStatusActive
 	}
-	if !validNamespace(req.AppID) {
+	if !Identity_ValidNamespace(req.AppID) {
 		return req, errors.New("invalid app_id")
 	}
 	if req.DisplayName == "" || len(req.DisplayName) > 80 {
@@ -789,14 +789,14 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 	}
 	for i := range req.Capabilities {
 		req.Capabilities[i] = strings.TrimSpace(req.Capabilities[i])
-		if !validNamespace(req.Capabilities[i]) {
+		if !Identity_ValidNamespace(req.Capabilities[i]) {
 			return req, errors.New("invalid capability")
 		}
 	}
 	for i := range req.Features {
 		req.Features[i].ID = strings.TrimSpace(req.Features[i].ID)
 		req.Features[i].Description = strings.TrimSpace(req.Features[i].Description)
-		if !validNamespace(req.Features[i].ID) || len(req.Features[i].Collections) > 16 {
+		if !Identity_ValidNamespace(req.Features[i].ID) || len(req.Features[i].Collections) > 16 {
 			return req, errors.New("invalid app feature")
 		}
 		for j := range req.Features[i].Collections {
@@ -810,7 +810,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 		req.LegacyProtocols[i].Name = strings.TrimSpace(req.LegacyProtocols[i].Name)
 		req.LegacyProtocols[i].Status = strings.TrimSpace(req.LegacyProtocols[i].Status)
 		req.LegacyProtocols[i].ValidUntil = strings.TrimSpace(req.LegacyProtocols[i].ValidUntil)
-		if !validNamespace(req.LegacyProtocols[i].Name) ||
+		if !Identity_ValidNamespace(req.LegacyProtocols[i].Name) ||
 			req.LegacyProtocols[i].Version < 0 ||
 			!validLegacyProtocolStatus(req.LegacyProtocols[i].Status) ||
 			!validDateString(req.LegacyProtocols[i].ValidUntil) {
@@ -834,7 +834,7 @@ func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody 
 
 func appOwnsDeclaredScope(appID string, collection AppCollection) bool {
 	// These names were released by Inbe before namespaced scopes existed.
-	if appID == "inbe" && validLegacyEncryptedCollection(collection.CollectionPrefix) {
+	if appID == "inbe" && Identity_ValidLegacyEncryptedCollection(collection.CollectionPrefix) {
 		return collection.Visibility == "private"
 	}
 	parts := strings.Split(strings.TrimSuffix(collection.CollectionPrefix, ".*"), ".")
@@ -869,7 +869,7 @@ func readAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) 
 	if req.Permission == "" {
 		req.Permission = appGrantRead
 	}
-	if !validNamespace(req.SourceAppID) || !validNamespace(req.TargetAppID) ||
+	if !Identity_ValidNamespace(req.SourceAppID) || !Identity_ValidNamespace(req.TargetAppID) ||
 		!validCollectionPrefix(req.CollectionPrefix) || req.Permission != appGrantRead {
 		return req, errors.New("invalid app grant")
 	}
@@ -893,7 +893,7 @@ func readSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody i
 	if req.Grant.Permission == "" {
 		req.Grant.Permission = appGrantRead
 	}
-	if !validNamespace(req.Grant.SourceAppID) || !validNamespace(req.Grant.TargetAppID) ||
+	if !Identity_ValidNamespace(req.Grant.SourceAppID) || !Identity_ValidNamespace(req.Grant.TargetAppID) ||
 		!validCollectionPrefix(req.Grant.CollectionPrefix) || req.Grant.Permission != appGrantRead {
 		return req, nil, errors.New("invalid app grant")
 	}
@@ -931,28 +931,28 @@ func validCollectionPrefix(value string) bool {
 	if value == "" {
 		return false
 	}
-	if validLegacyEncryptedCollection(value) {
+	if Identity_ValidLegacyEncryptedCollection(value) {
 		return true
 	}
 	if strings.HasSuffix(value, ".*") {
 		return validCollectionPrefixWildcardBase(strings.TrimSuffix(value, ".*"))
 	}
-	return validEncryptedHierarchyCollection(value)
+	return Identity_ValidEncryptedHierarchyCollection(value)
 }
 
 func validCollectionPrefixWildcardBase(value string) bool {
 	parts := strings.Split(strings.TrimSpace(value), ".")
 	if len(parts) == 2 && parts[0] == "account" {
-		return versionSegmentPattern.MatchString(parts[1])
+		return Identity_ValidVersionSegment(parts[1])
 	}
 	if len(parts) >= 3 && (parts[0] == "private" || parts[0] == "shared" ||
 		parts[0] == "friends" || parts[0] == "public") {
-		if !namespaceSegmentPattern.MatchString(parts[1]) ||
-			!versionSegmentPattern.MatchString(parts[2]) {
+		if !Identity_ValidNamespaceSegment(parts[1]) ||
+			!Identity_ValidVersionSegment(parts[2]) {
 			return false
 		}
 		for _, part := range parts[3:] {
-			if !namespaceSegmentPattern.MatchString(part) {
+			if !Identity_ValidNamespaceSegment(part) {
 				return false
 			}
 		}

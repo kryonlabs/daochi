@@ -110,8 +110,8 @@ func validDeviceRequestExpiry(expiresAt int64) bool {
 }
 
 func validDeviceRegistration(request DeviceRegistrationRequest) bool {
-	if !validNamespace(request.AppID) || !validClientID(request.KeyID) ||
-		!validClientID(request.ClientID) || !validClientID(request.Nonce) {
+	if !Identity_ValidNamespace(request.AppID) || !Identity_ValidClientID(request.KeyID) ||
+		!Identity_ValidClientID(request.ClientID) || !Identity_ValidClientID(request.Nonce) {
 		return false
 	}
 	publicKey, err := hex.DecodeString(request.PublicKey)
@@ -132,8 +132,9 @@ func (s *Server) verifyDeviceRegistration(ctx context.Context, accountID string,
 	if !found {
 		return authError{status: http.StatusUnauthorized, message: "sync account not found"}
 	}
-	signature, err := decodeBinaryField(request.Signature)
-	if err != nil || len(signature) != mlDSA44SignatureSize {
+	signatureField := Codec_DecodeBinaryField(request.Signature)
+	signature := []byte(signatureField.Value)
+	if signatureField.Error != "" || len(signature) != mlDSA44SignatureSize {
 		return authError{status: http.StatusBadRequest, message: "invalid device registration signature"}
 	}
 	message := canonicalDeviceRegistrationMessage(accountID, request)
@@ -144,8 +145,8 @@ func (s *Server) verifyDeviceRegistration(ctx context.Context, accountID string,
 }
 
 func (s *Server) verifyDeviceRevocation(ctx context.Context, accountID string, request DeviceRevocationRequest) error {
-	if !validNamespace(request.AppID) || !validClientID(request.KeyID) ||
-		!validClientID(request.Nonce) || !validDeviceRequestExpiry(request.ExpiresAt) {
+	if !Identity_ValidNamespace(request.AppID) || !Identity_ValidClientID(request.KeyID) ||
+		!Identity_ValidClientID(request.Nonce) || !validDeviceRequestExpiry(request.ExpiresAt) {
 		return authError{status: http.StatusBadRequest, message: "invalid device revocation"}
 	}
 	accountKey, found, err := s.store.PublicKey(ctx, accountID)
@@ -155,8 +156,9 @@ func (s *Server) verifyDeviceRevocation(ctx context.Context, accountID string, r
 	if !found {
 		return authError{status: http.StatusUnauthorized, message: "sync account not found"}
 	}
-	signature, err := decodeBinaryField(request.Signature)
-	if err != nil || len(signature) != mlDSA44SignatureSize {
+	signatureField := Codec_DecodeBinaryField(request.Signature)
+	signature := []byte(signatureField.Value)
+	if signatureField.Error != "" || len(signature) != mlDSA44SignatureSize {
 		return authError{status: http.StatusBadRequest, message: "invalid device revocation signature"}
 	}
 	if !s.verifier.Verify(accountKey, canonicalDeviceRevocationMessage(accountID, request), signature) {

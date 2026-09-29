@@ -132,13 +132,13 @@ func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byt
 	if tx.SignatureContext != "" && tx.SignatureContext != daochiTxContext {
 		return authError{status: http.StatusBadRequest, message: "invalid signed transaction context"}
 	}
-	if !validClientID(tx.TxID) || !validClientID(tx.Nonce) {
+	if !Identity_ValidClientID(tx.TxID) || !Identity_ValidClientID(tx.Nonce) {
 		return authError{status: http.StatusBadRequest, message: "invalid signed transaction id"}
 	}
-	if !validUserID(tx.AccountID) || tx.AccountID != accountID {
+	if !Identity_ValidUserID(tx.AccountID) || tx.AccountID != accountID {
 		return authError{status: http.StatusUnauthorized, message: "signed transaction account mismatch"}
 	}
-	if !validNamespace(tx.AppID) || tx.AppID != appID {
+	if !Identity_ValidNamespace(tx.AppID) || tx.AppID != appID {
 		return authError{status: http.StatusUnauthorized, message: "signed transaction app mismatch"}
 	}
 	if tx.Method != r.Method || tx.Path != r.URL.Path {
@@ -159,8 +159,9 @@ func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byt
 	if !found {
 		return authError{status: http.StatusUnauthorized, message: "sync account not found"}
 	}
-	signature, err := decodeBinaryField(tx.Signature)
-	if err != nil || len(signature) != mlDSA44SignatureSize {
+	signatureField := Codec_DecodeBinaryField(tx.Signature)
+	signature := []byte(signatureField.Value)
+	if signatureField.Error != "" || len(signature) != mlDSA44SignatureSize {
 		return authError{status: http.StatusBadRequest, message: "invalid signed transaction signature"}
 	}
 	message := canonicalSignedTxMessage(tx)
@@ -183,7 +184,7 @@ func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byt
 }
 
 func (s *Server) verifyDeviceSignedTx(ctx context.Context, tx SignedTxEnvelope, message []byte) error {
-	if !validClientID(tx.DeviceKeyID) {
+	if !Identity_ValidClientID(tx.DeviceKeyID) {
 		return authError{status: http.StatusBadRequest, message: "invalid device key id"}
 	}
 	deviceKey, found, err := s.store.ActiveDeviceKey(ctx, tx.AccountID, tx.AppID,
@@ -194,12 +195,14 @@ func (s *Server) verifyDeviceSignedTx(ctx context.Context, tx SignedTxEnvelope, 
 	if !found {
 		return authError{status: http.StatusUnauthorized, message: "device key not registered"}
 	}
-	publicKey, err := decodeBinaryField(deviceKey.PublicKey)
-	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+	publicKeyField := Codec_DecodeBinaryField(deviceKey.PublicKey)
+	publicKey := []byte(publicKeyField.Value)
+	if publicKeyField.Error != "" || len(publicKey) != ed25519.PublicKeySize {
 		return authError{status: http.StatusUnauthorized, message: "invalid app public key"}
 	}
-	signature, err := decodeBinaryField(tx.DeviceSignature)
-	if err != nil || len(signature) != ed25519.SignatureSize {
+	signatureField := Codec_DecodeBinaryField(tx.DeviceSignature)
+	signature := []byte(signatureField.Value)
+	if signatureField.Error != "" || len(signature) != ed25519.SignatureSize {
 		return authError{status: http.StatusBadRequest, message: "invalid device signature"}
 	}
 	if !ed25519.Verify(publicKey, message, signature) {

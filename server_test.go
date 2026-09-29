@@ -562,7 +562,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 		t.Fatalf("habit counter_enabled = %d, want 1", syncResponse.Changes.Habits[0].CounterEnabled)
 	}
 	loginBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `"}`)
-	wantMessage := string(canonicalMessage(mustDecodeHex(t, loginNonce), http.MethodPost, "/api/v1/sync/login", loginBody))
+	wantMessage := string(Signing_CanonicalMessage(mustDecodeHex(t, loginNonce), http.MethodPost, "/api/v1/sync/login", loginBody))
 	if string(verifier.message) != wantMessage {
 		t.Fatalf("signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
@@ -583,7 +583,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 	if deleteRes.Code != http.StatusOK {
 		t.Fatalf("delete status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
 	}
-	wantMessage = string(canonicalMessage(mustDecodeHex(t, nonce), http.MethodDelete, "/api/v1/account", deleteBody))
+	wantMessage = string(Signing_CanonicalMessage(mustDecodeHex(t, nonce), http.MethodDelete, "/api/v1/account", deleteBody))
 	if string(verifier.message) != wantMessage {
 		t.Fatalf("delete signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
@@ -652,7 +652,7 @@ func TestPostAccountDeleteRouteMatchesKryonClient(t *testing.T) {
 	if deleteRes.Code != http.StatusOK {
 		t.Fatalf("post delete status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
 	}
-	wantMessage := string(canonicalMessage(mustDecodeHex(t, nonce), http.MethodPost, "/api/v1/account/delete", deleteBody))
+	wantMessage := string(Signing_CanonicalMessage(mustDecodeHex(t, nonce), http.MethodPost, "/api/v1/account/delete", deleteBody))
 	if string(verifier.message) != wantMessage {
 		t.Fatalf("post delete signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
@@ -679,7 +679,7 @@ func TestDaochiHeaderAliases(t *testing.T) {
 	if loginRes.Code != http.StatusOK {
 		t.Fatalf("daochi login status = %d body=%s", loginRes.Code, loginRes.Body.String())
 	}
-	wantMessage := string(canonicalMessageWithContext(daochiSignatureContext, mustDecodeHex(t, nonce), http.MethodPost, "/api/v1/sync/login", loginBody))
+	wantMessage := string(Signing_CanonicalMessageWithContext(daochiSignatureContext, mustDecodeHex(t, nonce), http.MethodPost, "/api/v1/sync/login", loginBody))
 	if string(verifier.message) != wantMessage {
 		t.Fatalf("daochi signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
@@ -812,7 +812,7 @@ func TestLegacyInbeSignedLoginDeleteAndBearerHeaders(t *testing.T) {
 	if loginRes.Code != http.StatusOK {
 		t.Fatalf("legacy login status = %d body=%s", loginRes.Code, loginRes.Body.String())
 	}
-	wantMessage := string(canonicalMessageWithContext("inbe-sync-v1", mustDecodeHex(t, loginNonce), http.MethodPost, "/api/v1/sync/login", loginBody))
+	wantMessage := string(Signing_CanonicalMessageWithContext("inbe-sync-v1", mustDecodeHex(t, loginNonce), http.MethodPost, "/api/v1/sync/login", loginBody))
 	if string(verifier.message) != wantMessage {
 		t.Fatalf("legacy login signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
@@ -846,7 +846,7 @@ func TestLegacyInbeSignedLoginDeleteAndBearerHeaders(t *testing.T) {
 	if deleteRes.Code != http.StatusOK {
 		t.Fatalf("legacy delete status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
 	}
-	wantMessage = string(canonicalMessageWithContext("inbe-sync-v1", mustDecodeHex(t, deleteNonce), http.MethodDelete, "/api/v1/account", deleteBody))
+	wantMessage = string(Signing_CanonicalMessageWithContext("inbe-sync-v1", mustDecodeHex(t, deleteNonce), http.MethodDelete, "/api/v1/account", deleteBody))
 	if string(verifier.message) != wantMessage {
 		t.Fatalf("legacy delete signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
@@ -3044,10 +3044,11 @@ func TestAliasRejectsCrossAccountAndMissingAccount(t *testing.T) {
 	}
 
 	missingUser := strings.Repeat("a", 64)
-	missingToken, err := issueAuthToken(server.cfg.TokenSecret, missingUser, server.cfg.TokenTTL)
-	if err != nil {
-		t.Fatal(err)
+	missingTokenResult := Token_IssueAuthToken(server.cfg.TokenSecret, missingUser, time.Now().Add(server.cfg.TokenTTL).Unix())
+	if missingTokenResult.Error != "" {
+		t.Fatal(missingTokenResult.Error)
 	}
+	missingToken := missingTokenResult.Value
 	aliasBody = []byte(`{"user_id_hash":"` + missingUser + `","alias":"missing_alias"}`)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", bytes.NewReader(aliasBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -3233,10 +3234,11 @@ func TestBearerSyncCanRegisterUserWithPublicKey(t *testing.T) {
 	publicKey := bytes.Repeat([]byte{0x48}, mlDSA44PublicKeySize)
 	userHash := sha256.Sum256(publicKey)
 	userID := hex.EncodeToString(userHash[:])
-	token, err := issueAuthToken(server.cfg.TokenSecret, userID, server.cfg.TokenTTL)
-	if err != nil {
-		t.Fatal(err)
+	tokenResult := Token_IssueAuthToken(server.cfg.TokenSecret, userID, time.Now().Add(server.cfg.TokenTTL).Unix())
+	if tokenResult.Error != "" {
+		t.Fatal(tokenResult.Error)
 	}
+	token := tokenResult.Value
 
 	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `","since_server_version":0,"bootstrap":true,"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
 	res := syncWithBody(t, handler, "", userID, token, body)

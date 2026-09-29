@@ -194,6 +194,13 @@ make build
 
 The Makefile builds a minimal static liboqs from `vendor/liboqs` with `SIG_ml_dsa_44` enabled, then passes the right cgo include/library flags to Go. Use `make test` for the same setup in tests.
 
+Daochi is being ported to Ziran. Canonical `.zi` modules and their generated Go
+are committed together. Run `make generate` after changing Ziran source and
+`make test-ziran` to check generated files and run the server suite against both
+source and saved Ziran IR. The default compiler is
+`../ziran/build/bin/zi2go`; `ZI2GO` and `ZIRAN_STD` override its location.
+See the [port inventory](docs/ziran-port.md) for completed modules and remaining work.
+
 Inspect a production database offline with:
 
 ```sh

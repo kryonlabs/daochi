@@ -316,13 +316,13 @@ func (s *Server) handleSignedAppRegister(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.store.UpsertSignedAppManifest(r.Context(), req.Manifest, manifestBytes, manifestHash, req.ManifestSignature, req.ApprovalSignature); err != nil {
-		slog.Error("register signed app manifest", "app", logText(req.Manifest.AppID), "error", err)
+		slog.Error("register signed app manifest", "app", LogSafety_LogText(req.Manifest.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
 	app, _, err := s.store.AppByID(r.Context(), req.Manifest.AppID)
 	if err != nil {
-		slog.Error("load signed app manifest", "app", logText(req.Manifest.AppID), "error", err)
+		slog.Error("load signed app manifest", "app", LogSafety_LogText(req.Manifest.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
@@ -356,16 +356,18 @@ func validateSignedAppRegistration(req SignedAppRegistrationRequest, nodePublicK
 		return nil, "", err
 	}
 	manifestHash := sha256Hex(manifestBytes)
-	manifestSig, err := decodeBinaryField(req.ManifestSignature)
-	if err != nil || len(manifestSig) != ed25519.SignatureSize {
+	manifestSigField := Codec_DecodeBinaryField(req.ManifestSignature)
+	manifestSig := []byte(manifestSigField.Value)
+	if manifestSigField.Error != "" || len(manifestSig) != ed25519.SignatureSize {
 		return nil, "", authError{status: http.StatusBadRequest, message: "invalid manifest signature"}
 	}
 	manifestMsg := append([]byte(daochiAppManifestContext+"\n"), manifestBytes...)
 	if !manifestSignedByActiveKey(req.Manifest, manifestMsg, manifestSig) {
 		return nil, "", authError{status: http.StatusUnauthorized, message: "manifest signature rejected"}
 	}
-	approvalSig, err := decodeBinaryField(req.ApprovalSignature)
-	if err != nil || len(approvalSig) != ed25519.SignatureSize {
+	approvalSigField := Codec_DecodeBinaryField(req.ApprovalSignature)
+	approvalSig := []byte(approvalSigField.Value)
+	if approvalSigField.Error != "" || len(approvalSig) != ed25519.SignatureSize {
 		return nil, "", authError{status: http.StatusBadRequest, message: "invalid approval signature"}
 	}
 	if !ed25519.Verify(nodePublicKey, appApprovalMessage(req.Manifest.AppID, manifestHash), approvalSig) {
@@ -386,8 +388,9 @@ func manifestSignedByActiveKey(manifest AppManifest, message, signature []byte) 
 		if !strings.EqualFold(key.Algorithm, "Ed25519") {
 			continue
 		}
-		publicKey, err := decodeBinaryField(key.PublicKey)
-		if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		publicKeyField := Codec_DecodeBinaryField(key.PublicKey)
+		publicKey := []byte(publicKeyField.Value)
+		if publicKeyField.Error != "" || len(publicKey) != ed25519.PublicKeySize {
 			continue
 		}
 		if ed25519.Verify(publicKey, message, signature) {
@@ -456,7 +459,7 @@ func validateAppManifest(manifest AppManifest) error {
 	if manifest.ManifestVersion != 1 {
 		return errors.New("unsupported manifest_version")
 	}
-	if !validNamespace(manifest.AppID) {
+	if !Identity_ValidNamespace(manifest.AppID) {
 		return errors.New("invalid app_id")
 	}
 	if manifest.DisplayName == "" || len(manifest.DisplayName) > 80 {
@@ -480,11 +483,12 @@ func validateAppManifest(manifest AppManifest) error {
 		return errors.New("too many manifest fields")
 	}
 	for _, key := range manifest.Keys {
-		if !validClientID(key.KeyID) || !strings.EqualFold(key.Algorithm, "Ed25519") {
+		if !Identity_ValidClientID(key.KeyID) || !strings.EqualFold(key.Algorithm, "Ed25519") {
 			return errors.New("invalid app key")
 		}
-		publicKey, err := decodeBinaryField(key.PublicKey)
-		if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		publicKeyField := Codec_DecodeBinaryField(key.PublicKey)
+		publicKey := []byte(publicKeyField.Value)
+		if publicKeyField.Error != "" || len(publicKey) != ed25519.PublicKeySize {
 			return errors.New("invalid app public key")
 		}
 		if key.Status != "" && key.Status != appStatusActive && key.Status != appStatusSuspended {
@@ -499,12 +503,12 @@ func validateAppManifest(manifest AppManifest) error {
 		}
 	}
 	for _, capability := range manifest.Capabilities {
-		if !validNamespace(capability) {
+		if !Identity_ValidNamespace(capability) {
 			return errors.New("invalid capability")
 		}
 	}
 	for _, feature := range manifest.Features {
-		if !validNamespace(feature.ID) || len(feature.Collections) > 16 {
+		if !Identity_ValidNamespace(feature.ID) || len(feature.Collections) > 16 {
 			return errors.New("invalid app feature")
 		}
 		for _, collection := range feature.Collections {
@@ -514,7 +518,7 @@ func validateAppManifest(manifest AppManifest) error {
 		}
 	}
 	for _, legacy := range manifest.LegacyProtocols {
-		if !validNamespace(legacy.Name) || legacy.Version < 0 ||
+		if !Identity_ValidNamespace(legacy.Name) || legacy.Version < 0 ||
 			!validLegacyProtocolStatus(legacy.Status) || !validDateString(legacy.ValidUntil) {
 			return errors.New("invalid legacy protocol")
 		}

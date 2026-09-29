@@ -14,22 +14,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
-
-var userIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,128}$`)
-var accountAliasPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
-var ukuIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{4,128}$`)
-var namespacePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
-var namespaceSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9_:-]{1,64}$`)
-var versionSegmentPattern = regexp.MustCompile(`^v[1-9][0-9]{0,3}$`)
-var encryptedRecordIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
-var contentHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const (
 	daochiSignatureContext          = "daochi-sync-v1"
@@ -287,7 +276,7 @@ func (s *Server) handleSyncDiagnostics(w http.ResponseWriter, r *http.Request) {
 	}
 	report, err := s.store.SyncDiagnosticReport(r.Context(), userID)
 	if err != nil {
-		slog.Error("sync diagnostics", "user", logText(userID), "error", err)
+		slog.Error("sync diagnostics", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "diagnostics failed")
 		return
 	}
@@ -296,7 +285,7 @@ func (s *Server) handleSyncDiagnostics(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	userID := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("user_id")))
-	if !validUserID(userID) {
+	if !Identity_ValidUserID(userID) {
 		writeError(w, http.StatusBadRequest, "invalid user_id")
 		return
 	}
@@ -350,7 +339,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !validClientID(req.ClientID) {
+	if !Identity_ValidClientID(req.ClientID) {
 		writeError(w, http.StatusBadRequest, "invalid client_id")
 		return
 	}
@@ -388,7 +377,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	baseHash, err := s.store.StateHash(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("hash sync state", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("hash sync state", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "state hash failed")
 		return
 	}
@@ -412,7 +401,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	} else if req.ProtocolVersion >= 2 && !req.FullSyncRequested {
 		compacted, through, err := s.store.SyncOpsCompacted(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
-			slog.Error("check sync op compaction", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("check sync op compaction", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "compaction check failed")
 			return
 		}
@@ -425,7 +414,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		} else {
 			result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
 			if err != nil {
-				slog.Error("apply sync", "user", logText(req.UserIDHash), "error", err)
+				slog.Error("apply sync", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 				writeError(w, http.StatusInternalServerError, "sync failed")
 				return
 			}
@@ -433,7 +422,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	} else {
 		result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
 		if err != nil {
-			slog.Error("apply sync", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("apply sync", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "sync failed")
 			return
 		}
@@ -441,7 +430,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if fullSnapshotRequired && syncRequestHasLocalChanges(req) {
 		result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
 		if err != nil {
-			slog.Error("apply stale sync uploads", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("apply stale sync uploads", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "sync failed")
 			return
 		}
@@ -452,13 +441,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, sinceVersion)
 	if err != nil {
-		slog.Error("load sync changes", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("load sync changes", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "changes failed")
 		return
 	}
 	changes.SocialCache, err = s.store.AuthoritativeSocial(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("load authoritative social state", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("load authoritative social state", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "social state failed")
 		return
 	}
@@ -469,7 +458,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		} else {
 			remoteOps, err = s.store.OpsSince(r.Context(), req.UserIDHash, req.ClientClock)
 			if err != nil {
-				slog.Error("load sync ops", "user", logText(req.UserIDHash), "error", err)
+				slog.Error("load sync ops", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 				writeError(w, http.StatusInternalServerError, "ops failed")
 				return
 			}
@@ -477,18 +466,18 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	serverHash, err := s.store.StateHash(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("hash sync response", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("hash sync response", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "state hash failed")
 		return
 	}
 	if err := s.store.RecordClientSync(r.Context(), req.UserIDHash, req.ClientID, req.SinceServerVersion, serverVersion, req.ProtocolVersion, recordedClientClock); err != nil {
-		slog.Error("record sync client", "user", logText(req.UserIDHash), "client", logText(req.ClientID), "error", err)
+		slog.Error("record sync client", "user", LogSafety_LogText(req.UserIDHash), "client", LogSafety_LogText(req.ClientID), "error", err)
 		writeError(w, http.StatusInternalServerError, "client state failed")
 		return
 	}
 	if req.ProtocolVersion >= 2 {
 		if err := s.store.CompactSyncOps(r.Context(), req.UserIDHash); err != nil {
-			slog.Error("compact sync ops", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("compact sync ops", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "compaction failed")
 			return
 		}
@@ -498,13 +487,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	accountAlias, err := s.store.AccountAlias(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("load account alias", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("load account alias", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "alias failed")
 		return
 	}
 	profileIcon, err := s.store.AccountProfileIcon(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("load profile icon", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("load profile icon", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "profile icon failed")
 		return
 	}
@@ -543,19 +532,19 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ProtocolVersion >= 3 {
 		if err := s.store.AutoMigrateAccountForProtocol(r.Context(), req.UserIDHash, req.ProtocolVersion); err != nil {
-			slog.Error("auto migrate account", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("auto migrate account", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "migration failed")
 			return
 		}
 		serverVersion, err = s.store.currentUserVersion(r.Context(), req.UserIDHash)
 		if err != nil {
-			slog.Error("load migrated server version", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("load migrated server version", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "version failed")
 			return
 		}
 		serverHash, err = s.store.StateHash(r.Context(), req.UserIDHash)
 		if err != nil {
-			slog.Error("hash migrated sync response", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("hash migrated sync response", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "state hash failed")
 			return
 		}
@@ -564,7 +553,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		response.ServerStateHash = serverHash
 		response.Data, err = s.store.CleanData(r.Context(), req.UserIDHash)
 		if err != nil {
-			slog.Error("load clean data", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("load clean data", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "clean data failed")
 			return
 		}
@@ -591,20 +580,20 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		response.Changes.EncryptedRecords = response.Data.EncryptedRecords
 		response.Logs, err = s.store.SyncLogs(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
-			slog.Error("load sync logs", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("load sync logs", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "logs failed")
 			return
 		}
 		response.Deletes, err = s.store.DeleteLogs(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
-			slog.Error("load delete logs", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("load delete logs", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "delete logs failed")
 			return
 		}
 		response.LegacyClients, err = s.store.LegacyClients(
 			r.Context(), req.UserIDHash, latestProtocol)
 		if err != nil {
-			slog.Error("load legacy clients", "user", logText(req.UserIDHash), "error", err)
+			slog.Error("load legacy clients", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			writeError(w, http.StatusInternalServerError, "legacy clients failed")
 			return
 		}
@@ -615,7 +604,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	response.LegacyWriteRequired, response.LegacyProjectionEpoch, err =
 		s.store.LegacyWritePolicy(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("load legacy write policy", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("load legacy write policy", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "legacy write policy failed")
 		return
 	}
@@ -638,7 +627,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		FullSnapshotRequired: fullSnapshotRequired,
 		SnapshotReason:       snapshotReason,
 	}); err != nil {
-		slog.Error("record sync audit", "user", logText(req.UserIDHash), "client", logText(req.ClientID), "error", err)
+		slog.Error("record sync audit", "user", LogSafety_LogText(req.UserIDHash), "client", LogSafety_LogText(req.ClientID), "error", err)
 	}
 	syncOK = true
 	writeJSON(w, http.StatusOK, response)
@@ -650,7 +639,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "missing X-Daochi-User")
 		return false
 	}
-	if !validUserID(userID) {
+	if !Identity_ValidUserID(userID) {
 		writeError(w, http.StatusBadRequest, "invalid "+headerName)
 		return false
 	}
@@ -664,7 +653,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		return false
 	}
 	clientID := requestHeaderAlias(r, "X-Daochi-Client", "X-Ksync-Client")
-	if clientID != "" && !validClientID(clientID) {
+	if clientID != "" && !Identity_ValidClientID(clientID) {
 		writeError(w, http.StatusBadRequest, "invalid X-Daochi-Client")
 		return false
 	}
@@ -685,7 +674,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 	if s.cfg.EncryptedPayloadMaxAccountBytes > 0 {
 		currentBytes, err := s.store.EncryptedPayloadBytes(r.Context(), userID)
 		if err != nil {
-			slog.Error("load encrypted payload usage", "user", logText(userID), "error", err)
+			slog.Error("load encrypted payload usage", "user", LogSafety_LogText(userID), "error", err)
 			writeError(w, http.StatusInternalServerError, "encrypted sync failed")
 			return false
 		}
@@ -697,19 +686,19 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 	}
 	accountAlias, err := s.store.AccountAlias(r.Context(), userID)
 	if err != nil {
-		slog.Error("load encrypted sync account alias", "user", logText(userID), "error", err)
+		slog.Error("load encrypted sync account alias", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "alias failed")
 		return false
 	}
 	profileIcon, err := s.store.AccountProfileIcon(r.Context(), userID)
 	if err != nil {
-		slog.Error("load encrypted sync profile icon", "user", logText(userID), "error", err)
+		slog.Error("load encrypted sync profile icon", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "profile icon failed")
 		return false
 	}
 	social, err := s.store.AuthoritativeSocial(r.Context(), userID)
 	if err != nil {
-		slog.Error("load encrypted sync social state", "user", logText(userID), "error", err)
+		slog.Error("load encrypted sync social state", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "social state failed")
 		return false
 	}
@@ -719,23 +708,23 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusNotFound, "sync account not found")
 			return false
 		}
-		slog.Error("store encrypted payload", "user", logText(userID), "error", err)
+		slog.Error("store encrypted payload", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "encrypted sync failed")
 		return false
 	}
 	if result, err := s.store.PruneEncryptedPayloads(r.Context(), userID, s.cfg.EncryptedPayloadRetention, 0); err != nil {
-		slog.Error("prune encrypted payloads", "user", logText(userID), "error", err)
+		slog.Error("prune encrypted payloads", "user", LogSafety_LogText(userID), "error", err)
 	} else if result.Deleted > 0 {
-		slog.Info("pruned encrypted payloads", "user", logText(userID), "deleted", result.Deleted)
+		slog.Info("pruned encrypted payloads", "user", LogSafety_LogText(userID), "deleted", result.Deleted)
 	}
 	payloads, truncated, err := s.store.EncryptedPayloadsSince(r.Context(), userID, sinceVersion, limit)
 	if err != nil {
-		slog.Error("load encrypted payloads", "user", logText(userID), "error", err)
+		slog.Error("load encrypted payloads", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "encrypted sync failed")
 		return false
 	}
 	if err := s.store.RecordClientSync(r.Context(), userID, clientID, sinceVersion, serverVersion, latestProtocol, serverVersion); err != nil {
-		slog.Error("record encrypted sync client", "user", logText(userID), "client", logText(clientID), "error", err)
+		slog.Error("record encrypted sync client", "user", LogSafety_LogText(userID), "client", LogSafety_LogText(clientID), "error", err)
 	}
 	if err := s.store.RecordSyncAudit(r.Context(), SyncAuditEntry{
 		UserIDHash:            userID,
@@ -747,7 +736,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		EncryptedPayload:      true,
 		EncryptedPayloadBytes: int64(len(body)),
 	}); err != nil {
-		slog.Error("record encrypted sync audit", "user", logText(userID), "client", logText(clientID), "error", err)
+		slog.Error("record encrypted sync audit", "user", LogSafety_LogText(userID), "client", LogSafety_LogText(clientID), "error", err)
 	}
 	s.metrics.syncEncryptedPayloads.Add(1)
 	s.syncHub.publish(userID, serverVersion)
@@ -834,7 +823,7 @@ func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	alias := normalizeAlias(req.Alias)
-	if !validAccountAlias(alias) {
+	if !Identity_ValidAccountAlias(alias) {
 		writeError(w, http.StatusBadRequest, "invalid alias")
 		return
 	}
@@ -847,7 +836,7 @@ func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "sync account not found")
 			return
 		}
-		slog.Error("set account alias", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("set account alias", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "alias failed")
 		return
 	}
@@ -882,7 +871,7 @@ func (s *Server) handleProfileIcon(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "sync account not found")
 			return
 		}
-		slog.Error("set profile icon", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("set profile icon", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "profile icon failed")
 		return
 	}
@@ -900,7 +889,7 @@ func (s *Server) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "sync account not found")
 			return
 		}
-		slog.Error("export account", "user", logText(userID), "error", err)
+		slog.Error("export account", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "export failed")
 		return
 	}
@@ -928,7 +917,7 @@ func (s *Server) handleFriends(w http.ResponseWriter, r *http.Request) {
 	}
 	friends, err := s.store.ListFriends(r.Context(), userID)
 	if err != nil {
-		slog.Error("list friends", "user", logText(userID), "error", err)
+		slog.Error("list friends", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "friends failed")
 		return
 	}
@@ -944,12 +933,12 @@ func (s *Server) handleFriendRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	friendID := strings.TrimPrefix(r.URL.Path, "/api/v1/friends/")
 	friendID = strings.ToLower(strings.Trim(friendID, "/"))
-	if !validUserID(friendID) {
+	if !Identity_ValidUserID(friendID) {
 		writeError(w, http.StatusNotFound, "friend not found")
 		return
 	}
 	if err := s.store.RemoveFriend(r.Context(), userID, friendID); err != nil {
-		slog.Error("remove friend", "user", logText(userID), "friend", logText(friendID), "error", err)
+		slog.Error("remove friend", "user", LogSafety_LogText(userID), "friend", LogSafety_LogText(friendID), "error", err)
 		writeError(w, http.StatusInternalServerError, "friend remove failed")
 		return
 	}
@@ -965,7 +954,7 @@ func (s *Server) handleFriendRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	incoming, outgoing, err := s.store.ListFriendRequests(r.Context(), userID)
 	if err != nil {
-		slog.Error("list friend requests", "user", logText(userID), "error", err)
+		slog.Error("list friend requests", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "friend requests failed")
 		return
 	}
@@ -986,7 +975,7 @@ func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Reques
 	}
 	target, found, err := s.store.ResolveAccountRef(r.Context(), req.Target)
 	if err != nil {
-		slog.Error("resolve friend target", "user", logText(userID), "error", err)
+		slog.Error("resolve friend target", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
@@ -1006,7 +995,7 @@ func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		slog.Error("create friend request", "user", logText(userID), "target", logText(target), "error", err)
+		slog.Error("create friend request", "user", LogSafety_LogText(userID), "target", LogSafety_LogText(target), "error", err)
 		writeError(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
@@ -1049,7 +1038,7 @@ func (s *Server) handleFriendRequestRoute(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		slog.Error("friend request action", "user", logText(userID), "request", logText(requestID), "action", logText(action), "error", err)
+		slog.Error("friend request action", "user", LogSafety_LogText(userID), "request", LogSafety_LogText(requestID), "action", LogSafety_LogText(action), "error", err)
 		writeError(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
@@ -1070,7 +1059,7 @@ func (s *Server) handleProfileStatsPut(w http.ResponseWriter, r *http.Request) {
 	}
 	applied, err := s.store.UpsertProfileStats(r.Context(), userID, req.App, req.Metrics)
 	if err != nil {
-		slog.Error("upsert profile stats", "user", logText(userID), "app", logText(req.App), "error", err)
+		slog.Error("upsert profile stats", "user", LogSafety_LogText(userID), "app", LogSafety_LogText(req.App), "error", err)
 		writeError(w, http.StatusInternalServerError, "profile stats failed")
 		return
 	}
@@ -1081,7 +1070,7 @@ func (s *Server) handleProfileStatsPut(w http.ResponseWriter, r *http.Request) {
 				s.syncHub.publish(friend.UserIDHash, 0)
 			}
 		} else {
-			slog.Error("notify profile stats friends", "user", logText(userID), "error", err)
+			slog.Error("notify profile stats friends", "user", LogSafety_LogText(userID), "error", err)
 		}
 	}
 	writeJSON(w, http.StatusOK, ProfileStatsResponse{Status: "ok", Applied: applied})
@@ -1095,14 +1084,14 @@ func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
 	app := strings.TrimSpace(r.URL.Query().Get("app"))
 	practice := strings.TrimSpace(r.URL.Query().Get("practice"))
 	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
-	if !validNamespace(app) || !validNamespace(practice) || !validNamespace(metric) ||
+	if !Identity_ValidNamespace(app) || !Identity_ValidNamespace(practice) || !Identity_ValidNamespace(metric) ||
 		!validLeaderboardMetric(practice, metric) {
 		writeError(w, http.StatusBadRequest, "invalid stats query")
 		return
 	}
 	rows, err := s.store.FriendStats(r.Context(), userID, app, practice, metric)
 	if err != nil {
-		slog.Error("friend stats", "user", logText(userID), "app", logText(app), "practice", logText(practice), "metric", logText(metric), "error", err)
+		slog.Error("friend stats", "user", LogSafety_LogText(userID), "app", LogSafety_LogText(app), "practice", LogSafety_LogText(practice), "metric", LogSafety_LogText(metric), "error", err)
 		writeError(w, http.StatusInternalServerError, "friend stats failed")
 		return
 	}
@@ -1116,8 +1105,9 @@ func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
 	if strings.TrimSpace(req.PublicKey) == "" {
 		return nil, nil
 	}
-	publicKey, err := decodeBinaryField(req.PublicKey)
-	if err != nil {
+	publicKeyField := Codec_DecodeBinaryField(req.PublicKey)
+	publicKey := []byte(publicKeyField.Value)
+	if publicKeyField.Error != "" {
 		return nil, errors.New("invalid public_key")
 	}
 	if len(publicKey) != mlDSA44PublicKeySize {
@@ -1131,7 +1121,7 @@ func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
 
 func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error {
 	if req.AppID != "" {
-		if !validNamespace(req.AppID) {
+		if !Identity_ValidNamespace(req.AppID) {
 			return errors.New("invalid app_id")
 		}
 		app, exists, err := s.store.AppByID(ctx, req.AppID)
@@ -1174,7 +1164,7 @@ func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error
 				if req.ProtocolVersion >= 6 {
 					return errors.New("encrypted record collection is not registered for app_id")
 				}
-				slog.Warn("sync request used unregistered app collection", "app_id", logText(req.AppID), "collection", logText(item.Collection), "mode", "compat")
+				slog.Warn("sync request used unregistered app collection", "app_id", LogSafety_LogText(req.AppID), "collection", LogSafety_LogText(item.Collection), "mode", "compat")
 			}
 		}
 	}
@@ -1204,12 +1194,12 @@ func syncChangesResult(changes SyncChanges) SyncResult {
 func (s *Server) cacheSocialSnapshot(ctx context.Context, userID, kind string, value any) {
 	payload, err := json.Marshal(value)
 	if err != nil {
-		slog.Error("marshal social cache", "user", logText(userID), "kind", logText(kind), "error", err)
+		slog.Error("marshal social cache", "user", LogSafety_LogText(userID), "kind", LogSafety_LogText(kind), "error", err)
 		return
 	}
 	applied, err := s.store.SetSocialCacheJSON(ctx, userID, kind, payload)
 	if err != nil {
-		slog.Error("write social cache", "user", logText(userID), "kind", logText(kind), "error", err)
+		slog.Error("write social cache", "user", LogSafety_LogText(userID), "kind", LogSafety_LogText(kind), "error", err)
 		return
 	}
 	if applied > 0 {
@@ -1223,21 +1213,13 @@ func normalizeAlias(alias string) string {
 	return alias
 }
 
-func validAccountAlias(alias string) bool {
-	return accountAliasPattern.MatchString(alias)
-}
-
 func validProfileIcon(profileIcon int) bool {
 	return profileIcon >= ProfileIconNone && profileIcon <= ProfileIconTree5
 }
 
-func validNamespace(value string) bool {
-	return namespacePattern.MatchString(value)
-}
-
 func validEncryptedRecord(item EncryptedRecord) bool {
-	if !validNamespace(strings.TrimSpace(item.Collection)) ||
-		!encryptedRecordIDPattern.MatchString(strings.TrimSpace(item.ID)) {
+	if !Identity_ValidNamespace(strings.TrimSpace(item.Collection)) ||
+		!Identity_ValidEncryptedRecordID(strings.TrimSpace(item.ID)) {
 		return false
 	}
 	if strings.TrimSpace(item.UpdatedAt) == "" {
@@ -1257,8 +1239,8 @@ func validEncryptedRecordForProtocol(item EncryptedRecord, protocolVersion int) 
 		return false
 	}
 	if protocolVersion >= 5 {
-		return validEncryptedHierarchyCollection(item.Collection) ||
-			validLegacyEncryptedCollection(item.Collection)
+		return Identity_ValidEncryptedHierarchyCollection(item.Collection) ||
+			Identity_ValidLegacyEncryptedCollection(item.Collection)
 	}
 	return true
 }
@@ -1266,44 +1248,13 @@ func validEncryptedRecordForProtocol(item EncryptedRecord, protocolVersion int) 
 func validEncryptedRecordMetadata(item EncryptedRecord) bool {
 	contentHash := strings.TrimSpace(item.ContentHash)
 	parentID := strings.TrimSpace(item.ParentID)
-	if contentHash != "" && !contentHashPattern.MatchString(contentHash) {
+	if contentHash != "" && !Identity_ValidUserID(contentHash) {
 		return false
 	}
-	if parentID != "" && !encryptedRecordIDPattern.MatchString(parentID) {
+	if parentID != "" && !Identity_ValidEncryptedRecordID(parentID) {
 		return false
 	}
 	return item.SchemaVersion >= 0 && item.SchemaVersion <= 65535
-}
-
-func validEncryptedHierarchyCollection(collection string) bool {
-	parts := strings.Split(strings.TrimSpace(collection), ".")
-	if len(parts) == 3 && parts[0] == "account" {
-		return versionSegmentPattern.MatchString(parts[1]) &&
-			namespaceSegmentPattern.MatchString(parts[2])
-	}
-	if len(parts) >= 4 && (parts[0] == "private" || parts[0] == "shared" ||
-		parts[0] == "friends" || parts[0] == "public") {
-		if !namespaceSegmentPattern.MatchString(parts[1]) ||
-			!versionSegmentPattern.MatchString(parts[2]) {
-			return false
-		}
-		for _, part := range parts[3:] {
-			if !namespaceSegmentPattern.MatchString(part) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
-
-func validLegacyEncryptedCollection(collection string) bool {
-	switch strings.TrimSpace(collection) {
-	case "inbe.habits", "inbe.habit_days", "inbe.sessions":
-		return true
-	default:
-		return false
-	}
 }
 
 func validLeaderboardMetric(practice, metric string) bool {
@@ -1336,7 +1287,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !validClientID(req.ClientID) {
+	if !Identity_ValidClientID(req.ClientID) {
 		writeError(w, http.StatusBadRequest, "invalid client_id")
 		return
 	}
@@ -1352,36 +1303,36 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.RegisterUser(r.Context(), req.UserIDHash, publicKey); err != nil {
-		slog.Error("register sync user", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("register sync user", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "login failed")
 		return
 	}
 	if err := s.store.RecordClientLogin(r.Context(), req.UserIDHash, req.ClientID); err != nil {
-		slog.Error("record login client", "user", logText(req.UserIDHash), "client", logText(req.ClientID), "error", err)
+		slog.Error("record login client", "user", LogSafety_LogText(req.UserIDHash), "client", LogSafety_LogText(req.ClientID), "error", err)
 		writeError(w, http.StatusInternalServerError, "login failed")
 		return
 	}
-	token, err := issueAuthToken(s.cfg.TokenSecret, req.UserIDHash, s.cfg.TokenTTL)
-	if err != nil {
-		slog.Error("issue auth token", "user", logText(req.UserIDHash), "error", err)
+	token := Token_IssueAuthToken(s.cfg.TokenSecret, req.UserIDHash, time.Now().Add(s.cfg.TokenTTL).Unix())
+	if token.Error != "" {
+		slog.Error("issue auth token", "user", LogSafety_LogText(req.UserIDHash), "error", token.Error)
 		writeError(w, http.StatusInternalServerError, "login failed")
 		return
 	}
 	accountAlias, err := s.store.AccountAlias(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("load account alias", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("load account alias", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "alias failed")
 		return
 	}
 	profileIcon, err := s.store.AccountProfileIcon(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("load profile icon", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("load profile icon", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "profile icon failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Status:       "ok",
-		AuthToken:    token,
+		AuthToken:    token.Value,
 		ExpiresIn:    int64(s.cfg.TokenTTL.Seconds()),
 		ServerTime:   time.Now().Unix(),
 		AccountAlias: accountAlias,
@@ -1406,7 +1357,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
-		slog.Error("delete account", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("delete account", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "delete failed")
 		return
 	}
@@ -1426,7 +1377,7 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 	}
 	publicKey, found, err := s.store.PublicKey(r.Context(), req.UserIDHash)
 	if err != nil {
-		slog.Error("load account key", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("load account key", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "delete failed")
 		return
 	}
@@ -1445,12 +1396,12 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 	}
 	message := []byte("inbe-delete-account-v1\n" + req.UserIDHash + "\n")
 	signature, err := signWithPrivateKey(message, exportedKey.PrivateKey)
-	if err != nil || !s.verifier.Verify(publicKey, message, signature) {
+	if err != nil || !s.verifier.Verify(publicKey, []byte(message), signature) {
 		writeError(w, http.StatusUnauthorized, "exported key does not match sync account")
 		return
 	}
 	if err := s.store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
-		slog.Error("delete account with key", "user", logText(req.UserIDHash), "error", err)
+		slog.Error("delete account with key", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "delete failed")
 		return
 	}
@@ -1459,7 +1410,7 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyText, signatureText, signatureContext, method, path string, signedPayload []byte) ([]byte, error) {
 	userID = strings.ToLower(strings.TrimSpace(userID))
-	if !validUserID(userID) {
+	if !Identity_ValidUserID(userID) {
 		return nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
 	}
 	nonce, ok := s.challenges.Consume(userID)
@@ -1474,8 +1425,9 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 		if publicKeyText == "" {
 			return nil, authError{status: http.StatusBadRequest, message: "public_key required for first sync"}
 		}
-		publicKey, err = decodeBinaryField(publicKeyText)
-		if err != nil {
+		publicKeyField := Codec_DecodeBinaryField(publicKeyText)
+		publicKey = []byte(publicKeyField.Value)
+		if publicKeyField.Error != "" {
 			return nil, authError{status: http.StatusBadRequest, message: "invalid public_key"}
 		}
 		if len(publicKey) != mlDSA44PublicKeySize {
@@ -1485,20 +1437,22 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 			return nil, authError{status: http.StatusBadRequest, message: "public_key does not match user_id_hash"}
 		}
 	} else if publicKeyText != "" {
-		supplied, err := decodeBinaryField(publicKeyText)
-		if err != nil || subtle.ConstantTimeCompare(supplied, publicKey) != 1 {
+		suppliedField := Codec_DecodeBinaryField(publicKeyText)
+		supplied := []byte(suppliedField.Value)
+		if suppliedField.Error != "" || subtle.ConstantTimeCompare(supplied, publicKey) != 1 {
 			return nil, authError{status: http.StatusBadRequest, message: "public_key does not match registered user"}
 		}
 	}
-	signature, err := decodeBinaryField(signatureText)
-	if err != nil {
+	signatureField := Codec_DecodeBinaryField(signatureText)
+	signature := []byte(signatureField.Value)
+	if signatureField.Error != "" {
 		return nil, authError{status: http.StatusBadRequest, message: "invalid signature"}
 	}
 	if len(signature) != mlDSA44SignatureSize {
 		return nil, authError{status: http.StatusBadRequest, message: "wrong signature size"}
 	}
-	message := canonicalMessageWithContext(signatureContext, nonce, method, path, signedPayload)
-	if !s.verifier.Verify(publicKey, message, signature) {
+	message := Signing_CanonicalMessageWithContext(signatureContext, nonce, method, path, signedPayload)
+	if !s.verifier.Verify(publicKey, []byte(message), signature) {
 		return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
 	}
 	return publicKey, nil
@@ -1510,10 +1464,11 @@ func (s *Server) authenticateToken(r *http.Request) (string, error) {
 	if !ok || strings.TrimSpace(token) == "" {
 		return "", authError{status: http.StatusUnauthorized, message: "bearer token required"}
 	}
-	userID, err := verifyAuthToken(s.cfg.TokenSecret, strings.TrimSpace(token))
-	if err != nil {
+	verified := Token_VerifyAuthToken(s.cfg.TokenSecret, strings.TrimSpace(token), time.Now().Unix())
+	if verified.Error != "" {
 		return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
 	}
+	userID := verified.Value
 	_, found, err := s.store.PublicKey(r.Context(), userID)
 	if err != nil {
 		return "", err
@@ -1722,7 +1677,7 @@ func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int
 		return req, errors.New("invalid json")
 	}
 	req.App = strings.TrimSpace(req.App)
-	if !validNamespace(req.App) {
+	if !Identity_ValidNamespace(req.App) {
 		return req, errors.New("invalid app")
 	}
 	if len(req.Metrics) > 100 {
@@ -1732,7 +1687,7 @@ func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int
 		req.Metrics[i].Practice = strings.TrimSpace(req.Metrics[i].Practice)
 		req.Metrics[i].Metric = strings.TrimSpace(req.Metrics[i].Metric)
 		req.Metrics[i].Label = strings.TrimSpace(req.Metrics[i].Label)
-		if !validNamespace(req.Metrics[i].Practice) || !validNamespace(req.Metrics[i].Metric) {
+		if !Identity_ValidNamespace(req.Metrics[i].Practice) || !Identity_ValidNamespace(req.Metrics[i].Metric) {
 			return req, errors.New("invalid metric")
 		}
 	}
@@ -1750,7 +1705,7 @@ func readDeleteWithKeyRequest(w http.ResponseWriter, r *http.Request, maxBody in
 	}
 	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
 	req.ExportedKey = strings.TrimSpace(req.ExportedKey)
-	if !validUserID(req.UserIDHash) {
+	if !Identity_ValidUserID(req.UserIDHash) {
 		return req, errors.New("invalid user_id_hash")
 	}
 	if req.ExportedKey == "" {
@@ -1779,18 +1734,6 @@ func normalizeMeditationDurations(logs []MeditationLog) {
 	}
 }
 
-func validUserID(value string) bool {
-	return userIDPattern.MatchString(value)
-}
-
-func validClientID(value string) bool {
-	return clientIDPattern.MatchString(value)
-}
-
-func validResourceID(value string) bool {
-	return ukuIDPattern.MatchString(value)
-}
-
 func parseFriendRequestPath(path string) (requestID string, action string, ok bool) {
 	const prefix = "/api/v1/friends/requests/"
 	rest := strings.TrimPrefix(path, prefix)
@@ -1798,7 +1741,7 @@ func parseFriendRequestPath(path string) (requestID string, action string, ok bo
 		return "", "", false
 	}
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) == 2 && validResourceID(parts[0]) && (parts[1] == "accept" || parts[1] == "decline") {
+	if len(parts) == 2 && Identity_ValidResourceID(parts[0]) && (parts[1] == "accept" || parts[1] == "decline") {
 		return parts[0], parts[1], true
 	}
 	return "", "", false
@@ -1854,11 +1797,12 @@ func parseExportedSyncKey(text string) (exportedSyncKey, error) {
 	if !algorithmOK {
 		return exportedSyncKey{}, errors.New("account key algorithm must be ML-DSA-44")
 	}
-	if publicID != "" && !validUserID(publicID) {
+	if publicID != "" && !Identity_ValidUserID(publicID) {
 		return exportedSyncKey{}, errors.New("invalid public_id")
 	}
-	privateKey, err := decodeBinaryField(privateKeyText)
-	if err != nil {
+	privateKeyField := Codec_DecodeBinaryField(privateKeyText)
+	privateKey := []byte(privateKeyField.Value)
+	if privateKeyField.Error != "" {
 		return exportedSyncKey{}, errors.New("invalid private_key")
 	}
 	if len(privateKey) != mlDSA44PrivateKeySize {

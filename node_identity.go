@@ -158,7 +158,7 @@ func validatePairingAcceptance(
 	now time.Time,
 ) (ed25519.PublicKey, error) {
 	if acceptance.Version != 1 || acceptance.InviteID != invite.InviteID ||
-		!validUserID(acceptance.NodeID) || acceptance.Nonce == "" {
+		!Identity_ValidUserID(acceptance.NodeID) || acceptance.Nonce == "" {
 		return nil, errors.New("invalid pairing acceptance")
 	}
 	if acceptance.AcceptedAt < now.Add(-nodeAuthenticationWindow).Unix() ||
@@ -189,7 +189,7 @@ func validatePairingAcceptance(
 }
 
 func validatePairingInvite(invite PairingInvite, now time.Time) (ed25519.PublicKey, error) {
-	if invite.Version != 1 || !validUserID(invite.NodeID) ||
+	if invite.Version != 1 || !Identity_ValidUserID(invite.NodeID) ||
 		invite.InviteID == "" || invite.Nonce == "" {
 		return nil, errors.New("invalid pairing invite")
 	}

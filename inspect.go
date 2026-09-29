@@ -124,7 +124,7 @@ ORDER BY last_seen_at DESC`)
 
 func inspectUser(ctx context.Context, db *sql.DB, out io.Writer, userID string, full bool) error {
 	userID = strings.ToLower(strings.TrimSpace(userID))
-	if !validUserID(userID) {
+	if !Identity_ValidUserID(userID) {
 		return fmt.Errorf("invalid user_id_hash")
 	}
 
@@ -159,7 +159,7 @@ WHERE user_id_hash=?1`, userID).Scan(&publicKey, &createdAt, &lastSeenAt)
 
 func inspectDoctor(ctx context.Context, db *sql.DB, out io.Writer, userID string, full bool) error {
 	userID = strings.ToLower(strings.TrimSpace(userID))
-	if !validUserID(userID) {
+	if !Identity_ValidUserID(userID) {
 		return fmt.Errorf("invalid user_id_hash")
 	}
 

@@ -1,0 +1,6 @@
+go_strings :: #system_library "go:strings";
+ReplaceAll :: (value: string, old: string, replacement: string) -> string #foreign go_strings "ReplaceAll";
+
+LogText :: (value: string) -> string {
+    return ReplaceAll(ReplaceAll(value, "\n", ""), "\r", "")
+}

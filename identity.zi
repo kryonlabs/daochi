@@ -1,0 +1,137 @@
+// Explicit ASCII validation preserves the released protocol's byte grammar.
+go_strings :: #system_library "go:strings";
+TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";
+Split :: (value: string, separator: string) -> []string #foreign go_strings "Split";
+
+ValidUserID :: (value: string) -> bool {
+    if value.count != 64 {
+        return false
+    }
+    index: s64 = 0
+    while index < value.count {
+        byte: u8 = value[index]
+        if !(byte >= cast(u8)48 && byte <= cast(u8)57) && !(byte >= cast(u8)97 && byte <= cast(u8)102) {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+ValidID :: (value: string, minimum: s64, maximum: s64) -> bool {
+    if value.count < minimum || value.count > maximum {
+        return false
+    }
+    index: s64 = 0
+    while index < value.count {
+        byte: u8 = value[index]
+        if byte >= cast(u8)65 && byte <= cast(u8)90 {
+            index += 1
+            continue
+        }
+        if byte >= cast(u8)97 && byte <= cast(u8)122 {
+            index += 1
+            continue
+        }
+        if byte >= cast(u8)48 && byte <= cast(u8)57 {
+            index += 1
+            continue
+        }
+        if byte != cast(u8)46 && byte != cast(u8)95 && byte != cast(u8)58 && byte != cast(u8)45 {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+ValidClientID :: (value: string) -> bool {
+    return ValidID(value, 8, 128)
+}
+
+ValidResourceID :: (value: string) -> bool {
+    return ValidID(value, 4, 128)
+}
+
+ValidNamespace :: (value: string) -> bool {
+    return ValidID(value, 1, 64)
+}
+
+ValidEncryptedRecordID :: (value: string) -> bool {
+    return ValidID(value, 1, 160)
+}
+
+ValidAccountAlias :: (value: string) -> bool {
+    if value.count < 4 || value.count > 32 {
+        return false
+    }
+    index: s64 = 0
+    while index < value.count {
+        byte: u8 = value[index]
+        if !(byte >= cast(u8)97 && byte <= cast(u8)122) && !(byte >= cast(u8)48 && byte <= cast(u8)57) && byte != cast(u8)95 {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+ValidNamespaceSegment :: (value: string) -> bool {
+    if !ValidNamespace(value) {
+        return false
+    }
+    index: s64 = 0
+    while index < value.count {
+        if value[index] == cast(u8)46 {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+ValidVersionSegment :: (value: string) -> bool {
+    if value.count < 2 || value.count > 5 {
+        return false
+    }
+    if value[0] != cast(u8)118 || value[1] < cast(u8)49 || value[1] > cast(u8)57 {
+        return false
+    }
+    index: s64 = 2
+    while index < value.count {
+        if value[index] < cast(u8)48 || value[index] > cast(u8)57 {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+ValidEncryptedHierarchyCollection :: (collection: string) -> bool {
+    parts: []string = Split(TrimSpace(collection), ".")
+    if parts.count == 3 && parts[0] == "account" {
+        return ValidVersionSegment(parts[1]) && ValidNamespaceSegment(parts[2])
+    }
+    if parts.count < 4 {
+        return false
+    }
+    if parts[0] != "private" && parts[0] != "shared" && parts[0] != "friends" && parts[0] != "public" {
+        return false
+    }
+    if !ValidNamespaceSegment(parts[1]) || !ValidVersionSegment(parts[2]) {
+        return false
+    }
+    index: s64 = 3
+    while index < parts.count {
+        if !ValidNamespaceSegment(parts[index]) {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+ValidLegacyEncryptedCollection :: (collection: string) -> bool {
+    value: string = TrimSpace(collection)
+    return value == "inbe.habits" || value == "inbe.habit_days" || value == "inbe.sessions"
+}

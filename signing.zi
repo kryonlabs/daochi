@@ -1,0 +1,18 @@
+go_sha256 :: #system_library "crypto/sha256";
+go_hex :: #system_library "encoding/hex";
+go_strings :: #system_library "go:strings";
+
+Sum256 :: (value: []u8) -> [32]u8 #foreign go_sha256 "Sum256";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+Upper :: (value: string) -> string #foreign go_strings "ToUpper";
+Join :: (values: []string, separator: string) -> string #foreign go_strings "Join";
+
+CanonicalMessage :: (nonce: []u8, method: string, path: string, payload: []u8) -> string {
+    return CanonicalMessageWithContext("ksync-sync-v1", nonce, method, path, payload)
+}
+
+CanonicalMessageWithContext :: (context: string, nonce: []u8, method: string, path: string, payload: []u8) -> string {
+    sum: [32]u8 = Sum256(payload)
+    parts: [6]string = .[context, Upper(method), path, EncodeHex(sum[:]), EncodeHex(nonce), ""]
+    return Join(parts[:], "\n")
+}

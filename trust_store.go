@@ -531,8 +531,8 @@ INSERT OR IGNORE INTO trust_spaces(
 }
 
 func importNameClaim(ctx context.Context, tx *sql.Tx, claim NameClaim) (int, error) {
-	if claim.Version != 1 || !validUserID(claim.SpaceID) ||
-		!validUserID(claim.NodeID) || !namePattern.MatchString(claim.Name) ||
+	if claim.Version != 1 || !Identity_ValidUserID(claim.SpaceID) ||
+		!Identity_ValidUserID(claim.NodeID) || !namePattern.MatchString(claim.Name) ||
 		claim.Sequence <= 0 {
 		return 0, errors.New("invalid mesh name claim")
 	}

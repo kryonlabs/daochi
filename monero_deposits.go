@@ -104,7 +104,7 @@ func (s *Server) handleMoneroAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	addressLock.Unlock()
 	if err != nil {
-		slog.Error("allocate monero account address", "account", logText(accountID), "error", err)
+		slog.Error("allocate monero account address", "account", LogSafety_LogText(accountID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero address unavailable")
 		return
 	}
@@ -136,7 +136,7 @@ func (s *Server) handleMoneroDeposits(w http.ResponseWriter, r *http.Request) {
 	}
 	deposits, err := s.store.MoneroDeposits(r.Context(), accountID, 100)
 	if err != nil {
-		slog.Error("list monero deposits", "account", logText(accountID), "error", err)
+		slog.Error("list monero deposits", "account", LogSafety_LogText(accountID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero deposits unavailable")
 		return
 	}
@@ -159,7 +159,7 @@ WHERE m.account_id=?1 AND m.disabled_at=''`, accountID).Scan(
 }
 
 func (s *Store) CreateMoneroAccountAddress(ctx context.Context, accountID string, cfg Config) (MoneroAccountAddress, error) {
-	if !validUserID(accountID) {
+	if !Identity_ValidUserID(accountID) {
 		return MoneroAccountAddress{}, errors.New("invalid account id")
 	}
 	var exists int
@@ -319,8 +319,8 @@ func (s *Server) reconcileMoneroAccountDeposits(ctx context.Context) error {
 			continue
 		}
 		if err := s.settleMoneroAccountDeposit(ctx, accountID, transfer); err != nil {
-			slog.Warn("monero account deposit settlement failed", "account", logText(accountID),
-				"tx", logText(transfer.TxID), "error", err)
+			slog.Warn("monero account deposit settlement failed", "account", LogSafety_LogText(accountID),
+				"tx", LogSafety_LogText(transfer.TxID), "error", err)
 		}
 	}
 	return nil

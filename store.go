@@ -1456,14 +1456,14 @@ func (s *Store) ResolveAccountRef(ctx context.Context, ref string) (string, bool
 	if strings.HasPrefix(ref, "@") {
 		ref = strings.TrimPrefix(ref, "@")
 	}
-	if validUserID(strings.ToLower(ref)) {
+	if Identity_ValidUserID(strings.ToLower(ref)) {
 		userID := strings.ToLower(ref)
 		var exists int
 		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)`, userID).Scan(&exists)
 		return userID, exists != 0, err
 	}
 	alias := strings.ToLower(ref)
-	if !accountAliasPattern.MatchString(alias) {
+	if !Identity_ValidAccountAlias(alias) {
 		return "", false, nil
 	}
 	var userID string

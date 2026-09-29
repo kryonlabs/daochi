@@ -49,7 +49,7 @@ func (s *Server) verifyNodeRequest(ctx context.Context, req *http.Request, body 
 	nodeID := strings.TrimSpace(req.Header.Get("X-Daochi-Node-ID"))
 	timestampText := strings.TrimSpace(req.Header.Get("X-Daochi-Node-Time"))
 	nonce := strings.TrimSpace(req.Header.Get("X-Daochi-Node-Nonce"))
-	if !validUserID(nodeID) || nonce == "" || len(nonce) > 128 {
+	if !Identity_ValidUserID(nodeID) || nonce == "" || len(nonce) > 128 {
 		return errors.New("invalid node authentication")
 	}
 	timestamp, err := strconv.ParseInt(timestampText, 10, 64)

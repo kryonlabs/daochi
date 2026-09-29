@@ -14,9 +14,22 @@ CGO_ENV := CGO_ENABLED=1 \
 	CGO_CFLAGS="-I$(abspath $(LIBOQS_PREFIX))/include" \
 	CGO_LDFLAGS="-L$(abspath $(LIBOQS_PREFIX))/lib -loqs"
 
-.PHONY: all build test run clean liboqs
+.PHONY: all build test run clean liboqs generate check-generated test-ziran test-ziran-ir
 
 all: build
+
+# Generated Go is committed so ordinary Go/container builds remain usable.
+# Use the sibling Ziran checkout, or set ZI2GO and ZIRAN_STD explicitly.
+generate:
+	python3 scripts/generate_go.py
+
+check-generated:
+	python3 scripts/generate_go.py --check
+
+test-ziran: check-generated test test-ziran-ir
+
+test-ziran-ir: $(LIBOQS_A)
+	$(CGO_ENV) GOCACHE=/tmp/daochi-gocache python3 scripts/test_saved_ir.py
 
 liboqs: $(LIBOQS_A)
 

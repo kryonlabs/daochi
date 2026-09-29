@@ -170,11 +170,11 @@ func (s *Server) authenticateWebSocket(r *http.Request) (string, error) {
 		return "", authError{status: http.StatusUnauthorized, message: "websocket query tokens are not accepted"}
 	}
 	if token := bearerTokenFromWebSocketProtocol(r.Header.Get("Sec-WebSocket-Protocol")); token != "" {
-		userID, err := verifyAuthToken(s.cfg.TokenSecret, token)
-		if err != nil {
+		verified := Token_VerifyAuthToken(s.cfg.TokenSecret, token, time.Now().Unix())
+		if verified.Error != "" {
 			return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
 		}
-		return userID, nil
+		return verified.Value, nil
 	}
 	return s.authenticateToken(r)
 }

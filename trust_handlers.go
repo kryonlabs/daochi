@@ -343,8 +343,8 @@ func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request)
 	claim.SpaceID = strings.TrimSpace(claim.SpaceID)
 	claim.Name = normalizeName(claim.Name)
 	claim.NodeID = strings.TrimSpace(claim.NodeID)
-	if !validUserID(claim.SpaceID) || !namePattern.MatchString(claim.Name) ||
-		!validUserID(claim.NodeID) {
+	if !Identity_ValidUserID(claim.SpaceID) || !namePattern.MatchString(claim.Name) ||
+		!Identity_ValidUserID(claim.NodeID) {
 		writeError(w, http.StatusBadRequest, "invalid space, name, or node ID")
 		return
 	}
@@ -383,7 +383,7 @@ func validateServices(services []ServiceRecord) error {
 func (s *Server) handleResolveName(w http.ResponseWriter, r *http.Request) {
 	spaceID := strings.TrimSpace(r.URL.Query().Get("space_id"))
 	name := normalizeName(r.URL.Query().Get("name"))
-	if !validUserID(spaceID) || !namePattern.MatchString(name) {
+	if !Identity_ValidUserID(spaceID) || !namePattern.MatchString(name) {
 		writeError(w, http.StatusBadRequest, "invalid space or name")
 		return
 	}

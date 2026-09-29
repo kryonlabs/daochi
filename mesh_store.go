@@ -172,7 +172,7 @@ SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, u
 	applied := 0
 	for _, change := range changes {
 		if change.deletion != nil {
-			if !validUserID(change.deletion.UserIDHash) {
+			if !Identity_ValidUserID(change.deletion.UserIDHash) {
 				return 0, fmt.Errorf("invalid mesh deletion user_id_hash")
 			}
 			if !meshPolicyAllowsRecord(policy, matchers, change.deletion.Collection) {
@@ -193,7 +193,7 @@ SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, u
 			continue
 		}
 		item := *change.record
-		if !validUserID(item.UserIDHash) {
+		if !Identity_ValidUserID(item.UserIDHash) {
 			return 0, fmt.Errorf("invalid mesh user_id_hash")
 		}
 		publicKey, err := hex.DecodeString(strings.TrimSpace(item.PublicKey))
@@ -235,8 +235,8 @@ SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, u
 // as new as the stored row. The local delete trigger then logs our own
 // tombstone, so the deletion keeps propagating to further peers.
 func applyMeshRecordDeletion(ctx context.Context, tx *sql.Tx, deletion MeshEncryptedRecordDeletion) (int, error) {
-	if !validNamespace(strings.TrimSpace(deletion.Collection)) ||
-		!encryptedRecordIDPattern.MatchString(strings.TrimSpace(deletion.ID)) {
+	if !Identity_ValidNamespace(strings.TrimSpace(deletion.Collection)) ||
+		!Identity_ValidEncryptedRecordID(strings.TrimSpace(deletion.ID)) {
 		return 0, fmt.Errorf("invalid mesh deletion target")
 	}
 	deletedAt := normalizeTime(deletion.DeletedAt, "")

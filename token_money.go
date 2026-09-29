@@ -383,10 +383,10 @@ VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)`,
 }
 
 func validateTokenEventInput(input tokenEventInput) error {
-	if !validUserID(input.AccountID) {
+	if !Identity_ValidUserID(input.AccountID) {
 		return errors.New("invalid account_id")
 	}
-	if input.AppID != "" && !validNamespace(input.AppID) {
+	if input.AppID != "" && !Identity_ValidNamespace(input.AppID) {
 		return errors.New("invalid app_id")
 	}
 	if input.EventType != "credit" && input.EventType != "debit" {
@@ -401,7 +401,7 @@ func validateTokenEventInput(input tokenEventInput) error {
 	if input.EventType == "debit" && input.AmountDelta > 0 {
 		return errors.New("debit amount must be negative")
 	}
-	if !validNamespace(input.SourceType) || strings.TrimSpace(input.SourceRef) == "" || len(input.SourceRef) > 256 {
+	if !Identity_ValidNamespace(input.SourceType) || strings.TrimSpace(input.SourceRef) == "" || len(input.SourceRef) > 256 {
 		return errors.New("invalid source")
 	}
 	return nil
@@ -571,7 +571,7 @@ func (s *Server) handleTokenBalance(w http.ResponseWriter, r *http.Request) {
 		balance, err = s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
 	}
 	if err != nil {
-		slog.Error("token balance", "user", logText(userID), "error", err)
+		slog.Error("token balance", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token balance failed")
 		return
 	}
@@ -601,7 +601,7 @@ func (s *Server) handleTokenLedger(w http.ResponseWriter, r *http.Request) {
 		events, err = s.store.TokenLedger(r.Context(), userID, waoziTokenAssetID, since)
 	}
 	if err != nil {
-		slog.Error("token ledger", "user", logText(userID), "error", err)
+		slog.Error("token ledger", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token ledger failed")
 		return
 	}
@@ -610,7 +610,7 @@ func (s *Server) handleTokenLedger(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTokenReceipt(w http.ResponseWriter, r *http.Request) {
 	receiptID := strings.TrimPrefix(r.URL.Path, "/api/v1/tokens/receipts/")
-	if !validResourceID(receiptID) {
+	if !Identity_ValidResourceID(receiptID) {
 		writeError(w, http.StatusBadRequest, "invalid receipt_id")
 		return
 	}
@@ -621,7 +621,7 @@ func (s *Server) handleTokenReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	receipt, found, err := s.store.TokenReceipt(r.Context(), receiptID)
 	if err != nil {
-		slog.Error("token receipt", "receipt", logText(receiptID), "error", err)
+		slog.Error("token receipt", "receipt", LogSafety_LogText(receiptID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token receipt failed")
 		return
 	}
@@ -652,7 +652,7 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
-		slog.Error("token spend app lookup", "app", logText(req.AppID), "error", err)
+		slog.Error("token spend app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token spend failed")
 		return
 	} else if !exists {
@@ -694,7 +694,7 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		slog.Error("token spend", "user", logText(userID), "error", err)
+		slog.Error("token spend", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token spend failed")
 		return
 	}
@@ -723,7 +723,7 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
-		slog.Error("google token purchase app lookup", "app", logText(req.AppID), "error", err)
+		slog.Error("google token purchase app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token purchase failed")
 		return
 	} else if !exists {
@@ -762,12 +762,12 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		SourceRef:   paymentID,
 	})
 	if err != nil {
-		slog.Error("google token credit", "user", logText(userID), "payment", logText(paymentID), "error", err)
+		slog.Error("google token credit", "user", LogSafety_LogText(userID), "payment", LogSafety_LogText(paymentID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token credit failed")
 		return
 	}
 	if err := consumeGooglePlayPurchase(r.Context(), s.cfg, req); err != nil {
-		slog.Warn("google purchase consume failed after token credit", "user", logText(userID), "payment", logText(paymentID), "error", err)
+		slog.Warn("google purchase consume failed after token credit", "user", LogSafety_LogText(userID), "payment", LogSafety_LogText(paymentID), "error", err)
 	}
 	balance, err := s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
 	if err != nil {
@@ -798,7 +798,7 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
-		slog.Error("monero invoice app lookup", "app", logText(req.AppID), "error", err)
+		slog.Error("monero invoice app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	} else if !exists {
@@ -821,7 +821,7 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 	}()
 	invoice, err := s.store.CreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.cfg)
 	if err != nil {
-		slog.Error("create monero invoice", "user", logText(userID), "error", err)
+		slog.Error("create monero invoice", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	}
@@ -835,13 +835,13 @@ func (s *Server) handleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/tokens/purchases/monero/invoices/")
-	if !validResourceID(id) {
+	if !Identity_ValidResourceID(id) {
 		writeError(w, http.StatusBadRequest, "invalid invoice id")
 		return
 	}
 	invoice, found, err := s.store.MoneroInvoice(r.Context(), userID, id)
 	if err != nil {
-		slog.Error("load monero invoice", "user", logText(userID), "invoice", logText(id), "error", err)
+		slog.Error("load monero invoice", "user", LogSafety_LogText(userID), "invoice", LogSafety_LogText(id), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	}
@@ -851,7 +851,7 @@ func (s *Server) handleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request
 	}
 	if invoice.Status == "pending" {
 		if updated, err := s.trySettleOrExpireMoneroInvoice(r.Context(), userID, invoice); err != nil {
-			slog.Warn("monero invoice settlement failed", "user", logText(userID), "invoice", logText(id), "error", err)
+			slog.Warn("monero invoice settlement failed", "user", LogSafety_LogText(userID), "invoice", LogSafety_LogText(id), "error", err)
 		} else if updated.ID != "" {
 			invoice = updated
 		}
@@ -920,7 +920,7 @@ func (s *Server) reconcileMoneroExpiredInvoices(ctx context.Context, limit int) 
 	for _, item := range invoices {
 		payment, err := inspectMoneroInvoicePayment(ctx, s.cfg, item.Invoice)
 		if err != nil {
-			slog.Warn("expired monero invoice sweep failed", "invoice", logText(item.Invoice.ID), "error", err)
+			slog.Warn("expired monero invoice sweep failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", err)
 			continue
 		}
 		if payment.ConfirmedAtomic >= item.Invoice.AtomicAmount {
@@ -933,15 +933,15 @@ func (s *Server) reconcileMoneroExpiredInvoices(ctx context.Context, limit int) 
 				SourceRef:   payment.PaymentID,
 			})
 			if err != nil {
-				slog.Warn("expired monero invoice credit failed", "invoice", logText(item.Invoice.ID), "error", err)
+				slog.Warn("expired monero invoice credit failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", err)
 				continue
 			}
 			if err := s.store.SettleExpiredMoneroInvoice(ctx, item.AccountID, item.Invoice.ID, receipt.ReceiptID, payment.PaymentID); err != nil {
-				slog.Warn("expired monero invoice settle failed", "invoice", logText(item.Invoice.ID), "error", err)
+				slog.Warn("expired monero invoice settle failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", err)
 				continue
 			}
-			slog.Info("credited late monero invoice payment", "invoice", logText(item.Invoice.ID),
-				"account", logText(item.AccountID), "payment", logText(payment.PaymentID))
+			slog.Info("credited late monero invoice payment", "invoice", LogSafety_LogText(item.Invoice.ID),
+				"account", LogSafety_LogText(item.AccountID), "payment", LogSafety_LogText(payment.PaymentID))
 			continue
 		}
 		if payment.SeenAtomic > 0 {
@@ -956,8 +956,8 @@ func (s *Server) reportStuckMoneroInvoice(invoiceID, accountID string, payment m
 		return
 	}
 	s.metrics.moneroStuckInvoices.Add(1)
-	slog.Warn("monero invoice has uncredited funds", "invoice", logText(invoiceID),
-		"account", logText(accountID), "seen_atomic", payment.SeenAtomic,
+	slog.Warn("monero invoice has uncredited funds", "invoice", LogSafety_LogText(invoiceID),
+		"account", LogSafety_LogText(accountID), "seen_atomic", payment.SeenAtomic,
 		"confirmed_atomic", payment.ConfirmedAtomic)
 }
 
@@ -997,8 +997,8 @@ func (s *Server) reconcileMoneroInvoices(ctx context.Context, limit int) error {
 	}
 	for _, item := range invoices {
 		if _, err := s.trySettleOrExpireMoneroInvoice(ctx, item.AccountID, item.Invoice); err != nil {
-			slog.Warn("monero invoice reconciliation item failed", "account", logText(item.AccountID),
-				"invoice", logText(item.Invoice.ID), "error", err)
+			slog.Warn("monero invoice reconciliation item failed", "account", LogSafety_LogText(item.AccountID),
+				"invoice", LogSafety_LogText(item.Invoice.ID), "error", err)
 		}
 	}
 	return nil
@@ -1113,7 +1113,7 @@ func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64
 	req.Action = strings.TrimSpace(req.Action)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	req.Metadata = strings.TrimSpace(req.Metadata)
-	if !validNamespace(req.AppID) {
+	if !Identity_ValidNamespace(req.AppID) {
 		return req, nil, errors.New("invalid app_id")
 	}
 	if req.AssetID == "" {
@@ -1122,10 +1122,10 @@ func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64
 	if req.Amount <= 0 {
 		return req, nil, errors.New("amount required")
 	}
-	if !validNamespace(req.Action) {
+	if !Identity_ValidNamespace(req.Action) {
 		return req, nil, errors.New("invalid action")
 	}
-	if !validClientID(req.IdempotencyKey) {
+	if !Identity_ValidClientID(req.IdempotencyKey) {
 		return req, nil, errors.New("invalid idempotency_key")
 	}
 	return req, body, nil
@@ -1144,7 +1144,7 @@ func readGooglePurchaseVerifyRequest(w http.ResponseWriter, r *http.Request, max
 	req.PackageName = strings.TrimSpace(req.PackageName)
 	req.ProductID = strings.TrimSpace(req.ProductID)
 	req.PurchaseToken = strings.TrimSpace(req.PurchaseToken)
-	if !validNamespace(req.AppID) {
+	if !Identity_ValidNamespace(req.AppID) {
 		return req, nil, errors.New("invalid app_id")
 	}
 	if req.PackageName == "" || req.ProductID == "" || req.PurchaseToken == "" {
@@ -1164,7 +1164,7 @@ func readMoneroInvoiceRequest(w http.ResponseWriter, r *http.Request, maxBody in
 	}
 	req.AppID = strings.TrimSpace(req.AppID)
 	req.ProductID = strings.TrimSpace(req.ProductID)
-	if !validNamespace(req.AppID) {
+	if !Identity_ValidNamespace(req.AppID) {
 		return req, nil, errors.New("invalid app_id")
 	}
 	if req.ProductID == "" {
@@ -1178,7 +1178,7 @@ func tokenAppFilter(r *http.Request) (string, bool, error) {
 	if appID == "" {
 		return "", false, nil
 	}
-	if !validNamespace(appID) {
+	if !Identity_ValidNamespace(appID) {
 		return "", false, errors.New("invalid app_id")
 	}
 	return appID, true, nil

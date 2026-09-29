@@ -1,0 +1,224 @@
+#import "vec"
+
+go_strings :: #system_library "go:strings";
+TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";
+
+BinaryField :: struct {
+    value: string
+    error: string
+}
+
+mlDSA44PublicKeySize :: 1312;
+mlDSA44PrivateKeySize :: 2560;
+mlDSA44SignatureSize :: 2420;
+
+HexDigit :: (value: u8) -> s32 {
+    if value >= cast(u8)48 && value <= cast(u8)57 {
+        return cast(s32)value - 48
+    }
+    if value >= cast(u8)97 && value <= cast(u8)102 {
+        return cast(s32)value - 87
+    }
+    if value >= cast(u8)65 && value <= cast(u8)70 {
+        return cast(s32)value - 55
+    }
+    return -1
+}
+
+IsHex :: (value: string) -> bool {
+    index: s64 = 0
+    while index < value.count {
+        if HexDigit(value[index]) < 0 {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+Base64Digit :: (value: u8, url: bool) -> s32 {
+    if value >= cast(u8)65 && value <= cast(u8)90 {
+        return cast(s32)value - 65
+    }
+    if value >= cast(u8)97 && value <= cast(u8)122 {
+        return cast(s32)value - 71
+    }
+    if value >= cast(u8)48 && value <= cast(u8)57 {
+        return cast(s32)value + 4
+    }
+    if url {
+        if value == cast(u8)45 {
+            return 62
+        }
+        if value == cast(u8)95 {
+            return 63
+        }
+    } else {
+        if value == cast(u8)43 {
+            return 62
+        }
+        if value == cast(u8)47 {
+            return 63
+        }
+    }
+    return -1
+}
+
+// Match Go's non-strict encodings: CR/LF are ignored, unused terminal bits
+// need not be zero, and padded URL encoding does not accept unpadded input.
+DecodeBase64 :: (value: string, url: bool, padded: bool) -> BinaryField {
+    result: BinaryField
+    result.error = "invalid base64"
+    output: Vec(u8)
+    index: s64 = 0
+    digits: s32 = 0
+    padding: s32 = 0
+    accumulator: u32 = cast(u32)0
+    while index < value.count {
+        byte: u8 = value[index]
+        index += 1
+        if byte == cast(u8)10 || byte == cast(u8)13 {
+            continue
+        }
+        if byte == cast(u8)61 {
+            if !padded || digits < 2 || padding >= 4 - digits {
+                return result
+            }
+            padding += 1
+            continue
+        }
+        if padding != 0 {
+            return result
+        }
+        digit: s32 = Base64Digit(byte, url)
+        if digit < 0 {
+            return result
+        }
+        accumulator = (accumulator << cast(u32)6) | cast(u32)digit
+        digits += 1
+        if digits == 4 {
+            if !VecPush(output, cast(u8)(accumulator >> cast(u32)16)) {
+                result.error = "binary field allocation failed"
+                return result
+            }
+            if !VecPush(output, cast(u8)(accumulator >> cast(u32)8)) {
+                result.error = "binary field allocation failed"
+                return result
+            }
+            if !VecPush(output, cast(u8)accumulator) {
+                result.error = "binary field allocation failed"
+                return result
+            }
+            digits = 0
+            accumulator = cast(u32)0
+        }
+    }
+    if digits == 1 {
+        return result
+    }
+    if padded && digits != 0 && padding != 4 - digits {
+        return result
+    }
+    if digits == 2 || digits == 3 {
+        shift: u32 = cast(u32)(digits * 6 - 8)
+        if !VecPush(output, cast(u8)(accumulator >> shift)) {
+            result.error = "binary field allocation failed"
+            return result
+        }
+    }
+    if digits == 3 {
+        if !VecPush(output, cast(u8)(accumulator >> cast(u32)2)) {
+            result.error = "binary field allocation failed"
+            return result
+        }
+    }
+    result.value = BuilderFinish(output)
+    result.error = ""
+    return result
+}
+
+DecodeBinaryField :: (input: string) -> BinaryField {
+    value: string = TrimSpace(input)
+    result: BinaryField
+    if value.count == 0 {
+        result.error = "empty binary field"
+        return result
+    }
+    if value.count % 2 == 0 && IsHex(value) {
+        output: Vec(u8)
+        index: s64 = 0
+        while index < value.count {
+            byte: u8 = cast(u8)(HexDigit(value[index]) * 16 + HexDigit(value[index + 1]))
+            if !VecPush(output, byte) {
+                result.error = "binary field allocation failed"
+                return result
+            }
+            index += 2
+        }
+        result.value = BuilderFinish(output)
+        return result
+    }
+    result = DecodeBase64(value, false, true)
+    if result.error == "" {
+        return result
+    }
+    result = DecodeBase64(value, false, false)
+    if result.error == "" {
+        return result
+    }
+    result = DecodeBase64(value, true, true)
+    if result.error == "" {
+        return result
+    }
+    result.error = "field is neither hex nor base64"
+    return result
+}
+
+EncodeBase64 :: (value: string, url: bool, padded: bool) -> BinaryField {
+    result: BinaryField
+    result.error = "binary field allocation failed"
+    alphabet: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    if url {
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    }
+    output: Vec(u8)
+    index: s64 = 0
+    while index < value.count {
+        remaining: s64 = value.count - index
+        group: u32 = cast(u32)value[index] << cast(u32)16
+        if remaining > 1 {
+            group |= cast(u32)value[index + 1] << cast(u32)8
+        }
+        if remaining > 2 {
+            group |= cast(u32)value[index + 2]
+        }
+        if !VecPush(output, alphabet[cast(s64)(group >> cast(u32)18)]) {
+            return result
+        }
+        if !VecPush(output, alphabet[cast(s64)((group >> cast(u32)12) & cast(u32)63)]) {
+            return result
+        }
+        if remaining > 1 {
+            if !VecPush(output, alphabet[cast(s64)((group >> cast(u32)6) & cast(u32)63)]) {
+                return result
+            }
+        } else if padded {
+            if !VecPush(output, cast(u8)61) {
+                return result
+            }
+        }
+        if remaining > 2 {
+            if !VecPush(output, alphabet[cast(s64)(group & cast(u32)63)]) {
+                return result
+            }
+        } else if padded {
+            if !VecPush(output, cast(u8)61) {
+                return result
+            }
+        }
+        index += 3
+    }
+    result.value = BuilderFinish(output)
+    result.error = ""
+    return result
+}

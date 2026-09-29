@@ -35,8 +35,8 @@ func TestReleasedClientRealKeyLoginAndSync(t *testing.T) {
 			}
 			for _, valid := range []bool{false, true} {
 				nonce := issueChallenge(t, handler, "", userID)
-				message := canonicalMessageWithContext(format.context, mustDecodeHex(t, nonce), http.MethodPost, "/api/v1/sync/login", body)
-				signature, err := signWithPrivateKey(message, privateKey)
+				message := Signing_CanonicalMessageWithContext(format.context, mustDecodeHex(t, nonce), http.MethodPost, "/api/v1/sync/login", body)
+				signature, err := signWithPrivateKey([]byte(message), privateKey)
 				if err != nil {
 					t.Fatal(err)
 				}

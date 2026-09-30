@@ -44,7 +44,7 @@ $(LIBOQS_A): $(LIBOQS_DIR)/CMakeLists.txt
 	$(CMAKE) --build $(LIBOQS_BUILD_DIR) --target install
 
 build: $(LIBOQS_A)
-	$(CGO_ENV) $(GO) build -ldflags "-X main.version=$(VERSION)" -o daochi .
+	$(CGO_ENV) $(GO) build -ldflags "-X main.BuildVersion=$(VERSION)" -o daochi .
 
 test: $(LIBOQS_A)
 	$(CGO_ENV) GOCACHE=/tmp/daochi-gocache $(GO) test ./...

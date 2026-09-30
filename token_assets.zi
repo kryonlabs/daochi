@@ -1,0 +1,27 @@
+#import "go_types"
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+go_sql :: #system_library "go:database/sql";
+
+#scope_file
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+Execute :: (database: *sql.Database, context: ctx.Context, query: string) -> ExecResult #go_results #foreign go_sql "(*DB).ExecContext";
+SeedQuery :: #string SQL
+INSERT INTO token_assets(issuer_id,asset_id,display_name,decimals,status)
+VALUES('waozi','waozi:token','Chi',6,'active')
+ON CONFLICT(asset_id) DO UPDATE SET
+    issuer_id=excluded.issuer_id,
+    display_name=excluded.display_name,
+    decimals=excluded.decimals,
+    status=excluded.status,
+    updated_at=CURRENT_TIMESTAMP
+SQL;
+
+#scope_export
+Seed :: (database: *sql.Database, context: ctx.Context) -> Error {
+    result := Execute(database, context, SeedQuery)
+    return result.error
+}

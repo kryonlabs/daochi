@@ -252,7 +252,7 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := store.SeedTokenAssets(context.Background()); err != nil {
+	if err := TokenAssets_Seed(store.db, context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

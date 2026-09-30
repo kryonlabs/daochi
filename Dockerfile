@@ -14,7 +14,7 @@ COPY --from=liboqs /usr/local /usr/local
 WORKDIR /src
 COPY . .
 ENV CGO_ENABLED=1
-RUN go build -mod=mod -ldflags "-X main.version=${VERSION}" -o /out/daochi .
+RUN go build -mod=mod -ldflags "-X main.BuildVersion=${VERSION}" -o /out/daochi .
 
 FROM debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \

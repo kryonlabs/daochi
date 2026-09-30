@@ -1,0 +1,2 @@
+// A string variable allows Go builds to stamp the version with the linker.
+BuildVersion: string = "dev";

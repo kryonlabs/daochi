@@ -253,7 +253,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("load metrics storage usage", "error", err)
 	}
-	Metrics_Prometheus(s.metrics, w, usage, storage, version)
+	Metrics_Prometheus(s.metrics, w, usage, storage, BuildVersion)
 }
 
 func (s *Server) nodeUsage(ctx context.Context) (NodeUsage, error) {

@@ -73,7 +73,7 @@ field names, Go storage types, order and reflection tags.
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
-| `token_assets.go` | Go | Asset seeding transaction |
+| `token_assets.go` | Ziran | `token_assets.zi`: native SQL upsert, released asset fields and error propagation |
 | `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
 | `trust_handlers.go` | Go with ported callers | Pairing and namespace HTTP handlers |
 | `trust_store.go` | Go with ported callers | Peer trust, pairing, claims, nonce persistence |
@@ -81,7 +81,7 @@ field names, Go storage types, order and reflection tags.
 | `verifier.go` | Go | Signature verifier contract |
 | `verifier_nocgo.go` | Go | Unsupported-build error path |
 | `verifier_oqs.go` | Go | ML-DSA-44 foreign-library boundary and resource ownership |
-| `version.go` | Go | Build-stamped version |
+| `version.go` | Ziran | `version.zi`: default build version, stamped through Makefile and Docker linker arguments |
 
 `identity.zi` is a new canonical module extracted from `server.go`. Generated
 `vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go`, `go_types.go`,
@@ -135,7 +135,8 @@ lazy initialization and ordering. Prometheus output retains released metric
 names, escapes, integer behavior and storage clamping. Scraping unlocks the
 mutex during native panic unwinding as well as ordinary returns; a failing
 response writer cannot leave subsequent recording blocked. The build version
-is passed explicitly until startup/version code moves to Ziran.
+comes from `version.zi`; Makefile and Docker builds stamp its native string
+variable, and unstamped builds report `dev`.
 
 `timestamp.zi` owns the original storage timestamp helpers, including RFC 3339
 and SQLite parsing, fixed nanosecond fractions, UTC conversion and malformed

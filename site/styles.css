@@ -908,3 +908,34 @@ pre { max-width: 100%; border-radius: 4px; background: #273a30; }
 @media (prefers-reduced-motion: reduce) {
   html, .milestone-rail { scroll-behavior: auto; }
 }
+
+.node-refresh { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.node-refresh button { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--green); padding: 5px 10px; cursor: pointer; }
+.node-refresh button:disabled { opacity: .5; cursor: wait; }
+html[data-mini] .topbar, html[data-mini] .page-hero, html[data-mini] .footer, html[data-mini] .skip-link { display: none; }
+html[data-mini] main { width: 100%; max-width: none; padding: 0; margin: 0; }
+html[data-mini] .node-browser { display: flex; flex-direction: column; gap: 0; padding: 0; margin: 0; }
+html[data-mini] .node-map-card { padding: 16px; border: 0; border-radius: 0; }
+html[data-mini] .node-map-heading h2 { font-size: 24px; }
+html[data-mini] .node-map-count { font-size: 11px; }
+html[data-mini] .node-canvas-wrap { height: 170px; min-height: 170px; margin-top: 10px; }
+html[data-mini] .node-canvas-wrap canvas { height: 170px; }
+html[data-mini] .node-rail { margin-top: 8px; }
+html[data-mini] .node-rail button { padding: 8px 10px; }
+html[data-mini] .node-rail button em { display: none; }
+html[data-mini] .node-detail-shell { min-width: 0; }
+html[data-mini] .node-card { border: 0; border-radius: 0; padding: 12px 16px; }
+html[data-mini] .node-heading h3 { font-size: 21px; }
+html[data-mini] .node-heading p { font-size: 11px; margin: 0; overflow-wrap: anywhere; }
+html[data-mini] .detail-grid { margin-top: 12px; }
+html[data-mini] .live-node-footer { margin-bottom: 0; font-size: 11px; }
+
+html[data-mini] .node-browser { width: 100%; align-items: stretch; }
+html[data-mini] .node-map-card { position: static; gap: 8px; }
+html[data-mini] .node-map-heading { flex-direction: row; align-items: center; }
+html[data-mini] .node-canvas-wrap { margin-top: 0; }
+html[data-mini] .node-rail { margin-top: 0; }
+html[data-mini] .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin: 10px 0; }
+html[data-mini] .detail-grid div { padding: 7px 0; }
+html[data-mini] .detail-grid dt { font-size: 10px; }
+html[data-mini] .detail-grid dd { font-size: 13px; }

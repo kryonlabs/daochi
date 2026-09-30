@@ -26,7 +26,8 @@
   <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/styles.css?v=editorial-20260919">
+  <script>if (new URLSearchParams(location.search).has("mini")) document.documentElement.dataset.mini = "true";</script>
+  <link rel="stylesheet" href="/styles.css?v=live-nodes-20260930">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -56,7 +57,7 @@
             <p class="section-label">Node Canvas</p>
             <h2>Network view</h2>
           </div>
-          <div id="node-map-count" class="node-map-count">loading</div>
+          <div class="node-refresh"><div id="node-map-count" class="node-map-count">loading</div><button id="refresh-nodes" type="button" aria-label="Refresh live nodes">Refresh</button></div>
         </div>
         <div class="node-canvas-wrap">
           <canvas id="node-canvas" width="920" height="520" aria-label="Daochi node connection canvas"></canvas>
@@ -82,6 +83,9 @@
   </footer>
 
   <script>
+    const mini = new URLSearchParams(location.search).has("mini");
+    const refresh = document.getElementById("refresh-nodes");
+    let loading = false;
     const canvas = document.getElementById("node-canvas");
     const ctx = canvas.getContext("2d");
     const detail = document.getElementById("node-detail");
@@ -181,7 +185,7 @@
 
     async function fetchJSON(url) {
       try {
-        const response = await fetch(url, { cache: "no-store" });
+        const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10000) });
         let data = {};
         try {
           data = await response.json();
@@ -390,7 +394,7 @@
       const tokens = Array.isArray(tokenResult.data.assets) ? tokenResult.data.assets : [];
       const products = Array.isArray(productResult.data.products) ? productResult.data.products : [];
       const apps = Array.isArray(appsResult.data.apps) ? appsResult.data.apps : [];
-      const registrations = await Promise.all(apps.map((app) => appDetail(nodeUrl, app)));
+      const registrations = mini ? apps : await Promise.all(apps.map((app) => appDetail(nodeUrl, app)));
       const publishedPeers = peerList(nodeInfo.data.known_nodes);
       const peers = mergePeers(declaredPeers, publishedPeers);
       const online = health.ok && appsResult.ok && tokenResult.ok;
@@ -498,6 +502,23 @@
         detail.innerHTML = `<article class="node-card"><h3>No node selected</h3><p>No configured nodes are available.</p></article>`;
         return;
       }
+      if (mini) {
+        const usage = usageFor(node);
+        const storage = storageFor(node);
+        const protocol = node.nodeInfo.data.protocol || {};
+        detail.innerHTML = `
+          <article class="node-card selected-node-card">
+            <div class="node-heading"><div><h3>${text(node.name)}</h3><p>${text(node.url)}</p></div><span class="status-pill${node.online ? "" : " offline"}">${text(node.status)}</span></div>
+            ${node.nodeInfo.ok ? detailRows([
+              ["Protocol", String(Number(protocol.latest || 0))],
+              ["Registered apps", String(node.apps.length)],
+              ["Connected clients", String(Number(usage.connected_websocket_clients || 0))],
+              ["Stored data", formatBytes(storage.logical_bytes)]
+            ]) : "<p>Node metadata is currently unavailable.</p>"}
+            <p class="live-node-footer">Live node data · <a href="nodes.html" target="_blank" rel="noopener">Explore the network ↗</a></p>
+          </article>`;
+        return;
+      }
       const panels = {
         overview: overviewMarkup,
         storage: storageMarkup,
@@ -588,8 +609,8 @@
     function renderCanvas() {
       if (!ctx) return;
       const rect = canvas.parentElement.getBoundingClientRect();
-      const width = Math.max(320, Math.floor(rect.width));
-      const height = Math.max(300, Math.floor(rect.height));
+      const width = Math.max(mini ? 120 : 320, Math.floor(rect.width));
+      const height = Math.max(mini ? 170 : 300, Math.floor(rect.height));
       state.dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_CANVAS_DPR);
       canvas.width = Math.round(width * state.dpr);
       canvas.height = Math.round(height * state.dpr);
@@ -636,7 +657,7 @@
         drawArrow(source.canvasPoint, target.canvasPoint, edge.from === state.selected || edge.to === state.selected);
       });
 
-      if (!state.edges.length) {
+      if (!state.edges.length && !mini) {
         ctx.fillStyle = "rgba(32, 44, 41, .68)";
         ctx.font = "700 12px 'Noto Sans Mono', monospace";
         ctx.textAlign = "center";
@@ -779,14 +800,19 @@
     window.addEventListener("resize", () => renderCanvas());
 
     async function main() {
+      if (loading) return;
+      loading = true;
+      refresh.disabled = true;
+      const selectedURL = state.nodes[state.selected]?.url;
       try {
-        const response = await fetch("/nodes.json", { cache: "no-store" });
+        const response = await fetch("/nodes.json", { cache: "no-store", signal: AbortSignal.timeout(10000) });
+        if (!response.ok) throw new Error("Node configuration unavailable");
         const config = await response.json();
         const nodes = Array.isArray(config.nodes) ? config.nodes : [];
         const graph = await loadGraph(nodes);
         state.nodes = graph.nodes;
         state.edges = graph.edges;
-        state.selected = 0;
+        state.selected = Math.max(0, state.nodes.findIndex(node => node.url === selectedURL));
         renderRail();
         renderDetail();
         renderCanvas();
@@ -794,9 +820,15 @@
         count.textContent = "unavailable";
         detail.innerHTML = `<article class="node-card"><h3>Node list unavailable</h3><p>Could not load the checked-in node configuration.</p></article>`;
         renderCanvas();
+      } finally {
+        loading = false;
+        refresh.disabled = false;
       }
     }
 
+    refresh.addEventListener("click", main);
+    setInterval(() => { if (!document.hidden) main(); }, 60000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) main(); });
     main();
   </script>
 </body>

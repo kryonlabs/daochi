@@ -346,7 +346,8 @@ LIMIT 1`).Scan(&previousSeq, &previousHash); err != nil && !errors.Is(err, sql.E
 	if previousSeq.Valid {
 		ledgerSeq = previousSeq.Int64 + 1
 	}
-	receiptID, err := randomResourceID()
+	resource := ResourceId_New()
+	receiptID, err := resource.Value, resource.Error
 	if err != nil {
 		return TokenReceipt{}, err
 	}
@@ -1467,7 +1468,8 @@ func (s *Store) CreateMoneroInvoice(ctx context.Context, accountID, appID string
 	if product.MoneroAtomicAmount <= 0 {
 		return MoneroInvoiceResponse{}, errors.New("monero amount required")
 	}
-	id, err := randomResourceID()
+	resource := ResourceId_New()
+	id, err := resource.Value, resource.Error
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}

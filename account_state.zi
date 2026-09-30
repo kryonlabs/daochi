@@ -1,0 +1,29 @@
+#import "go_types"
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+timestamp :: #import "timestamp";
+go_sql :: #system_library "go:database/sql";
+
+#scope_file
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+UpdateSeen :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, seen: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+EnsureSync :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+
+#scope_export
+Touch :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, missingUser: Error) -> Error {
+    updated := UpdateSeen(transaction, context,
+        "UPDATE server_users SET last_seen_at=?2 WHERE user_id_hash=?1", userID, timestamp.CanonicalNow())
+    if updated.error != null {
+        return updated.error
+    }
+    affected := sql.RowsAffected(updated.value)
+    if affected.error != null || cast(isize)affected.value == cast(isize)0 {
+        return missingUser
+    }
+    inserted := EnsureSync(transaction, context,
+        "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
+    return inserted.error
+}

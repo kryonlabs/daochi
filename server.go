@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
@@ -985,7 +984,8 @@ func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "friend target not found")
 		return
 	}
-	id, err := randomResourceID()
+	resource := ResourceId_New()
+	id, err := resource.Value, resource.Error
 	if err != nil {
 		slog.Error("generate friend request id", "error", err)
 		writeError(w, http.StatusInternalServerError, "friend request failed")
@@ -1754,14 +1754,6 @@ func parseFriendRequestPath(path string) (requestID string, action string, ok bo
 		return parts[0], parts[1], true
 	}
 	return "", "", false
-}
-
-func randomResourceID() (string, error) {
-	var bytes [16]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes[:]), nil
 }
 
 type exportedSyncKey struct {

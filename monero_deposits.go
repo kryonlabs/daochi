@@ -169,7 +169,8 @@ func (s *Store) CreateMoneroAccountAddress(ctx context.Context, accountID string
 	if exists == 0 {
 		return MoneroAccountAddress{}, ErrSyncUserNotFound
 	}
-	allocationID, err := randomResourceID()
+	resource := ResourceId_New()
+	allocationID, err := resource.Value, resource.Error
 	if err != nil {
 		return MoneroAccountAddress{}, err
 	}

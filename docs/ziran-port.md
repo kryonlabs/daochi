@@ -48,7 +48,7 @@ field names, Go storage types, order and reflection tags.
 | Baseline file | Status | Remaining work or canonical source |
 |---|---|---|
 | `app_manifest.go` | Partial Ziran | Normalization, validation and active-key verification in `manifest.zi`; manifest storage in `app_store.zi`; decoding, signed approval verification and exact JSON/hash bytes in `app_registration.zi`; HTTP handler remains Go |
-| `app_registry.go` | Partial Ziran | Scope policy in `scope.zi`; app seeding, registry queries, metadata and collection ownership in `app_store.zi`; app/grant request decoding in `app_registration.zi`; grant storage and HTTP handlers remain Go |
+| `app_registry.go` | Partial Ziran | Scope policy in `scope.zi`; app seeding, registry queries, metadata and collection ownership in `app_store.zi`; app/grant request decoding in `app_registration.zi`; grant transactions, revocation, scope checks and encrypted-record reads in `app_grants.zi`; HTTP handlers remain Go |
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
@@ -66,10 +66,10 @@ field names, Go storage types, order and reflection tags.
 | `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
 | `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
-| `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; HTTP handlers remain Go |
+| `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; random resource identifiers in `resource_id.zi`; HTTP handlers remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`; schema, sync transactions, conflicts and projections remain Go |
+| `store.go` | Partial Ziran | Timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch in `account_state.zi`; schema, sync transactions, conflicts and projections remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -91,8 +91,8 @@ field names, Go storage types, order and reflection tags.
 come from Ziran's standard modules; they do not represent
 additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
-`transaction.zi` also owns the signed grant record. Their remaining grant
-transactions and HTTP handlers still need to move. Manifest normalization and
+`transaction.zi` also owns the signed grant record. Grant transactions live in
+`app_grants.zi`; HTTP handlers still need to move. Manifest normalization and
 validation preserve error text, byte limits, scopes, Gregorian dates and
 explicit expiry boundaries.
 Active-key verification selects eligible keys in Ziran and uses Go Ed25519.
@@ -107,7 +107,21 @@ active signed manifests untouched. Baseline fixtures compare stored state,
 key expiry/revocation filtering, replacement, malformed JSON and scan errors,
 cancellation, failed writes and commits, and legacy date boundaries. Maintained
 startup, HTTP, sync, token and mesh callers use the generated surface directly.
-Grant transactions and HTTP handlers still need porting.
+HTTP handlers still need porting.
+
+`app_grants.zi` owns grant creation, detail/list queries, revocation and
+authorized encrypted-record reads. Account, grant and audit changes commit
+together; failures roll back all writes. Reads retain account isolation,
+registered collection ownership, active read-grant checks, SQL wildcard
+escaping, ordering and nil versus allocated empty results. The original
+validation order and native SQL/context errors remain intact. Independent
+baseline fixtures compare lifecycle state, private/unregistered scope denial,
+cross-account access, malformed stored values, cancellation, failed writes and
+commits, and connection reuse. `account_state.zi` owns the shared transactional
+account-touch and sync-state initialization; `resource_id.zi` owns the exact
+16-byte random hexadecimal identifiers. Entropy-failure comparisons run in
+isolated subprocesses and preserve Go 1.24's fatal behavior. Maintained callers
+use the generated functions directly; the HTTP handlers remain Go.
 
 `app_registration.zi` owns signed/unsigned app and grant request decoding,
 ordered normalization/validation, manifest JSON serialization, hashes and both

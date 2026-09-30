@@ -1,0 +1,24 @@
+#import "go_types"
+random :: #import "random_go";
+go_hex :: #system_library "go:encoding/hex";
+
+ResourceIDResult :: struct {
+    value: string
+    error: Error
+}
+
+#scope_file
+EncodeHex :: (bytes: []u8) -> string #foreign go_hex "EncodeToString";
+
+#scope_export
+New :: () -> ResourceIDResult {
+    result: ResourceIDResult
+    bytes: [16]u8
+    filled := random.Fill(bytes[:])
+    result.error = filled.error
+    if filled.error != null {
+        return result
+    }
+    result.value = EncodeHex(bytes[:])
+    return result
+}

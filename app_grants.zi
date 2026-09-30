@@ -1,0 +1,331 @@
+#import "go_types"
+#import "protocol"
+apps :: #import "app_store";
+accounts :: #import "account_state";
+ids :: #import "resource_id";
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+scope :: #import "scope";
+json :: #import "json_go";
+text :: #import "text_go";
+errors :: #import "errors_go";
+go_sql :: #system_library "go:database/sql";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+GrantResult :: struct {
+    value: AppGrant
+    error: Error
+}
+GrantsResult :: struct {
+    value: []AppGrant
+    error: Error
+}
+GrantedRecordsResult :: struct {
+    value: []EncryptedRecord
+    error: Error
+}
+CollectionVisibilityResult :: struct {
+    value: string
+    found: bool
+    error: Error
+}
+
+#scope_file
+TransactionResult :: struct {
+    value: *sql.Transaction
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+HasSuffix :: (value: string, suffix: string) -> bool #foreign go_strings;
+Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+InsertGrant :: (transaction: *sql.Transaction, context: ctx.Context, query: string, id: string, userID: string, source: string, target: string, prefix: string, permission: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertCreateAudit :: (transaction: *sql.Transaction, context: ctx.Context, query: string, id: string, userID: string, payload: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertRevokeAudit :: (transaction: *sql.Transaction, context: ctx.Context, query: string, id: string, userID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+RevokeGrant :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, id: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+QueryTwo :: (database: *sql.Database, context: ctx.Context, query: string, first: string, second: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryScope :: (database: *sql.Database, context: ctx.Context, query: string, userID: string, source: string, target: string, prefix: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryRows :: (database: *sql.Database, context: ctx.Context, query: string, userID: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+QueryRecordRows :: (database: *sql.Database, context: ctx.Context, query: string, userID: string, prefix: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+ScanVisibility :: (row: *sql.Row, visibility: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
+ScanGrant :: (row: *sql.Row, id: *string, userID: *string, source: *string, target: *string, prefix: *string, permission: *string, status: *string, created: *string, updated: *string, revoked: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanGrantRows :: (rows: *sql.Rows, id: *string, userID: *string, source: *string, target: *string, prefix: *string, permission: *string, status: *string, created: *string, updated: *string, revoked: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanRecord :: (rows: *sql.Rows, collection: *string, id: *string, keyID: *string, nonce: *string, ciphertext: *string, updated: *string, deleted: *s64, hash: *string, schema: *isize, parent: *string) -> Error #foreign go_sql "(*Rows).Scan";
+AllocateGrants :: (count: isize) -> []AppGrant #foreign builtin "make";
+AllocateRecords :: (count: isize) -> []EncryptedRecord #foreign builtin "make";
+AppendGrant :: (values: []AppGrant, value: AppGrant) -> []AppGrant #foreign builtin "append";
+AppendRecord :: (values: []EncryptedRecord, value: EncryptedRecord) -> []EncryptedRecord #foreign builtin "append";
+
+AuditJSON :: (request: AppGrantRequest) -> string {
+    encoded := json.Marshal(request)
+    if encoded.error != null {
+        return "{}"
+    }
+    return text.FromBytes(encoded.value)
+}
+
+#scope_export
+Create :: (database: *sql.Database, context: ctx.Context, userID: string, request: AppGrantRequest, missingUser: Error) -> GrantResult {
+    result: GrantResult
+    generated := ids.New()
+    if generated.error != null {
+        result.error = generated.error
+        return result
+    }
+    if request.Permission == "" {
+        request.Permission = "read"
+    }
+    source := apps.Exists(database, context, request.SourceAppID)
+    result.error = source.error
+    if source.error != null {
+        return result
+    }
+    if !source.value {
+        result.error = sql.NoRows()
+        return result
+    }
+    target := apps.Exists(database, context, request.TargetAppID)
+    result.error = target.error
+    if target.error != null {
+        return result
+    }
+    if !target.value {
+        result.error = sql.NoRows()
+        return result
+    }
+    visibility := Visibility(database, context, request.SourceAppID, request.CollectionPrefix)
+    result.error = visibility.error
+    if visibility.error != null {
+        return result
+    }
+    if !visibility.found {
+        result.error = errors.New("collection is not registered for source app")
+        return result
+    }
+    if visibility.value == "private" {
+        result.error = errors.New("private collections cannot be granted across apps")
+        return result
+    }
+    begun := Begin(database, context, null)
+    result.error = begun.error
+    if begun.error != null {
+        return result
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    result.error = accounts.Touch(transaction, context, userID, missingUser)
+    if result.error != null {
+        return result
+    }
+    written := InsertGrant(transaction, context, GrantInsertSQL, generated.value,
+        userID, request.SourceAppID, request.TargetAppID, request.CollectionPrefix, request.Permission)
+    result.error = written.error
+    if written.error != null {
+        return result
+    }
+    audited := InsertCreateAudit(transaction, context, CreateAuditSQL, generated.value, userID, AuditJSON(request))
+    result.error = audited.error
+    if audited.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    if result.error != null {
+        return result
+    }
+    return ByID(database, context, userID, generated.value)
+}
+
+ByID :: (database: *sql.Database, context: ctx.Context, userID: string, id: string) -> GrantResult {
+    result: GrantResult
+    row := QueryTwo(database, context, GrantByIDSQL, userID, id)
+    result.error = ScanGrant(row, *result.value.ID, *result.value.UserIDHash,
+        *result.value.SourceAppID, *result.value.TargetAppID, *result.value.CollectionPrefix,
+        *result.value.Permission, *result.value.Status, *result.value.CreatedAt,
+        *result.value.UpdatedAt, *result.value.RevokedAt)
+    return result
+}
+
+List :: (database: *sql.Database, context: ctx.Context, userID: string) -> GrantsResult {
+    result: GrantsResult
+    queried := QueryRows(database, context, GrantListSQL, userID)
+    result.error = queried.error
+    if queried.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    values := AllocateGrants(0)
+    while sql.Next(rows) {
+        grant: AppGrant
+        result.error = ScanGrantRows(rows, *grant.ID, *grant.UserIDHash, *grant.SourceAppID,
+            *grant.TargetAppID, *grant.CollectionPrefix, *grant.Permission, *grant.Status,
+            *grant.CreatedAt, *grant.UpdatedAt, *grant.RevokedAt)
+        if result.error != null {
+            return result
+        }
+        values = AppendGrant(values, grant)
+    }
+    result.value = values
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Revoke :: (database: *sql.Database, context: ctx.Context, userID: string, id: string) -> Error {
+    begun := Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    revoked := RevokeGrant(transaction, context, GrantRevokeSQL, userID, id)
+    if revoked.error != null {
+        return revoked.error
+    }
+    affected := sql.RowsAffected(revoked.value)
+    if affected.error != null || cast(isize)affected.value == cast(isize)0 {
+        return sql.NoRows()
+    }
+    audited := InsertRevokeAudit(transaction, context, RevokeAuditSQL, id, userID)
+    if audited.error != null {
+        return audited.error
+    }
+    return sql.Commit(transaction)
+}
+
+AuthorizedRecords :: (database: *sql.Database, context: ctx.Context, userID: string, source: string, target: string, prefix: string, scopeNotOwned: Error, missingUser: Error) -> GrantedRecordsResult {
+    result: GrantedRecordsResult
+    source = TrimSpace(source)
+    target = TrimSpace(target)
+    prefix = TrimSpace(prefix)
+    if source == "" || target == "" || prefix == "" {
+        result.error = errors.New("source_app_id, target_app_id, and collection_prefix are required")
+        return result
+    }
+    visibility := Visibility(database, context, source, prefix)
+    result.error = visibility.error
+    if visibility.error != null {
+        return result
+    }
+    if !visibility.found {
+        result.error = scopeNotOwned
+        return result
+    }
+    exists := apps.Exists(database, context, target)
+    result.error = exists.error
+    if exists.error != null {
+        return result
+    }
+    if !exists.value {
+        result.error = sql.NoRows()
+        return result
+    }
+    if source != target {
+        count: isize = 0
+        row := QueryScope(database, context, AuthorizedScopeSQL, userID, source, target, prefix)
+        result.error = ScanCount(row, *count)
+        if result.error != null {
+            return result
+        }
+        if count == cast(isize)0 {
+            result.error = missingUser
+            return result
+        }
+    }
+    return Records(database, context, userID, prefix)
+}
+
+Visibility :: (database: *sql.Database, context: ctx.Context, appID: string, prefix: string) -> CollectionVisibilityResult {
+    result: CollectionVisibilityResult
+    value := ""
+    row := QueryTwo(database, context, VisibilitySQL, appID, prefix)
+    error := ScanVisibility(row, *value)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    result.error = error
+    if error != null {
+        return result
+    }
+    result.value = value
+    result.found = true
+    return result
+}
+
+Records :: (database: *sql.Database, context: ctx.Context, userID: string, prefix: string) -> GrantedRecordsResult {
+    result: GrantedRecordsResult
+    query := ExactRecordsSQL
+    pattern := prefix
+    if HasSuffix(prefix, ".*") {
+        query = PrefixRecordsSQL
+        pattern = scope.LikePatternForCollectionPrefix(prefix)
+    }
+    queried := QueryRecordRows(database, context, query, userID, pattern)
+    result.error = queried.error
+    if queried.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    values := AllocateRecords(0)
+    while sql.Next(rows) {
+        record: EncryptedRecord
+        result.error = ScanRecord(rows, *record.Collection, *record.ID, *record.KeyID,
+            *record.Nonce, *record.Ciphertext, *record.UpdatedAt, *record.DeletedAt,
+            *record.ContentHash, *record.SchemaVersion, *record.ParentID)
+        if result.error != null {
+            return result
+        }
+        values = AppendRecord(values, record)
+    }
+    result.value = values
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+#scope_file
+GrantInsertSQL :: #string SQL_END
+INSERT INTO server_app_grants(id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status)
+VALUES(?1,?2,?3,?4,?5,?6,'active')
+SQL_END;
+GrantByIDSQL :: #string SQL_END
+SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status,created_at,updated_at,revoked_at
+FROM server_app_grants WHERE user_id_hash=?1 AND id=?2
+SQL_END;
+GrantListSQL :: #string SQL_END
+SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status,created_at,updated_at,revoked_at
+FROM server_app_grants WHERE user_id_hash=?1 ORDER BY updated_at DESC,id
+SQL_END;
+GrantRevokeSQL :: #string SQL_END
+UPDATE server_app_grants
+SET status='revoked', revoked_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+WHERE user_id_hash=?1 AND id=?2 AND status='active'
+SQL_END;
+CreateAuditSQL :: "INSERT INTO server_app_grant_audit(grant_id,user_id_hash,action,payload_json) VALUES(?1,?2,'create',?3)";
+RevokeAuditSQL :: "INSERT INTO server_app_grant_audit(grant_id,user_id_hash,action) VALUES(?1,?2,'revoke')";
+AuthorizedScopeSQL :: #string SQL_END
+SELECT EXISTS(
+ SELECT 1 FROM server_app_grants
+ WHERE user_id_hash=?1 AND source_app_id=?2 AND target_app_id=?3
+   AND collection_prefix=?4 AND permission='read' AND status='active'
+)
+SQL_END;
+VisibilitySQL :: "SELECT visibility FROM server_app_collections WHERE app_id=?1 AND collection_prefix=?2";
+ExactRecordsSQL :: #string SQL_END
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
+FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 ORDER BY collection,id
+SQL_END;
+PrefixRecordsSQL :: #string SQL_END
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
+FROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\' ORDER BY collection,id
+SQL_END;

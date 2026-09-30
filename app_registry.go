@@ -1,11 +1,8 @@
 package main
 
 import (
-	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -19,208 +16,6 @@ const (
 )
 
 var errAppScopeNotOwned = errors.New("app does not own collection scope")
-
-func (s *Store) CreateAppGrant(ctx context.Context, userID string, req AppGrantRequest) (AppGrant, error) {
-	id, err := randomResourceID()
-	if err != nil {
-		return AppGrant{}, err
-	}
-	if req.Permission == "" {
-		req.Permission = appGrantRead
-	}
-	existence := AppStore_Exists(s.db, ctx, req.SourceAppID)
-	if exists, err := existence.Value, existence.Error; err != nil || !exists {
-		if err != nil {
-			return AppGrant{}, err
-		}
-		return AppGrant{}, sql.ErrNoRows
-	}
-	existence = AppStore_Exists(s.db, ctx, req.TargetAppID)
-	if exists, err := existence.Value, existence.Error; err != nil || !exists {
-		if err != nil {
-			return AppGrant{}, err
-		}
-		return AppGrant{}, sql.ErrNoRows
-	}
-	visibility, ok, err := s.appCollectionVisibility(ctx, req.SourceAppID, req.CollectionPrefix)
-	if err != nil {
-		return AppGrant{}, err
-	}
-	if !ok {
-		return AppGrant{}, fmt.Errorf("collection is not registered for source app")
-	}
-	if visibility == "private" {
-		return AppGrant{}, fmt.Errorf("private collections cannot be granted across apps")
-	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return AppGrant{}, err
-	}
-	defer tx.Rollback()
-	if err := touchUser(ctx, tx, userID); err != nil {
-		return AppGrant{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_app_grants(id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status)
-VALUES(?1,?2,?3,?4,?5,?6,'active')`,
-		id, userID, req.SourceAppID, req.TargetAppID, req.CollectionPrefix, req.Permission); err != nil {
-		return AppGrant{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_app_grant_audit(grant_id,user_id_hash,action,payload_json)
-VALUES(?1,?2,'create',?3)`, id, userID, auditJSON(req)); err != nil {
-		return AppGrant{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return AppGrant{}, err
-	}
-	return s.AppGrantByID(ctx, userID, id)
-}
-
-func (s *Store) AppGrantByID(ctx context.Context, userID, id string) (AppGrant, error) {
-	var grant AppGrant
-	err := s.db.QueryRowContext(ctx, `
-SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status,created_at,updated_at,revoked_at
-FROM server_app_grants
-WHERE user_id_hash=?1 AND id=?2`, userID, id).Scan(&grant.ID, &grant.UserIDHash,
-		&grant.SourceAppID, &grant.TargetAppID, &grant.CollectionPrefix, &grant.Permission,
-		&grant.Status, &grant.CreatedAt, &grant.UpdatedAt, &grant.RevokedAt)
-	return grant, err
-}
-
-func (s *Store) ListAppGrants(ctx context.Context, userID string) ([]AppGrant, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status,created_at,updated_at,revoked_at
-FROM server_app_grants
-WHERE user_id_hash=?1
-ORDER BY updated_at DESC,id`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := []AppGrant{}
-	for rows.Next() {
-		var item AppGrant
-		if err := rows.Scan(&item.ID, &item.UserIDHash, &item.SourceAppID, &item.TargetAppID,
-			&item.CollectionPrefix, &item.Permission, &item.Status, &item.CreatedAt,
-			&item.UpdatedAt, &item.RevokedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (s *Store) RevokeAppGrant(ctx context.Context, userID, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `
-UPDATE server_app_grants
-SET status='revoked', revoked_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
-WHERE user_id_hash=?1 AND id=?2 AND status='active'`, userID, id)
-	if err != nil {
-		return err
-	}
-	if rowsAffected(res) == 0 {
-		return sql.ErrNoRows
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_app_grant_audit(grant_id,user_id_hash,action)
-VALUES(?1,?2,'revoke')`, id, userID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *Store) AuthorizedAppRecords(ctx context.Context, userID, sourceAppID, targetAppID, collectionPrefix string) ([]EncryptedRecord, error) {
-	sourceAppID = strings.TrimSpace(sourceAppID)
-	targetAppID = strings.TrimSpace(targetAppID)
-	collectionPrefix = strings.TrimSpace(collectionPrefix)
-	if sourceAppID == "" || targetAppID == "" || collectionPrefix == "" {
-		return nil, fmt.Errorf("source_app_id, target_app_id, and collection_prefix are required")
-	}
-	if _, ok, err := s.appCollectionVisibility(ctx, sourceAppID, collectionPrefix); err != nil {
-		return nil, err
-	} else if !ok {
-		return nil, errAppScopeNotOwned
-	}
-	existence := AppStore_Exists(s.db, ctx, targetAppID)
-	if exists, err := existence.Value, existence.Error; err != nil {
-		return nil, err
-	} else if !exists {
-		return nil, sql.ErrNoRows
-	}
-	if sourceAppID != targetAppID {
-		var exists int
-		err := s.db.QueryRowContext(ctx, `
-SELECT EXISTS(
-	SELECT 1 FROM server_app_grants
-	WHERE user_id_hash=?1 AND source_app_id=?2 AND target_app_id=?3
-	  AND collection_prefix=?4 AND permission='read' AND status='active'
-)`, userID, sourceAppID, targetAppID, collectionPrefix).Scan(&exists)
-		if err != nil {
-			return nil, err
-		}
-		if exists == 0 {
-			return nil, ErrSyncUserNotFound
-		}
-	}
-	return s.snapshotEncryptedRecordsByCollectionPrefix(ctx, userID, collectionPrefix)
-}
-
-func (s *Store) appCollectionVisibility(ctx context.Context, appID, collectionPrefix string) (string, bool, error) {
-	var visibility string
-	err := s.db.QueryRowContext(ctx, `
-SELECT visibility
-FROM server_app_collections
-WHERE app_id=?1 AND collection_prefix=?2`, appID, collectionPrefix).Scan(&visibility)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return visibility, true, nil
-}
-
-func (s *Store) snapshotEncryptedRecordsByCollectionPrefix(ctx context.Context, userID, collectionPrefix string) ([]EncryptedRecord, error) {
-	query := `
-SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
-FROM server_encrypted_records
-WHERE user_id_hash=?1 AND collection=?2
-ORDER BY collection,id`
-	args := []any{userID, collectionPrefix}
-	if strings.HasSuffix(collectionPrefix, ".*") {
-		query = `
-SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
-FROM server_encrypted_records
-WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\'
-ORDER BY collection,id`
-		args[1] = Scope_LikePatternForCollectionPrefix(collectionPrefix)
-	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := []EncryptedRecord{}
-	for rows.Next() {
-		var item EncryptedRecord
-		if err := rows.Scan(&item.Collection, &item.ID, &item.KeyID, &item.Nonce,
-			&item.Ciphertext, &item.UpdatedAt, &item.DeletedAt, &item.ContentHash,
-			&item.SchemaVersion, &item.ParentID); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
 
 func (s *Server) handleAppList(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
@@ -329,7 +124,8 @@ func (s *Server) handleAppGrants(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		grant, err := s.store.CreateAppGrant(r.Context(), userID, req)
+		createdGrant := AppGrants_Create(s.store.db, r.Context(), userID, req, ErrSyncUserNotFound)
+		grant, err := createdGrant.Value, createdGrant.Error
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeError(w, http.StatusNotFound, "app not found")
@@ -346,7 +142,8 @@ func (s *Server) handleAppGrants(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, grant)
 		return
 	}
-	grants, err := s.store.ListAppGrants(r.Context(), userID)
+	listedGrants := AppGrants_List(s.store.db, r.Context(), userID)
+	grants, err := listedGrants.Value, listedGrants.Error
 	if err != nil {
 		slog.Error("list app grants", "user", LogSafety_LogText(userID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app grants failed")
@@ -389,7 +186,8 @@ func (s *Server) handleSignedAppGrant(w http.ResponseWriter, r *http.Request) {
 			SignedTx_Forget(s.store.db, r.Context(), req.Tx)
 		}
 	}()
-	grant, err := s.store.CreateAppGrant(r.Context(), userID, req.Grant)
+	createdGrant := AppGrants_Create(s.store.db, r.Context(), userID, req.Grant, ErrSyncUserNotFound)
+	grant, err := createdGrant.Value, createdGrant.Error
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "app not found")
@@ -417,7 +215,7 @@ func (s *Server) handleAppGrantRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "app grant not found")
 		return
 	}
-	if err := s.store.RevokeAppGrant(r.Context(), userID, id); err != nil {
+	if err := AppGrants_Revoke(s.store.db, r.Context(), userID, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "app grant not found")
 			return
@@ -457,7 +255,8 @@ func (s *Server) handleAppRecords(w http.ResponseWriter, r *http.Request) {
 			SignedTx_Forget(s.store.db, r.Context(), tx)
 		}
 	}()
-	records, err := s.store.AuthorizedAppRecords(r.Context(), userID, sourceAppID, targetAppID, collectionPrefix)
+	authorized := AppGrants_AuthorizedRecords(s.store.db, r.Context(), userID, sourceAppID, targetAppID, collectionPrefix, errAppScopeNotOwned, ErrSyncUserNotFound)
+	records, err := authorized.Value, authorized.Error
 	if err != nil {
 		if errors.Is(err, ErrSyncUserNotFound) {
 			writeError(w, http.StatusForbidden, "app grant required")
@@ -516,12 +315,4 @@ func readSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody i
 	}
 	decoded := AppRegistration_DecodeSignedGrant(body)
 	return decoded.Value, decoded.Body, decoded.Error
-}
-
-func auditJSON(value any) string {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return "{}"
-	}
-	return string(data)
 }

@@ -1003,7 +1003,7 @@ func (s *Store) ApplySyncDetailed(ctx context.Context, req SyncRequest, publicKe
 		if err := upsertUser(ctx, tx, req.UserIDHash, publicKey); err != nil {
 			return SyncResult{}, nil, err
 		}
-	} else if err := touchUser(ctx, tx, req.UserIDHash); err != nil {
+	} else if err := AccountState_Touch(tx, ctx, req.UserIDHash, ErrSyncUserNotFound); err != nil {
 		return SyncResult{}, nil, err
 	}
 	if req.FullSyncRequested {
@@ -2011,7 +2011,7 @@ func (s *Store) StoreEncryptedPayload(ctx context.Context, userID, clientID stri
 		return 0, err
 	}
 	defer tx.Rollback()
-	if err := touchUser(ctx, tx, userID); err != nil {
+	if err := AccountState_Touch(tx, ctx, userID, ErrSyncUserNotFound); err != nil {
 		return 0, err
 	}
 	version, err := nextUserVersion(ctx, tx, userID)
@@ -3610,23 +3610,6 @@ ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=?3`, userID, publicKey, Tim
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
-INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)
-VALUES(?1,0)`, userID)
-	return err
-}
-
-func touchUser(ctx context.Context, tx *sql.Tx, userID string) error {
-	res, err := tx.ExecContext(ctx, `
-UPDATE server_users
-SET last_seen_at=?2
-WHERE user_id_hash=?1`, userID, Timestamp_CanonicalNow())
-	if err != nil {
-		return err
-	}
-	if rowsAffected(res) == 0 {
-		return ErrSyncUserNotFound
-	}
-	_, err = tx.ExecContext(ctx, `
 INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)
 VALUES(?1,0)`, userID)
 	return err

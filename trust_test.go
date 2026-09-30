@@ -294,7 +294,7 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 			[]byte(Signing_AppApprovalMessage(AppApprovalContext, manifest.AppID, manifestHash)),
 		)),
 	}
-	if err := sourceStore.UpsertSignedAppManifest(
+	if err := AppStore_UpsertSignedManifest(sourceStore.db,
 		t.Context(),
 		manifest,
 		manifestBytes,

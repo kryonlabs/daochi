@@ -1126,7 +1126,8 @@ func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error
 		if !Identity_ValidNamespace(req.AppID) {
 			return errors.New("invalid app_id")
 		}
-		app, exists, err := s.store.AppByID(ctx, req.AppID)
+		appResult := AppStore_ByID(s.store.db, ctx, req.AppID)
+		app, exists, err := appResult.Value, appResult.Found, appResult.Error
 		if err != nil {
 			return err
 		}
@@ -1141,7 +1142,8 @@ func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error
 			return errors.New("app manifest expired")
 		}
 		if req.ProtocolVersion < 6 {
-			allowed, err := s.store.AppAllowsLegacyProtocol(ctx, req.AppID, req.ProtocolVersion)
+			legacyResult := AppStore_AllowsLegacyProtocol(s.store.db, ctx, req.AppID, req.ProtocolVersion)
+			allowed, err := legacyResult.Value, legacyResult.Error
 			if err != nil {
 				return err
 			}
@@ -1158,7 +1160,8 @@ func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error
 			return errors.New("invalid encrypted record")
 		}
 		if req.AppID != "" {
-			owns, err := s.store.AppOwnsCollection(ctx, req.AppID, item.Collection)
+			ownership := AppStore_OwnsCollection(s.store.db, ctx, req.AppID, item.Collection)
+			owns, err := ownership.Value, ownership.Error
 			if err != nil {
 				return err
 			}

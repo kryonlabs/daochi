@@ -256,7 +256,7 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := store.SeedBuiltinApps(context.Background()); err != nil {
+	if err := AppStore_SeedBuiltin(store.db, context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

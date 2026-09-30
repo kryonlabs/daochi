@@ -21,255 +21,6 @@ const (
 
 var errAppScopeNotOwned = errors.New("app does not own collection scope")
 
-func (s *Store) SeedBuiltinApps(ctx context.Context) error {
-	inbe := AppRegistration{
-		AppID:              "inbe",
-		DisplayName:        "Inner Breeze",
-		Description:        "Breathing, meditation, and habit data.",
-		HomepageURL:        "https://inbe.waozi.xyz/",
-		SourceURL:          "https://github.com/waozixyz/inbe",
-		Status:             appStatusActive,
-		AppSchemaVersion:   1,
-		MinClientVersion:   "0.0.0",
-		CurrentVersion:     "next",
-		CompatibilityUntil: appCompatibilityDeadline,
-		Collections: []AppCollection{
-			{CollectionPrefix: "inbe.habits", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit records."},
-			{CollectionPrefix: "inbe.habit_days", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit-day records."},
-			{CollectionPrefix: "inbe.sessions", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted session records."},
-			{CollectionPrefix: "private.inbe.v1.*", Visibility: "private", SchemaVersion: 1, Description: "Future private Inbe records."},
-			{CollectionPrefix: "private.inbe.v1.elist-lists", Visibility: "private", SchemaVersion: 1, Description: "Encrypted Inbe EList list records."},
-			{CollectionPrefix: "private.inbe.v1.elist-items", Visibility: "private", SchemaVersion: 1, Description: "Encrypted Inbe EList item records."},
-			{CollectionPrefix: "shared.inbe.v1.*", Visibility: "shared", SchemaVersion: 1, Description: "User-grantable Inbe records."},
-			{CollectionPrefix: "friends.inbe.v1.*", Visibility: "friends", SchemaVersion: 1, Description: "Friend-visible Inbe records."},
-			{CollectionPrefix: "public.inbe.v1.*", Visibility: "public", SchemaVersion: 1, Description: "Public Inbe records."},
-		},
-		Capabilities: []string{"sync", "encrypted-records", "profile-stats", "leaderboard"},
-		Features: []AppFeature{
-			{ID: "sync.private_records", Collections: []string{"private.inbe.v1.*", "inbe.habits", "inbe.habit_days", "inbe.sessions"}, RequiresSignedTx: true},
-			{ID: "sync.elist", Collections: []string{"private.inbe.v1.elist-lists", "private.inbe.v1.elist-items"}, RequiresSignedTx: true},
-			{ID: "sync.shared_records", Collections: []string{"shared.inbe.v1.*"}, RequiresSignedTx: true},
-			{ID: "profile.stats", RequiresSignedTx: false},
-		},
-		LegacyProtocols: []LegacyProtocol{
-			{Name: "inbe-typed-sync", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
-			{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
-		},
-		TokenPolicies: []TokenPolicy{
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive, LegacyUnsignedUntil: 1819756800},
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive, LegacyUnsignedUntil: 1819756800},
-		},
-	}
-	var signedManifest int
-	if err := s.db.QueryRowContext(ctx, `
-SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status='active')`).Scan(&signedManifest); err != nil {
-		return err
-	}
-	if signedManifest != 0 {
-		return nil
-	}
-	return s.UpsertApp(ctx, inbe)
-}
-
-func (s *Store) UpsertApp(ctx context.Context, app AppRegistration) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := upsertAppTx(ctx, tx, app); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *Store) ListApps(ctx context.Context) ([]AppRegistration, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,
-       app_schema_version,min_supported_client_version,current_client_version,
-       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at
-FROM server_apps
-ORDER BY app_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	apps := []AppRegistration{}
-	for rows.Next() {
-		var app AppRegistration
-		var featuresJSON string
-		var legacyProtocolsJSON string
-		if err := rows.Scan(&app.AppID, &app.DisplayName, &app.Description, &app.HomepageURL,
-			&app.SourceURL, &app.PublicKey, &app.Status, &app.AppSchemaVersion,
-			&app.MinClientVersion, &app.CurrentVersion, &app.CompatibilityUntil,
-			&featuresJSON, &legacyProtocolsJSON, &app.CreatedAt, &app.UpdatedAt); err != nil {
-			return nil, err
-		}
-		if err := decodeAppMetadata(featuresJSON, legacyProtocolsJSON, &app); err != nil {
-			return nil, err
-		}
-		apps = append(apps, app)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i := range apps {
-		apps[i].Collections, err = s.AppCollections(ctx, apps[i].AppID)
-		if err != nil {
-			return nil, err
-		}
-		apps[i].Capabilities, err = s.AppCapabilities(ctx, apps[i].AppID)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.HydrateAppManifestFields(ctx, &apps[i]); err != nil {
-			return nil, err
-		}
-	}
-	return apps, nil
-}
-
-func (s *Store) AppByID(ctx context.Context, appID string) (AppRegistration, bool, error) {
-	var app AppRegistration
-	row := s.db.QueryRowContext(ctx, `
-SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,
-       app_schema_version,min_supported_client_version,current_client_version,
-       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at
-FROM server_apps
-WHERE app_id=?1`, appID)
-	var featuresJSON string
-	var legacyProtocolsJSON string
-	err := row.Scan(&app.AppID, &app.DisplayName, &app.Description,
-		&app.HomepageURL, &app.SourceURL, &app.PublicKey, &app.Status,
-		&app.AppSchemaVersion, &app.MinClientVersion, &app.CurrentVersion,
-		&app.CompatibilityUntil, &featuresJSON, &legacyProtocolsJSON,
-		&app.CreatedAt, &app.UpdatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return AppRegistration{}, false, nil
-	}
-	if err != nil {
-		return AppRegistration{}, false, err
-	}
-	if err := decodeAppMetadata(featuresJSON, legacyProtocolsJSON, &app); err != nil {
-		return AppRegistration{}, false, err
-	}
-	var err2 error
-	app.Collections, err2 = s.AppCollections(ctx, appID)
-	if err2 != nil {
-		return AppRegistration{}, false, err2
-	}
-	app.Capabilities, err2 = s.AppCapabilities(ctx, appID)
-	if err2 != nil {
-		return AppRegistration{}, false, err2
-	}
-	if err := s.HydrateAppManifestFields(ctx, &app); err != nil {
-		return AppRegistration{}, false, err
-	}
-	return app, true, nil
-}
-
-func decodeAppMetadata(featuresJSON, legacyProtocolsJSON string, app *AppRegistration) error {
-	if strings.TrimSpace(featuresJSON) != "" {
-		if err := json.Unmarshal([]byte(featuresJSON), &app.Features); err != nil {
-			return err
-		}
-	}
-	if strings.TrimSpace(legacyProtocolsJSON) != "" {
-		if err := json.Unmarshal([]byte(legacyProtocolsJSON), &app.LegacyProtocols); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Store) AppExists(ctx context.Context, appID string) (bool, error) {
-	var exists int
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_apps WHERE app_id=?1 AND status='active')`, appID).Scan(&exists)
-	return exists != 0, err
-}
-
-func (s *Store) AppAllowsLegacyProtocol(ctx context.Context, appID string, protocolVersion int) (bool, error) {
-	app, found, err := s.AppByID(ctx, appID)
-	if err != nil || !found {
-		return false, err
-	}
-	today := time.Now().UTC().Format("2006-01-02")
-	for _, legacy := range app.LegacyProtocols {
-		if legacy.Status != "compatibility" && legacy.Status != "active" {
-			continue
-		}
-		if legacy.Version > 0 && protocolVersion > legacy.Version {
-			continue
-		}
-		if legacy.ValidUntil >= today {
-			return true, nil
-		}
-	}
-	if app.CompatibilityUntil != "" && app.CompatibilityUntil >= today {
-		return true, nil
-	}
-	return false, nil
-}
-
-func (s *Store) AppCollections(ctx context.Context, appID string) ([]AppCollection, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT app_id,collection_prefix,visibility,schema_version,description,created_at
-FROM server_app_collections
-WHERE app_id=?1
-ORDER BY collection_prefix`, appID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := []AppCollection{}
-	for rows.Next() {
-		var item AppCollection
-		if err := rows.Scan(&item.AppID, &item.CollectionPrefix, &item.Visibility,
-			&item.SchemaVersion, &item.Description, &item.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (s *Store) AppCapabilities(ctx context.Context, appID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT capability
-FROM server_app_capabilities
-WHERE app_id=?1
-ORDER BY capability`, appID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := []string{}
-	for rows.Next() {
-		var item string
-		if err := rows.Scan(&item); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (s *Store) AppOwnsCollection(ctx context.Context, appID, collection string) (bool, error) {
-	collections, err := s.AppCollections(ctx, appID)
-	if err != nil {
-		return false, err
-	}
-	for _, item := range collections {
-		if Scope_CollectionMatchesPrefix(collection, item.CollectionPrefix) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func (s *Store) CreateAppGrant(ctx context.Context, userID string, req AppGrantRequest) (AppGrant, error) {
 	id, err := randomResourceID()
 	if err != nil {
@@ -278,13 +29,15 @@ func (s *Store) CreateAppGrant(ctx context.Context, userID string, req AppGrantR
 	if req.Permission == "" {
 		req.Permission = appGrantRead
 	}
-	if exists, err := s.AppExists(ctx, req.SourceAppID); err != nil || !exists {
+	existence := AppStore_Exists(s.db, ctx, req.SourceAppID)
+	if exists, err := existence.Value, existence.Error; err != nil || !exists {
 		if err != nil {
 			return AppGrant{}, err
 		}
 		return AppGrant{}, sql.ErrNoRows
 	}
-	if exists, err := s.AppExists(ctx, req.TargetAppID); err != nil || !exists {
+	existence = AppStore_Exists(s.db, ctx, req.TargetAppID)
+	if exists, err := existence.Value, existence.Error; err != nil || !exists {
 		if err != nil {
 			return AppGrant{}, err
 		}
@@ -397,7 +150,8 @@ func (s *Store) AuthorizedAppRecords(ctx context.Context, userID, sourceAppID, t
 	} else if !ok {
 		return nil, errAppScopeNotOwned
 	}
-	if exists, err := s.AppExists(ctx, targetAppID); err != nil {
+	existence := AppStore_Exists(s.db, ctx, targetAppID)
+	if exists, err := existence.Value, existence.Error; err != nil {
 		return nil, err
 	} else if !exists {
 		return nil, sql.ErrNoRows
@@ -474,7 +228,8 @@ func (s *Server) handleAppList(w http.ResponseWriter, r *http.Request) {
 		s.handleAppRegister(w, r)
 		return
 	}
-	apps, err := s.store.ListApps(r.Context())
+	appsResult := AppStore_List(s.store.db, r.Context())
+	apps, err := appsResult.Value, appsResult.Error
 	if err != nil {
 		slog.Error("list apps", "error", err)
 		writeError(w, http.StatusInternalServerError, "apps failed")
@@ -488,14 +243,16 @@ func (s *Server) handleAppRoute(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(appID, "/collections") {
 		appID = strings.TrimSuffix(appID, "/collections")
 		appID = strings.Trim(appID, "/")
-		collections, err := s.store.AppCollections(r.Context(), appID)
+		collectionsResult := AppStore_Collections(s.store.db, r.Context(), appID)
+		collections, err := collectionsResult.Value, collectionsResult.Error
 		if err != nil {
 			slog.Error("app collections", "app", LogSafety_LogText(appID), "error", err)
 			writeError(w, http.StatusInternalServerError, "apps failed")
 			return
 		}
 		if len(collections) == 0 {
-			if exists, err := s.store.AppExists(r.Context(), appID); err != nil || !exists {
+			existence := AppStore_Exists(s.store.db, r.Context(), appID)
+			if exists, err := existence.Value, existence.Error; err != nil || !exists {
 				if err != nil {
 					slog.Error("app exists", "app", LogSafety_LogText(appID), "error", err)
 					writeError(w, http.StatusInternalServerError, "apps failed")
@@ -516,7 +273,8 @@ func (s *Server) handleAppRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "app not found")
 		return
 	}
-	app, found, err := s.store.AppByID(r.Context(), appID)
+	appResult := AppStore_ByID(s.store.db, r.Context(), appID)
+	app, found, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil {
 		slog.Error("load app", "app", LogSafety_LogText(appID), "error", err)
 		writeError(w, http.StatusInternalServerError, "apps failed")
@@ -546,12 +304,13 @@ func (s *Server) handleAppRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "app_id path mismatch")
 		return
 	}
-	if err := s.store.UpsertApp(r.Context(), req); err != nil {
+	if err := AppStore_Upsert(s.store.db, r.Context(), req); err != nil {
 		slog.Error("register app", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
-	app, _, err := s.store.AppByID(r.Context(), req.AppID)
+	appResult := AppStore_ByID(s.store.db, r.Context(), req.AppID)
+	app, _, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil {
 		slog.Error("load registered app", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "app registration failed")

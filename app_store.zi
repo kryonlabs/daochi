@@ -1,0 +1,716 @@
+#import "go_types"
+#import "manifest"
+#import "protocol"
+manifest :: #import "manifest";
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+clock :: #import "time_go";
+errors :: #import "errors_go";
+json :: #import "json_go";
+text :: #import "text_go";
+scope :: #import "scope";
+go_sql :: #system_library "go:database/sql";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+AppKeyResult :: struct {
+    value: AppKey
+    found: bool
+    error: Error
+}
+AppKeysResult :: struct {
+    value: []AppKey
+    error: Error
+}
+TokenPoliciesResult :: struct {
+    value: []TokenPolicy
+    error: Error
+}
+TokenPolicyResult :: struct {
+    value: TokenPolicy
+    found: bool
+    error: Error
+}
+TokenPolicyExistsResult :: struct {
+    value: bool
+    error: Error
+}
+AppResult :: struct {
+    value: AppRegistration
+    found: bool
+    error: Error
+}
+AppsResult :: struct {
+    value: []AppRegistration
+    error: Error
+}
+CollectionsResult :: struct {
+    value: []AppCollection
+    error: Error
+}
+CapabilitiesResult :: struct {
+    value: []string
+    error: Error
+}
+ExistsResult :: struct {
+    value: bool
+    error: Error
+}
+
+#scope_file
+TransactionResult :: struct {
+    value: *sql.Transaction
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Compare :: (left: string, right: string) -> isize #foreign go_strings;
+Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+DeleteByApp :: (transaction: *sql.Transaction, context: ctx.Context, query: string, appID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertApp :: (transaction: *sql.Transaction, context: ctx.Context, query: string, appID: string, name: string, description: string, homepage: string, source: string, key: string, status: string, schema: isize, minimum: string, current: string, compatibility: string, features: string, legacy: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertCollection :: (transaction: *sql.Transaction, context: ctx.Context, query: string, appID: string, prefix: string, visibility: string, schema: isize, description: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertCapability :: (transaction: *sql.Transaction, context: ctx.Context, query: string, appID: string, capability: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertPolicy :: (transaction: *sql.Transaction, context: ctx.Context, query: string, appID: string, asset: string, permission: string, status: string, legacy: s64) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertManifest :: (transaction: *sql.Transaction, context: ctx.Context, query: string, appID: string, version: isize, value: string, hash: string, signature: string, approval: string, expiry: s64, status: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertKey :: (transaction: *sql.Transaction, context: ctx.Context, query: string, appID: string, keyID: string, algorithm: string, key: string, purpose: string, status: string, expiry: s64) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+QueryOne :: (database: *sql.Database, context: ctx.Context, query: string, appID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryTwo :: (database: *sql.Database, context: ctx.Context, query: string, appID: string, keyID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryThree :: (database: *sql.Database, context: ctx.Context, query: string, appID: string, asset: string, permission: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryRows :: (database: *sql.Database, context: ctx.Context, query: string, appID: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
+ScanKey :: (row: *sql.Row, keyID: *string, algorithm: *string, key: *string, purpose: *string, status: *string, expiry: *s64, created: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanKeyRows :: (rows: *sql.Rows, keyID: *string, algorithm: *string, key: *string, purpose: *string, status: *string, expiry: *s64, created: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanPolicy :: (row: *sql.Row, asset: *string, permission: *string, status: *string, legacy: *s64) -> Error #foreign go_sql "(*Row).Scan";
+ScanPolicyRows :: (rows: *sql.Rows, asset: *string, permission: *string, status: *string, legacy: *s64) -> Error #foreign go_sql "(*Rows).Scan";
+ScanManifest :: (row: *sql.Row, version: *isize, value: *string, hash: *string, signature: *string, approval: *string, expiry: *s64) -> Error #foreign go_sql "(*Row).Scan";
+AppendKey :: (keys: []AppKey, key: AppKey) -> []AppKey #foreign builtin "append";
+AppendPolicy :: (policies: []TokenPolicy, policy: TokenPolicy) -> []TokenPolicy #foreign builtin "append";
+AppendApp :: (apps: []AppRegistration, app: AppRegistration) -> []AppRegistration #foreign builtin "append";
+AppendCollection :: (collections: []AppCollection, collection: AppCollection) -> []AppCollection #foreign builtin "append";
+AppendString :: (values: []string, value: string) -> []string #foreign builtin "append";
+AllocateApps :: (count: isize) -> []AppRegistration #foreign builtin "make";
+AllocateCollections :: (count: isize) -> []AppCollection #foreign builtin "make";
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+AllocateFeatures :: (count: isize) -> []AppFeature #foreign builtin "make";
+AllocateLegacy :: (count: isize) -> []LegacyProtocol #foreign builtin "make";
+AllocatePolicies :: (count: isize) -> []TokenPolicy #foreign builtin "make";
+QueryAll :: (database: *sql.Database, context: ctx.Context, query: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+QuerySingle :: (database: *sql.Database, context: ctx.Context, query: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+ScanApp :: (row: *sql.Row, appID: *string, name: *string, description: *string, homepage: *string, source: *string, key: *string, status: *string, schema: *isize, minimum: *string, current: *string, compatibility: *string, features: *string, legacy: *string, created: *string, updated: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanAppRows :: (rows: *sql.Rows, appID: *string, name: *string, description: *string, homepage: *string, source: *string, key: *string, status: *string, schema: *isize, minimum: *string, current: *string, compatibility: *string, features: *string, legacy: *string, created: *string, updated: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanCollection :: (rows: *sql.Rows, appID: *string, prefix: *string, visibility: *string, schema: *isize, description: *string, created: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanString :: (rows: *sql.Rows, value: *string) -> Error #foreign go_sql "(*Rows).Scan";
+
+DecodeMetadata :: (features: string, legacy: string, app: *AppRegistration) -> Error {
+    if TrimSpace(features) != "" {
+        error := json.Unmarshal(text.ToBytes(features), *app.Features)
+        if error != null {
+            return error
+        }
+    }
+    if TrimSpace(legacy) != "" {
+        error := json.Unmarshal(text.ToBytes(legacy), *app.LegacyProtocols)
+        if error != null {
+            return error
+        }
+    }
+    return null
+}
+
+Hydrate :: (database: *sql.Database, context: ctx.Context, app: *AppRegistration) -> Error {
+    collections := Collections(database, context, app.AppID)
+    app.Collections = collections.value
+    if collections.error != null {
+        return collections.error
+    }
+    capabilities := Capabilities(database, context, app.AppID)
+    app.Capabilities = capabilities.value
+    if capabilities.error != null {
+        return capabilities.error
+    }
+    return HydrateManifest(database, context, app)
+}
+
+ReplacePolicies :: (transaction: *sql.Transaction, context: ctx.Context, appID: string, policies: []TokenPolicy) -> Error {
+    deleted := DeleteByApp(transaction, context, "DELETE FROM token_app_permissions WHERE app_id=?1", appID)
+    if deleted.error != null {
+        return deleted.error
+    }
+    for policy: policies {
+        inserted := InsertPolicy(transaction, context, PolicyInsertSQL, appID, policy.AssetID,
+            policy.Permission, manifest.DefaultString(policy.Status, "active"), policy.LegacyUnsignedUntil)
+        if inserted.error != null {
+            return inserted.error
+        }
+    }
+    return null
+}
+
+UpsertTransaction :: (transaction: *sql.Transaction, context: ctx.Context, app: AppRegistration) -> Error {
+    status := TrimSpace(app.Status)
+    features := json.Marshal(app.Features)
+    if features.error != null {
+        return features.error
+    }
+    legacy := json.Marshal(app.LegacyProtocols)
+    if legacy.error != null {
+        return legacy.error
+    }
+    if status == "" {
+        status = "active"
+    }
+    inserted := InsertApp(transaction, context, AppInsertSQL, app.AppID, app.DisplayName,
+        app.Description, app.HomepageURL, app.SourceURL, app.PublicKey, status,
+        app.AppSchemaVersion, app.MinClientVersion, app.CurrentVersion, app.CompatibilityUntil,
+        text.FromBytes(features.value), text.FromBytes(legacy.value))
+    if inserted.error != null {
+        return inserted.error
+    }
+    collections := DeleteByApp(transaction, context, "DELETE FROM server_app_collections WHERE app_id=?1", app.AppID)
+    if collections.error != null {
+        return collections.error
+    }
+    for collection: app.Collections {
+        written := InsertCollection(transaction, context, CollectionInsertSQL, app.AppID,
+            collection.CollectionPrefix, collection.Visibility, collection.SchemaVersion, collection.Description)
+        if written.error != null {
+            return written.error
+        }
+    }
+    capabilities := DeleteByApp(transaction, context, "DELETE FROM server_app_capabilities WHERE app_id=?1", app.AppID)
+    if capabilities.error != null {
+        return capabilities.error
+    }
+    for capability: app.Capabilities {
+        written := InsertCapability(transaction, context, CapabilityInsertSQL, app.AppID, capability)
+        if written.error != null {
+            return written.error
+        }
+    }
+    return ReplacePolicies(transaction, context, app.AppID, app.TokenPolicies)
+}
+
+#scope_export
+Upsert :: (database: *sql.Database, context: ctx.Context, app: AppRegistration) -> Error {
+    begun := Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    error := UpsertTransaction(transaction, context, app)
+    if error != null {
+        return error
+    }
+    return sql.Commit(transaction)
+}
+
+UpsertSignedManifest :: (database: *sql.Database, context: ctx.Context, value: AppManifest, bytes: []u8, hash: string, signature: string, approval: string) -> Error {
+    begun := Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    status := value.Status
+    if status == "" {
+        status = "active"
+    }
+    app: AppRegistration
+    app.AppID = value.AppID
+    app.DisplayName = value.DisplayName
+    app.Description = value.Description
+    app.HomepageURL = value.HomepageURL
+    app.SourceURL = value.SourceURL
+    app.Status = status
+    app.AppSchemaVersion = value.AppSchemaVersion
+    app.MinClientVersion = value.MinClientVersion
+    app.CurrentVersion = value.CurrentVersion
+    app.CompatibilityUntil = value.CompatibilityUntil
+    app.Collections = value.Collections
+    app.Capabilities = value.Capabilities
+    app.Features = value.Features
+    app.LegacyProtocols = value.LegacyProtocols
+    app.TokenPolicies = value.TokenPolicies
+    if value.Keys.count > 0 {
+        app.PublicKey = value.Keys[0].PublicKey
+    }
+    error := UpsertTransaction(transaction, context, app)
+    if error != null {
+        return error
+    }
+    written := InsertManifest(transaction, context, ManifestInsertSQL, value.AppID,
+        value.ManifestVersion, text.FromBytes(bytes), hash, signature, approval, value.ExpiresAt, status)
+    if written.error != null {
+        return written.error
+    }
+    deleted := DeleteByApp(transaction, context, "DELETE FROM server_app_keys WHERE app_id=?1", value.AppID)
+    if deleted.error != null {
+        return deleted.error
+    }
+    for key: value.Keys {
+        inserted := InsertKey(transaction, context, KeyInsertSQL, value.AppID, key.KeyID,
+            key.Algorithm, key.PublicKey, manifest.DefaultString(key.Purpose, "signing"),
+            manifest.DefaultString(key.Status, "active"), key.ExpiresAt)
+        if inserted.error != null {
+            return inserted.error
+        }
+    }
+    error = ReplacePolicies(transaction, context, value.AppID, value.TokenPolicies)
+    if error != null {
+        return error
+    }
+    return sql.Commit(transaction)
+}
+
+ActiveKey :: (database: *sql.Database, context: ctx.Context, appID: string, keyID: string) -> AppKeyResult {
+    result: AppKeyResult
+    key: AppKey
+    row := QueryTwo(database, context, ActiveKeySQL, appID, keyID)
+    error := ScanKey(row, *key.KeyID, *key.Algorithm, *key.PublicKey, *key.Purpose,
+        *key.Status, *key.ExpiresAt, *key.CreatedAt)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    if error != null {
+        result.error = error
+        return result
+    }
+    if key.ExpiresAt > 0 && clock.Unix(clock.Now()) > key.ExpiresAt {
+        return result
+    }
+    result.value = key
+    result.found = true
+    return result
+}
+
+HydrateManifest :: (database: *sql.Database, context: ctx.Context, app: *AppRegistration) -> Error {
+    manifestJSON := ""
+    row := QueryOne(database, context, HydrateSQL, app.AppID)
+    error := ScanManifest(row, *app.ManifestVersion, *manifestJSON, *app.ManifestHash,
+        *app.ManifestSignature, *app.ApprovalSignature, *app.ManifestExpiresAt)
+    if error != null && !errors.Is(error, sql.NoRows()) {
+        return error
+    }
+    if manifestJSON != "" {
+        value: AppManifest
+        error = json.Unmarshal(text.ToBytes(manifestJSON), *value)
+        if error != null {
+            return error
+        }
+        app.AppSchemaVersion = value.AppSchemaVersion
+        app.MinClientVersion = value.MinClientVersion
+        app.CurrentVersion = value.CurrentVersion
+        app.CompatibilityUntil = value.CompatibilityUntil
+        app.Features = value.Features
+        app.LegacyProtocols = value.LegacyProtocols
+    }
+    keys := Keys(database, context, app.AppID)
+    if keys.error != null {
+        return keys.error
+    }
+    app.Keys = keys.value
+    policies := Policies(database, context, app.AppID)
+    if policies.error != null {
+        return policies.error
+    }
+    app.TokenPolicies = policies.value
+    return null
+}
+
+Keys :: (database: *sql.Database, context: ctx.Context, appID: string) -> AppKeysResult {
+    result: AppKeysResult
+    queried := QueryRows(database, context, KeysSQL, appID)
+    if queried.error != null {
+        result.error = queried.error
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    keys: []AppKey
+    while sql.Next(rows) {
+        key: AppKey
+        result.error = ScanKeyRows(rows, *key.KeyID, *key.Algorithm, *key.PublicKey,
+            *key.Purpose, *key.Status, *key.ExpiresAt, *key.CreatedAt)
+        if result.error != null {
+            return result
+        }
+        keys = AppendKey(keys, key)
+    }
+    result.value = keys
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Policies :: (database: *sql.Database, context: ctx.Context, appID: string) -> TokenPoliciesResult {
+    result: TokenPoliciesResult
+    queried := QueryRows(database, context, PoliciesSQL, appID)
+    if queried.error != null {
+        result.error = queried.error
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    policies: []TokenPolicy
+    while sql.Next(rows) {
+        policy: TokenPolicy
+        result.error = ScanPolicyRows(rows, *policy.AssetID, *policy.Permission,
+            *policy.Status, *policy.LegacyUnsignedUntil)
+        if result.error != null {
+            return result
+        }
+        policies = AppendPolicy(policies, policy)
+    }
+    result.value = policies
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Permission :: (database: *sql.Database, context: ctx.Context, appID: string, asset: string, permission: string) -> TokenPolicyResult {
+    result: TokenPolicyResult
+    policy: TokenPolicy
+    row := QueryThree(database, context, PermissionSQL, appID, asset, permission)
+    error := ScanPolicy(row, *policy.AssetID, *policy.Permission, *policy.Status, *policy.LegacyUnsignedUntil)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    result.value = policy
+    result.found = error == null
+    result.error = error
+    return result
+}
+
+HasPolicy :: (database: *sql.Database, context: ctx.Context, appID: string) -> TokenPolicyExistsResult {
+    result: TokenPolicyExistsResult
+    count: isize = 0
+    row := QueryOne(database, context, "SELECT COUNT(*) FROM token_app_permissions WHERE app_id=?1", appID)
+    result.error = ScanCount(row, *count)
+    result.value = count > 0
+    return result
+}
+
+List :: (database: *sql.Database, context: ctx.Context) -> AppsResult {
+    result: AppsResult
+    queried := QueryAll(database, context, RegistryListSQL)
+    if queried.error != null {
+        result.error = queried.error
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    apps := AllocateApps(0)
+    while sql.Next(rows) {
+        app: AppRegistration
+        features := ""
+        legacy := ""
+        result.error = ScanAppRows(rows, *app.AppID, *app.DisplayName, *app.Description,
+            *app.HomepageURL, *app.SourceURL, *app.PublicKey, *app.Status,
+            *app.AppSchemaVersion, *app.MinClientVersion, *app.CurrentVersion,
+            *app.CompatibilityUntil, *features, *legacy, *app.CreatedAt, *app.UpdatedAt)
+        if result.error != null {
+            return result
+        }
+        result.error = DecodeMetadata(features, legacy, *app)
+        if result.error != null {
+            return result
+        }
+        apps = AppendApp(apps, app)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error != null {
+        return result
+    }
+    index: s64 = 0
+    while index < apps.count {
+        result.error = Hydrate(database, context, *apps[index])
+        if result.error != null {
+            return result
+        }
+        index += 1
+    }
+    result.value = apps
+    return result
+}
+
+ByID :: (database: *sql.Database, context: ctx.Context, appID: string) -> AppResult {
+    result: AppResult
+    app: AppRegistration
+    features := ""
+    legacy := ""
+    row := QueryOne(database, context, ByIDSQL, appID)
+    error := ScanApp(row, *app.AppID, *app.DisplayName, *app.Description,
+        *app.HomepageURL, *app.SourceURL, *app.PublicKey, *app.Status,
+        *app.AppSchemaVersion, *app.MinClientVersion, *app.CurrentVersion,
+        *app.CompatibilityUntil, *features, *legacy, *app.CreatedAt, *app.UpdatedAt)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    if error != null {
+        result.error = error
+        return result
+    }
+    result.error = DecodeMetadata(features, legacy, *app)
+    if result.error != null {
+        return result
+    }
+    result.error = Hydrate(database, context, *app)
+    if result.error != null {
+        return result
+    }
+    result.value = app
+    result.found = true
+    return result
+}
+
+Exists :: (database: *sql.Database, context: ctx.Context, appID: string) -> ExistsResult {
+    result: ExistsResult
+    count: isize = 0
+    row := QueryOne(database, context, "SELECT EXISTS(SELECT 1 FROM server_apps WHERE app_id=?1 AND status='active')", appID)
+    result.error = ScanCount(row, *count)
+    result.value = count != 0
+    return result
+}
+
+AllowsLegacyProtocol :: (database: *sql.Database, context: ctx.Context, appID: string, version: isize) -> ExistsResult {
+    result: ExistsResult
+    loaded := ByID(database, context, appID)
+    result.error = loaded.error
+    if loaded.error != null || !loaded.found {
+        return result
+    }
+    today := clock.Format(clock.UTC(clock.Now()), "2006-01-02")
+    for legacy: loaded.value.LegacyProtocols {
+        if legacy.Status != "compatibility" && legacy.Status != "active" {
+            continue
+        }
+        if legacy.Version > 0 && version > legacy.Version {
+            continue
+        }
+        if Compare(legacy.ValidUntil, today) >= 0 {
+            result.value = true
+            return result
+        }
+    }
+    result.value = loaded.value.CompatibilityUntil != "" && Compare(loaded.value.CompatibilityUntil, today) >= 0
+    return result
+}
+
+Collections :: (database: *sql.Database, context: ctx.Context, appID: string) -> CollectionsResult {
+    result: CollectionsResult
+    queried := QueryRows(database, context, CollectionsSQL, appID)
+    if queried.error != null {
+        result.error = queried.error
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    collections := AllocateCollections(0)
+    while sql.Next(rows) {
+        collection: AppCollection
+        result.error = ScanCollection(rows, *collection.AppID, *collection.CollectionPrefix,
+            *collection.Visibility, *collection.SchemaVersion, *collection.Description, *collection.CreatedAt)
+        if result.error != null {
+            return result
+        }
+        collections = AppendCollection(collections, collection)
+    }
+    result.value = collections
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Capabilities :: (database: *sql.Database, context: ctx.Context, appID: string) -> CapabilitiesResult {
+    result: CapabilitiesResult
+    queried := QueryRows(database, context, CapabilitiesSQL, appID)
+    if queried.error != null {
+        result.error = queried.error
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    values := AllocateStrings(0)
+    while sql.Next(rows) {
+        value := ""
+        result.error = ScanString(rows, *value)
+        if result.error != null {
+            return result
+        }
+        values = AppendString(values, value)
+    }
+    result.value = values
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+OwnsCollection :: (database: *sql.Database, context: ctx.Context, appID: string, collection: string) -> ExistsResult {
+    result: ExistsResult
+    loaded := Collections(database, context, appID)
+    result.error = loaded.error
+    if loaded.error != null {
+        return result
+    }
+    for item: loaded.value {
+        if scope.CollectionMatchesPrefix(collection, item.CollectionPrefix) {
+            result.value = true
+            return result
+        }
+    }
+    return result
+}
+
+SeedBuiltin :: (database: *sql.Database, context: ctx.Context) -> Error {
+    app: AppRegistration
+    app.AppID = "inbe"
+    app.DisplayName = "Inner Breeze"
+    app.Description = "Breathing, meditation, and habit data."
+    app.HomepageURL = "https://inbe.waozi.xyz/"
+    app.SourceURL = "https://github.com/waozixyz/inbe"
+    app.Status = "active"
+    app.AppSchemaVersion = 1
+    app.MinClientVersion = "0.0.0"
+    app.CurrentVersion = "next"
+    app.CompatibilityUntil = "2027-09-01"
+    app.Collections = AllocateCollections(9)
+    app.Collections[0] = AppCollection.{CollectionPrefix = "inbe.habits", Visibility = "private", SchemaVersion = 4, Description = "Released v4 encrypted habit records."}
+    app.Collections[1] = AppCollection.{CollectionPrefix = "inbe.habit_days", Visibility = "private", SchemaVersion = 4, Description = "Released v4 encrypted habit-day records."}
+    app.Collections[2] = AppCollection.{CollectionPrefix = "inbe.sessions", Visibility = "private", SchemaVersion = 4, Description = "Released v4 encrypted session records."}
+    app.Collections[3] = AppCollection.{CollectionPrefix = "private.inbe.v1.*", Visibility = "private", SchemaVersion = 1, Description = "Future private Inbe records."}
+    app.Collections[4] = AppCollection.{CollectionPrefix = "private.inbe.v1.elist-lists", Visibility = "private", SchemaVersion = 1, Description = "Encrypted Inbe EList list records."}
+    app.Collections[5] = AppCollection.{CollectionPrefix = "private.inbe.v1.elist-items", Visibility = "private", SchemaVersion = 1, Description = "Encrypted Inbe EList item records."}
+    app.Collections[6] = AppCollection.{CollectionPrefix = "shared.inbe.v1.*", Visibility = "shared", SchemaVersion = 1, Description = "User-grantable Inbe records."}
+    app.Collections[7] = AppCollection.{CollectionPrefix = "friends.inbe.v1.*", Visibility = "friends", SchemaVersion = 1, Description = "Friend-visible Inbe records."}
+    app.Collections[8] = AppCollection.{CollectionPrefix = "public.inbe.v1.*", Visibility = "public", SchemaVersion = 1, Description = "Public Inbe records."}
+    app.Capabilities = AllocateStrings(4)
+    app.Capabilities[0] = "sync"
+    app.Capabilities[1] = "encrypted-records"
+    app.Capabilities[2] = "profile-stats"
+    app.Capabilities[3] = "leaderboard"
+    app.Features = AllocateFeatures(4)
+    app.Features[0].ID = "sync.private_records"
+    app.Features[0].RequiresSignedTx = true
+    app.Features[0].Collections = AllocateStrings(4)
+    app.Features[0].Collections[0] = "private.inbe.v1.*"
+    app.Features[0].Collections[1] = "inbe.habits"
+    app.Features[0].Collections[2] = "inbe.habit_days"
+    app.Features[0].Collections[3] = "inbe.sessions"
+    app.Features[1].ID = "sync.elist"
+    app.Features[1].RequiresSignedTx = true
+    app.Features[1].Collections = AllocateStrings(2)
+    app.Features[1].Collections[0] = "private.inbe.v1.elist-lists"
+    app.Features[1].Collections[1] = "private.inbe.v1.elist-items"
+    app.Features[2].ID = "sync.shared_records"
+    app.Features[2].RequiresSignedTx = true
+    app.Features[2].Collections = AllocateStrings(1)
+    app.Features[2].Collections[0] = "shared.inbe.v1.*"
+    app.Features[3].ID = "profile.stats"
+    app.LegacyProtocols = AllocateLegacy(2)
+    app.LegacyProtocols[0] = LegacyProtocol.{Name = "inbe-typed-sync", Version = 5, Status = "compatibility", ValidUntil = "2027-09-01"}
+    app.LegacyProtocols[1] = LegacyProtocol.{Name = "ksync-headers", Version = 5, Status = "compatibility", ValidUntil = "2027-09-01"}
+    app.TokenPolicies = AllocatePolicies(2)
+    app.TokenPolicies[0] = TokenPolicy.{AssetID = "waozi:token", Permission = "spend", Status = "active", LegacyUnsignedUntil = 1819756800}
+    app.TokenPolicies[1] = TokenPolicy.{AssetID = "waozi:token", Permission = "purchase", Status = "active", LegacyUnsignedUntil = 1819756800}
+    signed: isize = 0
+    row := QuerySingle(database, context, "SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status='active')")
+    error := ScanCount(row, *signed)
+    if error != null {
+        return error
+    }
+    if signed != 0 {
+        return null
+    }
+    return Upsert(database, context, app)
+}
+
+#scope_file
+RegistryListSQL :: #string SQL_END
+
+SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,
+       app_schema_version,min_supported_client_version,current_client_version,
+       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at
+FROM server_apps ORDER BY app_id
+SQL_END;
+ByIDSQL :: #string SQL_END
+
+SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,
+       app_schema_version,min_supported_client_version,current_client_version,
+       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at
+FROM server_apps WHERE app_id=?1
+SQL_END;
+CollectionsSQL :: #string SQL_END
+
+SELECT app_id,collection_prefix,visibility,schema_version,description,created_at
+FROM server_app_collections WHERE app_id=?1 ORDER BY collection_prefix
+SQL_END;
+CapabilitiesSQL :: "SELECT capability FROM server_app_capabilities WHERE app_id=?1 ORDER BY capability";
+AppInsertSQL :: #string SQL_END
+
+INSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status,app_schema_version,min_supported_client_version,current_client_version,compatibility_until,features_json,legacy_protocols_json)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+ON CONFLICT(app_id) DO UPDATE SET
+ display_name=excluded.display_name,
+ description=excluded.description,
+ homepage_url=excluded.homepage_url,
+ source_url=excluded.source_url,
+ public_key=excluded.public_key,
+ status=excluded.status,
+ app_schema_version=excluded.app_schema_version,
+ min_supported_client_version=excluded.min_supported_client_version,
+ current_client_version=excluded.current_client_version,
+ compatibility_until=excluded.compatibility_until,
+ features_json=excluded.features_json,
+ legacy_protocols_json=excluded.legacy_protocols_json,
+ updated_at=CURRENT_TIMESTAMP
+SQL_END;
+ManifestInsertSQL :: #string SQL_END
+
+INSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at,status)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+ON CONFLICT(app_id) DO UPDATE SET
+ manifest_version=excluded.manifest_version,
+ manifest_json=excluded.manifest_json,
+ manifest_hash=excluded.manifest_hash,
+ manifest_signature=excluded.manifest_signature,
+ approval_signature=excluded.approval_signature,
+ expires_at=excluded.expires_at,
+ status=excluded.status,
+ updated_at=CURRENT_TIMESTAMP
+SQL_END;
+CollectionInsertSQL :: "INSERT INTO server_app_collections(app_id,collection_prefix,visibility,schema_version,description) VALUES(?1,?2,?3,?4,?5)";
+CapabilityInsertSQL :: "INSERT OR IGNORE INTO server_app_capabilities(app_id,capability) VALUES(?1,?2)";
+PolicyInsertSQL :: "INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until) VALUES(?1,?2,?3,?4,?5)";
+KeyInsertSQL :: "INSERT INTO server_app_keys(app_id,key_id,algorithm,public_key,purpose,status,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7)";
+ActiveKeySQL :: #string SQL_END
+
+SELECT key_id,algorithm,public_key,purpose,status,expires_at,created_at
+FROM server_app_keys WHERE app_id=?1 AND key_id=?2 AND status='active'
+SQL_END;
+KeysSQL :: #string SQL_END
+
+SELECT key_id,algorithm,public_key,purpose,status,expires_at,created_at
+FROM server_app_keys WHERE app_id=?1 ORDER BY key_id
+SQL_END;
+PoliciesSQL :: #string SQL_END
+
+SELECT asset_id,permission,status,legacy_unsigned_until
+FROM token_app_permissions WHERE app_id=?1 ORDER BY asset_id,permission
+SQL_END;
+PermissionSQL :: #string SQL_END
+
+SELECT asset_id,permission,status,legacy_unsigned_until
+FROM token_app_permissions
+WHERE app_id=?1 AND asset_id=?2 AND permission=?3 AND status='active'
+SQL_END;
+HydrateSQL :: #string SQL_END
+
+SELECT manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at
+FROM server_app_manifests WHERE app_id=?1 AND status='active'
+SQL_END;

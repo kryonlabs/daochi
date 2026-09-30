@@ -1250,7 +1250,7 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 
 func TestSeedBuiltinAppsPreservesAppOwnedRegistrations(t *testing.T) {
 	_, store, _ := testServer(t)
-	if err := store.UpsertApp(context.Background(), AppRegistration{
+	if err := AppStore_Upsert(store.db, context.Background(), AppRegistration{
 		AppID:       "ukuvota",
 		DisplayName: "Ukuvota",
 		Status:      appStatusActive,
@@ -1261,10 +1261,11 @@ func TestSeedBuiltinAppsPreservesAppOwnedRegistrations(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SeedBuiltinApps(context.Background()); err != nil {
+	if err := AppStore_SeedBuiltin(store.db, context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	app, found, err := store.AppByID(context.Background(), "ukuvota")
+	appResult := AppStore_ByID(store.db, context.Background(), "ukuvota")
+	app, found, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil || !found || len(app.Collections) != 1 {
 		t.Fatalf("app-owned registration changed during seed, app=%#v found=%v err=%v", app, found, err)
 	}
@@ -1272,7 +1273,7 @@ func TestSeedBuiltinAppsPreservesAppOwnedRegistrations(t *testing.T) {
 
 func TestSeedBuiltinAppsPreservesSignedInbeManifest(t *testing.T) {
 	_, store, _ := testServer(t)
-	if err := store.UpsertApp(context.Background(), AppRegistration{
+	if err := AppStore_Upsert(store.db, context.Background(), AppRegistration{
 		AppID:       "inbe",
 		DisplayName: "Inner Breeze",
 		Status:      appStatusActive,
@@ -1288,10 +1289,11 @@ INSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_
 VALUES('inbe',1,'{}','signed-inbe-test','signature','approval','active')`); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SeedBuiltinApps(context.Background()); err != nil {
+	if err := AppStore_SeedBuiltin(store.db, context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	app, found, err := store.AppByID(context.Background(), "inbe")
+	appResult := AppStore_ByID(store.db, context.Background(), "inbe")
+	app, found, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil || !found || len(app.Collections) != 1 ||
 		app.Collections[0].CollectionPrefix != "private.inbe.v2.records.*" {
 		t.Fatalf("signed Inbe manifest was overwritten: app=%#v found=%v err=%v", app, found, err)

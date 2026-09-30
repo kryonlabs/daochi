@@ -47,8 +47,8 @@ field names, Go storage types, order and reflection tags.
 
 | Baseline file | Status | Remaining work or canonical source |
 |---|---|---|
-| `app_manifest.go` | Partial Ziran | Normalization, validation and active-key verification in `manifest.zi`; JSON, approval verification and registry transactions remain Go |
-| `app_registry.go` | Partial Ziran | Scope grammar/ownership/matching/SQL escaping in `scope.zi`; grants, registry, handlers remain Go |
+| `app_manifest.go` | Partial Ziran | Normalization, validation and active-key verification in `manifest.zi`; manifest transactions, key/policy queries and hydration in `app_store.zi`; approval verification and HTTP handlers remain Go |
+| `app_registry.go` | Partial Ziran | Scope grammar/ownership/matching/SQL escaping in `scope.zi`; app seeding, registry queries, metadata and collection ownership in `app_store.zi`; grants and HTTP handlers remain Go |
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
@@ -95,6 +95,18 @@ additional completed baseline modules.
 operations still need to move. Manifest normalization and validation preserve
 error text, byte limits, scopes, Gregorian dates and explicit expiry boundaries.
 Active-key verification selects eligible keys in Ziran and uses Go Ed25519.
+
+`app_store.zi` owns app registry transactions, signed manifest persistence,
+key and token-policy replacement, registry listing/detail queries, metadata
+decoding, legacy protocol date/version checks and collection ownership. Native
+SQL handles preserve atomic rollback, error identity and connection reuse.
+Queries retain ordering, missing-row behavior and nil versus allocated empty
+results. Built-in seeding preserves the released Inbe metadata and leaves
+active signed manifests untouched. Baseline fixtures compare stored state,
+key expiry/revocation filtering, replacement, malformed JSON and scan errors,
+cancellation, failed writes and commits, and legacy date boundaries. Maintained
+startup, HTTP, sync, token and mesh callers use the generated surface directly.
+Grant transactions, request parsing and approval verification still need porting.
 
 `sync_types.zi` owns sync requests, responses, changes, snapshots and operation
 records. Its `RawMessage` declaration aliases `encoding/json.RawMessage`,
@@ -271,6 +283,9 @@ Native public-key equality and SQL affected-row results preserve Go key types,
 Native decoded URL paths and Unix timestamp construction preserve request
 encoding, signed 64-bit seconds and nanosecond normalization. Typed callbacks
 carry native byte slices and imported authentication results through saved IR.
+Foreign slice return validation now runs after the complete import graph is
+linked. Public record types re-exported through intermediate modules therefore
+resolve independently of module/declaration order in source and saved IR.
 
 ## Next dependencies
 

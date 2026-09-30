@@ -113,7 +113,7 @@ func (s *Server) ImportMeshApps(
 			continue
 		}
 
-		if err := s.store.UpsertSignedAppManifest(
+		if err := AppStore_UpsertSignedManifest(s.store.db,
 			ctx,
 			registration.Manifest,
 			manifestBytes,

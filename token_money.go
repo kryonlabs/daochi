@@ -651,7 +651,8 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unsupported asset_id")
 		return
 	}
-	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
+	existence := AppStore_Exists(s.store.db, r.Context(), req.AppID)
+	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("token spend app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token spend failed")
 		return
@@ -722,7 +723,8 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "unknown product_id")
 		return
 	}
-	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
+	existence := AppStore_Exists(s.store.db, r.Context(), req.AppID)
+	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("google token purchase app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "token purchase failed")
 		return
@@ -797,7 +799,8 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown monero product_id")
 		return
 	}
-	if exists, err := s.store.AppExists(r.Context(), req.AppID); err != nil {
+	existence := AppStore_Exists(s.store.db, r.Context(), req.AppID)
+	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("monero invoice app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		writeError(w, http.StatusInternalServerError, "monero invoice failed")
 		return
@@ -1201,14 +1204,16 @@ func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []
 	if !Scope_ValidTokenPolicyPermission(permission) {
 		return signedTx, hasSignedTx, authError{status: http.StatusBadRequest, message: "invalid token permission"}
 	}
-	hasPolicy, err := s.store.HasTokenPolicy(ctx, appID)
+	policyExists := AppStore_HasPolicy(s.store.db, ctx, appID)
+	hasPolicy, err := policyExists.Value, policyExists.Error
 	if err != nil {
 		return signedTx, hasSignedTx, err
 	}
 	if !hasPolicy {
 		return signedTx, hasSignedTx, nil
 	}
-	policy, ok, err := s.store.AppTokenPermission(ctx, appID, assetID, permission)
+	policyResult := AppStore_Permission(s.store.db, ctx, appID, assetID, permission)
+	policy, ok, err := policyResult.Value, policyResult.Found, policyResult.Error
 	if err != nil {
 		return signedTx, hasSignedTx, err
 	}

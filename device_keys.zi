@@ -1,0 +1,267 @@
+#import "go_types"
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+clock :: #import "time_go";
+errors :: #import "errors_go";
+text :: #import "text_go";
+timestamp :: #import "timestamp";
+identity :: #import "identity";
+go_sql :: #system_library "go:database/sql";
+go_strings :: #system_library "go:strings";
+go_strconv :: #system_library "go:strconv";
+go_hex :: #system_library "go:encoding/hex";
+go_time :: #system_library "go:time";
+builtin :: #system_library "go:builtin";
+
+DeviceKey :: struct {
+    AccountID: string #go_tag "json:\"account_id,omitempty\""
+    AppID: string #go_tag "json:\"app_id\""
+    KeyID: string #go_tag "json:\"device_key_id\""
+    ClientID: string #go_tag "json:\"client_id\""
+    PublicKey: string #go_tag "json:\"public_key\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+    LastUsedAt: string #go_tag "json:\"last_used_at,omitempty\""
+    RevokedAt: string #go_tag "json:\"revoked_at,omitempty\""
+}
+DeviceRegistrationRequest :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    KeyID: string #go_tag "json:\"device_key_id\""
+    ClientID: string #go_tag "json:\"client_id\""
+    PublicKey: string #go_tag "json:\"public_key\""
+    Nonce: string #go_tag "json:\"nonce\""
+    ExpiresAt: s64 #go_tag "json:\"expires_at\""
+    Signature: string #go_tag "json:\"signature\""
+}
+DeviceRevocationRequest :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    KeyID: string #go_tag "json:\"device_key_id\""
+    Nonce: string #go_tag "json:\"nonce\""
+    ExpiresAt: s64 #go_tag "json:\"expires_at\""
+    Signature: string #go_tag "json:\"signature\""
+}
+DeviceKeyResult :: struct {
+    value: DeviceKey
+    found: bool
+    error: Error
+}
+DeviceListResult :: struct {
+    value: []DeviceKey
+    error: Error
+}
+
+#scope_file
+TransactionResult :: struct {
+    value: *sql.Transaction
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+KeyResult :: struct {
+    value: []u8
+    error: Error
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Lower :: (value: string) -> string #foreign go_strings "ToLower";
+Contains :: (value: string, fragment: string) -> bool #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+FormatInteger :: (value: s64, base: isize) -> string #foreign go_strconv "FormatInt";
+DecodeHex :: (value: string) -> KeyResult #go_results #foreign go_hex "DecodeString";
+UnixTime :: (seconds: s64, nanos: s64) -> clock.Time #foreign go_time "Unix";
+Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+DeleteNonces :: (transaction: *sql.Transaction, context: ctx.Context, query: string, cutoff: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertNonce :: (transaction: *sql.Transaction, context: ctx.Context, query: string, accountID: string, nonce: string, created: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertDevice :: (transaction: *sql.Transaction, context: ctx.Context, query: string, accountID: string, appID: string, keyID: string, clientID: string, key: string, created: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+RevokeDevice :: (transaction: *sql.Transaction, context: ctx.Context, query: string, accountID: string, appID: string, keyID: string, revoked: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+TouchDevice :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string, appID: string, keyID: string, used: string) -> ExecResult #go_results #foreign go_sql "(*DB).ExecContext";
+QueryDevice :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string, appID: string, keyID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryDevices :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+ScanDevice :: (row: *sql.Row, accountID: *string, appID: *string, keyID: *string, clientID: *string, key: *string, created: *string, used: *string, revoked: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanDeviceRows :: (rows: *sql.Rows, accountID: *string, appID: *string, keyID: *string, clientID: *string, key: *string, created: *string, used: *string, revoked: *string) -> Error #foreign go_sql "(*Rows).Scan";
+AppendDevice :: (devices: []DeviceKey, device: DeviceKey) -> []DeviceKey #foreign builtin "append";
+
+RecordNonce :: (transaction: *sql.Transaction, context: ctx.Context, accountID: string, nonce: string, replay: Error) -> Error {
+    cutoff := timestamp.CanonicalTimestamp(clock.Add(clock.Now(), cast(clock.Duration)-1800000000000))
+    deleted := DeleteNonces(transaction, context, DeleteNoncesSQL, cutoff)
+    if deleted.error != null {
+        return deleted.error
+    }
+    inserted := InsertNonce(transaction, context, InsertNonceSQL, accountID, nonce, timestamp.CanonicalNow())
+    if inserted.error != null && Contains(errors.Message(inserted.error), "UNIQUE") {
+        return replay
+    }
+    return inserted.error
+}
+
+#scope_export
+RegistrationMessage :: (accountID: string, request: DeviceRegistrationRequest) -> []u8 {
+    parts: [9]string = .[
+        "daochi-device-registration-v1", accountID, request.AppID, request.KeyID,
+        request.ClientID, request.PublicKey, request.Nonce,
+        FormatInteger(request.ExpiresAt, cast(isize)10), ""
+    ]
+    return text.ToBytes(Join(parts[:], "\n"))
+}
+RevocationMessage :: (accountID: string, request: DeviceRevocationRequest) -> []u8 {
+    parts: [7]string = .[
+        "daochi-device-revocation-v1", accountID, request.AppID, request.KeyID,
+        request.Nonce, FormatInteger(request.ExpiresAt, cast(isize)10), ""
+    ]
+    return text.ToBytes(Join(parts[:], "\n"))
+}
+NormalizeRegistration :: (request: *DeviceRegistrationRequest) {
+    request.AppID = TrimSpace(request.AppID)
+    request.KeyID = TrimSpace(request.KeyID)
+    request.ClientID = TrimSpace(request.ClientID)
+    request.PublicKey = Lower(TrimSpace(request.PublicKey))
+    request.Nonce = TrimSpace(request.Nonce)
+    request.Signature = TrimSpace(request.Signature)
+}
+NormalizeRevocation :: (request: *DeviceRevocationRequest) {
+    request.AppID = TrimSpace(request.AppID)
+    request.KeyID = TrimSpace(request.KeyID)
+    request.Nonce = TrimSpace(request.Nonce)
+    request.Signature = TrimSpace(request.Signature)
+}
+ValidExpiry :: (expiresAt: s64) -> bool {
+    now := clock.Now()
+    return expiresAt > clock.Unix(now) &&
+        !clock.After(UnixTime(expiresAt, 0), clock.Add(now, cast(clock.Duration)900000000000))
+}
+ValidRegistration :: (request: DeviceRegistrationRequest) -> bool {
+    if !identity.ValidNamespace(request.AppID) || !identity.ValidClientID(request.KeyID) ||
+        !identity.ValidClientID(request.ClientID) || !identity.ValidClientID(request.Nonce) {
+        return false
+    }
+    key := DecodeHex(request.PublicKey)
+    if key.error != null || key.value.count != 32 {
+        return false
+    }
+    return ValidExpiry(request.ExpiresAt)
+}
+Register :: (database: *sql.Database, context: ctx.Context, device: DeviceKey, nonce: string, replay: Error) -> Error {
+    begun := Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    error := RecordNonce(transaction, context, device.AccountID, nonce, replay)
+    if error != null {
+        return error
+    }
+    inserted := InsertDevice(transaction, context, RegisterSQL, device.AccountID,
+        device.AppID, device.KeyID, device.ClientID, device.PublicKey, timestamp.CanonicalNow())
+    if inserted.error != null {
+        return inserted.error
+    }
+    return sql.Commit(transaction)
+}
+Revoke :: (database: *sql.Database, context: ctx.Context, accountID: string, request: DeviceRevocationRequest, replay: Error) -> Error {
+    begun := Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    error := RecordNonce(transaction, context, accountID, request.Nonce, replay)
+    if error != null {
+        return error
+    }
+    revoked := RevokeDevice(transaction, context, RevokeSQL, accountID, request.AppID,
+        request.KeyID, timestamp.CanonicalNow())
+    if revoked.error != null {
+        return revoked.error
+    }
+    changed := sql.RowsAffected(revoked.value)
+    if changed.error != null {
+        return changed.error
+    }
+    if changed.value == 0 {
+        return sql.NoRows()
+    }
+    return sql.Commit(transaction)
+}
+Active :: (database: *sql.Database, context: ctx.Context, accountID: string, appID: string, keyID: string) -> DeviceKeyResult {
+    result: DeviceKeyResult
+    device: DeviceKey
+    row := QueryDevice(database, context, ActiveSQL, accountID, appID, keyID)
+    error := ScanDevice(row, *device.AccountID, *device.AppID, *device.KeyID,
+        *device.ClientID, *device.PublicKey, *device.CreatedAt, *device.LastUsedAt, *device.RevokedAt)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    result.value = device
+    result.found = error == null
+    result.error = error
+    return result
+}
+Touch :: (database: *sql.Database, context: ctx.Context, accountID: string, appID: string, keyID: string) -> Error {
+    touched := TouchDevice(database, context, TouchSQL, accountID, appID, keyID, timestamp.CanonicalNow())
+    return touched.error
+}
+List :: (database: *sql.Database, context: ctx.Context, accountID: string) -> DeviceListResult {
+    result: DeviceListResult
+    queried := QueryDevices(database, context, ListSQL, accountID)
+    if queried.error != null {
+        result.error = queried.error
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    devices: []DeviceKey
+    while sql.Next(rows) {
+        device: DeviceKey
+        result.error = ScanDeviceRows(rows, *device.AccountID, *device.AppID, *device.KeyID,
+            *device.ClientID, *device.PublicKey, *device.CreatedAt, *device.LastUsedAt, *device.RevokedAt)
+        if result.error != null {
+            return result
+        }
+        devices = AppendDevice(devices, device)
+    }
+    result.value = devices
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+#scope_file
+DeleteNoncesSQL :: "DELETE FROM server_device_registration_nonces WHERE created_at<?1";
+InsertNonceSQL :: "INSERT INTO server_device_registration_nonces(account_id,nonce,created_at) VALUES(?1,?2,?3)";
+RegisterSQL :: #string SQL_END
+
+INSERT INTO server_device_keys(account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at)
+VALUES(?1,?2,?3,?4,?5,?6,?6,'')
+ON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET
+ client_id=excluded.client_id,
+ public_key=excluded.public_key,
+ last_used_at=excluded.last_used_at,
+ revoked_at=''
+SQL_END;
+RevokeSQL :: #string SQL_END
+
+UPDATE server_device_keys SET revoked_at=?4
+WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''
+SQL_END;
+ActiveSQL :: #string SQL_END
+
+SELECT account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at
+FROM server_device_keys
+WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''
+SQL_END;
+TouchSQL :: #string SQL_END
+
+UPDATE server_device_keys SET last_used_at=?4
+WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''
+SQL_END;
+ListSQL :: #string SQL_END
+
+SELECT account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at
+FROM server_device_keys WHERE account_id=?1 ORDER BY app_id,device_key_id
+SQL_END;

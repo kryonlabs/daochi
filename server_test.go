@@ -1094,13 +1094,13 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 		registered.AppSchemaVersion != 0 {
 		t.Fatalf("registered app missing manifest fields: %#v", registered)
 	}
-	if err := store.RegisterDeviceKey(context.Background(), DeviceKey{
+	if err := DeviceKeys_Register(store.db, context.Background(), DeviceKey{
 		AccountID: identity.UserID,
 		AppID:     "testapp",
 		KeyID:     "key-main1",
 		ClientID:  "test-client-v6-good",
 		PublicKey: hex.EncodeToString(appPublic),
-	}, "register-v6-device"); err != nil {
+	}, "register-v6-device", errSignedTxReplay); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1389,13 +1389,13 @@ func TestAppGrantsGateCrossAppEncryptedRecords(t *testing.T) {
 	if registerRes.Code != http.StatusOK {
 		t.Fatalf("register app status = %d body=%s", registerRes.Code, registerRes.Body.String())
 	}
-	if err := store.RegisterDeviceKey(context.Background(), DeviceKey{
+	if err := DeviceKeys_Register(store.db, context.Background(), DeviceKey{
 		AccountID: identity.UserID,
 		AppID:     "ukuvota",
 		KeyID:     "main-key",
 		ClientID:  "app-records-client",
 		PublicKey: hex.EncodeToString(appPrivate.Public().(ed25519.PublicKey)),
-	}, "register-app-records-device"); err != nil {
+	}, "register-app-records-device", errSignedTxReplay); err != nil {
 		t.Fatal(err)
 	}
 

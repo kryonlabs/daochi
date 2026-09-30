@@ -49,9 +49,9 @@ func TestDeviceKeyRegistrationReplayAndRevocation(t *testing.T) {
 	if response := register(); response.Code != http.StatusConflict {
 		t.Fatalf("registration replay status=%d body=%s", response.Code, response.Body.String())
 	}
-	if _, found, err := store.ActiveDeviceKey(context.Background(), identity.UserID,
-		"inbe", "device-key-1"); err != nil || !found {
-		t.Fatalf("registered device not active: found=%v err=%v", found, err)
+	if active := DeviceKeys_Active(store.db, context.Background(), identity.UserID,
+		"inbe", "device-key-1"); active.Error != nil || !active.Found {
+		t.Fatalf("registered device not active: found=%v err=%v", active.Found, active.Error)
 	}
 
 	revocation := DeviceRevocationRequest{
@@ -77,9 +77,9 @@ func TestDeviceKeyRegistrationReplayAndRevocation(t *testing.T) {
 	if response := revoke(); response.Code != http.StatusOK {
 		t.Fatalf("revoke status=%d body=%s", response.Code, response.Body.String())
 	}
-	if _, found, err := store.ActiveDeviceKey(context.Background(), identity.UserID,
-		"inbe", "device-key-1"); err != nil || found {
-		t.Fatalf("revoked device remains active: found=%v err=%v", found, err)
+	if active := DeviceKeys_Active(store.db, context.Background(), identity.UserID,
+		"inbe", "device-key-1"); active.Error != nil || active.Found {
+		t.Fatalf("revoked device remains active: found=%v err=%v", active.Found, active.Error)
 	}
 	if response := revoke(); response.Code != http.StatusConflict {
 		t.Fatalf("revocation replay status=%d body=%s", response.Code, response.Body.String())

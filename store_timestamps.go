@@ -19,7 +19,7 @@ type zir_ae447d079a37fac2_TransactionResult struct {
 	Error Error
 }
 
-type RowsResult struct {
+type zir_2a2f992bc5f52346_RowsResult struct {
 	Value *Rows
 	Error Error
 }
@@ -45,8 +45,8 @@ func StoreTimestamps_Begin(Database *Database, Context Context, Options *Transac
 	return result
 }
 
-func StoreTimestamps_QueryRows(Transaction *Transaction, Context Context, Query string) RowsResult {
-	var result RowsResult
+func StoreTimestamps_QueryRows(Transaction *Transaction, Context Context, Query string) zir_2a2f992bc5f52346_RowsResult {
+	var result zir_2a2f992bc5f52346_RowsResult
 	result.Value, result.Error = (*sql.Tx).QueryContext(Transaction, Context, Query)
 	return result
 }

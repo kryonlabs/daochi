@@ -97,7 +97,7 @@ func (s *Server) verifySignedTx(ctx context.Context, r *http.Request, body []byt
 		}
 		return err
 	}
-	if err := s.store.TouchDeviceKey(ctx, tx.AccountID, tx.AppID, tx.DeviceKeyID); err != nil {
+	if err := DeviceKeys_Touch(s.store.db, ctx, tx.AccountID, tx.AppID, tx.DeviceKeyID); err != nil {
 		return err
 	}
 	return nil
@@ -107,8 +107,8 @@ func (s *Server) verifyDeviceSignedTx(ctx context.Context, tx SignedTxEnvelope, 
 	if !Identity_ValidClientID(tx.DeviceKeyID) {
 		return authError{status: http.StatusBadRequest, message: "invalid device key id"}
 	}
-	deviceKey, found, err := s.store.ActiveDeviceKey(ctx, tx.AccountID, tx.AppID,
-		tx.DeviceKeyID)
+	active := DeviceKeys_Active(s.store.db, ctx, tx.AccountID, tx.AppID, tx.DeviceKeyID)
+	deviceKey, found, err := active.Value, active.Found, active.Error
 	if err != nil {
 		return err
 	}

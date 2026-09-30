@@ -52,7 +52,7 @@ field names, Go storage types, order and reflection tags.
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
-| `device_keys.go` | Go with ported callers | Device registration, signatures, revocation, replay policy |
+| `device_keys.go` | Partial Ziran | Records, canonical messages, normalization, validation, atomic registration/revocation, nonce cleanup, lookup/list/touch in `device_keys.zi`; signature verification and HTTP handlers remain in `device_handlers.go` |
 | `discovery.go` | Go | LAN discovery and runtime cancellation |
 | `docs.go` | Go | Embedded public API documentation |
 | `inspect.go` | Go with ported callers | Offline database commands and redaction |
@@ -185,6 +185,17 @@ export never includes authority private keys. Baseline comparisons cover stored
 state, malformed JSON, cancellation and entropy errors, failed commits,
 connection reuse, concurrent invite consumers and record reflection tags.
 `mesh_policy.zi` owns the shared data-scope and reciprocal-direction helpers.
+
+`device_keys.zi` owns the device records and storage lifecycle. Canonical
+messages preserve raw bytes, integer limits and trailing newlines; normalization
+retains Unicode handling and key validation retains the exact time window.
+Registration and revocation consume their nonce in the same transaction as the
+key change, including expiry cleanup. Failed changes and commits roll back
+nonce consumption; missing-key revocation returns the native SQL sentinel.
+Replacement preserves creation time and clears revocation. Listing preserves
+ordering and nil empty results. Baseline fixtures compare record layouts,
+messages, lifecycle state, cancellation, commit failures and concurrent replay
+identity. The original signature checks and HTTP handlers still need porting.
 
 ## Compiler work exercised by this port
 

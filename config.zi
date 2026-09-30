@@ -1,0 +1,287 @@
+#import "protocol"
+#import "config_values"
+#import "map_go"
+#import "go_types"
+#import "sets"
+text :: #import "text_go";
+clock :: #import "time_go";
+go_os :: #system_library "go:os";
+go_strings :: #system_library "go:strings";
+go_numbers :: #system_library "go:strconv";
+go_hex :: #system_library "go:encoding/hex";
+go_random :: #system_library "go:crypto/rand";
+go_crypto :: #system_library "go:crypto/ed25519";
+go_log :: #system_library "go:log";
+go_slog :: #system_library "go:log/slog";
+go_format :: #system_library "go:fmt";
+builtin :: #system_library "go:builtin";
+PublicKey :: #type #foreign go_crypto "PublicKey";
+PrivateKey :: #type #foreign go_crypto "PrivateKey";
+
+Config :: struct {
+    Addr: string
+    BaseURL: string
+    DBPath: string
+    AdminToken: string
+    ChallengeTTL: clock.Duration
+    TokenTTL: clock.Duration
+    TokenSecret: []u8
+    TokenSecretEphemeral: bool
+    MaxBodyBytes: s64
+    EncryptedPayloadMaxReturn: isize
+    EncryptedPayloadMaxAccountBytes: s64
+    EncryptedPayloadRetention: clock.Duration
+    NodeRegistryPublicKey: PublicKey
+    KnownNodes: []NodePeer
+    NodeSyncToken: string
+    NodeSyncInterval: clock.Duration
+    NodeSyncBatchLimit: isize
+    NodeIdentityKeyFile: string
+    NodeIdentityPrivateKey: PrivateKey
+    NodeDisplayName: string
+    LANDiscovery: bool
+    WaoziIssuerPublicKey: PublicKey
+    WaoziIssuerPrivateKey: PrivateKey
+    TokenProducts: Map(string, TokenProduct)
+    GooglePackageNames: Map(string, bool)
+    GoogleServiceAccountJSON: string
+    GoogleOAuthClientJSON: string
+    GoogleOAuthRefreshToken: string
+    MoneroWalletRPCURL: string
+    MoneroWalletRPCUser: string
+    MoneroWalletRPCPassword: string
+    MoneroNetwork: string
+    MoneroRateAtomicAmount: s64
+    MoneroRateTokenUnits: s64
+    MoneroMinimumAtomicAmount: s64
+    MoneroConfirmationsRequired: s64
+    TokenDirectPurchasesEnabled: bool
+}
+
+#scope_file
+NativeIntegerResult :: struct {
+    value: isize
+    error: Error
+}
+WideIntegerResult :: struct {
+    value: s64
+    error: Error
+}
+FileResult :: struct {
+    value: []u8
+    error: Error
+}
+RandomResult :: struct {
+    count: isize
+    error: Error
+}
+Getenv :: (key: string) -> string #foreign go_os;
+ReadFile :: (path: string) -> FileResult #go_results #foreign go_os;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Atoi :: (value: string) -> NativeIntegerResult #go_results #foreign go_numbers;
+ParseInt :: (value: string, base: isize, bits: isize) -> WideIntegerResult #go_results #foreign go_numbers;
+DecodeString :: (value: string) -> FileResult #go_results #foreign go_hex;
+ReadRandom :: (value: []u8) -> RandomResult #go_results #foreign go_random "Read";
+NewKeyFromSeed :: (value: []u8) -> PrivateKey #foreign go_crypto;
+AllocateBytes :: (count: isize) -> []u8 #foreign builtin "make";
+PrivateLength :: (value: PrivateKey) -> isize #foreign builtin "len";
+Panic :: (value: Error) #foreign builtin "panic";
+Fatal :: (message: string) #foreign go_log;
+FatalValue :: (format: string, key: string, value: string) #foreign go_log "Fatalf";
+Warn :: (message: string) #foreign go_slog;
+WarnFile :: (message: string, envLabel: string, env: string, pathLabel: string, path: string, errorLabel: string, error: Error) #foreign go_slog "Warn";
+FormatKeyPath :: (format: string, path: string) -> string #foreign go_format "Sprintf";
+
+#scope_export
+EnvString :: (key: string, fallback: string) -> string {
+    value := Getenv(key)
+    if value != "" {
+        return value
+    }
+    return fallback
+}
+
+EnvDurationSeconds :: (key: string, fallback: clock.Duration) -> clock.Duration {
+    value := Getenv(key)
+    if value != "" {
+        seconds := Atoi(value)
+        if seconds.error != null {
+            FatalValue("invalid %s: not an integer: %q", key, value)
+        }
+        if seconds.value > 0 {
+            return cast(clock.Duration)(cast(s64)seconds.value * 1000000000)
+        }
+    }
+    return fallback
+}
+
+EnvDurationDays :: (key: string, fallback: clock.Duration) -> clock.Duration {
+    value := Getenv(key)
+    if value != "" {
+        days := Atoi(value)
+        if days.error != null {
+            FatalValue("invalid %s: not an integer: %q", key, value)
+        }
+        if days.value > 0 {
+            return cast(clock.Duration)(cast(s64)days.value * 24 * 3600000000000)
+        }
+    }
+    return fallback
+}
+
+EnvInt :: (key: string, fallback: isize) -> isize {
+    value := Getenv(key)
+    if value != "" {
+        integer := Atoi(value)
+        if integer.error != null {
+            FatalValue("invalid %s: not an integer: %q", key, value)
+        }
+        if integer.value > 0 {
+            return integer.value
+        }
+    }
+    return fallback
+}
+
+EnvInt64 :: (key: string, fallback: s64) -> s64 {
+    value := Getenv(key)
+    if value != "" {
+        integer := ParseInt(value, cast(isize)10, cast(isize)64)
+        if integer.error != null {
+            FatalValue("invalid %s: not an integer: %q", key, value)
+        }
+        if integer.value > 0 {
+            return integer.value
+        }
+    }
+    return fallback
+}
+
+EnvBytesHex :: (key: string, fallback: []u8) -> []u8 {
+    value := Getenv(key)
+    if value != "" {
+        decoded := DecodeString(value)
+        if decoded.error != null {
+            FatalValue("invalid %s: not valid hex: %q", key, value)
+        }
+        return decoded.value
+    }
+    return fallback
+}
+
+EnvStringOrFile :: (key: string, fileKey: string, fallback: string) -> string {
+    value := Getenv(key)
+    if value != "" {
+        return value
+    }
+    path := TrimSpace(Getenv(fileKey))
+    if path != "" {
+        file := ReadFile(path)
+        if file.error == null {
+            return TrimSpace(text.FromBytes(file.value))
+        }
+        WarnFile("failed to read config file", "env", fileKey, "path", path, "error", file.error)
+    }
+    return fallback
+}
+
+EnvBytesHexOrFile :: (key: string, fileKey: string, fallback: []u8) -> []u8 {
+    value := Getenv(key)
+    if value != "" {
+        decoded := DecodeString(TrimSpace(value))
+        if decoded.error == null {
+            return decoded.value
+        }
+    }
+    fileValue := EnvStringOrFile("", fileKey, "")
+    if fileValue != "" {
+        decoded := DecodeString(TrimSpace(fileValue))
+        if decoded.error == null {
+            return decoded.value
+        }
+    }
+    return fallback
+}
+
+Load :: () -> Config {
+    empty: []u8
+    secret := EnvBytesHex("DAOCHI_TOKEN_SECRET_HEX", empty)
+    ephemeralSecret := false
+    if secret.count < 32 {
+        if !Bool(Getenv("DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET"), false) {
+            Fatal("DAOCHI_TOKEN_SECRET_HEX must be at least 32 bytes; set DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET=1 only for local development")
+        }
+        Warn("DAOCHI_TOKEN_SECRET_HEX is missing or too short; using an ephemeral token secret suitable only for local development")
+        secret = AllocateBytes(cast(isize)32)
+        random := ReadRandom(secret)
+        if random.error != null {
+            Panic(random.error)
+        }
+        ephemeralSecret = true
+    }
+    nodeRegistryPublic := cast(PublicKey)EnvBytesHexOrFile("DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX", "DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE", empty)
+    issuerPublic := EnvBytesHexOrFile("DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE", empty)
+    issuerPrivateBytes := EnvBytesHexOrFile("DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE", empty)
+    issuerPrivate: PrivateKey
+    if issuerPrivateBytes.count == 32 {
+        issuerPrivate = NewKeyFromSeed(issuerPrivateBytes)
+    } else if issuerPrivateBytes.count == 64 {
+        issuerPrivate = cast(PrivateKey)issuerPrivateBytes
+    }
+    if PrivateLength(issuerPrivate) == 64 && issuerPublic.count == 0 {
+        privateBytes := cast([]u8)issuerPrivate
+        issuerPublic = AllocateBytes(cast(isize)32)
+        for index: 0..31 {
+            issuerPublic[index] = privateBytes[index + 32]
+        }
+    }
+    baseURL := EnvString("DAOCHI_BASE_URL", "https://api.example.com")
+    nodeKeyBytes := EnvBytesHexOrFile("DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX", "DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX_FILE", empty)
+    nodePrivateKey: PrivateKey
+    if nodeKeyBytes.count == 32 {
+        nodePrivateKey = NewKeyFromSeed(nodeKeyBytes)
+    } else if nodeKeyBytes.count == 64 {
+        nodePrivateKey = cast(PrivateKey)nodeKeyBytes
+    } else if nodeKeyBytes.count != 0 {
+        Fatal("DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX must contain a 32-byte Ed25519 seed or 64-byte private key")
+    }
+    result: Config
+    result.Addr = EnvString("DAOCHI_ADDR", "127.0.0.1:8080")
+    result.BaseURL = baseURL
+    result.DBPath = EnvString("DAOCHI_DB", "daochi.db")
+    result.AdminToken = EnvString("DAOCHI_ADMIN_TOKEN", "")
+    result.ChallengeTTL = EnvDurationSeconds("DAOCHI_CHALLENGE_TTL_SECONDS", cast(clock.Duration)60000000000)
+    result.TokenTTL = EnvDurationSeconds("DAOCHI_TOKEN_TTL_SECONDS", cast(clock.Duration)3600000000000)
+    result.TokenSecret = secret
+    result.TokenSecretEphemeral = ephemeralSecret
+    result.MaxBodyBytes = EnvInt64("DAOCHI_MAX_BODY_BYTES", cast(s64)1048576)
+    result.EncryptedPayloadMaxReturn = EnvInt("DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN", cast(isize)0)
+    result.EncryptedPayloadMaxAccountBytes = EnvInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", cast(s64)0)
+    result.EncryptedPayloadRetention = EnvDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", cast(clock.Duration)0)
+    result.NodeRegistryPublicKey = nodeRegistryPublic
+    result.KnownNodes = Peers(EnvString("DAOCHI_KNOWN_NODES", ""))
+    result.NodeSyncToken = EnvString("DAOCHI_NODE_SYNC_TOKEN", "")
+    result.NodeSyncInterval = EnvDurationSeconds("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", cast(clock.Duration)0)
+    result.NodeSyncBatchLimit = EnvInt("DAOCHI_NODE_SYNC_BATCH_LIMIT", cast(isize)500)
+    result.NodeIdentityKeyFile = EnvString("DAOCHI_NODE_IDENTITY_KEY_FILE", FormatKeyPath("%s.node-key", EnvString("DAOCHI_DB", "daochi.db")))
+    result.NodeIdentityPrivateKey = nodePrivateKey
+    result.NodeDisplayName = EnvString("DAOCHI_NODE_NAME", "Daochi Node")
+    result.LANDiscovery = Bool(Getenv("DAOCHI_LAN_DISCOVERY"), true)
+    result.WaoziIssuerPublicKey = cast(PublicKey)issuerPublic
+    result.WaoziIssuerPrivateKey = issuerPrivate
+    result.TokenProducts = Products(EnvString("DAOCHI_TOKEN_PRODUCTS", ""))
+    result.GooglePackageNames = FromEnvironment(EnvString("DAOCHI_GOOGLE_PACKAGE_NAMES", ""))
+    result.GoogleServiceAccountJSON = EnvStringOrFile("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON", "DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", "")
+    result.GoogleOAuthClientJSON = EnvStringOrFile("DAOCHI_GOOGLE_OAUTH_CLIENT_JSON", "DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE", "")
+    result.GoogleOAuthRefreshToken = EnvStringOrFile("DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN", "DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", "")
+    result.MoneroWalletRPCURL = EnvString("MONERO_WALLET_RPC_URL", "")
+    result.MoneroWalletRPCUser = EnvString("MONERO_WALLET_RPC_USER", "")
+    result.MoneroWalletRPCPassword = EnvStringOrFile("MONERO_WALLET_RPC_PASSWORD", "MONERO_WALLET_RPC_PASSWORD_FILE", "")
+    result.MoneroNetwork = EnvString("MONERO_NETWORK", "mainnet")
+    result.MoneroRateAtomicAmount = EnvInt64("MONERO_RATE_ATOMIC_AMOUNT", cast(s64)0)
+    result.MoneroRateTokenUnits = EnvInt64("MONERO_RATE_TOKEN_UNITS", cast(s64)0)
+    result.MoneroMinimumAtomicAmount = EnvInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", cast(s64)1)
+    result.MoneroConfirmationsRequired = EnvInt64("MONERO_CONFIRMATIONS_REQUIRED", cast(s64)10)
+    result.TokenDirectPurchasesEnabled = Bool(Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED"), false)
+    return result
+}

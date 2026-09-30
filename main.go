@@ -27,7 +27,7 @@ func localHTTPURL(addr string) string {
 }
 
 func main() {
-	cfg := loadConfig()
+	cfg := Config_Load()
 	if len(cfg.NodeIdentityPrivateKey) == 0 {
 		nodeKey, nodeErr := loadOrCreateNodeIdentityKey(cfg.NodeIdentityKeyFile)
 		if nodeErr != nil {

@@ -20,10 +20,6 @@ type IntegerResult struct {
 	Error Error
 }
 
-type __type_c922d3f56b74fd5a = map[string]bool
-
-type __type_cd75cecb5feef7fa = map[string]TokenProduct
-
 func ConfigValues_Cut(Value string, Separator string) CutResult {
 	var result CutResult
 	result.Before, result.After, result.Found = strings.Cut(Value, Separator)

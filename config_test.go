@@ -23,7 +23,7 @@ func TestLoadConfigUsesCanonicalEnv(t *testing.T) {
 	t.Setenv("MONERO_RATE_ATOMIC_AMOUNT", "1000000000000")
 	t.Setenv("MONERO_RATE_TOKEN_UNITS", "5000000")
 
-	cfg := loadConfig()
+	cfg := Config_Load()
 	if got := hex.EncodeToString(cfg.TokenSecret); got != daochiSecret {
 		t.Fatalf("TokenSecret=%q, want DAOCHI secret", got)
 	}

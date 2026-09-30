@@ -48,7 +48,7 @@ field names, Go storage types, order and reflection tags.
 | `app_registry.go` | Partial Ziran | Scope grammar/ownership/matching/SQL escaping in `scope.zi`; grants, registry, handlers remain Go |
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
-| `config.go` | Partial Ziran | String sets in `sets.zi`; booleans, peer lists, sync policy/directions/lists and products in `config_values.zi`; environment/file access, startup settings, fatal errors and keys remain Go |
+| `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
 | `device_keys.go` | Go with ported callers | Device registration, signatures, revocation, replay policy |
 | `discovery.go` | Go | LAN discovery and runtime cancellation |
 | `docs.go` | Go | Embedded public API documentation |
@@ -104,6 +104,13 @@ including Unicode whitespace/case conversion and allocated empty results.
 including duplicate selection, nil/empty results, integer limits, policy field
 order and Unicode handling. Tests compare the baseline Go parsers against
 source and saved IR on table cases and 1,000 arbitrary byte strings.
+`config.zi` completes the configuration module, including file precedence,
+native integer overflow, duration multiplication, strict startup failures,
+random development secrets and Ed25519 seed/private/public key handling.
+Tests compare every field and its native Go type against the original loader,
+verify fallback storage and public-key copying, and compare fatal messages
+and exit status in isolated subprocesses. Maintained startup and inspection
+callers use the generated configuration surface directly.
 
 `challenge.zi` and `rate_limit.zi` own their state, map updates, locking and
 expiry decisions. They keep Go's monotonic timestamps and exact strict expiry
@@ -162,6 +169,9 @@ captures its arguments immediately and preserves panic cleanup. The new
 shared counter and HTTP primitives used by the metrics port. Foreign generic
 signatures now normalize their concrete type applications before checking,
 including ownership restrictions on deferred calls.
+Explicit conversions between native Go aliases and slices preserve backing
+storage and keep returned data alive. Typed Go `panic` preserves error
+identity; configuration uses it for the cryptographic-random failure path.
 
 ## Next dependencies
 

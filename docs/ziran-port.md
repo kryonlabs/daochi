@@ -73,7 +73,7 @@ field names, Go storage types, order and reflection tags.
 | `log_safety.go` | Ziran | `log_safety.zi`: byte-preserving CR/LF removal |
 | `main.go` | Go | Startup, worker supervision, HTTP lifecycle |
 | `mesh.go` | Partial Ziran | Wire records in `mesh_types.zi`, cursor encoding/decoding, peer-key hashing and limits in `mesh_cursor.zi`, direction and scope predicates in `mesh_policy.zi`; peer requests, retries, HTTP authentication and replication orchestration remain Go |
-| `mesh_apps.go` | Partial Ziran | Normalized app sets in `sets.zi`; registry replication and app projections remain Go |
+| `mesh_apps.go` | Ziran | `mesh_apps.zi`: scoped signed registry export/import, manifest decoding, signature verification, version queries, downgrade/fork rejection and per-app transactions; native authentication error conversion remains supplied by the Go caller |
 | `mesh_store.go` | Ziran | `mesh_store.zi`: encrypted-record export/import, stable change ordering, account tombstones, conflicts, deletion propagation, cursor persistence and atomic rollback; collection ownership in `collection_scope.zi`, record validation in `encrypted_record.zi` |
 | `metrics.go` | Ziran | `metrics.zi`: concurrent counters, route/reason normalization, escaped labels, sorted maps, aggregate usage and exact Prometheus output |
 | `monero_deposits.go` | Go with ported callers | Deposit reconciliation and credit transactions |
@@ -277,6 +277,18 @@ preserves base64/JSON bytes, partial-decode rejection, integer bounds, batch lim
 and URL/policy cursor keys. The native SQL scan found a Go backend truncation bug;
 Ziran now uses the complete checked parameter list for procedure signatures and
 foreign calls, with source and saved-IR regressions through 64 parameters.
+
+`mesh_apps.zi` completes signed app registry replication. Export preserves
+ordering, exact stored manifest/signature bytes, normalized app filters,
+nil/empty results and wrapped JSON errors. Import preserves validation and
+signature checks before version comparisons, refuses same-version forks and
+skips older manifests. Each accepted app commits independently, as in the
+released implementation: a later failure reports zero applied while leaving
+earlier completed apps present. Tests compare this boundary, expired manifests
+and keys, scope denial, exact wrapped authentication errors, cancelled SQL,
+malformed stored data, failed writes/commits and connection reuse. The existing
+Go authentication-error converter is a typed callback dependency; that adapter
+and the remaining Go server modules still need porting for the complete goal.
 
 `device_keys.zi` owns the device records and storage lifecycle. Canonical
 messages preserve raw bytes, integer limits and trailing newlines; normalization

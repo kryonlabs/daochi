@@ -37,7 +37,8 @@ func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeRequestedPolicy(w, r, req.Policy, "export") {
 		return
 	}
-	apps, err := s.store.ExportMeshApps(r.Context(), req.Policy)
+	exportedApps := MeshApps_Export(s.store.db, r.Context(), req.Policy)
+	apps, err := exportedApps.Value, exportedApps.Error
 	if err != nil {
 		slog.Error("mesh app registry export", "error", err)
 		Response_Error(w, http.StatusInternalServerError, "mesh app registry export failed")
@@ -92,7 +93,8 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeRequestedPolicy(w, r, req.Policy, "import") {
 		return
 	}
-	appCount, err := s.ImportMeshApps(r.Context(), req.Policy, req.Apps)
+	importedApps := MeshApps_Import(s.store.db, r.Context(), s.cfg.NodeRegistryPublicKey, req.Policy, req.Apps, authenticationError)
+	appCount, err := importedApps.Value, importedApps.Error
 	if err != nil {
 		slog.Error("mesh app registry import", "error", err)
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -244,7 +246,8 @@ func (s *Server) pullNodePeer(ctx context.Context, peer NodePeer) error {
 			len(exported.Names) == 0 {
 			return nil
 		}
-		appCount, err := s.ImportMeshApps(ctx, policy, exported.Apps)
+		importedApps := MeshApps_Import(s.store.db, ctx, s.cfg.NodeRegistryPublicKey, policy, exported.Apps, authenticationError)
+		appCount, err := importedApps.Value, importedApps.Error
 		if err != nil {
 			return err
 		}

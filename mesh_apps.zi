@@ -1,0 +1,180 @@
+#import "std/go_types"
+#import "authentication"
+#import "protocol"
+#import "manifest"
+#import "std/map_go"
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+keys :: #import "std/ed25519_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+auth :: #import "authentication";
+manifest :: #import "manifest";
+registration :: #import "app_registration";
+apps :: #import "app_store";
+policy :: #import "mesh_policy";
+sets :: #import "sets";
+go_sql :: #system_library "go:database/sql";
+go_format :: #system_library "go:fmt";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+ManifestVersion :: struct {
+    Version: isize
+    Hash: string
+}
+ManifestVersionResult :: struct {
+    value: ManifestVersion
+    found: bool
+    error: Error
+}
+MeshAppsExportResult :: struct {
+    value: []SignedAppRegistrationRequest
+    error: Error
+}
+MeshAppsImportResult :: struct {
+    value: isize
+    error: Error
+}
+
+#scope_file
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+Query :: (database: *sql.Database, context: ctx.Context, query: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+Scan :: (rows: *sql.Rows, appID: *string, manifest: *string, signature: *string, approval: *string) -> Error #foreign go_sql "(*Rows).Scan";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+QueryVersion :: (database: *sql.Database, context: ctx.Context, query: string, appID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+ScanVersion :: (row: *sql.Row, version: *isize, hash: *string) -> Error #foreign go_sql "(*Row).Scan";
+Lower :: (value: string) -> string #foreign go_strings "ToLower";
+WrapError :: (format: string, appID: string, error: Error) -> Error #foreign go_format "Errorf";
+ScopeError :: (format: string, appID: string) -> Error #foreign go_format "Errorf";
+ConflictError :: (format: string, appID: string, version: isize) -> Error #foreign go_format "Errorf";
+Allocate :: (count: isize, capacity: isize) -> []SignedAppRegistrationRequest #foreign builtin "make";
+Append :: (values: []SignedAppRegistrationRequest, value: SignedAppRegistrationRequest) -> []SignedAppRegistrationRequest #foreign builtin "append";
+
+#scope_export
+Export :: (database: *sql.Database, context: ctx.Context, meshPolicy: NodeSyncPolicy) -> MeshAppsExportResult {
+    result: MeshAppsExportResult
+    if !policy.IncludesData(*meshPolicy, "app_registry") || meshPolicy.Apps.count == 0 {
+        result.value = Allocate(0, 0)
+        return result
+    }
+    allowed := sets.Normalize(meshPolicy.Apps)
+    queried := Query(database, context, ExportAppsSQL)
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    values := Allocate(0, cast(isize)MapCount(allowed))
+    while sql.Next(rows) {
+        appID: string
+        manifestJSON: string
+        signature: string
+        approval: string
+        result.error = Scan(rows, *appID, *manifestJSON, *signature, *approval)
+        if result.error != null {
+            return result
+        }
+        if !MapGet(allowed, Lower(appID)) {
+            continue
+        }
+        value: SignedAppRegistrationRequest
+        error := json.Unmarshal(text.ToBytes(manifestJSON), *value.Manifest)
+        if error != null {
+            result.error = WrapError("decode stored manifest %q: %w", appID, error)
+            return result
+        }
+        value.ManifestSignature = signature
+        value.ApprovalSignature = approval
+        values = Append(values, value)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error == null {
+        result.value = values
+    }
+    return result
+}
+
+Import :: (database: *sql.Database, context: ctx.Context, registryKey: keys.PublicKey, meshPolicy: NodeSyncPolicy, registrations: []SignedAppRegistrationRequest, convertError: auth.ConvertError) -> MeshAppsImportResult {
+    result: MeshAppsImportResult
+    if !policy.IncludesData(*meshPolicy, "app_registry") {
+        return result
+    }
+    allowed := sets.Normalize(meshPolicy.Apps)
+    applied: isize = 0
+    for value: registrations {
+        manifest.Normalize(*value.Manifest)
+        if !MapGet(allowed, Lower(value.Manifest.AppID)) {
+            result.error = ScopeError("app %q exceeds mesh policy", value.Manifest.AppID)
+            return result
+        }
+        problem := manifest.Validate(value.Manifest, clock.Unix(clock.Now()))
+        if problem != "" {
+            result.error = WrapError("invalid mesh app %q: %w", value.Manifest.AppID, errors.New(problem))
+            return result
+        }
+        verified := registration.Verify(value, registryKey)
+        error := convertError(verified.authentication)
+        if error != null {
+            result.error = WrapError("verify mesh app %q: %w", value.Manifest.AppID, error)
+            return result
+        }
+        current := LoadVersion(database, context, value.Manifest.AppID)
+        result.error = current.error
+        if result.error != null {
+            return result
+        }
+        if current.found && value.Manifest.ManifestVersion < current.value.Version {
+            continue
+        }
+        if current.found && value.Manifest.ManifestVersion == current.value.Version {
+            if verified.hash != current.value.Hash {
+                result.error = ConflictError("conflicting app manifest %q at version %d", value.Manifest.AppID, current.value.Version)
+                return result
+            }
+            continue
+        }
+        result.error = apps.UpsertSignedManifest(database, context, value.Manifest,
+            verified.value, verified.hash, value.ManifestSignature, value.ApprovalSignature)
+        if result.error != null {
+            return result
+        }
+        applied += 1
+    }
+    result.value = applied
+    return result
+}
+
+LoadVersion :: (database: *sql.Database, context: ctx.Context, appID: string) -> ManifestVersionResult {
+    result: ManifestVersionResult
+    value: ManifestVersion
+    row := QueryVersion(database, context, VersionSQL, appID)
+    error := ScanVersion(row, *value.Version, *value.Hash)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    result.error = error
+    if error == null {
+        result.value = value
+        result.found = true
+    }
+    return result
+}
+
+#scope_file
+ExportAppsSQL :: #string SQL_END
+SELECT app_id,manifest_json,manifest_signature,approval_signature
+FROM server_app_manifests
+ORDER BY app_id
+SQL_END;
+VersionSQL :: #string SQL_END
+SELECT manifest_version,manifest_hash
+FROM server_app_manifests
+WHERE app_id=?1
+SQL_END;

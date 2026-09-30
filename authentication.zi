@@ -8,6 +8,8 @@ AuthenticationResult :: struct {
     error: Error
 }
 
+ConvertError :: #type (result: AuthenticationResult) -> Error;
+
 Failure :: (status: isize, message: string) -> AuthenticationResult {
     result: AuthenticationResult
     result.status = status

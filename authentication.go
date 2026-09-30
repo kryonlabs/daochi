@@ -10,6 +10,8 @@ type AuthenticationResult struct {
 	Error   Error
 }
 
+type ConvertError func(AuthenticationResult) Error
+
 func Authentication_Failure(status int, message string) AuthenticationResult {
 	var result AuthenticationResult = AuthenticationResult{}
 	result.Status = status

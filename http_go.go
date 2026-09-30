@@ -7,6 +7,8 @@ type Request = http.Request
 
 type Header = http.Header
 
+type ResponseWriter = http.ResponseWriter
+
 func HttpGo_RemoteAddressRaw(Request *Request) string {
 	return Request.RemoteAddr
 }
@@ -25,4 +27,12 @@ func HttpGo_Headers(request *Request) Header {
 
 func HttpGo_HeaderValue(header Header, name string) string {
 	return (http.Header).Get(header, name)
+}
+
+func HttpGo_ResponseHeaders(writer ResponseWriter) Header {
+	return (http.ResponseWriter).Header(writer)
+}
+
+func HttpGo_SetHeader(header Header, name string, value string) {
+	(http.Header).Set(header, name, value)
 }

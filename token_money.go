@@ -955,7 +955,7 @@ func (s *Server) reportStuckMoneroInvoice(invoiceID, accountID string, payment m
 	if _, already := s.moneroStuckNotified.LoadOrStore(invoiceID, true); already {
 		return
 	}
-	s.metrics.moneroStuckInvoices.Add(1)
+	s.metrics.MoneroStuckInvoices.Add(1)
 	slog.Warn("monero invoice has uncredited funds", "invoice", LogSafety_LogText(invoiceID),
 		"account", LogSafety_LogText(accountID), "seen_atomic", payment.SeenAtomic,
 		"confirmed_atomic", payment.ConfirmedAtomic)

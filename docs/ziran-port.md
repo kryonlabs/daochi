@@ -34,7 +34,9 @@ Additional regression cases compare binary decoding, identifier grammars,
 bearer-token bytes, HMAC results, malformed inputs, Gregorian dates,
 manifest scope/key policy, integer limits, expiry boundaries, concurrent
 request counts, single-use challenges and proxy trust against the original
-contracts and Go standard library.
+contracts and Go standard library. Metrics cases also compare exact Prometheus
+bytes and headers, label normalization, counter overflow, concurrent recording
+and cleanup after response-writer panics with the original implementation.
 A fixture extracted from the baseline protects the ported protocol records'
 field names, Go storage types, order and reflection tags.
 
@@ -56,7 +58,7 @@ field names, Go storage types, order and reflection tags.
 | `mesh.go` | Go | Peer requests, retries, authentication, replication |
 | `mesh_apps.go` | Partial Ziran | Normalized app sets in `sets.zi`; registry replication and app projections remain Go |
 | `mesh_store.go` | Go with ported callers | Mesh export/import and scope enforcement |
-| `metrics.go` | Go | Concurrent counters, aggregate usage, text output |
+| `metrics.go` | Ziran | `metrics.zi`: concurrent counters, route/reason normalization, escaped labels, sorted maps, aggregate usage and exact Prometheus output |
 | `monero_deposits.go` | Go with ported callers | Deposit reconciliation and credit transactions |
 | `node_auth.go` | Partial Ziran | Canonical message in `signing.zi`; signatures, time window, peer lookup, nonce consumption remain Go |
 | `node_identity.go` | Go with ported callers | Identity persistence, invites, pairing, namespace claims |
@@ -81,7 +83,7 @@ field names, Go storage types, order and reflection tags.
 `identity.zi` is a new canonical module extracted from `server.go`. Generated
 `vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go`, `go_types.go`,
 `option.go`, `sync_go.go`, `time_go.go`, `random_go.go`, `text_go.go`,
-`net_go.go` and `http_go.go` come from Ziran's standard
+`net_go.go`, `http_go.go` and `atomic_go.go` come from Ziran's standard
 modules; they do not represent additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Their HTTP/database
@@ -116,6 +118,14 @@ whitespace, malformed inputs, IPv4/IPv6 canonicalization and proxy trust with
 the baseline policy. Forwarded addresses remain trusted only for direct
 loopback peers, and only the first hop/header value can select the bucket.
 
+`metrics.zi` owns the entire original metrics module. Atomic counters stay in
+shared native storage. Map recording and scraping keep the original mutex,
+lazy initialization and ordering. Prometheus output retains released metric
+names, escapes, integer behavior and storage clamping. Scraping unlocks the
+mutex during native panic unwinding as well as ordinary returns; a failing
+response writer cannot leave subsequent recording blocked. The build version
+is passed explicitly until startup/version code moves to Ziran.
+
 ## Compiler work exercised by this port
 
 Ziran now accepts explicit `go:` foreign package imports, including standard
@@ -146,6 +156,12 @@ Typed single-element `append` preserves nil slices, lengths, capacities and
 shared backing storage while rejecting owned vector elements.
 Compiler tests compare source and saved IR, including altered diagnostic
 declaration strings, to ensure typed metadata controls generation.
+`#go_defer` schedules a checked foreign Go call at the calling function's exit,
+captures its arguments immediately and preserves panic cleanup. The new
+`atomic_go` module and native response-writer/header operations provide the
+shared counter and HTTP primitives used by the metrics port. Foreign generic
+signatures now normalize their concrete type applications before checking,
+including ownership restrictions on deferred calls.
 
 ## Next dependencies
 

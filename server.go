@@ -253,7 +253,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("load metrics storage usage", "error", err)
 	}
-	s.metrics.writePrometheus(w, usage, storage)
+	Metrics_Prometheus(s.metrics, w, usage, storage, version)
 }
 
 func (s *Server) nodeUsage(ctx context.Context) (NodeUsage, error) {
@@ -309,12 +309,12 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
-	s.metrics.syncRequests.Add(1)
+	s.metrics.SyncRequests.Add(1)
 	syncOK := false
 	var signedTx *SignedTxEnvelope
 	defer func() {
 		if !syncOK {
-			s.metrics.syncFailures.Add(1)
+			s.metrics.SyncFailures.Add(1)
 			if signedTx != nil {
 				s.store.ForgetSignedTx(r.Context(), *signedTx)
 			}
@@ -437,7 +437,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if fullSnapshotRequired {
-		s.metrics.recordFullSnapshot(snapshotReason)
+		Metrics_RecordFullSnapshot(s.metrics, snapshotReason)
 	}
 
 	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, sinceVersion)
@@ -599,7 +599,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(response.LegacyClients) > 0 {
-			s.metrics.legacyClientHints.Add(uint64(len(response.LegacyClients)))
+			s.metrics.LegacyClientHints.Add(uint64(len(response.LegacyClients)))
 		}
 	}
 	response.LegacyWriteRequired, response.LegacyProjectionEpoch, err =
@@ -613,7 +613,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		response.Diagnostics.ReturnedChanges = syncChangesResult(response.Changes)
 	}
 	if result.EncryptedRecords > 0 {
-		s.metrics.syncEncryptedRecords.Add(uint64(result.EncryptedRecords))
+		s.metrics.SyncEncryptedRecords.Add(uint64(result.EncryptedRecords))
 	}
 	if err := s.store.RecordSyncAudit(r.Context(), SyncAuditEntry{
 		UserIDHash:           req.UserIDHash,
@@ -739,7 +739,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 	}); err != nil {
 		slog.Error("record encrypted sync audit", "user", LogSafety_LogText(userID), "client", LogSafety_LogText(clientID), "error", err)
 	}
-	s.metrics.syncEncryptedPayloads.Add(1)
+	s.metrics.SyncEncryptedPayloads.Add(1)
 	s.syncHub.publish(userID, serverVersion)
 	response := SyncResponse{
 		ProtocolVersion:      latestProtocol,
@@ -1825,12 +1825,12 @@ func (e authError) Error() string {
 func (s *Server) writeAuthError(w http.ResponseWriter, err error) {
 	var ae authError
 	if errors.As(err, &ae) {
-		s.metrics.recordAuthFailure(ae.status, ae.message)
+		Metrics_RecordAuthFailure(s.metrics, ae.status, ae.message)
 		writeError(w, ae.status, ae.message)
 		return
 	}
 	slog.Error("auth", "error", err)
-	s.metrics.recordAuthFailure(http.StatusInternalServerError, "authentication failed")
+	Metrics_RecordAuthFailure(s.metrics, http.StatusInternalServerError, "authentication failed")
 	writeError(w, http.StatusInternalServerError, "authentication failed")
 }
 
@@ -1871,7 +1871,7 @@ func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			s.metrics.recordHTTP(r.Method, r.URL.Path, status, time.Since(start))
+			Metrics_RecordHTTP(s.metrics, r.Method, r.URL.Path, status, time.Since(start))
 		}()
 		w = mw
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -1896,7 +1896,7 @@ func (s *Server) allowRequest(r *http.Request, key string, limit int, window tim
 	}
 	allowed := RateLimit_Allow(s.limiter, key, limit, window)
 	if !allowed {
-		s.metrics.rateLimitedRequests.Add(1)
+		s.metrics.RateLimitedRequests.Add(1)
 	}
 	return allowed
 }

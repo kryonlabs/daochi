@@ -1,0 +1,292 @@
+#import "protocol"
+#import "map_go"
+#import "sync_go"
+#import "vec"
+atomic :: #import "atomic_go";
+http :: #import "http_go";
+clock :: #import "time_go";
+go_strings :: #system_library "go:strings";
+go_sort :: #system_library "go:sort";
+go_format :: #system_library "go:fmt";
+go_utf8 :: #system_library "go:unicode/utf8";
+go_sync :: #system_library "go:sync";
+
+ServerMetrics :: struct {
+    syncRequests: atomic.Uint64
+    syncFailures: atomic.Uint64
+    syncFullSnapshots: atomic.Uint64
+    syncEncryptedRecords: atomic.Uint64
+    syncEncryptedPayloads: atomic.Uint64
+    rateLimitedRequests: atomic.Uint64
+    webSocketAccepted: atomic.Uint64
+    webSocketRejected: atomic.Uint64
+    authFailures: atomic.Uint64
+    legacyClientHints: atomic.Uint64
+    moneroStuckInvoices: atomic.Uint64
+    mu: Mutex
+    httpRequests: Map(string, u64)
+    httpLatencyMS: Map(string, u64)
+    authFailuresBy: Map(string, u64)
+    fullSnapshotsBy: Map(string, u64)
+    webSocketRejects: Map(string, u64)
+}
+
+#scope_file
+RuneResult :: struct {
+    value: s32
+    width: isize
+}
+DecodeRune :: (value: string) -> RuneResult #go_results #foreign go_utf8 "DecodeRuneInString";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Trim :: (value: string, cutset: string) -> string #foreign go_strings;
+ToLower :: (value: string) -> string #foreign go_strings;
+ReplaceAll :: (value: string, before: string, after: string) -> string #foreign go_strings;
+HasPrefix :: (value: string, prefix: string) -> bool #foreign go_strings;
+HasSuffix :: (value: string, suffix: string) -> bool #foreign go_strings;
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+SortStrings :: (values: []string) #foreign go_sort "Strings";
+UnlockAtReturn :: (mutex: *Mutex) #go_defer #foreign go_sync "(*Mutex).Unlock";
+FormatHTTPKey :: (format: string, method: string, route: string, status: isize) -> string #foreign go_format "Sprintf";
+FormatAuthKey :: (format: string, status: isize, reason: string) -> string #foreign go_format "Sprintf";
+WriteText :: (writer: http.ResponseWriter, value: string) #foreign go_format "Fprint";
+FormatText :: (writer: http.ResponseWriter, format: string, value: string) #foreign go_format "Fprintf";
+FormatPair :: (writer: http.ResponseWriter, format: string, first: string, second: string) #foreign go_format "Fprintf";
+FormatCount :: (writer: http.ResponseWriter, format: string, value: u64) #foreign go_format "Fprintf";
+FormatScalar :: (writer: http.ResponseWriter, format: string, name: string, kind: string, repeatedName: string, value: u64) #foreign go_format "Fprintf";
+FormatApp :: (writer: http.ResponseWriter, format: string, name: string, app: string, value: s64) #foreign go_format "Fprintf";
+FormatCollection :: (writer: http.ResponseWriter, format: string, name: string, app: string, collection: string, value: s64) #foreign go_format "Fprintf";
+FormatLabel :: (writer: http.ResponseWriter, format: string, name: string, label: string, value: string, count: u64) #foreign go_format "Fprintf";
+
+EnsureMaps :: (metrics: *ServerMetrics) {
+    if metrics.httpRequests == null {
+        MapInit(metrics.httpRequests)
+        metrics.httpLatencyMS = null
+        MapInit(metrics.httpLatencyMS)
+        metrics.authFailuresBy = null
+        MapInit(metrics.authFailuresBy)
+        metrics.fullSnapshotsBy = null
+        MapInit(metrics.fullSnapshotsBy)
+        metrics.webSocketRejects = null
+        MapInit(metrics.webSocketRejects)
+    }
+}
+
+WriteMaps :: (metrics: *ServerMetrics, writer: http.ResponseWriter) {
+    Lock(*metrics.mu)
+    UnlockAtReturn(*metrics.mu)
+    EnsureMaps(metrics)
+    WriteLabelMap(writer, "daochi_http_requests_total", "counter", "method,route,status", metrics.httpRequests)
+    WriteLabelMap(writer, "daochi_http_request_duration_milliseconds_total", "counter", "method,route,status", metrics.httpLatencyMS)
+    WriteLabelMap(writer, "daochi_auth_failures_by_reason_total", "counter", "status,reason", metrics.authFailuresBy)
+    WriteSingleLabelMap(writer, "daochi_sync_full_snapshots_by_reason_total", "counter", "reason", metrics.fullSnapshotsBy)
+    WriteSingleLabelMap(writer, "daochi_websocket_rejected_by_reason_total", "counter", "reason", metrics.webSocketRejects)
+    WriteLabelMap(writer, "ksync_http_requests_total", "counter", "method,route,status", metrics.httpRequests)
+    WriteLabelMap(writer, "ksync_http_request_duration_milliseconds_total", "counter", "method,route,status", metrics.httpLatencyMS)
+    WriteLabelMap(writer, "ksync_auth_failures_by_reason_total", "counter", "status,reason", metrics.authFailuresBy)
+    WriteSingleLabelMap(writer, "ksync_sync_full_snapshots_by_reason_total", "counter", "reason", metrics.fullSnapshotsBy)
+    WriteSingleLabelMap(writer, "ksync_websocket_rejected_by_reason_total", "counter", "reason", metrics.webSocketRejects)
+}
+
+#scope_export
+Route :: (path: string) -> string {
+    if path == "" {
+        return "/"
+    }
+    if HasPrefix(path, "/api/v1/friends/requests/") {
+        return "/api/v1/friends/requests/{id}"
+    }
+    if HasPrefix(path, "/api/v1/friends/") {
+        return "/api/v1/friends/{user_id_hash}"
+    }
+    if HasPrefix(path, "/api/v1/apps/") {
+        if HasSuffix(path, "/collections") {
+            return "/api/v1/apps/{app_id}/collections"
+        }
+        return "/api/v1/apps/{app_id}"
+    }
+    if HasPrefix(path, "/api/v1/account/app-grants/") {
+        return "/api/v1/account/app-grants/{id}"
+    }
+    if HasPrefix(path, "/api/v1/tokens/purchases/monero/invoices/") {
+        return "/api/v1/tokens/purchases/monero/invoices/{id}"
+    }
+    if HasPrefix(path, "/api/v1/tokens/purchases/monero/address/") {
+        return "/api/v1/tokens/purchases/monero/address/{recipient}"
+    }
+    if HasPrefix(path, "/api/v1/tokens/receipts/") {
+        return "/api/v1/tokens/receipts/{receipt_id}"
+    }
+    return path
+}
+
+Reason :: (value: string) -> string {
+    normalized := ToLower(TrimSpace(value))
+    output: Vec(u8)
+    at: s64 = 0
+    while at < normalized.count {
+        decoded := DecodeRune(normalized[at:])
+        rune := decoded.value
+        byte: u8 = cast(u8)95
+        if (rune >= 97 && rune <= 122) || (rune >= 48 && rune <= 57) || rune == 95 || rune == 45 || rune == 46 {
+            byte = cast(u8)rune
+        }
+        VecPush(output, byte)
+        at += cast(s64)decoded.width
+    }
+    return Trim(BuilderFinish(output), "_")
+}
+
+EscapeLabel :: (value: string) -> string {
+    escaped := ReplaceAll(value, "\\", "\\\\")
+    escaped = ReplaceAll(escaped, "\n", "\\n")
+    return ReplaceAll(escaped, "\"", "\\\"")
+}
+
+NonNegative :: (value: s64) -> s64 {
+    if value < 0 {
+        return 0
+    }
+    return value
+}
+
+SortedKeys :: (values: Map(string, u64)) -> []string {
+    keys := MapKeys(values)
+    SortStrings(keys)
+    return keys
+}
+
+RecordHTTP :: (metrics: *ServerMetrics, method: string, path: string, status: isize, elapsed: clock.Duration) {
+    route := Route(path)
+    key := FormatHTTPKey("%s|%s|%d", method, route, status)
+    Lock(*metrics.mu)
+    EnsureMaps(metrics)
+    MapSet(metrics.httpRequests, key, MapGet(metrics.httpRequests, key) + cast(u64)1)
+    milliseconds := cast(s64)elapsed / 1000000
+    MapSet(metrics.httpLatencyMS, key, MapGet(metrics.httpLatencyMS, key) + cast(u64)milliseconds)
+    Unlock(*metrics.mu)
+}
+
+RecordAuthFailure :: (metrics: *ServerMetrics, status: isize, message: string) {
+    atomic.Add(*metrics.authFailures, cast(u64)1)
+    reason := Reason(message)
+    key := FormatAuthKey("%d|%s", status, reason)
+    Lock(*metrics.mu)
+    EnsureMaps(metrics)
+    MapSet(metrics.authFailuresBy, key, MapGet(metrics.authFailuresBy, key) + cast(u64)1)
+    Unlock(*metrics.mu)
+}
+
+RecordFullSnapshot :: (metrics: *ServerMetrics, reason: string) {
+    atomic.Add(*metrics.syncFullSnapshots, cast(u64)1)
+    normalized := Reason(reason)
+    if normalized == "" {
+        normalized = "unspecified"
+    }
+    Lock(*metrics.mu)
+    EnsureMaps(metrics)
+    MapSet(metrics.fullSnapshotsBy, normalized, MapGet(metrics.fullSnapshotsBy, normalized) + cast(u64)1)
+    Unlock(*metrics.mu)
+}
+
+RecordWebSocketReject :: (metrics: *ServerMetrics, reason: string) {
+    atomic.Add(*metrics.webSocketRejected, cast(u64)1)
+    normalized := Reason(reason)
+    if normalized == "" {
+        normalized = "rejected"
+    }
+    Lock(*metrics.mu)
+    EnsureMaps(metrics)
+    MapSet(metrics.webSocketRejects, normalized, MapGet(metrics.webSocketRejects, normalized) + cast(u64)1)
+    Unlock(*metrics.mu)
+}
+
+WriteScalar :: (writer: http.ResponseWriter, name: string, kind: string, value: u64) {
+    FormatScalar(writer, "# TYPE %s %s\n%s %d\n", name, kind, name, value)
+}
+
+WriteAppStorage :: (writer: http.ResponseWriter, name: string, kind: string, apps: []AppStorageUsage) {
+    FormatPair(writer, "# TYPE %s %s\n", name, kind)
+    for app: apps {
+        FormatApp(writer, "%s{app_id=\"%s\"} %d\n", name, EscapeLabel(app.AppID), NonNegative(app.LogicalBytes))
+    }
+}
+
+WriteCollectionStorage :: (writer: http.ResponseWriter, name: string, kind: string, apps: []AppStorageUsage) {
+    FormatPair(writer, "# TYPE %s %s\n", name, kind)
+    for app: apps {
+        for collection: app.Collections {
+            FormatCollection(writer, "%s{app_id=\"%s\",collection=\"%s\"} %d\n", name, EscapeLabel(app.AppID), EscapeLabel(collection.Collection), NonNegative(collection.LogicalBytes))
+        }
+    }
+}
+
+WriteLabelMap :: (writer: http.ResponseWriter, name: string, kind: string, labels: string, values: Map(string, u64)) {
+    FormatPair(writer, "# TYPE %s %s\n", name, kind)
+    keys := SortedKeys(values)
+    names := Split(labels, ",")
+    for key: keys {
+        parts := Split(key, "|")
+        FormatText(writer, "%s{", name)
+        for label, index: names {
+            if index > 0 {
+                WriteText(writer, ",")
+            }
+            value := ""
+            if index < parts.count {
+                value = parts[index]
+            }
+            FormatPair(writer, "%s=\"%s\"", label, EscapeLabel(value))
+        }
+        FormatCount(writer, "} %d\n", MapGet(values, key))
+    }
+}
+
+WriteSingleLabelMap :: (writer: http.ResponseWriter, name: string, kind: string, label: string, values: Map(string, u64)) {
+    FormatPair(writer, "# TYPE %s %s\n", name, kind)
+    keys := SortedKeys(values)
+    for key: keys {
+        FormatLabel(writer, "%s{%s=\"%s\"} %d\n", name, label, EscapeLabel(key), MapGet(values, key))
+    }
+}
+
+Prometheus :: (metrics: *ServerMetrics, writer: http.ResponseWriter, usage: NodeUsage, storage: NodeStorageUsage, version: string) {
+    http.SetHeader(http.ResponseHeaders(writer), "Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+    FormatText(writer, "# TYPE daochi_build_info gauge\ndaochi_build_info{version=%q} 1\n", version)
+    WriteScalar(writer, "daochi_sync_requests_total", "counter", atomic.Load(*metrics.syncRequests))
+    WriteScalar(writer, "daochi_sync_failures_total", "counter", atomic.Load(*metrics.syncFailures))
+    WriteScalar(writer, "daochi_sync_full_snapshots_total", "counter", atomic.Load(*metrics.syncFullSnapshots))
+    WriteScalar(writer, "daochi_sync_encrypted_records_applied_total", "counter", atomic.Load(*metrics.syncEncryptedRecords))
+    WriteScalar(writer, "daochi_sync_encrypted_payloads_applied_total", "counter", atomic.Load(*metrics.syncEncryptedPayloads))
+    WriteScalar(writer, "daochi_rate_limited_requests_total", "counter", atomic.Load(*metrics.rateLimitedRequests))
+    WriteScalar(writer, "daochi_auth_failures_total", "counter", atomic.Load(*metrics.authFailures))
+    WriteScalar(writer, "daochi_legacy_client_hints_total", "counter", atomic.Load(*metrics.legacyClientHints))
+    WriteScalar(writer, "daochi_websocket_accepted_total", "counter", atomic.Load(*metrics.webSocketAccepted))
+    WriteScalar(writer, "daochi_websocket_rejected_total", "counter", atomic.Load(*metrics.webSocketRejected))
+    WriteScalar(writer, "daochi_monero_stuck_invoices_total", "counter", atomic.Load(*metrics.moneroStuckInvoices))
+    WriteScalar(writer, "daochi_websocket_active", "gauge", cast(u64)usage.ConnectedWebSocketClients)
+    WriteScalar(writer, "daochi_connected_users", "gauge", cast(u64)usage.ConnectedUsers)
+    WriteScalar(writer, "daochi_registered_users", "gauge", cast(u64)usage.RegisteredUsers)
+    WriteScalar(writer, "daochi_active_users_30d", "gauge", cast(u64)usage.ActiveUsers30d)
+    WriteScalar(writer, "daochi_registered_clients", "gauge", cast(u64)usage.RegisteredClients)
+    WriteScalar(writer, "daochi_active_clients_30d", "gauge", cast(u64)usage.ActiveClients30d)
+    WriteScalar(writer, "daochi_websocket_connection_limit_per_user", "gauge", cast(u64)usage.WebSocketConnectionLimitPerUser)
+    WriteScalar(writer, "daochi_storage_database_total_bytes", "gauge", cast(u64)NonNegative(storage.DatabaseTotalBytes))
+    WriteScalar(writer, "daochi_storage_sqlite_page_bytes", "gauge", cast(u64)NonNegative(storage.SQLitePageBytes))
+    WriteScalar(writer, "daochi_storage_logical_bytes", "gauge", cast(u64)NonNegative(storage.LogicalBytes))
+    WriteScalar(writer, "daochi_storage_encrypted_record_bytes", "gauge", cast(u64)NonNegative(storage.EncryptedRecordBytes))
+    WriteScalar(writer, "daochi_storage_encrypted_payload_bytes", "gauge", cast(u64)NonNegative(storage.EncryptedPayloadBytes))
+    WriteAppStorage(writer, "daochi_storage_app_logical_bytes", "gauge", storage.Apps)
+    WriteCollectionStorage(writer, "daochi_storage_collection_logical_bytes", "gauge", storage.Apps)
+    WriteScalar(writer, "ksync_sync_requests_total", "counter", atomic.Load(*metrics.syncRequests))
+    WriteScalar(writer, "ksync_sync_failures_total", "counter", atomic.Load(*metrics.syncFailures))
+    WriteScalar(writer, "ksync_sync_full_snapshots_total", "counter", atomic.Load(*metrics.syncFullSnapshots))
+    WriteScalar(writer, "ksync_sync_encrypted_records_applied_total", "counter", atomic.Load(*metrics.syncEncryptedRecords))
+    WriteScalar(writer, "ksync_sync_encrypted_payloads_applied_total", "counter", atomic.Load(*metrics.syncEncryptedPayloads))
+    WriteScalar(writer, "ksync_rate_limited_requests_total", "counter", atomic.Load(*metrics.rateLimitedRequests))
+    WriteScalar(writer, "ksync_auth_failures_total", "counter", atomic.Load(*metrics.authFailures))
+    WriteScalar(writer, "ksync_legacy_client_hints_total", "counter", atomic.Load(*metrics.legacyClientHints))
+    WriteScalar(writer, "ksync_websocket_accepted_total", "counter", atomic.Load(*metrics.webSocketAccepted))
+    WriteScalar(writer, "ksync_websocket_rejected_total", "counter", atomic.Load(*metrics.webSocketRejected))
+    WriteScalar(writer, "ksync_websocket_active", "gauge", cast(u64)usage.ConnectedWebSocketClients)
+    WriteMaps(metrics, writer)
+}

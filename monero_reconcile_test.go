@@ -113,7 +113,7 @@ func TestMoneroExpiredInvoicePartialFundsReportedStuck(t *testing.T) {
 	if err != nil || balance != 0 {
 		t.Fatalf("partial expired invoice must not credit: balance=%d err=%v", balance, err)
 	}
-	if stuck := server.metrics.moneroStuckInvoices.Load(); stuck != 1 {
+	if stuck := server.metrics.MoneroStuckInvoices.Load(); stuck != 1 {
 		t.Fatalf("stuck invoice counter=%d, want 1 (reported once)", stuck)
 	}
 }

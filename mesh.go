@@ -99,7 +99,7 @@ func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !validInboundMeshPolicy(req.Policy) {
+	if !MeshPolicy_ValidInbound(req.Policy) {
 		Response_Error(w, http.StatusBadRequest, "explicit mesh policy required")
 		return
 	}
@@ -153,7 +153,7 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 		Response_Error(w, http.StatusBadRequest, "invalid mesh import request")
 		return
 	}
-	if !validInboundMeshPolicy(req.Policy) {
+	if !MeshPolicy_ValidInbound(req.Policy) {
 		Response_Error(w, http.StatusBadRequest, "explicit mesh policy required")
 		return
 	}
@@ -455,17 +455,6 @@ func meshPeerCursorKey(baseURL string, policy NodeSyncPolicy) string {
 	body, _ := json.Marshal(policy)
 	sum := sha256.Sum256([]byte(strings.TrimRight(baseURL, "/") + "\x00" + string(body)))
 	return hex.EncodeToString(sum[:])
-}
-
-func validInboundMeshPolicy(policy NodeSyncPolicy) bool {
-	if len(policy.Data) == 0 {
-		return false
-	}
-	hasRecords := MeshPolicy_IncludesData(&policy, "encrypted_records") &&
-		(len(policy.Apps) > 0 || len(policy.Collections) > 0)
-	hasNames := MeshPolicy_IncludesData(&policy, "names") && len(policy.Spaces) > 0
-	hasAppRegistry := MeshPolicy_IncludesData(&policy, "app_registry") && len(policy.Apps) > 0
-	return hasRecords || hasNames || hasAppRegistry
 }
 
 func encodeMeshCursor(cursor meshCursor) (string, error) {

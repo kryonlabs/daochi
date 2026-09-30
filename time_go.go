@@ -50,3 +50,7 @@ func TimeGo_Unix(value Time) int64 {
 func TimeGo_FromUnix(seconds int64, nanos int64) Time {
 	return time.Unix(int64(seconds), int64(nanos))
 }
+
+func TimeGo_Until(value Time) Duration {
+	return time.Until(value)
+}

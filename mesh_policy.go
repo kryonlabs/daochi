@@ -10,7 +10,7 @@ func MeshPolicy_IncludesData(policy *NodeSyncPolicy, dataType string) bool {
 	}
 	{
 		value_0 := policy.Data[:]
-		if 0 < 0 || int64(len(value_0)) < 0 || int64(len(value_0)) > int64(len(value_0)) {
+		if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
 			panic("slice range out of bounds")
 		}
 		loop_view_3 := value_0[0:int64(len(value_0)):int64(len(value_0))]
@@ -40,4 +40,17 @@ func MeshPolicy_Inverse(policy NodeSyncPolicy) NodeSyncPolicy {
 		inverse.Direction = direction
 	}
 	return inverse
+}
+
+func MeshPolicy_ValidInbound(policy NodeSyncPolicy) bool {
+	if int64(len(policy.Data)) == 0 {
+		return false
+	}
+	var value_0 bool = MeshPolicy_IncludesData(&(policy), "encrypted_records")
+	hasRecords := value_0 && (int64(len(policy.Apps)) > 0 || int64(len(policy.Collections)) > 0)
+	var value_1 bool = MeshPolicy_IncludesData(&(policy), "names")
+	hasNames := value_1 && int64(len(policy.Spaces)) > 0
+	var value_2 bool = MeshPolicy_IncludesData(&(policy), "app_registry")
+	hasAppRegistry := value_2 && int64(len(policy.Apps)) > 0
+	return hasRecords || hasNames || hasAppRegistry
 }

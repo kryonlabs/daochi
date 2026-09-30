@@ -145,7 +145,7 @@ func NodeIdentity_New(privateKey PrivateKey) NodeIdentityResult {
 		result.Error = value_0
 		return result
 	}
-	if 32 < 0 || 64 < 32 || 64 > int64(len(privateBytes)) {
+	if int64(32) < 0 || int64(64) < int64(32) || int64(64) > int64(len(privateBytes)) {
 		panic("slice range out of bounds")
 	}
 	publicBytes := NodeIdentity_CopyBytes(privateBytes[32:64:64])

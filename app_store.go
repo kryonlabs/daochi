@@ -241,7 +241,7 @@ func AppStore_UpsertTransaction(transaction *Transaction, context Context, app A
 	}
 	{
 		value_16 := app.Collections[:]
-		if 0 < 0 || int64(len(value_16)) < 0 || int64(len(value_16)) > int64(len(value_16)) {
+		if int64(0) < 0 || int64(int64(len(value_16))) < int64(0) || int64(int64(len(value_16))) > int64(len(value_16)) {
 			panic("slice range out of bounds")
 		}
 		loop_view_20 := value_16[0:int64(len(value_16)):int64(len(value_16))]
@@ -267,7 +267,7 @@ func AppStore_UpsertTransaction(transaction *Transaction, context Context, app A
 	}
 	{
 		value_20 := app.Capabilities[:]
-		if 0 < 0 || int64(len(value_20)) < 0 || int64(len(value_20)) > int64(len(value_20)) {
+		if int64(0) < 0 || int64(int64(len(value_20))) < int64(0) || int64(int64(len(value_20))) > int64(len(value_20)) {
 			panic("slice range out of bounds")
 		}
 		loop_view_30 := value_20[0:int64(len(value_20)):int64(len(value_20))]
@@ -354,7 +354,7 @@ func AppStore_UpsertSignedManifest(database *Database, context Context, value Ap
 	}
 	{
 		value_8 := value.Keys[:]
-		if 0 < 0 || int64(len(value_8)) < 0 || int64(len(value_8)) > int64(len(value_8)) {
+		if int64(0) < 0 || int64(int64(len(value_8))) < int64(0) || int64(int64(len(value_8))) > int64(len(value_8)) {
 			panic("slice range out of bounds")
 		}
 		loop_view_41 := value_8[0:int64(len(value_8)):int64(len(value_8))]
@@ -636,7 +636,7 @@ func AppStore_AllowsLegacyProtocol(database *Database, context Context, appID st
 	today := TimeGo_Format(TimeGo_UTC(TimeGo_Now()), "2006-01-02")
 	{
 		value_0 := loaded.Value.LegacyProtocols[:]
-		if 0 < 0 || int64(len(value_0)) < 0 || int64(len(value_0)) > int64(len(value_0)) {
+		if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
 			panic("slice range out of bounds")
 		}
 		loop_view_7 := value_0[0:int64(len(value_0)):int64(len(value_0))]
@@ -731,7 +731,7 @@ func AppStore_OwnsCollection(database *Database, context Context, appID string, 
 	}
 	{
 		value_0 := loaded.Value[:]
-		if 0 < 0 || int64(len(value_0)) < 0 || int64(len(value_0)) > int64(len(value_0)) {
+		if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
 			panic("slice range out of bounds")
 		}
 		loop_view_6 := value_0[0:int64(len(value_0)):int64(len(value_0))]

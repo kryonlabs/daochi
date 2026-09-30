@@ -76,7 +76,7 @@ field names, Go storage types, order and reflection tags.
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
 | `token_assets.go` | Ziran | `token_assets.zi`: native SQL upsert, released asset fields and error propagation |
 | `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
-| `trust_handlers.go` | Go with ported callers | Pairing and namespace HTTP handlers |
+| `trust_handlers.go` | Ziran | `trust_http.zi`: operator access, signed pairing invitations/acceptances, outbound completion and retries, trusted-peer listing, trust-space creation and namespace registration/resolution |
 | `trust_store.go` | Ziran | `trust_store.zi`: schema, atomic pairing, peer policy/list queries, trust spaces, namespace signing/resolution and scoped mesh name replication; nonces in `node_nonce.zi`, public-key lookup in `peer_trust.zi` |
 | `types.go` | Ziran | All 77 original records and profile constants in `protocol.zi`, `manifest.zi`, `sync_types.zi` and `types.zi` |
 | `verifier.go` | Go | Signature verifier contract |
@@ -274,6 +274,22 @@ panic retains committed device changes and closes a consumed body exactly as
 the original implementation does. Routes dispatch directly to the generated
 handlers; no handwritten device handler remains.
 
+`trust_http.zi` completes the pairing and namespace HTTP handlers. Invitation
+creation retains explicit scopes, lifetime arithmetic, configured address and
+display-name fallbacks, signing and persistence. Acceptance verifies the
+inviter before contacting it, completes reciprocal pairing before committing
+local trust, and preserves replay rejection. Completion validates both signed
+records and the issued invitation before trusting the accepting node. Outbound
+requests retain the ten-second timeout, ordered address retries, native request
+context/body replay, 2,048-byte response reads, body closure and wrapped errors.
+Peer and namespace responses preserve JSON field order and nil lists; name
+registration retains normalization, expiry validation, authority signing and
+sequence updates. Baseline comparisons cover all seven handlers, successful
+writes, unauthorized and malformed requests, signatures and expiry, unavailable
+peers, cancellation, replay/idempotence, failed writes, and native panic cleanup.
+`mesh_policy.zi` also owns the explicit inbound-scope check shared with mesh
+handlers. Routes call the generated handlers through a dependency record.
+
 `signed_tx.zi` completes signed-header decoding, transaction verification,
 device signature verification and replay persistence. Header decoding preserves
 raw JSON and both URL-base64 encodings, Unicode trimming, JSON errors and field
@@ -356,6 +372,13 @@ panic identity, immediate argument capture and ownership/signature rejection.
 Foreign slice return validation now runs after the complete import graph is
 linked. Public record types re-exported through intermediate modules therefore
 resolve independently of module/declaration order in source and saved IR.
+Void `#go_field` accessors assign a field through a pointer receiver, or assign
+a package variable with one value argument. The checker rejects value receivers,
+owned storage, wrong arity and incompatible accessor attributes. Source and
+saved-IR regressions verify pointer identity, package assignments and rejected
+signatures. The extended HTTP/I/O/time modules provide native timeout clients,
+outbound requests, response fields, byte readers, bounded streams and deadline
+arithmetic without application-specific adapters.
 
 ## Next dependencies
 

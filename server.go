@@ -112,6 +112,14 @@ func (s *Server) devices() Devices {
 	}
 }
 
+func (s *Server) trust() Trust {
+	return Trust{
+		Database:      s.store.db,
+		Configuration: &s.cfg,
+		Identity:      s.node,
+	}
+}
+
 func (s *Server) authenticateToken(r *http.Request) (string, error) {
 	result := HttpAuth_AuthenticateToken(s.store.db, r, s.cfg.TokenSecret)
 	return result.Value, authenticationError(result.Authentication)
@@ -133,13 +141,27 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("GET /api/v1/node", s.handleNodeInfo)
-	mux.HandleFunc("POST /api/v1/node/pairing/invites", s.handleCreatePairingInvite)
-	mux.HandleFunc("POST /api/v1/node/pairing/accept", s.handleAcceptPairingInvite)
-	mux.HandleFunc("POST /api/v1/node/pairing/complete", s.handleCompletePairing)
-	mux.HandleFunc("GET /api/v1/node/peers", s.handleListTrustedPeers)
-	mux.HandleFunc("POST /api/v1/namespaces", s.handleCreateTrustSpace)
-	mux.HandleFunc("POST /api/v1/namespaces/claims", s.handleRegisterNameClaim)
-	mux.HandleFunc("GET /api/v1/namespaces/resolve", s.handleResolveName)
+	mux.HandleFunc("POST /api/v1/node/pairing/invites", func(w http.ResponseWriter, r *http.Request) {
+		TrustHttp_CreateInvite(s.trust(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/node/pairing/accept", func(w http.ResponseWriter, r *http.Request) {
+		TrustHttp_AcceptInvite(s.trust(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/node/pairing/complete", func(w http.ResponseWriter, r *http.Request) {
+		TrustHttp_CompletePairing(s.trust(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/node/peers", func(w http.ResponseWriter, r *http.Request) {
+		TrustHttp_ListPeers(s.trust(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/namespaces", func(w http.ResponseWriter, r *http.Request) {
+		TrustHttp_CreateSpace(s.trust(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/namespaces/claims", func(w http.ResponseWriter, r *http.Request) {
+		TrustHttp_RegisterName(s.trust(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/namespaces/resolve", func(w http.ResponseWriter, r *http.Request) {
+		TrustHttp_ResolveName(s.trust(), w, r)
+	})
 	mux.HandleFunc("POST /api/v1/node/mesh/export", s.handleNodeMeshExport)
 	mux.HandleFunc("POST /api/v1/node/mesh/import", s.handleNodeMeshImport)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)

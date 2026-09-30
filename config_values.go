@@ -153,7 +153,7 @@ func ConfigValues_Peers(raw string) []NodePeer {
 		fields := strings.Split(item, ";")
 		if int64(len(fields)) > 1 {
 			url = strings.TrimSpace(fields[0])
-			if 1 < 0 || int64(len(fields)) < 1 || int64(len(fields)) > int64(len(fields)) {
+			if int64(1) < 0 || int64(int64(len(fields))) < int64(1) || int64(int64(len(fields))) > int64(len(fields)) {
 				panic("slice range out of bounds")
 			}
 			policyFields = fields[1:int64(len(fields)):int64(len(fields))]

@@ -1,0 +1,399 @@
+#import "go_types"
+#import "protocol"
+#import "node_identity"
+#import "trust_store"
+config :: #import "config";
+config_values :: #import "config_values";
+http_auth :: #import "http_auth";
+http_body :: #import "http_body";
+response :: #import "response";
+http :: #import "http_go";
+io :: #import "io_go";
+url :: #import "url_go";
+sql :: #import "sql_go";
+ctx :: #import "context_go";
+clock :: #import "time_go";
+json :: #import "json_go";
+errors :: #import "errors_go";
+text :: #import "text_go";
+node :: #import "node_identity";
+auth :: #import "node_auth";
+store :: #import "trust_store";
+policy :: #import "mesh_policy";
+identity :: #import "identity";
+manifest :: #import "manifest";
+go_strings :: #system_library "go:strings";
+go_hex :: #system_library "go:encoding/hex";
+go_format :: #system_library "go:fmt";
+builtin :: #system_library "go:builtin";
+
+Trust :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    identity: NodeIdentity
+}
+PairingAcceptanceResult :: struct {
+    value: PairingAcceptance
+    error: Error
+}
+
+#scope_file
+CreateInviteRequest :: struct {
+    displayName: string #go_tag "json:\"display_name\""
+    addresses: []string #go_tag "json:\"addresses\""
+    spaceID: string #go_tag "json:\"space_id\""
+    expiresIn: s64 #go_tag "json:\"expires_in_seconds\""
+    policy: NodeSyncPolicy #go_tag "json:\"policy\""
+}
+CompletePairingRequest :: struct {
+    invite: PairingInvite #go_tag "json:\"invite\""
+    acceptance: PairingAcceptance #go_tag "json:\"acceptance\""
+}
+PairingResponse :: struct {
+    nodeID: string #go_tag "json:\"node_id\""
+    status: string #go_tag "json:\"status\""
+}
+PeersResponse :: struct {
+    peers: []TrustedNodePeer #go_tag "json:\"peers\""
+}
+CreateSpaceRequest :: struct {
+    displayName: string #go_tag "json:\"display_name\""
+}
+SpaceResponse :: struct {
+    displayName: string #go_tag "json:\"display_name\""
+    spaceID: string #go_tag "json:\"space_id\""
+}
+NameResponse :: struct {
+    claim: NameClaim #go_tag "json:\"claim\""
+    ttlSeconds: s64 #go_tag "json:\"ttl_seconds\""
+    uri: string #go_tag "json:\"uri\""
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+TrimRight :: (value: string, cutset: string) -> string #foreign go_strings;
+ToLower :: (value: string) -> string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+AllocateAddresses :: (count: isize) -> []string #foreign builtin "make";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+RemoteFailure :: (format: string, status: string, body: string) -> Error #foreign go_format "Errorf";
+WrapFailure :: (format: string, error: Error) -> Error #foreign go_format "Errorf";
+
+#scope_export
+ValidPairingPolicy :: (value: NodeSyncPolicy) -> bool {
+    direction := ToLower(TrimSpace(value.Direction))
+    if direction == "pull" || direction == "push" || direction == "bidirectional" {
+        return policy.ValidInbound(value)
+    }
+    return false
+}
+
+CreateInvite :: (trust: Trust, writer: http.ResponseWriter, request: *http.Request) {
+    if !http_auth.RequireLocalOperator(writer, request, trust.configuration.AdminToken) {
+        return
+    }
+    body := http_body.ReadJSON(writer, request, trust.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    input: CreateInviteRequest
+    if body.value.count > 0 {
+        if json.Unmarshal(body.value, *input) != null {
+            response.Error(writer, cast(isize)400, "invalid pairing invite request")
+            return
+        }
+    }
+    lifetime: s64 = 600000000000
+    if input.expiresIn > 0 {
+        lifetime = input.expiresIn * 1000000000
+    }
+    if lifetime > cast(s64)MaximumInviteLifetimeSeconds * 1000000000 {
+        response.Error(writer, cast(isize)400, "pairing invite expiry exceeds 24 hours")
+        return
+    }
+    input.policy.Direction = config_values.SyncDirection(input.policy.Direction)
+    if !ValidPairingPolicy(input.policy) {
+        response.Error(writer, cast(isize)400, "explicit pairing policy required")
+        return
+    }
+    addresses := input.addresses
+    if addresses.count == 0 && TrimSpace(trust.configuration.BaseURL) != "" {
+        addresses = AllocateAddresses(cast(isize)1)
+        addresses[0] = TrimRight(trust.configuration.BaseURL, "/")
+    }
+    invalid := node.ValidateAddresses(addresses)
+    if invalid != null {
+        response.Error(writer, cast(isize)400, errors.Message(invalid))
+        return
+    }
+    invite: PairingInvite
+    invite.Version = cast(isize)1
+    invite.InviteID = auth.RandomHex(cast(isize)16)
+    invite.NodeID = trust.identity.ID
+    invite.PublicKey = EncodeHex(cast([]u8)trust.identity.PublicKey)
+    invite.DisplayName = manifest.DefaultString(TrimSpace(input.displayName), trust.configuration.NodeDisplayName)
+    invite.Addresses = addresses
+    invite.SpaceID = TrimSpace(input.spaceID)
+    invite.ExpiresAt = clock.Unix(clock.Add(clock.Now(), cast(clock.Duration)lifetime))
+    invite.Nonce = auth.RandomHex(cast(isize)16)
+    invite.Policy = input.policy
+    node.SignInvite(trust.identity, *invite)
+    if store.RecordIssuedPairingInvite(trust.database, http.Context(request), invite) != null {
+        response.Error(writer, cast(isize)500, "pairing invite creation failed")
+        return
+    }
+    response.JSON(writer, cast(isize)200, invite)
+}
+
+NewAcceptance :: (trust: Trust, invite: PairingInvite) -> PairingAcceptanceResult {
+    result: PairingAcceptanceResult
+    addresses := AllocateAddresses(cast(isize)1)
+    addresses[0] = TrimRight(TrimSpace(trust.configuration.BaseURL), "/")
+    if node.ValidateAddresses(addresses) != null {
+        result.error = errors.New("this node needs a reachable DAOCHI_BASE_URL")
+        return result
+    }
+    result.value.Version = cast(isize)1
+    result.value.InviteID = invite.InviteID
+    result.value.NodeID = trust.identity.ID
+    result.value.PublicKey = EncodeHex(cast([]u8)trust.identity.PublicKey)
+    result.value.DisplayName = trust.configuration.NodeDisplayName
+    result.value.Addresses = addresses
+    result.value.AcceptedAt = clock.Unix(clock.Now())
+    result.value.Nonce = auth.RandomHex(cast(isize)16)
+    node.SignAcceptance(trust.identity, invite, *result.value)
+    return result
+}
+
+CompleteRemote :: (context: ctx.Context, invite: PairingInvite, acceptance: PairingAcceptance) -> Error {
+    input: CompletePairingRequest
+    input.invite = invite
+    input.acceptance = acceptance
+    body := json.Marshal(input)
+    if body.error != null {
+        return body.error
+    }
+    client := http.NewClient(cast(clock.Duration)10000000000)
+    lastError: Error
+    for address: invite.Addresses {
+        targetParts: [2]string = .[TrimRight(address, "/"), "/api/v1/node/pairing/complete"]
+        target := Join(targetParts[:], "")
+        request := http.NewRequest(context, "POST", target, io.FromBytes(body.value))
+        if request.error != null {
+            lastError = request.error
+            continue
+        }
+        http.SetHeader(http.Headers(request.value), "Content-Type", "application/json")
+        reply := http.Do(client, request.value)
+        if reply.error != null {
+            lastError = reply.error
+            continue
+        }
+        reader := http.ResponseBody(reply.value)
+        responseBody := io.ReadAll(io.LimitReader(cast(io.Reader)reader, cast(s64)2048))
+        io.Close(reader)
+        if responseBody.error != null {
+            lastError = responseBody.error
+            continue
+        }
+        status := http.StatusCode(reply.value)
+        if status >= cast(isize)200 && status < cast(isize)300 {
+            return null
+        }
+        lastError = RemoteFailure("pairing completion failed: %s %s", http.Status(reply.value), TrimSpace(text.FromBytes(responseBody.value)))
+    }
+    if lastError == null {
+        lastError = errors.New("invite has no reachable address")
+    }
+    return WrapFailure("could not complete pairing with inviter: %w", lastError)
+}
+
+AcceptInvite :: (trust: Trust, writer: http.ResponseWriter, request: *http.Request) {
+    if !http_auth.RequireLocalOperator(writer, request, trust.configuration.AdminToken) {
+        return
+    }
+    body := http_body.ReadJSON(writer, request, trust.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    invite: PairingInvite
+    if json.Unmarshal(body.value, *invite) != null {
+        response.Error(writer, cast(isize)400, "invalid pairing invite")
+        return
+    }
+    publicKey := node.ValidateInvite(invite, clock.Now())
+    if publicKey.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(publicKey.error))
+        return
+    }
+    if invite.NodeID == trust.identity.ID {
+        response.Error(writer, cast(isize)400, "cannot pair a node with itself")
+        return
+    }
+    acceptance := NewAcceptance(trust, invite)
+    if acceptance.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(acceptance.error))
+        return
+    }
+    remoteError := CompleteRemote(http.Context(request), invite, acceptance.value)
+    if remoteError != null {
+        response.Error(writer, cast(isize)502, errors.Message(remoteError))
+        return
+    }
+    trustError := store.TrustPeer(trust.database, http.Context(request), invite, publicKey.value)
+    if trustError != null {
+        response.Error(writer, cast(isize)409, errors.Message(trustError))
+        return
+    }
+    value: PairingResponse
+    value.nodeID = invite.NodeID
+    value.status = "paired"
+    response.JSON(writer, cast(isize)200, value)
+}
+
+CompletePairing :: (trust: Trust, writer: http.ResponseWriter, request: *http.Request) {
+    body := http_body.ReadJSON(writer, request, trust.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    input: CompletePairingRequest
+    if json.Unmarshal(body.value, *input) != null {
+        response.Error(writer, cast(isize)400, "invalid pairing completion")
+        return
+    }
+    validated := node.ValidateInvite(input.invite, clock.Now())
+    if validated.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(validated.error))
+        return
+    }
+    if input.invite.NodeID != trust.identity.ID {
+        response.Error(writer, cast(isize)400, "pairing invite belongs to another node")
+        return
+    }
+    publicKey := node.ValidateAcceptance(input.invite, input.acceptance, clock.Now())
+    if publicKey.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(publicKey.error))
+        return
+    }
+    if input.acceptance.NodeID == trust.identity.ID {
+        response.Error(writer, cast(isize)400, "cannot pair a node with itself")
+        return
+    }
+    error := store.CompleteIssuedPairing(trust.database, http.Context(request), input.invite, input.acceptance, publicKey.value)
+    if error != null {
+        response.Error(writer, cast(isize)409, errors.Message(error))
+        return
+    }
+    value: PairingResponse
+    value.nodeID = input.acceptance.NodeID
+    value.status = "paired"
+    response.JSON(writer, cast(isize)200, value)
+}
+
+ListPeers :: (trust: Trust, writer: http.ResponseWriter, request: *http.Request) {
+    if !http_auth.RequireLocalOperator(writer, request, trust.configuration.AdminToken) {
+        return
+    }
+    listed := store.ListTrustedPeers(trust.database, http.Context(request))
+    if listed.error != null {
+        response.Error(writer, cast(isize)500, "peer list failed")
+        return
+    }
+    value: PeersResponse
+    value.peers = listed.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+CreateSpace :: (trust: Trust, writer: http.ResponseWriter, request: *http.Request) {
+    if !http_auth.RequireLocalOperator(writer, request, trust.configuration.AdminToken) {
+        return
+    }
+    body := http_body.ReadJSON(writer, request, trust.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    input: CreateSpaceRequest
+    if json.Unmarshal(body.value, *input) != null || TrimSpace(input.displayName) == "" {
+        response.Error(writer, cast(isize)400, "invalid trust space")
+        return
+    }
+    displayName := TrimSpace(input.displayName)
+    created := store.CreateTrustSpace(trust.database, http.Context(request), displayName)
+    if created.error != null {
+        response.Error(writer, cast(isize)500, "trust space creation failed")
+        return
+    }
+    value: SpaceResponse
+    value.displayName = displayName
+    value.spaceID = created.value
+    response.JSON(writer, cast(isize)201, value)
+}
+
+RegisterName :: (trust: Trust, writer: http.ResponseWriter, request: *http.Request) {
+    if !http_auth.RequireLocalOperator(writer, request, trust.configuration.AdminToken) {
+        return
+    }
+    body := http_body.ReadJSON(writer, request, trust.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    claim: NameClaim
+    if json.Unmarshal(body.value, *claim) != null {
+        response.Error(writer, cast(isize)400, "invalid name claim")
+        return
+    }
+    claim.SpaceID = TrimSpace(claim.SpaceID)
+    claim.Name = node.NormalizeName(claim.Name)
+    claim.NodeID = TrimSpace(claim.NodeID)
+    if !identity.ValidUserID(claim.SpaceID) || !node.ValidName(claim.Name) || !identity.ValidUserID(claim.NodeID) {
+        response.Error(writer, cast(isize)400, "invalid space, name, or node ID")
+        return
+    }
+    if claim.ExpiresAt == 0 {
+        claim.ExpiresAt = clock.Unix(clock.Add(clock.Now(), cast(clock.Duration)31536000000000000))
+    }
+    remaining := cast(s64)clock.Until(clock.FromUnix(claim.ExpiresAt, 0))
+    if remaining <= 0 || remaining > 31622400000000000 {
+        response.Error(writer, cast(isize)400, "invalid name expiry")
+        return
+    }
+    invalid := store.ValidateServices(claim.Services)
+    if invalid != null {
+        response.Error(writer, cast(isize)400, errors.Message(invalid))
+        return
+    }
+    signed := store.SignAndStoreNameClaim(trust.database, http.Context(request), claim)
+    if signed.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(signed.error))
+        return
+    }
+    response.JSON(writer, cast(isize)200, signed.value)
+}
+
+ResolveName :: (trust: Trust, writer: http.ResponseWriter, request: *http.Request) {
+    query := url.Query(http.RequestURL(request))
+    spaceID := TrimSpace(url.Value(query, "space_id"))
+    name := node.NormalizeName(url.Value(query, "name"))
+    if !identity.ValidUserID(spaceID) || !node.ValidName(name) {
+        response.Error(writer, cast(isize)400, "invalid space or name")
+        return
+    }
+    resolved := store.ResolveNameClaim(trust.database, http.Context(request), spaceID, name)
+    if resolved.error != null {
+        response.Error(writer, cast(isize)500, "name resolution failed")
+        return
+    }
+    if !resolved.found {
+        response.Error(writer, cast(isize)404, "name not found")
+        return
+    }
+    value: NameResponse
+    value.claim = resolved.value
+    value.ttlSeconds = resolved.value.ExpiresAt - clock.Unix(clock.Now())
+    uriParts: [4]string = .["daochi://", spaceID, "/", name]
+    value.uri = Join(uriParts[:], "")
+    response.JSON(writer, cast(isize)200, value)
+}

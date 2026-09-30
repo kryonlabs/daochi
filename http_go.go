@@ -3,11 +3,26 @@ package main
 
 import http "net/http"
 
+// #import go_types
 type Request = http.Request
 
 type Header = http.Header
 
 type ResponseWriter = http.ResponseWriter
+
+type Client = http.Client
+
+type Response = http.Response
+
+type RequestResult struct {
+	Value *Request
+	Error Error
+}
+
+type ResponseResult struct {
+	Value *Response
+	Error Error
+}
 
 func HttpGo_RemoteAddressRaw(Request *Request) string {
 	return Request.RemoteAddr
@@ -27,6 +42,38 @@ func HttpGo_URLRaw(Request *Request) *URL {
 
 func HttpGo_BodyRaw(Request *Request) ReadCloser {
 	return Request.Body
+}
+
+func HttpGo_SetTimeoutRaw(Client *Client, Timeout Duration) {
+	Client.Timeout = Timeout
+}
+
+func HttpGo_TimeoutRaw(Client *Client) Duration {
+	return Client.Timeout
+}
+
+func HttpGo_NewRequestRaw(Context Context, Method string, Target string, Body Reader) RequestResult {
+	var result RequestResult
+	result.Value, result.Error = http.NewRequestWithContext(Context, Method, Target, Body)
+	return result
+}
+
+func HttpGo_DoRaw(Client *Client, Request *Request) ResponseResult {
+	var result ResponseResult
+	result.Value, result.Error = (*http.Client).Do(Client, Request)
+	return result
+}
+
+func HttpGo_ResponseBodyRaw(Response *Response) ReadCloser {
+	return Response.Body
+}
+
+func HttpGo_StatusRaw(Response *Response) string {
+	return Response.Status
+}
+
+func HttpGo_StatusCodeRaw(Response *Response) int {
+	return Response.StatusCode
 }
 
 func HttpGo_RemoteAddress(request *Request) string {
@@ -71,4 +118,34 @@ func HttpGo_ResponseHeaders(writer ResponseWriter) Header {
 
 func HttpGo_SetHeader(header Header, name string, value string) {
 	(http.Header).Set(header, name, value)
+}
+
+func HttpGo_NewClient(timeout Duration) *Client {
+	client := new(Client)
+	HttpGo_SetTimeoutRaw(client, timeout)
+	return client
+}
+
+func HttpGo_ClientTimeout(client *Client) Duration {
+	return HttpGo_TimeoutRaw(client)
+}
+
+func HttpGo_NewRequest(context Context, method string, target string, body Reader) RequestResult {
+	return HttpGo_NewRequestRaw(context, method, target, body)
+}
+
+func HttpGo_Do(client *Client, request *Request) ResponseResult {
+	return HttpGo_DoRaw(client, request)
+}
+
+func HttpGo_ResponseBody(response *Response) ReadCloser {
+	return HttpGo_ResponseBodyRaw(response)
+}
+
+func HttpGo_Status(response *Response) string {
+	return HttpGo_StatusRaw(response)
+}
+
+func HttpGo_StatusCode(response *Response) int {
+	return HttpGo_StatusCodeRaw(response)
 }

@@ -1,3 +1,4 @@
+// Original HTTP handlers retained only as regression oracles.
 package main
 
 import (
@@ -33,7 +34,7 @@ type completePairingRequest struct {
 	Acceptance PairingAcceptance `json:"acceptance"`
 }
 
-func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Request) {
+func (s *Server) baselineTrustCreateInvite(w http.ResponseWriter, r *http.Request) {
 	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
@@ -60,7 +61,7 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	req.Policy.Direction = ConfigValues_SyncDirection(req.Policy.Direction)
-	if !validPairingPolicy(req.Policy) {
+	if !baselineTrustPairingPolicy(req.Policy) {
 		Response_Error(w, http.StatusBadRequest, "explicit pairing policy required")
 		return
 	}
@@ -93,16 +94,16 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 	Response_JSON(w, http.StatusOK, invite)
 }
 
-func validPairingPolicy(policy NodeSyncPolicy) bool {
+func baselineTrustPairingPolicy(policy NodeSyncPolicy) bool {
 	switch strings.ToLower(strings.TrimSpace(policy.Direction)) {
 	case "pull", "push", "bidirectional":
-		return validInboundMeshPolicy(policy)
+		return baselineTrustInboundPolicy(policy)
 	default:
 		return false
 	}
 }
 
-func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Request) {
+func (s *Server) baselineTrustAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
@@ -126,12 +127,12 @@ func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Reques
 		Response_Error(w, http.StatusBadRequest, "cannot pair a node with itself")
 		return
 	}
-	acceptance, err := s.newPairingAcceptance(invite)
+	acceptance, err := s.baselineTrustAcceptance(invite)
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := completeRemotePairing(r.Context(), invite, acceptance); err != nil {
+	if err := baselineTrustCompleteRemote(r.Context(), invite, acceptance); err != nil {
 		Response_Error(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -145,7 +146,7 @@ func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-func (s *Server) newPairingAcceptance(invite PairingInvite) (PairingAcceptance, error) {
+func (s *Server) baselineTrustAcceptance(invite PairingInvite) (PairingAcceptance, error) {
 	addresses := []string{strings.TrimRight(strings.TrimSpace(s.cfg.BaseURL), "/")}
 	if err := NodeIdentity_ValidateAddresses(addresses); err != nil {
 		return PairingAcceptance{}, errors.New("this node needs a reachable DAOCHI_BASE_URL")
@@ -164,7 +165,7 @@ func (s *Server) newPairingAcceptance(invite PairingInvite) (PairingAcceptance, 
 	return acceptance, nil
 }
 
-func completeRemotePairing(
+func baselineTrustCompleteRemote(
 	ctx context.Context,
 	invite PairingInvite,
 	acceptance PairingAcceptance,
@@ -212,7 +213,7 @@ func completeRemotePairing(
 	return fmt.Errorf("could not complete pairing with inviter: %w", lastError)
 }
 
-func (s *Server) handleCompletePairing(w http.ResponseWriter, r *http.Request) {
+func (s *Server) baselineTrustCompletePairing(w http.ResponseWriter, r *http.Request) {
 	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
@@ -256,7 +257,7 @@ func (s *Server) handleCompletePairing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleListTrustedPeers(w http.ResponseWriter, r *http.Request) {
+func (s *Server) baselineTrustListPeers(w http.ResponseWriter, r *http.Request) {
 	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
@@ -269,7 +270,7 @@ func (s *Server) handleListTrustedPeers(w http.ResponseWriter, r *http.Request) 
 	Response_JSON(w, http.StatusOK, map[string]any{"peers": peers})
 }
 
-func (s *Server) handleCreateTrustSpace(w http.ResponseWriter, r *http.Request) {
+func (s *Server) baselineTrustCreateSpace(w http.ResponseWriter, r *http.Request) {
 	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
@@ -299,7 +300,7 @@ func (s *Server) handleCreateTrustSpace(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request) {
+func (s *Server) baselineTrustRegisterName(w http.ResponseWriter, r *http.Request) {
 	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
@@ -343,7 +344,7 @@ func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request)
 	Response_JSON(w, http.StatusOK, claim)
 }
 
-func (s *Server) handleResolveName(w http.ResponseWriter, r *http.Request) {
+func (s *Server) baselineTrustResolveName(w http.ResponseWriter, r *http.Request) {
 	spaceID := strings.TrimSpace(r.URL.Query().Get("space_id"))
 	name := NodeIdentity_NormalizeName(r.URL.Query().Get("name"))
 	if !Identity_ValidUserID(spaceID) || !NodeIdentity_ValidName(name) {
@@ -365,4 +366,15 @@ func (s *Server) handleResolveName(w http.ResponseWriter, r *http.Request) {
 		"claim":       claim,
 		"ttl_seconds": claim.ExpiresAt - time.Now().Unix(),
 	})
+}
+
+func baselineTrustInboundPolicy(policy NodeSyncPolicy) bool {
+	if len(policy.Data) == 0 {
+		return false
+	}
+	hasRecords := MeshPolicy_IncludesData(&policy, "encrypted_records") &&
+		(len(policy.Apps) > 0 || len(policy.Collections) > 0)
+	hasNames := MeshPolicy_IncludesData(&policy, "names") && len(policy.Spaces) > 0
+	hasAppRegistry := MeshPolicy_IncludesData(&policy, "app_registry") && len(policy.Apps) > 0
+	return hasRecords || hasNames || hasAppRegistry
 }

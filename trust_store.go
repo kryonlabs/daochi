@@ -628,7 +628,7 @@ func TrustStore_ExportMeshNames(database *Database, context Context, meshPolicy 
 	names := make([]NameClaim, int(int(0)))
 	{
 		value_1 := meshPolicy.Spaces[:]
-		if 0 < 0 || int64(len(value_1)) < 0 || int64(len(value_1)) > int64(len(value_1)) {
+		if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 			panic("slice range out of bounds")
 		}
 		loop_view_6 := value_1[0:int64(len(value_1)):int64(len(value_1))]
@@ -701,7 +701,7 @@ func TrustStore_ImportMeshNames(database *Database, context Context, meshPolicy 
 	var allowedSpaces __type_c922d3f56b74fd5a = *new(__type_c922d3f56b74fd5a)
 	{
 		value_1 := meshPolicy.Spaces[:]
-		if 0 < 0 || int64(len(value_1)) < 0 || int64(len(value_1)) > int64(len(value_1)) {
+		if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 			panic("slice range out of bounds")
 		}
 		loop_view_5 := value_1[0:int64(len(value_1)):int64(len(value_1))]

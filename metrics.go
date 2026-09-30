@@ -287,7 +287,7 @@ func Metrics_WriteCollectionStorage(writer ResponseWriter, name string, kind str
 		app := apps[it_index]
 		{
 			value_0 := app.Collections[:]
-			if 0 < 0 || int64(len(value_0)) < 0 || int64(len(value_0)) > int64(len(value_0)) {
+			if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
 				panic("slice range out of bounds")
 			}
 			loop_view_2 := value_0[0:int64(len(value_0)):int64(len(value_0))]

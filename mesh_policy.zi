@@ -30,3 +30,14 @@ Inverse :: (policy: NodeSyncPolicy) -> NodeSyncPolicy {
     }
     return inverse
 }
+
+ValidInbound :: (policy: NodeSyncPolicy) -> bool {
+    if policy.Data.count == 0 {
+        return false
+    }
+    hasRecords := IncludesData(*policy, "encrypted_records") &&
+        (policy.Apps.count > 0 || policy.Collections.count > 0)
+    hasNames := IncludesData(*policy, "names") && policy.Spaces.count > 0
+    hasAppRegistry := IncludesData(*policy, "app_registry") && policy.Apps.count > 0
+    return hasRecords || hasNames || hasAppRegistry
+}

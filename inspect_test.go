@@ -65,7 +65,7 @@ func TestInspectSummaryAndUser(t *testing.T) {
 	}
 
 	var summary bytes.Buffer
-	if err := runInspect(context.Background(), []string{"--db", dbPath, "summary"}, InspectOptions{Out: &summary}); err != nil {
+	if err := Inspect_Run(context.Background(), []string{"--db", dbPath, "summary"}, InspectOptions{Out: &summary}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(summary.String(), "server_users") || !strings.Contains(summary.String(), "server_sessions") {
@@ -73,7 +73,7 @@ func TestInspectSummaryAndUser(t *testing.T) {
 	}
 
 	var user bytes.Buffer
-	if err := runInspect(context.Background(), []string{"--db", dbPath, "user", userID}, InspectOptions{Out: &user}); err != nil {
+	if err := Inspect_Run(context.Background(), []string{"--db", dbPath, "user", userID}, InspectOptions{Out: &user}); err != nil {
 		t.Fatal(err)
 	}
 	got := user.String()
@@ -85,7 +85,7 @@ func TestInspectSummaryAndUser(t *testing.T) {
 	}
 
 	var doctor bytes.Buffer
-	if err := runInspect(context.Background(), []string{"--db", dbPath, "doctor", userID}, InspectOptions{Out: &doctor}); err != nil {
+	if err := Inspect_Run(context.Background(), []string{"--db", dbPath, "doctor", userID}, InspectOptions{Out: &doctor}); err != nil {
 		t.Fatal(err)
 	}
 	got = doctor.String()
@@ -110,7 +110,7 @@ func TestInspectMissingUser(t *testing.T) {
 	}
 
 	userID := strings.Repeat("a", 64)
-	err = runInspect(context.Background(), []string{"--db", dbPath, "user", userID}, InspectOptions{Out: &bytes.Buffer{}})
+	err = Inspect_Run(context.Background(), []string{"--db", dbPath, "user", userID}, InspectOptions{Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "user not found") {
 		t.Fatalf("missing user error = %v", err)
 	}

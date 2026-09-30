@@ -1,0 +1,542 @@
+#import "std/go_types"
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+io :: #import "std/io_go";
+errors :: #import "std/errors_go";
+config :: #import "config";
+identity :: #import "identity";
+go_sql :: #system_library "go:database/sql";
+go_flag :: #system_library "go:flag";
+go_format :: #system_library "go:fmt";
+go_os :: #system_library "go:os";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+InspectOptions :: struct {
+    DBPath: string
+    Full: bool
+    Out: io.Writer
+}
+DatabaseResult :: struct {
+    value: *sql.Database
+    error: Error
+}
+CountResult :: struct {
+    value: isize
+    error: Error
+}
+
+#scope_file
+FlagSet :: #type #foreign go_flag "FlagSet";
+ErrorHandling :: #type #foreign go_flag "ErrorHandling";
+NullInteger :: #type #foreign go_sql "NullInt64";
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+StandardOutput :: () -> io.Writer #go_field #foreign go_os "Stdout";
+ContinueOnError :: () -> ErrorHandling #go_field #foreign go_flag;
+NewFlagSet :: (name: string, handling: ErrorHandling) -> *FlagSet #foreign go_flag;
+SetOutput :: (flags: *FlagSet, out: io.Writer) #foreign go_flag "(*FlagSet).SetOutput";
+StringFlag :: (flags: *FlagSet, value: *string, name: string, initial: string, description: string) #foreign go_flag "(*FlagSet).StringVar";
+BoolFlag :: (flags: *FlagSet, value: *bool, name: string, initial: bool, description: string) #foreign go_flag "(*FlagSet).BoolVar";
+ParseFlags :: (flags: *FlagSet, arguments: []string) -> Error #foreign go_flag "(*FlagSet).Parse";
+RemainingArguments :: (flags: *FlagSet) -> []string #foreign go_flag "(*FlagSet).Args";
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+AppendString :: (values: []string, value: string) -> []string #foreign builtin "append";
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+ToLower :: (value: string) -> string #foreign go_strings;
+FormatString :: (format: string, value: string) -> string #foreign go_format "Sprintf";
+FormatInteger :: (format: string, value: s64) -> string #foreign go_format "Sprintf";
+CommandError :: (format: string, command: string) -> Error #foreign go_format "Errorf";
+WriteLine :: (out: io.Writer, value: string) #foreign go_format "Fprintln";
+Write1 :: (out: io.Writer, format: string, first: Any) #foreign go_format "Fprintf";
+Write2 :: (out: io.Writer, format: string, first: Any, second: Any) #foreign go_format "Fprintf";
+Write4 :: (out: io.Writer, format: string, first: Any, second: Any, third: Any, fourth: Any) #foreign go_format "Fprintf";
+Write6 :: (out: io.Writer, format: string, first: Any, second: Any, third: Any, fourth: Any, fifth: Any, sixth: Any) #foreign go_format "Fprintf";
+Write7 :: (out: io.Writer, format: string, first: Any, second: Any, third: Any, fourth: Any, fifth: Any, sixth: Any, seventh: Any) #foreign go_format "Fprintf";
+Write9 :: (out: io.Writer, format: string, first: Any, second: Any, third: Any, fourth: Any, fifth: Any, sixth: Any, seventh: Any, eighth: Any, ninth: Any) #foreign go_format "Fprintf";
+OpenDatabase :: (driver: string, source: string) -> DatabaseResult #go_results #foreign go_sql "Open";
+SetMaxOpenConnections :: (database: *sql.Database, count: isize) #foreign go_sql "(*DB).SetMaxOpenConns";
+Ping :: (database: *sql.Database) -> Error #foreign go_sql "(*DB).Ping";
+CloseDatabase :: (database: *sql.Database) -> Error #foreign go_sql "(*DB).Close";
+CloseDatabaseAtReturn :: (database: *sql.Database) #go_defer #foreign go_sql "(*DB).Close";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+QueryAll :: (database: *sql.Database, context: ctx.Context, query: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+QueryUser :: (database: *sql.Database, context: ctx.Context, query: string, userID: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+QueryRow :: (database: *sql.Database, context: ctx.Context, query: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryUserRow :: (database: *sql.Database, context: ctx.Context, query: string, userID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+ScanCount :: (row: *sql.Row, value: *isize) -> Error #foreign go_sql "(*Row).Scan";
+ScanVersion :: (row: *sql.Row, value: *s64) -> Error #foreign go_sql "(*Row).Scan";
+ScanUser :: (row: *sql.Row, key: *string, created: *string, seen: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanDates :: (row: *sql.Row, created: *string, seen: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanPayloads :: (row: *sql.Row, count: *isize, bytes: *NullInteger) -> Error #foreign go_sql "(*Row).Scan";
+ScanUsers :: (rows: *sql.Rows, id: *string, key: *string, created: *string, seen: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanClients :: (rows: *sql.Rows, id: *string, protocol: *isize, login: *sql.NullString, sync: *sql.NullString, version: *s64, clock: *s64) -> Error #foreign go_sql "(*Rows).Scan";
+ScanAudit :: (rows: *sql.Rows, id: *string, protocol: *isize, version: *s64, operations: *isize, snapshot: *isize, reason: *string, payload: *isize, bytes: *s64, created: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanHabits :: (rows: *sql.Rows, id: *string, name: *string, mode: *isize, activity: *isize, deleted: *isize, updated: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanSessions :: (rows: *sql.Rows, id: *string, started: *string, date: *isize, topic: *string, activity: *isize, deleted: *isize, updated: *string) -> Error #foreign go_sql "(*Rows).Scan";
+IntegerValid :: (value: NullInteger) -> bool #go_field #foreign go_sql "NullInt64.Valid";
+IntegerValue :: (value: NullInteger) -> s64 #go_field #foreign go_sql "NullInt64.Int64";
+
+SummaryTables: [9]string = .[
+    "server_users", "server_habits", "server_habit_days", "server_sessions",
+    "server_session_rounds", "server_meditation_logs", "server_encrypted_records",
+    "server_encrypted_payloads", "server_sync_audit"
+];
+UserTables: [6]string = .[
+    "server_habits", "server_habit_days", "server_sessions",
+    "server_session_rounds", "server_meditation_logs", "server_encrypted_records"
+];
+DoctorTables: [9]string = .[
+    "server_habits", "server_habit_days", "server_sessions", "server_meditation_logs",
+    "server_encrypted_records", "server_encrypted_payloads", "server_sync_ops",
+    "server_clients", "server_sync_audit"
+];
+
+#scope_export
+Run :: (context: ctx.Context, arguments: []string, options: InspectOptions) -> Error {
+    if cast(Any)options.Out == null {
+        options.Out = StandardOutput()
+    }
+    flags := NewFlagSet("inspect", ContinueOnError())
+    SetOutput(flags, options.Out)
+    StringFlag(flags, *options.DBPath, "db", options.DBPath, "SQLite database path")
+    BoolFlag(flags, *options.Full, "full", options.Full, "show full user IDs and public keys")
+    error := ParseFlags(flags, arguments)
+    if error != null {
+        return error
+    }
+    if options.DBPath == "" {
+        options.DBPath = config.EnvString("DAOCHI_DB", "daochi.db")
+    }
+    remaining := RemainingArguments(flags)
+    if remaining.count == 0 {
+        remaining = AllocateStrings(cast(isize)1)
+        remaining[0] = "summary"
+    }
+    opened := Open(options.DBPath)
+    if opened.error != null {
+        return opened.error
+    }
+    database := opened.value
+    CloseDatabaseAtReturn(database)
+    command := remaining[0]
+    if command == "summary" {
+        return Summary(context, database, options.Out)
+    }
+    if command == "users" {
+        return Users(context, database, options.Out, options.Full)
+    }
+    if command == "doctor" {
+        if remaining.count != 2 {
+            return errors.New("usage: daochi inspect doctor <user_id_hash>")
+        }
+        return Doctor(context, database, options.Out, remaining[1], options.Full)
+    }
+    if command == "user" {
+        if remaining.count != 2 {
+            return errors.New("usage: daochi inspect user <user_id_hash>")
+        }
+        return User(context, database, options.Out, remaining[1], options.Full)
+    }
+    return CommandError("unknown inspect command %q", command)
+}
+
+Open :: (path: string) -> DatabaseResult {
+    result := OpenDatabase("sqlite3", FormatString("file:%s?mode=ro&_query_only=1", path))
+    if result.error != null {
+        result.value = null
+        return result
+    }
+    SetMaxOpenConnections(result.value, cast(isize)1)
+    error := Ping(result.value)
+    if error != null {
+        CloseDatabase(result.value)
+        result.value = null
+        result.error = error
+    }
+    return result
+}
+
+Summary :: (context: ctx.Context, database: *sql.Database, out: io.Writer) -> Error {
+    WriteLine(out, "Daochi data summary")
+    for table: SummaryTables {
+        count := Count(context, database, table, "", "")
+        if count.error != null {
+            return count.error
+        }
+        Write2(out, "%-24s %d\n", table, count.value)
+    }
+    return null
+}
+
+Users :: (context: ctx.Context, database: *sql.Database, out: io.Writer, full: bool) -> Error {
+    queried := QueryAll(database, context, UsersQuery)
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    WriteLine(out, "Users")
+    while sql.Next(rows) {
+        userID: string
+        publicKey: string
+        createdAt: string
+        lastSeenAt: string
+        error := ScanUsers(rows, *userID, *publicKey, *createdAt, *lastSeenAt)
+        if error != null {
+            return error
+        }
+        Write4(out, "%s  key=%s  created=%s  last_seen=%s\n",
+            RedactID(userID, full), RedactID(ToLower(publicKey), full), createdAt, lastSeenAt)
+    }
+    return sql.RowsError(rows)
+}
+
+User :: (context: ctx.Context, database: *sql.Database, out: io.Writer, userID: string, full: bool) -> Error {
+    userID = ToLower(TrimSpace(userID))
+    if !identity.ValidUserID(userID) {
+        return errors.New("invalid user_id_hash")
+    }
+    publicKey: string
+    createdAt: string
+    lastSeenAt: string
+    error := ScanUser(QueryUserRow(database, context, UserQuery, userID), *publicKey, *createdAt, *lastSeenAt)
+    if error == sql.NoRows() {
+        return errors.New("user not found")
+    }
+    if error != null {
+        return error
+    }
+    Write1(out, "User %s\n", RedactID(userID, full))
+    Write1(out, "public_key=%s\n", RedactID(ToLower(publicKey), full))
+    Write2(out, "created=%s\nlast_seen=%s\n", createdAt, lastSeenAt)
+    for table: UserTables {
+        count := Count(context, database, table, "WHERE user_id_hash=?1", userID)
+        if count.error != null {
+            return count.error
+        }
+        Write2(out, "%-24s %d\n", table, count.value)
+    }
+    error = UserHabits(context, database, out, userID)
+    if error != null {
+        return error
+    }
+    return UserSessions(context, database, out, userID)
+}
+
+Doctor :: (context: ctx.Context, database: *sql.Database, out: io.Writer, userID: string, full: bool) -> Error {
+    userID = ToLower(TrimSpace(userID))
+    if !identity.ValidUserID(userID) {
+        return errors.New("invalid user_id_hash")
+    }
+    createdAt: string
+    lastSeenAt: string
+    error := ScanDates(QueryUserRow(database, context, DoctorQuery, userID), *createdAt, *lastSeenAt)
+    if error == sql.NoRows() {
+        return errors.New("user not found")
+    }
+    if error != null {
+        return error
+    }
+    version: s64
+    ScanVersion(QueryUserRow(database, context, VersionQuery, userID), *version)
+    compactedThrough: s64
+    ScanVersion(QueryUserRow(database, context, CompactionQuery, userID), *compactedThrough)
+    Write1(out, "Daochi doctor %s\n", RedactID(userID, full))
+    Write2(out, "status=ok server_version=%d compacted_through=%d\n", version, compactedThrough)
+    Write2(out, "created=%s last_seen=%s\n", createdAt, lastSeenAt)
+    for table: DoctorTables {
+        count := Count(context, database, table, "WHERE user_id_hash=?1", userID)
+        if count.error != null {
+            return count.error
+        }
+        Write2(out, "%-28s %d\n", table, count.value)
+    }
+    error = DoctorWarnings(context, database, out, userID)
+    if error != null {
+        return error
+    }
+    error = DoctorClients(context, database, out, userID)
+    if error != null {
+        return error
+    }
+    return DoctorAudit(context, database, out, userID)
+}
+
+DoctorWarnings :: (context: ctx.Context, database: *sql.Database, out: io.Writer, userID: string) -> Error {
+    warnings := AllocateStrings(cast(isize)0)
+    legacyClients: isize
+    error := ScanCount(QueryUserRow(database, context, LegacyClientsQuery, userID), *legacyClients)
+    if error != null {
+        return error
+    }
+    if legacyClients > 0 {
+        warnings = AppendString(warnings, FormatInteger("%d legacy clients below protocol 5 seen recently", cast(s64)legacyClients))
+    }
+    payloadCount: isize
+    payloadBytes: NullInteger
+    error = ScanPayloads(QueryUserRow(database, context, PayloadsQuery, userID), *payloadCount, *payloadBytes)
+    if error != null {
+        return error
+    }
+    if payloadCount > 1000 {
+        warnings = AppendString(warnings, FormatInteger("%d encrypted payloads queued; consider pagination/retention tuning", cast(s64)payloadCount))
+    }
+    if IntegerValid(payloadBytes) && IntegerValue(payloadBytes) > cast(s64)(64 << 20) {
+        warnings = AppendString(warnings, FormatInteger("%d encrypted payload bytes stored; check account quota/retention", IntegerValue(payloadBytes)))
+    }
+    fullSnapshots: isize
+    error = ScanCount(QueryUserRow(database, context, FullSnapshotsQuery, userID), *fullSnapshots)
+    if error != null {
+        return error
+    }
+    if fullSnapshots >= 3 {
+        warnings = AppendString(warnings, FormatInteger("%d recent syncs required full snapshots", cast(s64)fullSnapshots))
+    }
+    WriteLine(out, "\nWarnings")
+    if warnings.count == 0 {
+        WriteLine(out, "- none")
+        return null
+    }
+    for warning: warnings {
+        Write1(out, "- %s\n", warning)
+    }
+    return null
+}
+
+DoctorClients :: (context: ctx.Context, database: *sql.Database, out: io.Writer, userID: string) -> Error {
+    queried := QueryUser(database, context, ClientsQuery, userID)
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    WriteLine(out, "\nClients")
+    while sql.Next(rows) {
+        clientID: string
+        loginAt: sql.NullString
+        syncAt: sql.NullString
+        protocol: isize
+        seenVersion: s64
+        clientClock: s64
+        error := ScanClients(rows, *clientID, *protocol, *loginAt, *syncAt, *seenVersion, *clientClock)
+        if error != null {
+            return error
+        }
+        status := "current"
+        if protocol > 0 && protocol < 5 {
+            status = "legacy"
+        }
+        Write7(out, "%s protocol=%d status=%s last_login=%s last_sync=%s seen=%d clock=%d\n",
+            clientID, protocol, status, NullText(loginAt), NullText(syncAt), seenVersion, clientClock)
+    }
+    return sql.RowsError(rows)
+}
+
+DoctorAudit :: (context: ctx.Context, database: *sql.Database, out: io.Writer, userID: string) -> Error {
+    queried := QueryUser(database, context, AuditQuery, userID)
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    WriteLine(out, "\nRecent sync audit")
+    while sql.Next(rows) {
+        clientID: string
+        snapshotReason: string
+        createdAt: string
+        protocol: isize
+        remoteOps: isize
+        fullSnapshot: isize
+        encryptedPayload: isize
+        version: s64
+        encryptedBytes: s64
+        error := ScanAudit(rows, *clientID, *protocol, *version, *remoteOps, *fullSnapshot,
+            *snapshotReason, *encryptedPayload, *encryptedBytes, *createdAt)
+        if error != null {
+            return error
+        }
+        Write9(out, "%s protocol=%d version=%d remote_ops=%d full_snapshot=%t reason=%s encrypted_payload=%t bytes=%d at=%s\n",
+            clientID, protocol, version, remoteOps, fullSnapshot != 0, EmptyText(snapshotReason, "-"),
+            encryptedPayload != 0, encryptedBytes, createdAt)
+    }
+    return sql.RowsError(rows)
+}
+
+UserHabits :: (context: ctx.Context, database: *sql.Database, out: io.Writer, userID: string) -> Error {
+    queried := QueryUser(database, context, HabitsQuery, userID)
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    WriteLine(out, "\nHabits")
+    while sql.Next(rows) {
+        id: string
+        name: string
+        updatedAt: string
+        syncMode: isize
+        syncActivity: isize
+        deletedAt: isize
+        error := ScanHabits(rows, *id, *name, *syncMode, *syncActivity, *deletedAt, *updatedAt)
+        if error != null {
+            return error
+        }
+        Write6(out, "%s  %q  sync=%d/%d  deleted=%d  updated=%s\n",
+            id, name, syncMode, syncActivity, deletedAt, updatedAt)
+    }
+    return sql.RowsError(rows)
+}
+
+UserSessions :: (context: ctx.Context, database: *sql.Database, out: io.Writer, userID: string) -> Error {
+    queried := QueryUser(database, context, SessionsQuery, userID)
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    WriteLine(out, "\nRecent sessions")
+    while sql.Next(rows) {
+        id: string
+        startedAt: string
+        topic: string
+        updatedAt: string
+        localDate: isize
+        activity: isize
+        deletedAt: isize
+        error := ScanSessions(rows, *id, *startedAt, *localDate, *topic, *activity, *deletedAt, *updatedAt)
+        if error != null {
+            return error
+        }
+        Write7(out, "%s  started=%s  local_date=%d  topic=%s  activity=%d  deleted=%d  updated=%s\n",
+            id, startedAt, localDate, topic, activity, deletedAt, updatedAt)
+    }
+    return sql.RowsError(rows)
+}
+
+Count :: (context: ctx.Context, database: *sql.Database, table: string, where: string, userID: string) -> CountResult {
+    result: CountResult
+    query := FormatString("SELECT COUNT(*) FROM %s", table)
+    if where != "" {
+        parts: [3]string = .[query, " ", where]
+        query = Join(parts[:], "")
+        result.error = ScanCount(QueryUserRow(database, context, query, userID), *result.value)
+    } else {
+        result.error = ScanCount(QueryRow(database, context, query), *result.value)
+    }
+    return result
+}
+
+RedactID :: (value: string, full: bool) -> string {
+    if full || value.count <= 16 {
+        return value
+    }
+    parts: [3]string = .[value[:12], "...", value[value.count - 8:]]
+    return Join(parts[:], "")
+}
+
+NullText :: (value: sql.NullString) -> string {
+    if !sql.NullStringValid(value) || sql.NullStringValue(value) == "" {
+        return "-"
+    }
+    return sql.NullStringValue(value)
+}
+
+EmptyText :: (value: string, fallback: string) -> string {
+    if value == "" {
+        return fallback
+    }
+    return value
+}
+
+#scope_file
+UsersQuery :: #string SQL_END
+
+SELECT user_id_hash, hex(public_key), created_at, last_seen_at
+FROM server_users
+ORDER BY last_seen_at DESC
+SQL_END;
+UserQuery :: #string SQL_END
+
+SELECT hex(public_key), created_at, last_seen_at
+FROM server_users
+WHERE user_id_hash=?1
+SQL_END;
+DoctorQuery :: #string SQL_END
+
+SELECT created_at,last_seen_at
+FROM server_users
+WHERE user_id_hash=?1
+SQL_END;
+VersionQuery :: #string SQL_END
+
+SELECT server_version
+FROM server_sync_state
+WHERE user_id_hash=?1
+SQL_END;
+CompactionQuery :: #string SQL_END
+
+SELECT compacted_through_version
+FROM server_sync_compaction
+WHERE user_id_hash=?1
+SQL_END;
+LegacyClientsQuery :: #string SQL_END
+
+SELECT COUNT(*)
+FROM server_clients
+WHERE user_id_hash=?1 AND protocol_version>0 AND protocol_version<5
+SQL_END;
+PayloadsQuery :: #string SQL_END
+
+SELECT COUNT(*),SUM(LENGTH(payload_json))
+FROM server_encrypted_payloads
+WHERE user_id_hash=?1
+SQL_END;
+FullSnapshotsQuery :: #string SQL_END
+
+SELECT COUNT(*)
+FROM (
+	SELECT full_snapshot_required
+	FROM server_sync_audit
+	WHERE user_id_hash=?1
+	ORDER BY id DESC
+	LIMIT 8
+)
+WHERE full_snapshot_required!=0
+SQL_END;
+ClientsQuery :: #string SQL_END
+
+SELECT client_id,protocol_version,last_login_at,last_sync_at,last_seen_server_version,last_client_clock
+FROM server_clients
+WHERE user_id_hash=?1
+ORDER BY last_seen_at DESC,client_id
+LIMIT 12
+SQL_END;
+AuditQuery :: #string SQL_END
+
+SELECT client_id,protocol_version,server_version,remote_ops,full_snapshot_required,
+       snapshot_reason,encrypted_payload,encrypted_payload_bytes,created_at
+FROM server_sync_audit
+WHERE user_id_hash=?1
+ORDER BY id DESC
+LIMIT 8
+SQL_END;
+HabitsQuery :: #string SQL_END
+
+SELECT id, name, sync_mode, sync_activity, deleted_at, updated_at
+FROM server_habits
+WHERE user_id_hash=?1
+ORDER BY sort_order, id
+LIMIT 50
+SQL_END;
+SessionsQuery :: #string SQL_END
+
+SELECT id, started_at, local_date, topic, activity, deleted_at, updated_at
+FROM server_sessions
+WHERE user_id_hash=?1
+ORDER BY started_at DESC
+LIMIT 25
+SQL_END;

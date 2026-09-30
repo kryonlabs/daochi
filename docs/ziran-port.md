@@ -69,7 +69,7 @@ field names, Go storage types, order and reflection tags.
 | `device_handlers.go` | Ziran | `device_http.zi`: authenticated device listing, registration and revocation, ordered body/signature validation, replay errors and response serialization |
 | `discovery.go` | Ziran | `discovery.zi`: LAN advertisement metadata, native registration/shutdown, listener ports and cancellable resource lifecycle |
 | `docs.go` | Ziran | `docs.zi`: public HTML, typed OpenAPI map builders, cached JSON and both HTTP handlers; public statistics remain a storage dependency |
-| `inspect.go` | Go with ported callers | Offline database commands and redaction |
+| `inspect.go` | Ziran | `inspect.zi`: read-only database access, native flag parsing, summary/user/doctor commands, warnings, ordered queries, byte-preserving redaction and output |
 | `log_safety.go` | Ziran | `log_safety.zi`: byte-preserving CR/LF removal |
 | `main.go` | Go | Startup, worker supervision, HTTP lifecycle |
 | `mesh.go` | Ziran | `mesh.zi`: HTTP export/import, signed/token authentication, approved-scope checks, configured/trusted peer selection, signed outbound requests, pagination, cursor persistence and the cancellable recurring worker; wire records, cursors and scope predicates in `mesh_types.zi`, `mesh_cursor.zi` and `mesh_policy.zi`; native authentication error conversion is supplied by the caller |
@@ -390,6 +390,21 @@ is fully ported. `types.zi` owns its unchanged public statistics record;
 cover the full spec's native types, fresh nested storage, concurrent cache use,
 writer errors and panics, query/context identity, unavailable statistics and
 signed integer boundaries. Source and saved-IR server suites run these cases.
+
+`inspect.zi` completes the offline database commands. Native flag parsing keeps
+the original help/error output, option precedence and argument validation order.
+The database opens read-only with one connection and closes on every return;
+query iteration also closes during panic unwinding. Summary, user listing,
+account detail and doctor output retain exact bytes, ordering, limits, nullable
+fields, ignored version-query failures and warning thresholds. Redaction uses
+the original byte boundaries, including arbitrary non-UTF-8 strings; a typed
+nil writer retains its native interface behavior. Independent comparisons
+cover every command, invalid flags/users, environment fallback, missing and
+malformed databases, SQL scan failures, cancelled/expired contexts, read-only
+enforcement, warning boundaries, output failures/panics and connection reuse.
+Startup calls the generated inspection entry directly. The original Go module
+is kept only as a test oracle; no handwritten inspection implementation remains
+in production. Source and saved-IR server suites pass with race detection.
 
 ## Compiler work exercised by this port
 

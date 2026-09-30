@@ -45,7 +45,7 @@ type zir_7411a0f537a07f92_HexResult struct {
 	Error Error
 }
 
-type NullInteger = sql.NullInt64
+type zir_d77f65f269cc9b2e_NullInteger = sql.NullInt64
 
 type MeshChange struct {
 	Sequence int64
@@ -58,7 +58,7 @@ type __type_6c762ccf1d5d7b6c struct {
 	Value    bool
 }
 
-func MeshStore_IntegerValue(Value NullInteger) int64 {
+func MeshStore_IntegerValue(Value zir_d77f65f269cc9b2e_NullInteger) int64 {
 	return Value.Int64
 }
 
@@ -249,9 +249,9 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 		var nonce NullString = *new(NullString)
 		var ciphertext NullString = *new(NullString)
 		var updated NullString = *new(NullString)
-		var recordDeleted NullInteger = *new(NullInteger)
+		var recordDeleted zir_d77f65f269cc9b2e_NullInteger = *new(zir_d77f65f269cc9b2e_NullInteger)
 		var hash NullString = *new(NullString)
-		var schema NullInteger = *new(NullInteger)
+		var schema zir_d77f65f269cc9b2e_NullInteger = *new(zir_d77f65f269cc9b2e_NullInteger)
 		var parent NullString = *new(NullString)
 		var publicKey []uint8 = nil
 		var created NullString = *new(NullString)

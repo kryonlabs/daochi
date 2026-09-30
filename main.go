@@ -36,7 +36,7 @@ func main() {
 		cfg.NodeIdentityPrivateKey = nodeKey.Value
 	}
 	if len(os.Args) > 1 && os.Args[1] == "inspect" {
-		if err := runInspect(context.Background(), os.Args[2:], InspectOptions{DBPath: cfg.DBPath}); err != nil {
+		if err := Inspect_Run(context.Background(), os.Args[2:], InspectOptions{DBPath: cfg.DBPath}); err != nil {
 			log.Fatalf("inspect: %v", err)
 		}
 		return

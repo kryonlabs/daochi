@@ -29,11 +29,11 @@ func localHTTPURL(addr string) string {
 func main() {
 	cfg := Config_Load()
 	if len(cfg.NodeIdentityPrivateKey) == 0 {
-		nodeKey, nodeErr := loadOrCreateNodeIdentityKey(cfg.NodeIdentityKeyFile)
-		if nodeErr != nil {
-			log.Fatalf("load node identity: %v", nodeErr)
+		nodeKey := NodeIdentity_LoadOrCreateKey(cfg.NodeIdentityKeyFile)
+		if nodeKey.Error != nil {
+			log.Fatalf("load node identity: %v", nodeKey.Error)
 		}
-		cfg.NodeIdentityPrivateKey = nodeKey
+		cfg.NodeIdentityPrivateKey = nodeKey.Value
 	}
 	if len(os.Args) > 1 && os.Args[1] == "inspect" {
 		if err := runInspect(context.Background(), os.Args[2:], InspectOptions{DBPath: cfg.DBPath}); err != nil {

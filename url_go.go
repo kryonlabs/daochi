@@ -3,7 +3,39 @@ package main
 
 import url "net/url"
 
+// #import go_types
 type URL = url.URL
+
+type ParseURLResult struct {
+	Value *URL
+	Error Error
+}
+
+func UrlGo_ParseRaw(Value string) ParseURLResult {
+	var result ParseURLResult
+	result.Value, result.Error = url.Parse(Value)
+	return result
+}
+
+func UrlGo_HostRaw(Value *URL) string {
+	return Value.Host
+}
+
+func UrlGo_SchemeRaw(Value *URL) string {
+	return Value.Scheme
+}
+
+func UrlGo_Parse(value string) ParseURLResult {
+	return UrlGo_ParseRaw(value)
+}
+
+func UrlGo_Host(value *URL) string {
+	return UrlGo_HostRaw(value)
+}
+
+func UrlGo_Scheme(value *URL) string {
+	return UrlGo_SchemeRaw(value)
+}
 
 func UrlGo_EscapedPath(value *URL) string {
 	return (*url.URL).EscapedPath(value)

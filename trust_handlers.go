@@ -10,14 +10,13 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
 
 const (
 	defaultInviteLifetime = 10 * time.Minute
-	maximumInviteLifetime = 24 * time.Hour
+	maximumInviteLifetime = time.Duration(MaximumInviteLifetimeSeconds) * time.Second
 	defaultNameLifetime   = 365 * 24 * time.Hour
 	maximumNameLifetime   = 366 * 24 * time.Hour
 )
@@ -86,7 +85,7 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 	if len(addresses) == 0 && strings.TrimSpace(s.cfg.BaseURL) != "" {
 		addresses = []string{strings.TrimRight(s.cfg.BaseURL, "/")}
 	}
-	if err := validateHTTPAddresses(addresses); err != nil {
+	if err := NodeIdentity_ValidateAddresses(addresses); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -103,7 +102,7 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 		Nonce:       NodeAuth_RandomHex(16),
 		Policy:      req.Policy,
 	}
-	s.node.signInvite(&invite)
+	NodeIdentity_SignInvite(s.node, &invite)
 	if err := s.store.RecordIssuedPairingInvite(r.Context(), invite); err != nil {
 		writeError(w, http.StatusInternalServerError, "pairing invite creation failed")
 		return
@@ -120,20 +119,6 @@ func validPairingPolicy(policy NodeSyncPolicy) bool {
 	}
 }
 
-func validateHTTPAddresses(addresses []string) error {
-	if len(addresses) == 0 {
-		return errors.New("at least one reachable address is required")
-	}
-	for _, address := range addresses {
-		parsed, err := url.Parse(address)
-		if err != nil || parsed.Host == "" ||
-			(parsed.Scheme != "http" && parsed.Scheme != "https") {
-			return errors.New("invalid pairing address")
-		}
-	}
-	return nil
-}
-
 func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Request) {
 	if !s.requireLocalOperator(w, r) {
 		return
@@ -148,9 +133,9 @@ func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid pairing invite")
 		return
 	}
-	publicKey, err := validatePairingInvite(invite, time.Now())
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	publicKey := NodeIdentity_ValidateInvite(invite, time.Now())
+	if publicKey.Error != nil {
+		writeError(w, http.StatusBadRequest, publicKey.Error.Error())
 		return
 	}
 	if invite.NodeID == s.node.ID {
@@ -166,7 +151,7 @@ func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	if err := s.store.TrustPeer(r.Context(), invite, publicKey); err != nil {
+	if err := s.store.TrustPeer(r.Context(), invite, publicKey.Value); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -178,7 +163,7 @@ func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) newPairingAcceptance(invite PairingInvite) (PairingAcceptance, error) {
 	addresses := []string{strings.TrimRight(strings.TrimSpace(s.cfg.BaseURL), "/")}
-	if err := validateHTTPAddresses(addresses); err != nil {
+	if err := NodeIdentity_ValidateAddresses(addresses); err != nil {
 		return PairingAcceptance{}, errors.New("this node needs a reachable DAOCHI_BASE_URL")
 	}
 	acceptance := PairingAcceptance{
@@ -191,7 +176,7 @@ func (s *Server) newPairingAcceptance(invite PairingInvite) (PairingAcceptance, 
 		AcceptedAt:  time.Now().Unix(),
 		Nonce:       NodeAuth_RandomHex(16),
 	}
-	s.node.signAcceptance(invite, &acceptance)
+	NodeIdentity_SignAcceptance(s.node, invite, &acceptance)
 	return acceptance, nil
 }
 
@@ -254,17 +239,17 @@ func (s *Server) handleCompletePairing(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid pairing completion")
 		return
 	}
-	if _, err := validatePairingInvite(request.Invite, time.Now()); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if validated := NodeIdentity_ValidateInvite(request.Invite, time.Now()); validated.Error != nil {
+		writeError(w, http.StatusBadRequest, validated.Error.Error())
 		return
 	}
 	if request.Invite.NodeID != s.node.ID {
 		writeError(w, http.StatusBadRequest, "pairing invite belongs to another node")
 		return
 	}
-	publicKey, err := validatePairingAcceptance(request.Invite, request.Acceptance, time.Now())
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	publicKey := NodeIdentity_ValidateAcceptance(request.Invite, request.Acceptance, time.Now())
+	if publicKey.Error != nil {
+		writeError(w, http.StatusBadRequest, publicKey.Error.Error())
 		return
 	}
 	if request.Acceptance.NodeID == s.node.ID {
@@ -275,7 +260,7 @@ func (s *Server) handleCompletePairing(w http.ResponseWriter, r *http.Request) {
 		r.Context(),
 		request.Invite,
 		request.Acceptance,
-		publicKey,
+		publicKey.Value,
 	); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -341,9 +326,9 @@ func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	claim.SpaceID = strings.TrimSpace(claim.SpaceID)
-	claim.Name = normalizeName(claim.Name)
+	claim.Name = NodeIdentity_NormalizeName(claim.Name)
 	claim.NodeID = strings.TrimSpace(claim.NodeID)
-	if !Identity_ValidUserID(claim.SpaceID) || !namePattern.MatchString(claim.Name) ||
+	if !Identity_ValidUserID(claim.SpaceID) || !NodeIdentity_ValidName(claim.Name) ||
 		!Identity_ValidUserID(claim.NodeID) {
 		writeError(w, http.StatusBadRequest, "invalid space, name, or node ID")
 		return
@@ -370,10 +355,10 @@ func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request)
 
 func validateServices(services []ServiceRecord) error {
 	for _, service := range services {
-		if !namePattern.MatchString(normalizeName(service.Service)) {
+		if !NodeIdentity_ValidName(NodeIdentity_NormalizeName(service.Service)) {
 			return errors.New("invalid service name")
 		}
-		if err := validateHTTPAddresses(service.Endpoints); err != nil {
+		if err := NodeIdentity_ValidateAddresses(service.Endpoints); err != nil {
 			return errors.New("invalid service endpoint")
 		}
 	}
@@ -382,8 +367,8 @@ func validateServices(services []ServiceRecord) error {
 
 func (s *Server) handleResolveName(w http.ResponseWriter, r *http.Request) {
 	spaceID := strings.TrimSpace(r.URL.Query().Get("space_id"))
-	name := normalizeName(r.URL.Query().Get("name"))
-	if !Identity_ValidUserID(spaceID) || !namePattern.MatchString(name) {
+	name := NodeIdentity_NormalizeName(r.URL.Query().Get("name"))
+	if !Identity_ValidUserID(spaceID) || !NodeIdentity_ValidName(name) {
 		writeError(w, http.StatusBadRequest, "invalid space or name")
 		return
 	}

@@ -73,9 +73,9 @@ type Server struct {
 }
 
 func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
-	node, err := newNodeIdentity(cfg.NodeIdentityPrivateKey)
-	if err != nil {
-		panic(err)
+	node := NodeIdentity_New(cfg.NodeIdentityPrivateKey)
+	if node.Error != nil {
+		panic(node.Error)
 	}
 	return &Server{
 		cfg:        cfg,
@@ -85,7 +85,7 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 		syncHub:    newSyncHub(),
 		limiter:    RateLimit_New(),
 		metrics:    &ServerMetrics{},
-		node:       node,
+		node:       node.Value,
 	}
 }
 

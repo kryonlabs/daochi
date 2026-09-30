@@ -1,0 +1,335 @@
+#import "protocol"
+#import "go_types"
+keys :: #import "ed25519_go";
+auth :: #import "node_auth";
+files :: #import "file_go";
+text :: #import "text_go";
+clock :: #import "time_go";
+errors :: #import "errors_go";
+json :: #import "json_go";
+url :: #import "url_go";
+identity :: #import "identity";
+signing :: #import "signing";
+codec :: #import "codec";
+go_sort :: #system_library "go:sort";
+go_strings :: #system_library "go:strings";
+go_hex :: #system_library "go:encoding/hex";
+go_numbers :: #system_library "go:strconv";
+go_format :: #system_library "go:fmt";
+builtin :: #system_library "go:builtin";
+
+NodeIdentity :: struct {
+    ID: string
+    PublicKey: keys.PublicKey
+    PrivateKey: keys.PrivateKey
+}
+NodeIdentityResult :: struct {
+    value: NodeIdentity
+    error: Error
+}
+PrivateKeyResult :: struct {
+    value: keys.PrivateKey
+    error: Error
+}
+PublicKeyResult :: struct {
+    value: keys.PublicKey
+    error: Error
+}
+PairingInvite :: struct {
+    Version: isize #go_tag "json:\"version\""
+    InviteID: string #go_tag "json:\"invite_id\""
+    NodeID: string #go_tag "json:\"node_id\""
+    PublicKey: string #go_tag "json:\"public_key\""
+    DisplayName: string #go_tag "json:\"display_name\""
+    Addresses: []string #go_tag "json:\"addresses\""
+    SpaceID: string #go_tag "json:\"space_id,omitempty\""
+    ExpiresAt: s64 #go_tag "json:\"expires_at\""
+    Nonce: string #go_tag "json:\"nonce\""
+    Policy: NodeSyncPolicy #go_tag "json:\"policy\""
+    Signature: string #go_tag "json:\"signature\""
+}
+PairingAcceptance :: struct {
+    Version: isize #go_tag "json:\"version\""
+    InviteID: string #go_tag "json:\"invite_id\""
+    NodeID: string #go_tag "json:\"node_id\""
+    PublicKey: string #go_tag "json:\"public_key\""
+    DisplayName: string #go_tag "json:\"display_name\""
+    Addresses: []string #go_tag "json:\"addresses\""
+    AcceptedAt: s64 #go_tag "json:\"accepted_at\""
+    Nonce: string #go_tag "json:\"nonce\""
+    Signature: string #go_tag "json:\"signature\""
+}
+ServiceRecord :: struct {
+    Service: string #go_tag "json:\"service\""
+    Endpoints: []string #go_tag "json:\"endpoints\""
+    Capabilities: []string #go_tag "json:\"capabilities,omitempty\""
+}
+NameClaim :: struct {
+    Version: isize #go_tag "json:\"version\""
+    SpaceID: string #go_tag "json:\"space_id\""
+    Name: string #go_tag "json:\"name\""
+    NodeID: string #go_tag "json:\"node_id\""
+    Sequence: s64 #go_tag "json:\"sequence\""
+    ExpiresAt: s64 #go_tag "json:\"expires_at\""
+    Services: []ServiceRecord #go_tag "json:\"services,omitempty\""
+    Signature: string #go_tag "json:\"signature\""
+}
+MeshTrustSpace :: struct {
+    SpaceID: string #go_tag "json:\"space_id\""
+    DisplayName: string #go_tag "json:\"display_name\""
+    AuthorityPublicKey: string #go_tag "json:\"authority_public_key\""
+}
+MaximumInviteLifetimeSeconds :: 86400;
+
+#scope_file
+HexResult :: struct {
+    value: []u8
+    error: Error
+}
+DecodeHex :: (value: string) -> HexResult #go_results #foreign go_hex "DecodeString";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Lower :: (value: string) -> string #foreign go_strings "ToLower";
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+FormatInteger :: (value: s64, base: isize) -> string #foreign go_numbers "FormatInt";
+DecodeError :: (format: string, path: string, error: Error) -> Error #foreign go_format "Errorf";
+AllocateBytes :: (count: isize) -> []u8 #foreign builtin "make";
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+SortStrings :: (values: []string) #foreign go_sort "Strings";
+
+Concat :: (left: string, right: string) -> string {
+    parts: [2]string = .[left, right]
+    return Join(parts[:], "")
+}
+
+CopyBytes :: (value: []u8) -> []u8 {
+    output := AllocateBytes(cast(isize)value.count)
+    index: s64 = 0
+    while index < value.count {
+        output[index] = value[index]
+        index += 1
+    }
+    return output
+}
+SortedAddresses :: (addresses: []string) -> string {
+    values := AllocateStrings(cast(isize)addresses.count)
+    index: s64 = 0
+    while index < addresses.count {
+        values[index] = addresses[index]
+        index += 1
+    }
+    SortStrings(values)
+    return Join(values, ",")
+}
+SignedMessage :: (key: keys.PrivateKey, message: []u8) -> string {
+    signature := keys.Sign(key, message)
+    encoded := codec.EncodeBase64(text.FromBytes(signature), true, false)
+    return encoded.value
+}
+
+#scope_export
+New :: (privateKey: keys.PrivateKey) -> NodeIdentityResult {
+    result: NodeIdentityResult
+    privateBytes := cast([]u8)privateKey
+    if privateBytes.count == 0 {
+        generated := keys.GenerateKey()
+        if generated.error != null {
+            result.error = generated.error
+            return result
+        }
+        privateKey = generated.privateKey
+        privateBytes = cast([]u8)privateKey
+    }
+    if privateBytes.count != 64 {
+        result.error = errors.New("invalid Ed25519 node identity key")
+        return result
+    }
+    publicBytes := CopyBytes(privateBytes[32:64])
+    result.value.ID = signing.SHA256Hex(publicBytes)
+    result.value.PublicKey = cast(keys.PublicKey)publicBytes
+    result.value.PrivateKey = cast(keys.PrivateKey)CopyBytes(privateBytes)
+    return result
+}
+
+LoadOrCreateKey :: (rawPath: string) -> PrivateKeyResult {
+    result: PrivateKeyResult
+    path := TrimSpace(rawPath)
+    if path == "" {
+        result.error = errors.New("empty node identity key path")
+        return result
+    }
+    read := files.ReadFile(path)
+    if read.error == null {
+        decoded := DecodeHex(TrimSpace(text.FromBytes(read.value)))
+        if decoded.error != null {
+            result.error = DecodeError("decode %s: %w", path, decoded.error)
+            return result
+        }
+        if decoded.value.count == 32 {
+            result.value = keys.NewKeyFromSeed(decoded.value)
+            return result
+        }
+        if decoded.value.count != 64 {
+            result.error = errors.New(Concat(path, " has invalid key length"))
+            return result
+        }
+        result.value = cast(keys.PrivateKey)decoded.value
+        return result
+    }
+    if !errors.Is(read.error, files.NotExist()) {
+        result.error = read.error
+        return result
+    }
+    // 0700 directories and a 0600 key file retain the private-storage contract.
+    result.error = files.MkdirAll(files.Dir(path), cast(files.FileMode)448)
+    if result.error != null {
+        return result
+    }
+    generated := keys.GenerateKey()
+    if generated.error != null {
+        result.error = generated.error
+        return result
+    }
+    temporary := Concat(path, ".tmp")
+    encoded := Concat(EncodeHex(cast([]u8)generated.privateKey), "\n")
+    result.error = files.WriteFile(temporary, text.ToBytes(encoded), cast(files.FileMode)384)
+    if result.error != null {
+        return result
+    }
+    result.error = files.Rename(temporary, path)
+    if result.error != null {
+        files.Remove(temporary)
+        return result
+    }
+    result.value = generated.privateKey
+    return result
+}
+
+InviteMessage :: (invite: PairingInvite) -> []u8 {
+    policy := json.Marshal(invite.Policy)
+    parts: [12]string = .["daochi-pairing-invite-v1", FormatInteger(cast(s64)invite.Version, cast(isize)10),
+        invite.InviteID, invite.NodeID, invite.PublicKey, invite.DisplayName, SortedAddresses(invite.Addresses),
+        invite.SpaceID, FormatInteger(invite.ExpiresAt, cast(isize)10), invite.Nonce,
+        signing.SHA256Hex(policy.value), ""]
+    return text.ToBytes(Join(parts[:], "\n"))
+}
+SignInvite :: (node: NodeIdentity, invite: *PairingInvite) {
+    invite.Signature = SignedMessage(node.PrivateKey, InviteMessage(<<invite))
+}
+AcceptanceMessage :: (invite: PairingInvite, acceptance: PairingAcceptance) -> []u8 {
+    parts: [11]string = .["daochi-pairing-invite-v1-acceptance", FormatInteger(cast(s64)acceptance.Version, cast(isize)10),
+        acceptance.InviteID, acceptance.NodeID, acceptance.PublicKey, acceptance.DisplayName,
+        SortedAddresses(acceptance.Addresses), FormatInteger(acceptance.AcceptedAt, cast(isize)10),
+        acceptance.Nonce, signing.SHA256Hex(text.ToBytes(invite.Signature)), ""]
+    return text.ToBytes(Join(parts[:], "\n"))
+}
+SignAcceptance :: (node: NodeIdentity, invite: PairingInvite, acceptance: *PairingAcceptance) {
+    acceptance.Signature = SignedMessage(node.PrivateKey, AcceptanceMessage(invite, <<acceptance))
+}
+ValidateAddresses :: (addresses: []string) -> Error {
+    if addresses.count == 0 {
+        return errors.New("at least one reachable address is required")
+    }
+    for address: addresses {
+        parsed := url.Parse(address)
+        if parsed.error != null || url.Host(parsed.value) == "" ||
+           (url.Scheme(parsed.value) != "http" && url.Scheme(parsed.value) != "https") {
+            return errors.New("invalid pairing address")
+        }
+    }
+    return null
+}
+ValidateAcceptance :: (invite: PairingInvite, acceptance: PairingAcceptance, now: clock.Time) -> PublicKeyResult {
+    result: PublicKeyResult
+    if acceptance.Version != 1 || acceptance.InviteID != invite.InviteID ||
+       !identity.ValidUserID(acceptance.NodeID) || acceptance.Nonce == "" {
+        result.error = errors.New("invalid pairing acceptance")
+        return result
+    }
+    window: s64 = cast(s64)auth.NodeAuthenticationWindowSeconds * 1000000000
+    if acceptance.AcceptedAt < clock.Unix(clock.Add(now, cast(clock.Duration)-window)) ||
+       acceptance.AcceptedAt > clock.Unix(clock.Add(now, cast(clock.Duration)window)) {
+        result.error = errors.New("pairing acceptance time is outside the allowed window")
+        return result
+    }
+    result.error = ValidateAddresses(acceptance.Addresses)
+    if result.error != null {
+        return result
+    }
+    publicBytes := DecodeHex(acceptance.PublicKey)
+    if publicBytes.error != null || publicBytes.value.count != 32 {
+        result.error = errors.New("invalid pairing acceptance public key")
+        return result
+    }
+    if signing.SHA256Hex(publicBytes.value) != acceptance.NodeID {
+        result.error = errors.New("pairing acceptance node ID does not match public key")
+        return result
+    }
+    signature := codec.DecodeBase64(acceptance.Signature, true, false)
+    key := cast(keys.PublicKey)publicBytes.value
+    if signature.error != "" || !keys.Verify(key, AcceptanceMessage(invite, acceptance), text.ToBytes(signature.value)) {
+        result.error = errors.New("invalid pairing acceptance signature")
+        return result
+    }
+    result.value = key
+    return result
+}
+ValidateInvite :: (invite: PairingInvite, now: clock.Time) -> PublicKeyResult {
+    result: PublicKeyResult
+    if invite.Version != 1 || !identity.ValidUserID(invite.NodeID) || invite.InviteID == "" || invite.Nonce == "" {
+        result.error = errors.New("invalid pairing invite")
+        return result
+    }
+    lifetime := cast(clock.Duration)(cast(s64)MaximumInviteLifetimeSeconds * 1000000000)
+    if invite.ExpiresAt <= clock.Unix(now) || invite.ExpiresAt > clock.Unix(clock.Add(now, lifetime)) {
+        result.error = errors.New("pairing invite expired or too far in the future")
+        return result
+    }
+    publicBytes := DecodeHex(invite.PublicKey)
+    if publicBytes.error != null || publicBytes.value.count != 32 {
+        result.error = errors.New("invalid pairing public key")
+        return result
+    }
+    if signing.SHA256Hex(publicBytes.value) != invite.NodeID {
+        result.error = errors.New("pairing node ID does not match public key")
+        return result
+    }
+    signature := codec.DecodeBase64(invite.Signature, true, false)
+    key := cast(keys.PublicKey)publicBytes.value
+    if signature.error != "" || !keys.Verify(key, InviteMessage(invite), text.ToBytes(signature.value)) {
+        result.error = errors.New("invalid pairing signature")
+        return result
+    }
+    result.error = ValidateAddresses(invite.Addresses)
+    if result.error != null {
+        return result
+    }
+    result.value = key
+    return result
+}
+NormalizeName :: (name: string) -> string {
+    return Lower(TrimSpace(name))
+}
+ValidName :: (name: string) -> bool {
+    if name.count == 0 || name.count > 63 {
+        return false
+    }
+    index: s64 = 0
+    while index < name.count {
+        value := name[index]
+        if (value < cast(u8)97 || value > cast(u8)122) && (value < cast(u8)48 || value > cast(u8)57) {
+            if value != cast(u8)45 || index == 0 || index == name.count - 1 {
+                return false
+            }
+        }
+        index += 1
+    }
+    return true
+}
+NameClaimMessage :: (claim: NameClaim) -> []u8 {
+    services := json.Marshal(claim.Services)
+    parts: [9]string = .["daochi-name-claim-v1", FormatInteger(cast(s64)claim.Version, cast(isize)10),
+        claim.SpaceID, claim.Name, claim.NodeID, FormatInteger(claim.Sequence, cast(isize)10),
+        FormatInteger(claim.ExpiresAt, cast(isize)10), signing.SHA256Hex(services.value), ""]
+    return text.ToBytes(Join(parts[:], "\n"))
+}

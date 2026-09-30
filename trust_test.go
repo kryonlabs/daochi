@@ -14,15 +14,15 @@ import (
 
 func TestNodeIdentityPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "node.key")
-	first, err := loadOrCreateNodeIdentityKey(path)
-	if err != nil {
-		t.Fatal(err)
+	first := NodeIdentity_LoadOrCreateKey(path)
+	if first.Error != nil {
+		t.Fatal(first.Error)
 	}
-	second, err := loadOrCreateNodeIdentityKey(path)
-	if err != nil {
-		t.Fatal(err)
+	second := NodeIdentity_LoadOrCreateKey(path)
+	if second.Error != nil {
+		t.Fatal(second.Error)
 	}
-	if !bytes.Equal(first, second) {
+	if !bytes.Equal(first.Value, second.Value) {
 		t.Fatal("node identity changed after reload")
 	}
 	info, err := os.Stat(path)
@@ -35,10 +35,11 @@ func TestNodeIdentityPersists(t *testing.T) {
 }
 
 func TestPairingInviteSignatureAndTampering(t *testing.T) {
-	identity, err := newNodeIdentity(nil)
-	if err != nil {
-		t.Fatal(err)
+	created := NodeIdentity_New(nil)
+	if created.Error != nil {
+		t.Fatal(created.Error)
 	}
+	identity := created.Value
 	invite := PairingInvite{
 		Version:     1,
 		InviteID:    NodeAuth_RandomHex(16),
@@ -55,25 +56,26 @@ func TestPairingInviteSignatureAndTampering(t *testing.T) {
 			Data:        []string{"encrypted_records"},
 		},
 	}
-	identity.signInvite(&invite)
-	if _, err := validatePairingInvite(invite, time.Now()); err != nil {
-		t.Fatalf("valid invite rejected: %v", err)
+	NodeIdentity_SignInvite(identity, &invite)
+	if validated := NodeIdentity_ValidateInvite(invite, time.Now()); validated.Error != nil {
+		t.Fatalf("valid invite rejected: %v", validated.Error)
 	}
 	invite.DisplayName = "Attacker"
-	if _, err := validatePairingInvite(invite, time.Now()); err == nil {
+	if validated := NodeIdentity_ValidateInvite(invite, time.Now()); validated.Error == nil {
 		t.Fatal("tampered invite accepted")
 	}
 }
 
 func TestPairingAcceptanceSignatureAndTampering(t *testing.T) {
-	inviter, err := newNodeIdentity(nil)
-	if err != nil {
-		t.Fatal(err)
+	inviterResult := NodeIdentity_New(nil)
+	if inviterResult.Error != nil {
+		t.Fatal(inviterResult.Error)
 	}
-	acceptor, err := newNodeIdentity(nil)
-	if err != nil {
-		t.Fatal(err)
+	acceptorResult := NodeIdentity_New(nil)
+	if acceptorResult.Error != nil {
+		t.Fatal(acceptorResult.Error)
 	}
+	inviter, acceptor := inviterResult.Value, acceptorResult.Value
 	invite := PairingInvite{
 		Version:   1,
 		InviteID:  NodeAuth_RandomHex(16),
@@ -88,7 +90,7 @@ func TestPairingAcceptanceSignatureAndTampering(t *testing.T) {
 			Data:      []string{"encrypted_records"},
 		},
 	}
-	inviter.signInvite(&invite)
+	NodeIdentity_SignInvite(inviter, &invite)
 	acceptance := PairingAcceptance{
 		Version:     1,
 		InviteID:    invite.InviteID,
@@ -99,12 +101,12 @@ func TestPairingAcceptanceSignatureAndTampering(t *testing.T) {
 		AcceptedAt:  time.Now().Unix(),
 		Nonce:       NodeAuth_RandomHex(16),
 	}
-	acceptor.signAcceptance(invite, &acceptance)
-	if _, err := validatePairingAcceptance(invite, acceptance, time.Now()); err != nil {
-		t.Fatalf("valid acceptance rejected: %v", err)
+	NodeIdentity_SignAcceptance(acceptor, invite, &acceptance)
+	if validated := NodeIdentity_ValidateAcceptance(invite, acceptance, time.Now()); validated.Error != nil {
+		t.Fatalf("valid acceptance rejected: %v", validated.Error)
 	}
 	acceptance.DisplayName = "Attacker"
-	if _, err := validatePairingAcceptance(invite, acceptance, time.Now()); err == nil {
+	if validated := NodeIdentity_ValidateAcceptance(invite, acceptance, time.Now()); validated.Error == nil {
 		t.Fatal("tampered acceptance accepted")
 	}
 }
@@ -415,12 +417,12 @@ func trustServer(t *testing.T, store *Store, peer *Server) {
 		ExpiresAt:   time.Now().Add(time.Minute).Unix(),
 		Nonce:       NodeAuth_RandomHex(16),
 	}
-	peer.node.signInvite(&invite)
-	publicKey, err := validatePairingInvite(invite, time.Now())
-	if err != nil {
-		t.Fatal(err)
+	NodeIdentity_SignInvite(peer.node, &invite)
+	publicKey := NodeIdentity_ValidateInvite(invite, time.Now())
+	if publicKey.Error != nil {
+		t.Fatal(publicKey.Error)
 	}
-	if err := store.TrustPeer(t.Context(), invite, ed25519.PublicKey(publicKey)); err != nil {
+	if err := store.TrustPeer(t.Context(), invite, ed25519.PublicKey(publicKey.Value)); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -314,7 +314,7 @@ WHERE space_id=?1 AND name=?2`, claim.SpaceID, claim.Name).Scan(&currentSequence
 		return claim, err
 	}
 	claim.Signature = base64.RawURLEncoding.EncodeToString(
-		ed25519.Sign(ed25519.PrivateKey(privateKey), nameClaimMessage(claim)))
+		ed25519.Sign(ed25519.PrivateKey(privateKey), NodeIdentity_NameClaimMessage(claim)))
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO name_claims(
     space_id,name,node_id,sequence,expires_at,services_json,signature,updated_at
@@ -359,7 +359,7 @@ WHERE space_id=?1`, spaceID).Scan(&publicKey); err != nil {
 		return claim, false, err
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(claim.Signature)
-	if err != nil || !ed25519.Verify(ed25519.PublicKey(publicKey), nameClaimMessage(claim), signature) {
+	if err != nil || !ed25519.Verify(ed25519.PublicKey(publicKey), NodeIdentity_NameClaimMessage(claim), signature) {
 		return claim, false, fmt.Errorf("invalid stored name claim signature")
 	}
 	return claim, true, nil
@@ -500,7 +500,7 @@ INSERT OR IGNORE INTO trust_spaces(
 
 func importNameClaim(ctx context.Context, tx *sql.Tx, claim NameClaim) (int, error) {
 	if claim.Version != 1 || !Identity_ValidUserID(claim.SpaceID) ||
-		!Identity_ValidUserID(claim.NodeID) || !namePattern.MatchString(claim.Name) ||
+		!Identity_ValidUserID(claim.NodeID) || !NodeIdentity_ValidName(claim.Name) ||
 		claim.Sequence <= 0 {
 		return 0, errors.New("invalid mesh name claim")
 	}
@@ -515,7 +515,7 @@ WHERE space_id=?1`, claim.SpaceID).Scan(&publicKey); err != nil {
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(claim.Signature)
 	if err != nil || !ed25519.Verify(ed25519.PublicKey(publicKey),
-		nameClaimMessage(claim), signature) {
+		NodeIdentity_NameClaimMessage(claim), signature) {
 		return 0, errors.New("invalid mesh name claim signature")
 	}
 

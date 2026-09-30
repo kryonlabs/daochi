@@ -64,7 +64,7 @@ field names, Go storage types, order and reflection tags.
 | `metrics.go` | Ziran | `metrics.zi`: concurrent counters, route/reason normalization, escaped labels, sorted maps, aggregate usage and exact Prometheus output |
 | `monero_deposits.go` | Go with ported callers | Deposit reconciliation and credit transactions |
 | `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
-| `node_identity.go` | Go with ported callers | Identity persistence, invites, pairing, namespace claims |
+| `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
 | `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; HTTP handlers remain Go |
 | `signed_tx.go` | Partial Ziran | Record, normalization, canonical bytes in `transaction.zi`; decoding, verification and replay remain Go |
@@ -87,7 +87,8 @@ field names, Go storage types, order and reflection tags.
 `vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go`, `go_types.go`,
 `option.go`, `sync_go.go`, `time_go.go`, `random_go.go`, `text_go.go`,
 `net_go.go`, `http_go.go`, `atomic_go.go`, `context_go.go`, `sql_go.go` and
-`errors_go.go`, `ed25519_go.go` and `url_go.go` come from Ziran's standard modules; they do not represent
+`errors_go.go`, `ed25519_go.go`, `url_go.go`, `file_go.go` and `json_go.go`
+come from Ziran's standard modules; they do not represent
 additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Their HTTP/database
@@ -164,6 +165,17 @@ exercise signature line breaks and malformed headers, and concurrent replay
 tests accept a shared signed request exactly once. `peer_trust.zi` owns the
 trusted-peer public-key query; the remaining trust store is still handwritten.
 
+`node_identity.zi` completes key creation and persistence, pairing invitations
+and acceptances, their signatures and validation, and namespace claim messages
+and naming helpers. Key loading retains seed/private-key support, Unicode
+whitespace, wrapped hexadecimal errors, private file/directory permissions,
+atomic rename and removal of temporary secrets after rename failure. Identity
+construction copies both keys into independent storage. Messages retain JSON
+hashes, sorted address copies, exact integer formatting and raw URL base64
+signatures. Validation retains its original order and expiry boundaries.
+Independent baseline fixtures cover the six record layouts, key ownership,
+filesystem/entropy failures, signatures, malformed input and native errors.
+
 ## Compiler work exercised by this port
 
 Ziran now accepts explicit `go:` foreign package imports, including standard
@@ -211,6 +223,10 @@ The `ed25519_go` and `url_go` modules provide native key types, signature
 operations and escaped paths. Extended HTTP/time operations read the original
 request method, URL pointer and Unix timestamp. `text_go.ToBytes` produces an
 independent, byte-preserving slice, including allocated empty values.
+The `file_go` and `json_go` modules provide native file permissions, path/error
+operations and JSON serialization/deserialization. Go interface arguments
+preserve record tags, nil/empty slices and pointer destinations. Native key
+generation preserves public/private/error result order and entropy errors.
 
 ## Next dependencies
 

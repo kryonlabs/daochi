@@ -25,6 +25,10 @@ func UrlGo_SchemeRaw(Value *URL) string {
 	return Value.Scheme
 }
 
+func UrlGo_PathRaw(Value *URL) string {
+	return Value.Path
+}
+
 func UrlGo_Parse(value string) ParseURLResult {
 	return UrlGo_ParseRaw(value)
 }
@@ -35,6 +39,10 @@ func UrlGo_Host(value *URL) string {
 
 func UrlGo_Scheme(value *URL) string {
 	return UrlGo_SchemeRaw(value)
+}
+
+func UrlGo_Path(value *URL) string {
+	return UrlGo_PathRaw(value)
 }
 
 func UrlGo_EscapedPath(value *URL) string {

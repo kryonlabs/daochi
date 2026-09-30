@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -117,7 +118,7 @@ type baselinePairingAcceptance struct {
 func baselinePairingInviteMessage(invite PairingInvite) []byte {
 	addresses := append([]string(nil), invite.Addresses...)
 	sort.Strings(addresses)
-	policy, _ := canonicalJSON(invite.Policy)
+	policy, _ := json.Marshal(invite.Policy)
 	return []byte(fmt.Sprintf("%s\n%d\n%s\n%s\n%s\n%s\n%s\n%s\n%d\n%s\n%s\n",
 		baselinePairingInviteContext, invite.Version, invite.InviteID, invite.NodeID,
 		invite.PublicKey, invite.DisplayName, strings.Join(addresses, ","), invite.SpaceID,
@@ -244,7 +245,7 @@ func baselineNormalizeName(name string) string {
 }
 
 func baselineNameClaimMessage(claim NameClaim) []byte {
-	services, _ := canonicalJSON(claim.Services)
+	services, _ := json.Marshal(claim.Services)
 	return []byte(fmt.Sprintf("%s\n%d\n%s\n%s\n%s\n%d\n%d\n%s\n",
 		baselineNameClaimContext, claim.Version, claim.SpaceID, claim.Name, claim.NodeID,
 		claim.Sequence, claim.ExpiresAt, Signing_SHA256Hex(services)))

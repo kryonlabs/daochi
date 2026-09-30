@@ -68,8 +68,8 @@ func TestInbeReleasedAndCurrentScopesRemainValid(t *testing.T) {
 
 func TestSignedTransactionContextIsNotCallerDefined(t *testing.T) {
 	tx := SignedTxEnvelope{ProtocolVersion: 6, SignatureContext: "attacker-context"}
-	message := Transaction_CanonicalMessage(daochiTxContext, tx)
-	if !strings.HasPrefix(message, daochiTxContext+"\n") || strings.Contains(message, "attacker-context") {
+	message := Transaction_CanonicalMessage(TransactionContext, tx)
+	if !strings.HasPrefix(message, TransactionContext+"\n") || strings.Contains(message, "attacker-context") {
 		t.Fatalf("canonical transaction context was caller-controlled: %q", message)
 	}
 }

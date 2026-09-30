@@ -987,18 +987,6 @@ DROP TABLE server_social_cache;`)
 	return err
 }
 
-func (s *Store) PublicKey(ctx context.Context, userID string) ([]byte, bool, error) {
-	var key []byte
-	err := s.db.QueryRowContext(ctx, `SELECT public_key FROM server_users WHERE user_id_hash=?1`, userID).Scan(&key)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	return key, true, nil
-}
-
 func (s *Store) ApplySync(ctx context.Context, req SyncRequest, publicKey []byte) (SyncResult, error) {
 	result, _, err := s.ApplySyncDetailed(ctx, req, publicKey)
 	return result, err

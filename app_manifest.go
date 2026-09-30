@@ -265,26 +265,6 @@ ORDER BY asset_id,permission`, appID)
 	return out, rows.Err()
 }
 
-func (s *Store) RecordSignedTx(ctx context.Context, tx SignedTxEnvelope) error {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM server_signed_transactions WHERE expires_at<?1`, time.Now().Unix()); err != nil {
-		return err
-	}
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO server_signed_transactions(account_id,tx_id,app_id,nonce,expires_at)
-VALUES(?1,?2,?3,?4,?5)`, tx.AccountID, tx.TxID, tx.AppID, tx.Nonce, tx.ExpiresAt)
-	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
-		return errSignedTxReplay
-	}
-	return err
-}
-
-func (s *Store) ForgetSignedTx(ctx context.Context, tx SignedTxEnvelope) {
-	_, _ = s.db.ExecContext(ctx, `
-DELETE FROM server_signed_transactions
-WHERE account_id=?1 AND tx_id=?2 AND app_id=?3 AND nonce=?4`,
-		tx.AccountID, tx.TxID, tx.AppID, tx.Nonce)
-}
-
 func (s *Store) AppTokenPermission(ctx context.Context, appID, assetID, permission string) (TokenPolicy, bool, error) {
 	var policy TokenPolicy
 	err := s.db.QueryRowContext(ctx, `
@@ -351,7 +331,8 @@ func validateSignedAppRegistration(req SignedAppRegistrationRequest, nodePublicK
 	if len(nodePublicKey) != ed25519.PublicKeySize {
 		return nil, "", authError{status: http.StatusForbidden, message: "node registry approval unavailable"}
 	}
-	manifestBytes, err := canonicalJSON(req.Manifest)
+	serialized := JsonGo_Marshal(req.Manifest)
+	manifestBytes, err := serialized.Value, serialized.Error
 	if err != nil {
 		return nil, "", err
 	}
@@ -361,7 +342,7 @@ func validateSignedAppRegistration(req SignedAppRegistrationRequest, nodePublicK
 	if manifestSigField.Error != "" || len(manifestSig) != ed25519.SignatureSize {
 		return nil, "", authError{status: http.StatusBadRequest, message: "invalid manifest signature"}
 	}
-	manifestMsg := append([]byte(daochiAppManifestContext+"\n"), manifestBytes...)
+	manifestMsg := append([]byte(AppManifestContext+"\n"), manifestBytes...)
 	if !Manifest_SignedByActiveKey(req.Manifest, manifestMsg, manifestSig, time.Now().Unix()) {
 		return nil, "", authError{status: http.StatusUnauthorized, message: "manifest signature rejected"}
 	}
@@ -370,14 +351,15 @@ func validateSignedAppRegistration(req SignedAppRegistrationRequest, nodePublicK
 	if approvalSigField.Error != "" || len(approvalSig) != ed25519.SignatureSize {
 		return nil, "", authError{status: http.StatusBadRequest, message: "invalid approval signature"}
 	}
-	if !ed25519.Verify(nodePublicKey, []byte(Signing_AppApprovalMessage(daochiAppApprovalContext, req.Manifest.AppID, manifestHash)), approvalSig) {
+	if !ed25519.Verify(nodePublicKey, []byte(Signing_AppApprovalMessage(AppApprovalContext, req.Manifest.AppID, manifestHash)), approvalSig) {
 		return nil, "", authError{status: http.StatusUnauthorized, message: "node approval rejected"}
 	}
 	return manifestBytes, manifestHash, nil
 }
 
 func manifestDigest(manifest AppManifest) (string, error) {
-	data, err := canonicalJSON(manifest)
+	serialized := JsonGo_Marshal(manifest)
+	data, err := serialized.Value, serialized.Error
 	if err != nil {
 		return "", err
 	}
@@ -390,7 +372,8 @@ func formatAppManifestForTest(manifest AppManifest) ([]byte, string, error) {
 	if problem := Manifest_Validate(manifest, time.Now().Unix()); problem != "" {
 		return nil, "", errors.New(problem)
 	}
-	data, err := canonicalJSON(manifest)
+	serialized := JsonGo_Marshal(manifest)
+	data, err := serialized.Value, serialized.Error
 	if err != nil {
 		return nil, "", err
 	}

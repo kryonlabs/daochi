@@ -50,17 +50,17 @@ type DeviceListResult struct {
 	Error Error
 }
 
-type zir_1b627dc0e6db542b_TransactionResult struct {
+type zir_7e7cd09519a1fca6_TransactionResult struct {
 	Value *Transaction
 	Error Error
 }
 
-type zir_9f77619cbb1e2ba7_ExecResult struct {
+type zir_0291b470ede4d422_ExecResult struct {
 	Value Result
 	Error Error
 }
 
-type zir_238c45788f610323_RowsResult struct {
+type zir_a74db72b643e677e_RowsResult struct {
 	Value *Rows
 	Error Error
 }
@@ -76,44 +76,44 @@ func DeviceKeys_DecodeHex(Value string) KeyResult {
 	return result
 }
 
-func DeviceKeys_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_1b627dc0e6db542b_TransactionResult {
-	var result zir_1b627dc0e6db542b_TransactionResult
+func DeviceKeys_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_7e7cd09519a1fca6_TransactionResult {
+	var result zir_7e7cd09519a1fca6_TransactionResult
 	result.Value, result.Error = (*sql.DB).BeginTx(Database, Context, Options)
 	return result
 }
 
-func DeviceKeys_DeleteNonces(Transaction *Transaction, Context Context, Query string, Cutoff string) zir_9f77619cbb1e2ba7_ExecResult {
-	var result zir_9f77619cbb1e2ba7_ExecResult
+func DeviceKeys_DeleteNonces(Transaction *Transaction, Context Context, Query string, Cutoff string) zir_0291b470ede4d422_ExecResult {
+	var result zir_0291b470ede4d422_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, Cutoff)
 	return result
 }
 
-func DeviceKeys_InsertNonce(Transaction *Transaction, Context Context, Query string, AccountID string, Nonce string, Created string) zir_9f77619cbb1e2ba7_ExecResult {
-	var result zir_9f77619cbb1e2ba7_ExecResult
+func DeviceKeys_InsertNonce(Transaction *Transaction, Context Context, Query string, AccountID string, Nonce string, Created string) zir_0291b470ede4d422_ExecResult {
+	var result zir_0291b470ede4d422_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AccountID, Nonce, Created)
 	return result
 }
 
-func DeviceKeys_InsertDevice(Transaction *Transaction, Context Context, Query string, AccountID string, AppID string, KeyID string, ClientID string, Key string, Created string) zir_9f77619cbb1e2ba7_ExecResult {
-	var result zir_9f77619cbb1e2ba7_ExecResult
+func DeviceKeys_InsertDevice(Transaction *Transaction, Context Context, Query string, AccountID string, AppID string, KeyID string, ClientID string, Key string, Created string) zir_0291b470ede4d422_ExecResult {
+	var result zir_0291b470ede4d422_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AccountID, AppID, KeyID, ClientID, Key, Created)
 	return result
 }
 
-func DeviceKeys_RevokeDevice(Transaction *Transaction, Context Context, Query string, AccountID string, AppID string, KeyID string, Revoked string) zir_9f77619cbb1e2ba7_ExecResult {
-	var result zir_9f77619cbb1e2ba7_ExecResult
+func DeviceKeys_RevokeDevice(Transaction *Transaction, Context Context, Query string, AccountID string, AppID string, KeyID string, Revoked string) zir_0291b470ede4d422_ExecResult {
+	var result zir_0291b470ede4d422_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AccountID, AppID, KeyID, Revoked)
 	return result
 }
 
-func DeviceKeys_TouchDevice(Database *Database, Context Context, Query string, AccountID string, AppID string, KeyID string, Used string) zir_9f77619cbb1e2ba7_ExecResult {
-	var result zir_9f77619cbb1e2ba7_ExecResult
+func DeviceKeys_TouchDevice(Database *Database, Context Context, Query string, AccountID string, AppID string, KeyID string, Used string) zir_0291b470ede4d422_ExecResult {
+	var result zir_0291b470ede4d422_ExecResult
 	result.Value, result.Error = (*sql.DB).ExecContext(Database, Context, Query, AccountID, AppID, KeyID, Used)
 	return result
 }
 
-func DeviceKeys_QueryDevices(Database *Database, Context Context, Query string, AccountID string) zir_238c45788f610323_RowsResult {
-	var result zir_238c45788f610323_RowsResult
+func DeviceKeys_QueryDevices(Database *Database, Context Context, Query string, AccountID string) zir_a74db72b643e677e_RowsResult {
+	var result zir_a74db72b643e677e_RowsResult
 	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query, AccountID)
 	return result
 }
@@ -128,12 +128,12 @@ const ListSQL = "\nSELECT account_id,app_id,device_key_id,client_id,public_key,c
 
 func DeviceKeys_RecordNonce(transaction *Transaction, context Context, accountID string, nonce string, replay Error) Error {
 	cutoff := Timestamp_CanonicalTimestamp(TimeGo_Add(TimeGo_Now(), Duration(-1800000000000)))
-	var value_0 zir_9f77619cbb1e2ba7_ExecResult = DeviceKeys_DeleteNonces(transaction, context, "DELETE FROM server_device_registration_nonces WHERE created_at<?1", cutoff)
+	var value_0 zir_0291b470ede4d422_ExecResult = DeviceKeys_DeleteNonces(transaction, context, "DELETE FROM server_device_registration_nonces WHERE created_at<?1", cutoff)
 	deleted := value_0
 	if deleted.Error != nil {
 		return deleted.Error
 	}
-	var value_1 zir_9f77619cbb1e2ba7_ExecResult = DeviceKeys_InsertNonce(transaction, context, "INSERT INTO server_device_registration_nonces(account_id,nonce,created_at) VALUES(?1,?2,?3)", accountID, nonce, Timestamp_CanonicalNow())
+	var value_1 zir_0291b470ede4d422_ExecResult = DeviceKeys_InsertNonce(transaction, context, "INSERT INTO server_device_registration_nonces(account_id,nonce,created_at) VALUES(?1,?2,?3)", accountID, nonce, Timestamp_CanonicalNow())
 	inserted := value_1
 	var value_2 bool = inserted.Error != nil
 	var value_3 bool = value_2
@@ -227,6 +227,69 @@ func DeviceKeys_ValidRegistration(request DeviceRegistrationRequest) bool {
 	return DeviceKeys_ValidExpiry(request.ExpiresAt)
 }
 
+func DeviceKeys_VerifyRegistration(database *Database, context Context, accountID string, request DeviceRegistrationRequest, verifySignature VerifySignature) AuthenticationResult {
+	var value_0 bool = DeviceKeys_ValidRegistration(request)
+	if !value_0 {
+		return Authentication_Failure(int(400), "invalid device registration")
+	}
+	account := AccountKeys_PublicKey(database, context, accountID)
+	if account.Error != nil {
+		return Authentication_NativeFailure(account.Error)
+	}
+	if !account.Found {
+		return Authentication_Failure(int(401), "sync account not found")
+	}
+	signature := Codec_DecodeBinaryField(request.Signature)
+	if signature.Error != "" || int64(len(signature.Value)) != 2420 {
+		return Authentication_Failure(int(400), "invalid device registration signature")
+	}
+	var value_1 VerifySignature = verifySignature
+	var value_2 bool = value_1(account.Value, DeviceKeys_RegistrationMessage(accountID, request), TextGo_ToBytes(signature.Value))
+	if !value_2 {
+		return Authentication_Failure(int(401), "device registration rejected")
+	}
+	return Authentication_NativeFailure(nil)
+}
+
+func DeviceKeys_VerifyRevocation(database *Database, context Context, accountID string, request DeviceRevocationRequest, verifySignature VerifySignature) AuthenticationResult {
+	var value_0 bool = Identity_ValidNamespace(request.AppID)
+	var value_1 bool = !value_0
+	if !value_1 {
+		var value_2 bool = Identity_ValidClientID(request.KeyID)
+		value_1 = !value_2
+	}
+	var value_3 bool = value_1
+	if !value_3 {
+		var value_4 bool = Identity_ValidClientID(request.Nonce)
+		value_3 = !value_4
+	}
+	var value_5 bool = value_3
+	if !value_5 {
+		var value_6 bool = DeviceKeys_ValidExpiry(request.ExpiresAt)
+		value_5 = !value_6
+	}
+	if value_5 {
+		return Authentication_Failure(int(400), "invalid device revocation")
+	}
+	account := AccountKeys_PublicKey(database, context, accountID)
+	if account.Error != nil {
+		return Authentication_NativeFailure(account.Error)
+	}
+	if !account.Found {
+		return Authentication_Failure(int(401), "sync account not found")
+	}
+	signature := Codec_DecodeBinaryField(request.Signature)
+	if signature.Error != "" || int64(len(signature.Value)) != 2420 {
+		return Authentication_Failure(int(400), "invalid device revocation signature")
+	}
+	var value_7 VerifySignature = verifySignature
+	var value_8 bool = value_7(account.Value, DeviceKeys_RevocationMessage(accountID, request), TextGo_ToBytes(signature.Value))
+	if !value_8 {
+		return Authentication_Failure(int(401), "device revocation rejected")
+	}
+	return Authentication_NativeFailure(nil)
+}
+
 func DeviceKeys_Register(database *Database, context Context, device DeviceKey, nonce string, replay Error) Error {
 	begun := DeviceKeys_Begin(database, context, nil)
 	if begun.Error != nil {
@@ -239,7 +302,7 @@ func DeviceKeys_Register(database *Database, context Context, device DeviceKey, 
 		return error
 	}
 	var value_0 string = "\nINSERT INTO server_device_keys(account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at)\nVALUES(?1,?2,?3,?4,?5,?6,?6,'')\nON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET\n client_id=excluded.client_id,\n public_key=excluded.public_key,\n last_used_at=excluded.last_used_at,\n revoked_at=''\n"
-	var value_1 zir_9f77619cbb1e2ba7_ExecResult = DeviceKeys_InsertDevice(transaction, context, value_0, device.AccountID, device.AppID, device.KeyID, device.ClientID, device.PublicKey, Timestamp_CanonicalNow())
+	var value_1 zir_0291b470ede4d422_ExecResult = DeviceKeys_InsertDevice(transaction, context, value_0, device.AccountID, device.AppID, device.KeyID, device.ClientID, device.PublicKey, Timestamp_CanonicalNow())
 	inserted := value_1
 	if inserted.Error != nil {
 		return inserted.Error
@@ -259,7 +322,7 @@ func DeviceKeys_Revoke(database *Database, context Context, accountID string, re
 		return error
 	}
 	var value_0 string = "\nUPDATE server_device_keys SET revoked_at=?4\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n"
-	var value_1 zir_9f77619cbb1e2ba7_ExecResult = DeviceKeys_RevokeDevice(transaction, context, value_0, accountID, request.AppID, request.KeyID, Timestamp_CanonicalNow())
+	var value_1 zir_0291b470ede4d422_ExecResult = DeviceKeys_RevokeDevice(transaction, context, value_0, accountID, request.AppID, request.KeyID, Timestamp_CanonicalNow())
 	revoked := value_1
 	if revoked.Error != nil {
 		return revoked.Error
@@ -293,7 +356,7 @@ func DeviceKeys_Active(database *Database, context Context, accountID string, ap
 
 func DeviceKeys_Touch(database *Database, context Context, accountID string, appID string, keyID string) Error {
 	var value_0 string = "\nUPDATE server_device_keys SET last_used_at=?4\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n"
-	var value_1 zir_9f77619cbb1e2ba7_ExecResult = DeviceKeys_TouchDevice(database, context, value_0, accountID, appID, keyID, Timestamp_CanonicalNow())
+	var value_1 zir_0291b470ede4d422_ExecResult = DeviceKeys_TouchDevice(database, context, value_0, accountID, appID, keyID, Timestamp_CanonicalNow())
 	touched := value_1
 	return touched.Error
 }

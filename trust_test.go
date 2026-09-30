@@ -287,11 +287,11 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 		Manifest: manifest,
 		ManifestSignature: encodeHex(ed25519.Sign(
 			appPrivateKey,
-			append([]byte(daochiAppManifestContext+"\n"), manifestBytes...),
+			append([]byte(AppManifestContext+"\n"), manifestBytes...),
 		)),
 		ApprovalSignature: encodeHex(ed25519.Sign(
 			registryPrivateKey,
-			[]byte(Signing_AppApprovalMessage(daochiAppApprovalContext, manifest.AppID, manifestHash)),
+			[]byte(Signing_AppApprovalMessage(AppApprovalContext, manifest.AppID, manifestHash)),
 		)),
 	}
 	if err := sourceStore.UpsertSignedAppManifest(

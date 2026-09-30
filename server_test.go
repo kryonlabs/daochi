@@ -1072,8 +1072,8 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 	}
 	registerBody, err := json.Marshal(SignedAppRegistrationRequest{
 		Manifest:          manifest,
-		ManifestSignature: hex.EncodeToString(ed25519.Sign(appPrivate, append([]byte(daochiAppManifestContext+"\n"), manifestBytes...))),
-		ApprovalSignature: hex.EncodeToString(ed25519.Sign(nodePrivate, []byte(Signing_AppApprovalMessage(daochiAppApprovalContext, "testapp", manifestHash)))),
+		ManifestSignature: hex.EncodeToString(ed25519.Sign(appPrivate, append([]byte(AppManifestContext+"\n"), manifestBytes...))),
+		ApprovalSignature: hex.EncodeToString(ed25519.Sign(nodePrivate, []byte(Signing_AppApprovalMessage(AppApprovalContext, "testapp", manifestHash)))),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3253,8 +3253,8 @@ func TestBearerSyncCanRegisterUserWithPublicKey(t *testing.T) {
 	if payload.Applied.Habits != 1 || len(payload.Changes.Habits) != 1 {
 		t.Fatalf("registered sync response = %#v", payload)
 	}
-	if _, found, err := server.store.PublicKey(t.Context(), userID); err != nil || !found {
-		t.Fatalf("registered public key found=%v err=%v", found, err)
+	if account := AccountKeys_PublicKey(server.store.db, t.Context(), userID); account.Error != nil || !account.Found {
+		t.Fatalf("registered public key found=%v err=%v", account.Found, account.Error)
 	}
 }
 
@@ -3671,7 +3671,7 @@ func signedTxHeader(t *testing.T, accountID, appID, deviceKeyID, method, path st
 		Signature:       hex.EncodeToString(bytes.Repeat([]byte{0x7a}, mlDSA44SignatureSize)),
 	}
 	tx.DeviceSignature = hex.EncodeToString(ed25519.Sign(devicePrivate,
-		[]byte(Transaction_CanonicalMessage(daochiTxContext, tx))))
+		[]byte(Transaction_CanonicalMessage(TransactionContext, tx))))
 	data, err := json.Marshal(tx)
 	if err != nil {
 		t.Fatal(err)

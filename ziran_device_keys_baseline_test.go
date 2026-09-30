@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -104,7 +105,7 @@ func baselineNormalizeDeviceRevocation(request *DeviceRevocationRequest) {
 func baselineValidDeviceRequestExpiry(expiresAt int64) bool {
 	now := time.Now()
 	return expiresAt > now.Unix() &&
-		!time.Unix(expiresAt, 0).After(now.Add(daochiTxMaxFutureSkew))
+		!time.Unix(expiresAt, 0).After(now.Add((15 * time.Minute)))
 }
 
 func baselineValidDeviceRegistration(request DeviceRegistrationRequest) bool {
@@ -171,7 +172,7 @@ WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''`,
 
 func baselineRecordDeviceNonce(ctx context.Context, transaction *sql.Tx,
 	accountID, nonce string) error {
-	cutoff := Timestamp_CanonicalTimestamp(time.Now().Add(-2 * daochiTxMaxFutureSkew))
+	cutoff := Timestamp_CanonicalTimestamp(time.Now().Add(-2 * (15 * time.Minute)))
 	if _, err := transaction.ExecContext(ctx, `
 DELETE FROM server_device_registration_nonces WHERE created_at<?1`, cutoff); err != nil {
 		return err
@@ -227,4 +228,50 @@ FROM server_device_keys WHERE account_id=?1 ORDER BY app_id,device_key_id`, acco
 		devices = append(devices, device)
 	}
 	return devices, rows.Err()
+}
+
+func (s *Server) baselineVerifyDeviceRegistration(ctx context.Context, accountID string, request DeviceRegistrationRequest) error {
+	if !baselineValidDeviceRegistration(request) {
+		return authError{status: http.StatusBadRequest, message: "invalid device registration"}
+	}
+	accountKey, found, err := s.store.baselineAccountPublicKey(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return authError{status: http.StatusUnauthorized, message: "sync account not found"}
+	}
+	signatureField := Codec_DecodeBinaryField(request.Signature)
+	signature := []byte(signatureField.Value)
+	if signatureField.Error != "" || len(signature) != mlDSA44SignatureSize {
+		return authError{status: http.StatusBadRequest, message: "invalid device registration signature"}
+	}
+	message := baselineDeviceRegistrationMessage(accountID, request)
+	if !s.verifier.Verify(accountKey, message, signature) {
+		return authError{status: http.StatusUnauthorized, message: "device registration rejected"}
+	}
+	return nil
+}
+
+func (s *Server) baselineVerifyDeviceRevocation(ctx context.Context, accountID string, request DeviceRevocationRequest) error {
+	if !Identity_ValidNamespace(request.AppID) || !Identity_ValidClientID(request.KeyID) ||
+		!Identity_ValidClientID(request.Nonce) || !baselineValidDeviceRequestExpiry(request.ExpiresAt) {
+		return authError{status: http.StatusBadRequest, message: "invalid device revocation"}
+	}
+	accountKey, found, err := s.store.baselineAccountPublicKey(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return authError{status: http.StatusUnauthorized, message: "sync account not found"}
+	}
+	signatureField := Codec_DecodeBinaryField(request.Signature)
+	signature := []byte(signatureField.Value)
+	if signatureField.Error != "" || len(signature) != mlDSA44SignatureSize {
+		return authError{status: http.StatusBadRequest, message: "invalid device revocation signature"}
+	}
+	if !s.verifier.Verify(accountKey, baselineDeviceRevocationMessage(accountID, request), signature) {
+		return authError{status: http.StatusUnauthorized, message: "device revocation rejected"}
+	}
+	return nil
 }

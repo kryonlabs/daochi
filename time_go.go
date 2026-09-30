@@ -46,3 +46,7 @@ func TimeGo_Format(value Time, layout string) string {
 func TimeGo_Unix(value Time) int64 {
 	return (time.Time).Unix(value)
 }
+
+func TimeGo_FromUnix(seconds int64, nanos int64) Time {
+	return time.Unix(int64(seconds), int64(nanos))
+}

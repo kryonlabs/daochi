@@ -316,7 +316,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		if !syncOK {
 			s.metrics.SyncFailures.Add(1)
 			if signedTx != nil {
-				s.store.ForgetSignedTx(r.Context(), *signedTx)
+				SignedTx_Forget(s.store.db, r.Context(), *signedTx)
 			}
 		}
 	}()
@@ -363,12 +363,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ProtocolVersion >= 6 {
-		tx, err := readSignedTxHeader(r)
+		header := SignedTx_ReadHeader(r)
+		tx, err := header.Value, authenticationError(header.Authentication)
 		if err != nil {
 			s.writeAuthError(w, err)
 			return
 		}
-		if err := s.verifySignedTx(r.Context(), r, body, tx, req.UserIDHash, req.AppID); err != nil {
+		if err := authenticationError(SignedTx_Verify(s.store.db, r.Context(), r, body, tx, req.UserIDHash, req.AppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 			s.writeAuthError(w, err)
 			return
 		}
@@ -1376,7 +1377,8 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
-	publicKey, found, err := s.store.PublicKey(r.Context(), req.UserIDHash)
+	account := AccountKeys_PublicKey(s.store.db, r.Context(), req.UserIDHash)
+	publicKey, found, err := account.Value, account.Found, account.Error
 	if err != nil {
 		slog.Error("load account key", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		writeError(w, http.StatusInternalServerError, "delete failed")
@@ -1419,7 +1421,8 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 	if !ok {
 		return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
 	}
-	publicKey, found, err := s.store.PublicKey(ctx, userID)
+	account := AccountKeys_PublicKey(s.store.db, ctx, userID)
+	publicKey, found, err := account.Value, account.Found, account.Error
 	if err != nil {
 		return nil, err
 	}
@@ -1471,7 +1474,8 @@ func (s *Server) authenticateToken(r *http.Request) (string, error) {
 		return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
 	}
 	userID := verified.Value
-	_, found, err := s.store.PublicKey(r.Context(), userID)
+	account := AccountKeys_PublicKey(s.store.db, r.Context(), userID)
+	found, err := account.Found, account.Error
 	if err != nil {
 		return "", err
 	}

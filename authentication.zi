@@ -1,0 +1,22 @@
+#import "go_types"
+
+VerifySignature :: #type (publicKey: []u8, message: []u8, signature: []u8) -> bool;
+
+AuthenticationResult :: struct {
+    status: isize
+    message: string
+    error: Error
+}
+
+Failure :: (status: isize, message: string) -> AuthenticationResult {
+    result: AuthenticationResult
+    result.status = status
+    result.message = message
+    return result
+}
+
+NativeFailure :: (error: Error) -> AuthenticationResult {
+    result: AuthenticationResult
+    result.error = error
+    return result
+}

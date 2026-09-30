@@ -662,7 +662,7 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, req.AssetID, tokenPermissionSpend)
 	if err != nil {
 		if hasSignedTx {
-			s.store.ForgetSignedTx(r.Context(), signedTx)
+			SignedTx_Forget(s.store.db, r.Context(), signedTx)
 		}
 		s.writeAuthError(w, err)
 		return
@@ -670,7 +670,7 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 	completed := false
 	defer func() {
 		if hasSignedTx && !completed {
-			s.store.ForgetSignedTx(r.Context(), signedTx)
+			SignedTx_Forget(s.store.db, r.Context(), signedTx)
 		}
 	}()
 	sourceRef := req.Action + ":" + req.IdempotencyKey
@@ -733,7 +733,7 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase)
 	if err != nil {
 		if hasSignedTx {
-			s.store.ForgetSignedTx(r.Context(), signedTx)
+			SignedTx_Forget(s.store.db, r.Context(), signedTx)
 		}
 		s.writeAuthError(w, err)
 		return
@@ -741,7 +741,7 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 	completed := false
 	defer func() {
 		if hasSignedTx && !completed {
-			s.store.ForgetSignedTx(r.Context(), signedTx)
+			SignedTx_Forget(s.store.db, r.Context(), signedTx)
 		}
 	}()
 	if len(s.cfg.GooglePackageNames) > 0 && !s.cfg.GooglePackageNames[req.PackageName] {
@@ -808,7 +808,7 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase)
 	if err != nil {
 		if hasSignedTx {
-			s.store.ForgetSignedTx(r.Context(), signedTx)
+			SignedTx_Forget(s.store.db, r.Context(), signedTx)
 		}
 		s.writeAuthError(w, err)
 		return
@@ -816,7 +816,7 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 	completed := false
 	defer func() {
 		if hasSignedTx && !completed {
-			s.store.ForgetSignedTx(r.Context(), signedTx)
+			SignedTx_Forget(s.store.db, r.Context(), signedTx)
 		}
 	}()
 	invoice, err := s.store.CreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.cfg)
@@ -1188,11 +1188,12 @@ func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []
 	hasSignedTx := strings.TrimSpace(r.Header.Get("X-Daochi-Tx")) != ""
 	var signedTx SignedTxEnvelope
 	if hasSignedTx {
-		tx, err := readSignedTxHeader(r)
+		header := SignedTx_ReadHeader(r)
+		tx, err := header.Value, authenticationError(header.Authentication)
 		if err != nil {
 			return signedTx, false, err
 		}
-		if err := s.verifySignedTx(ctx, r, body, tx, accountID, appID); err != nil {
+		if err := authenticationError(SignedTx_Verify(s.store.db, ctx, r, body, tx, accountID, appID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 			return signedTx, false, err
 		}
 		signedTx = tx

@@ -1,57 +1,10 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 )
-
-func (s *Server) verifyDeviceRegistration(ctx context.Context, accountID string, request DeviceRegistrationRequest) error {
-	if !DeviceKeys_ValidRegistration(request) {
-		return authError{status: http.StatusBadRequest, message: "invalid device registration"}
-	}
-	accountKey, found, err := s.store.PublicKey(ctx, accountID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return authError{status: http.StatusUnauthorized, message: "sync account not found"}
-	}
-	signatureField := Codec_DecodeBinaryField(request.Signature)
-	signature := []byte(signatureField.Value)
-	if signatureField.Error != "" || len(signature) != mlDSA44SignatureSize {
-		return authError{status: http.StatusBadRequest, message: "invalid device registration signature"}
-	}
-	message := DeviceKeys_RegistrationMessage(accountID, request)
-	if !s.verifier.Verify(accountKey, message, signature) {
-		return authError{status: http.StatusUnauthorized, message: "device registration rejected"}
-	}
-	return nil
-}
-
-func (s *Server) verifyDeviceRevocation(ctx context.Context, accountID string, request DeviceRevocationRequest) error {
-	if !Identity_ValidNamespace(request.AppID) || !Identity_ValidClientID(request.KeyID) ||
-		!Identity_ValidClientID(request.Nonce) || !DeviceKeys_ValidExpiry(request.ExpiresAt) {
-		return authError{status: http.StatusBadRequest, message: "invalid device revocation"}
-	}
-	accountKey, found, err := s.store.PublicKey(ctx, accountID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return authError{status: http.StatusUnauthorized, message: "sync account not found"}
-	}
-	signatureField := Codec_DecodeBinaryField(request.Signature)
-	signature := []byte(signatureField.Value)
-	if signatureField.Error != "" || len(signature) != mlDSA44SignatureSize {
-		return authError{status: http.StatusBadRequest, message: "invalid device revocation signature"}
-	}
-	if !s.verifier.Verify(accountKey, DeviceKeys_RevocationMessage(accountID, request), signature) {
-		return authError{status: http.StatusUnauthorized, message: "device revocation rejected"}
-	}
-	return nil
-}
 
 func (s *Server) handleAccountDevices(w http.ResponseWriter, r *http.Request) {
 	accountID, ok := s.bearerUser(w, r)
@@ -83,7 +36,7 @@ func (s *Server) handleAccountDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	DeviceKeys_NormalizeRegistration(&request)
-	if err := s.verifyDeviceRegistration(r.Context(), accountID, request); err != nil {
+	if err := authenticationError(DeviceKeys_VerifyRegistration(s.store.db, r.Context(), accountID, request, s.verifier.Verify)); err != nil {
 		s.writeAuthError(w, err)
 		return
 	}
@@ -117,7 +70,7 @@ func (s *Server) handleDeviceRevocation(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	DeviceKeys_NormalizeRevocation(&request)
-	if err := s.verifyDeviceRevocation(r.Context(), accountID, request); err != nil {
+	if err := authenticationError(DeviceKeys_VerifyRevocation(s.store.db, r.Context(), accountID, request, s.verifier.Verify)); err != nil {
 		s.writeAuthError(w, err)
 		return
 	}

@@ -1,0 +1,33 @@
+#import "go_types"
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+errors :: #import "errors_go";
+go_sql :: #system_library "go:database/sql";
+
+AccountKeyResult :: struct {
+    value: []u8
+    found: bool
+    error: Error
+}
+
+#scope_file
+Query :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+Scan :: (row: *sql.Row, key: *[]u8) -> Error #foreign go_sql "(*Row).Scan";
+
+#scope_export
+PublicKey :: (database: *sql.Database, context: ctx.Context, accountID: string) -> AccountKeyResult {
+    result: AccountKeyResult
+    key: []u8
+    row := Query(database, context, "SELECT public_key FROM server_users WHERE user_id_hash=?1", accountID)
+    error := Scan(row, *key)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    if error != null {
+        result.error = error
+        return result
+    }
+    result.value = key
+    result.found = true
+    return result
+}

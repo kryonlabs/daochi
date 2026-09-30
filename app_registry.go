@@ -607,7 +607,8 @@ func (s *Server) handleSignedAppGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	grantBody, err := canonicalJSON(req.Grant)
+	serialized := JsonGo_Marshal(req.Grant)
+	grantBody, err := serialized.Value, serialized.Error
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid app grant")
 		return
@@ -620,14 +621,14 @@ func (s *Server) handleSignedAppGrant(w http.ResponseWriter, r *http.Request) {
 		req.Tx.BodySHA256 = Signing_SHA256Hex(grantBody)
 	}
 	_ = body
-	if err := s.verifySignedTx(r.Context(), r, grantBody, req.Tx, userID, req.Grant.TargetAppID); err != nil {
+	if err := authenticationError(SignedTx_Verify(s.store.db, r.Context(), r, grantBody, req.Tx, userID, req.Grant.TargetAppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 		s.writeAuthError(w, err)
 		return
 	}
 	created := false
 	defer func() {
 		if !created {
-			s.store.ForgetSignedTx(r.Context(), req.Tx)
+			SignedTx_Forget(s.store.db, r.Context(), req.Tx)
 		}
 	}()
 	grant, err := s.store.CreateAppGrant(r.Context(), userID, req.Grant)
@@ -682,19 +683,20 @@ func (s *Server) handleAppRecords(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid app records query")
 		return
 	}
-	tx, err := readSignedTxHeader(r)
+	header := SignedTx_ReadHeader(r)
+	tx, err := header.Value, authenticationError(header.Authentication)
 	if err != nil {
 		s.writeAuthError(w, err)
 		return
 	}
-	if err := s.verifySignedTx(r.Context(), r, nil, tx, userID, targetAppID); err != nil {
+	if err := authenticationError(SignedTx_Verify(s.store.db, r.Context(), r, nil, tx, userID, targetAppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 		s.writeAuthError(w, err)
 		return
 	}
 	readCompleted := false
 	defer func() {
 		if !readCompleted {
-			s.store.ForgetSignedTx(r.Context(), tx)
+			SignedTx_Forget(s.store.db, r.Context(), tx)
 		}
 	}()
 	records, err := s.store.AuthorizedAppRecords(r.Context(), userID, sourceAppID, targetAppID, collectionPrefix)

@@ -1,0 +1,171 @@
+#import "go_types"
+#import "transaction"
+auth :: #import "authentication";
+accounts :: #import "account_keys";
+devices :: #import "device_keys";
+identity :: #import "identity";
+codec :: #import "codec";
+signing :: #import "signing";
+transaction :: #import "transaction";
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+http :: #import "http_go";
+url :: #import "url_go";
+text :: #import "text_go";
+json :: #import "json_go";
+keys :: #import "ed25519_go";
+clock :: #import "time_go";
+errors :: #import "errors_go";
+go_sql :: #system_library "go:database/sql";
+go_strings :: #system_library "go:strings";
+
+TransactionContext :: "daochi-tx-v1";
+AppManifestContext :: "daochi-app-manifest-v1";
+AppApprovalContext :: "daochi-app-approval-v1";
+MaxFutureSkew :: 900000000000;
+SignedHeaderResult :: struct {
+    value: SignedTxEnvelope
+    authentication: auth.AuthenticationResult
+}
+
+#scope_file
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Lower :: (value: string) -> string #foreign go_strings "ToLower";
+HasPrefix :: (value: string, prefix: string) -> bool #foreign go_strings;
+Contains :: (value: string, fragment: string) -> bool #foreign go_strings;
+DeleteExpired :: (database: *sql.Database, context: ctx.Context, query: string, now: s64) -> ExecResult #go_results #foreign go_sql "(*DB).ExecContext";
+Insert :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string, txID: string, appID: string, nonce: string, expiry: s64) -> ExecResult #go_results #foreign go_sql "(*DB).ExecContext";
+Delete :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string, txID: string, appID: string, nonce: string) -> ExecResult #go_results #foreign go_sql "(*DB).ExecContext";
+
+#scope_export
+ReadHeader :: (request: *http.Request) -> SignedHeaderResult {
+    result: SignedHeaderResult
+    value := TrimSpace(http.HeaderValue(http.Headers(request), "X-Daochi-Tx"))
+    if value == "" {
+        result.authentication = auth.Failure(cast(isize)401, "signed transaction required")
+        return result
+    }
+    raw := value
+    if !HasPrefix(value, "{") {
+        decoded := codec.DecodeBase64(value, true, false)
+        if decoded.error != "" {
+            decoded = codec.DecodeBase64(value, true, true)
+        }
+        if decoded.error != "" {
+            result.authentication = auth.Failure(cast(isize)400, "invalid signed transaction")
+            return result
+        }
+        raw = decoded.value
+    }
+    tx: SignedTxEnvelope
+    if json.Unmarshal(text.ToBytes(raw), *tx) != null {
+        result.authentication = auth.Failure(cast(isize)400, "invalid signed transaction")
+        return result
+    }
+    transaction.Normalize(*tx)
+    result.value = tx
+    return result
+}
+
+Verify :: (database: *sql.Database, context: ctx.Context, request: *http.Request, body: []u8, tx: SignedTxEnvelope, accountID: string, appID: string, verifySignature: auth.VerifySignature, replay: Error) -> auth.AuthenticationResult {
+    accountID = Lower(TrimSpace(accountID))
+    appID = TrimSpace(appID)
+    if tx.protocolVersion < 6 {
+        return auth.Failure(cast(isize)400, "signed transaction protocol too old")
+    }
+    if tx.signatureContext != "" && tx.signatureContext != TransactionContext {
+        return auth.Failure(cast(isize)400, "invalid signed transaction context")
+    }
+    if !identity.ValidClientID(tx.txID) || !identity.ValidClientID(tx.nonce) {
+        return auth.Failure(cast(isize)400, "invalid signed transaction id")
+    }
+    if !identity.ValidUserID(tx.accountID) || tx.accountID != accountID {
+        return auth.Failure(cast(isize)401, "signed transaction account mismatch")
+    }
+    if !identity.ValidNamespace(tx.appID) || tx.appID != appID {
+        return auth.Failure(cast(isize)401, "signed transaction app mismatch")
+    }
+    if tx.method != http.Method(request) || tx.path != url.Path(http.RequestURL(request)) {
+        return auth.Failure(cast(isize)401, "signed transaction route mismatch")
+    }
+    if tx.bodySHA256 != signing.SHA256Hex(body) {
+        return auth.Failure(cast(isize)401, "signed transaction body mismatch")
+    }
+    now := clock.Now()
+    if tx.expiresAt <= clock.Unix(now) ||
+        clock.After(clock.FromUnix(tx.expiresAt, 0), clock.Add(now, cast(clock.Duration)MaxFutureSkew)) {
+        return auth.Failure(cast(isize)401, "signed transaction expired")
+    }
+    account := accounts.PublicKey(database, context, tx.accountID)
+    if account.error != null {
+        return auth.NativeFailure(account.error)
+    }
+    if !account.found {
+        return auth.Failure(cast(isize)401, "sync account not found")
+    }
+    signature := codec.DecodeBinaryField(tx.signature)
+    if signature.error != "" || signature.value.count != codec.mlDSA44SignatureSize {
+        return auth.Failure(cast(isize)400, "invalid signed transaction signature")
+    }
+    message := text.ToBytes(transaction.CanonicalMessage(TransactionContext, tx))
+    if !verifySignature(account.value, message, text.ToBytes(signature.value)) {
+        return auth.Failure(cast(isize)401, "signed transaction rejected")
+    }
+    device := VerifyDevice(database, context, tx, message)
+    if device.status != 0 || device.error != null {
+        return device
+    }
+    recorded := Record(database, context, tx, replay)
+    if recorded != null {
+        if errors.Is(recorded, replay) {
+            return auth.Failure(cast(isize)409, "signed transaction replay")
+        }
+        return auth.NativeFailure(recorded)
+    }
+    return auth.NativeFailure(devices.Touch(database, context, tx.accountID, tx.appID, tx.deviceKeyID))
+}
+
+VerifyDevice :: (database: *sql.Database, context: ctx.Context, tx: SignedTxEnvelope, message: []u8) -> auth.AuthenticationResult {
+    if !identity.ValidClientID(tx.deviceKeyID) {
+        return auth.Failure(cast(isize)400, "invalid device key id")
+    }
+    device := devices.Active(database, context, tx.accountID, tx.appID, tx.deviceKeyID)
+    if device.error != null {
+        return auth.NativeFailure(device.error)
+    }
+    if !device.found {
+        return auth.Failure(cast(isize)401, "device key not registered")
+    }
+    publicKey := codec.DecodeBinaryField(device.value.PublicKey)
+    if publicKey.error != "" || publicKey.value.count != 32 {
+        return auth.Failure(cast(isize)401, "invalid app public key")
+    }
+    signature := codec.DecodeBinaryField(tx.deviceSignature)
+    if signature.error != "" || signature.value.count != 64 {
+        return auth.Failure(cast(isize)400, "invalid device signature")
+    }
+    if !keys.Verify(cast(keys.PublicKey)text.ToBytes(publicKey.value), message, text.ToBytes(signature.value)) {
+        return auth.Failure(cast(isize)401, "device signature rejected")
+    }
+    return auth.NativeFailure(null)
+}
+
+Record :: (database: *sql.Database, context: ctx.Context, tx: SignedTxEnvelope, replay: Error) -> Error {
+    deleted := DeleteExpired(database, context, "DELETE FROM server_signed_transactions WHERE expires_at<?1", clock.Unix(clock.Now()))
+    if deleted.error != null {
+        return deleted.error
+    }
+    inserted := Insert(database, context, "INSERT INTO server_signed_transactions(account_id,tx_id,app_id,nonce,expires_at) VALUES(?1,?2,?3,?4,?5)", tx.accountID, tx.txID, tx.appID, tx.nonce, tx.expiresAt)
+    if inserted.error != null && Contains(errors.Message(inserted.error), "UNIQUE") {
+        return replay
+    }
+    return inserted.error
+}
+
+Forget :: (database: *sql.Database, context: ctx.Context, tx: SignedTxEnvelope) {
+    Delete(database, context, "DELETE FROM server_signed_transactions WHERE account_id=?1 AND tx_id=?2 AND app_id=?3 AND nonce=?4", tx.accountID, tx.txID, tx.appID, tx.nonce)
+}

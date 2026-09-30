@@ -52,7 +52,7 @@ field names, Go storage types, order and reflection tags.
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
-| `device_keys.go` | Partial Ziran | Records, canonical messages, normalization, validation, atomic registration/revocation, nonce cleanup, lookup/list/touch in `device_keys.zi`; signature verification and HTTP handlers remain in `device_handlers.go` |
+| `device_keys.go` | Partial Ziran | Records, canonical messages, validation, signature verification, atomic registration/revocation, nonce cleanup and key queries in `device_keys.zi`; HTTP handlers remain in `device_handlers.go` |
 | `discovery.go` | Go | LAN discovery and runtime cancellation |
 | `docs.go` | Go | Embedded public API documentation |
 | `inspect.go` | Go with ported callers | Offline database commands and redaction |
@@ -67,9 +67,9 @@ field names, Go storage types, order and reflection tags.
 | `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
 | `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; HTTP handlers remain Go |
-| `signed_tx.go` | Partial Ziran | Record, normalization, canonical bytes in `transaction.zi`; decoding, verification and replay remain Go |
+| `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Timestamp parsing/normalization in `timestamp.zi`; schema, sync transactions, conflicts and projections remain Go |
+| `store.go` | Partial Ziran | Timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`; schema, sync transactions, conflicts and projections remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -195,7 +195,25 @@ nonce consumption; missing-key revocation returns the native SQL sentinel.
 Replacement preserves creation time and clears revocation. Listing preserves
 ordering and nil empty results. Baseline fixtures compare record layouts,
 messages, lifecycle state, cancellation, commit failures and concurrent replay
-identity. The original signature checks and HTTP handlers still need porting.
+identity. Registration/revocation signature checks now also live in Ziran and
+preserve the original validation order, native account-key query failures and
+exact signature messages. Their HTTP handlers still need porting.
+
+`signed_tx.zi` completes signed-header decoding, transaction verification,
+device signature verification and replay persistence. Header decoding preserves
+raw JSON and both URL-base64 encodings, Unicode trimming, JSON errors and field
+normalization. Verification retains protocol/context/ID validation order,
+decoded request paths, body hashes, expiry limits, account lookup, both signature
+checks and native errors. Cryptographic verification uses a typed function
+argument bound to the existing foreign-library verifier. Replay recording
+retains the original separate expiry cleanup and insertion; a failed device
+touch leaves the replay recorded, matching the original behavior. Forgetting
+requires all four identifiers to match and still ignores native SQL errors.
+Baseline cases compare rejection status/text, callback bytes, database state,
+malformed headers and simultaneous request verification. `authentication.zi`
+owns the shared result and signature callback; `authentication_error.go` remains
+a small conversion to the existing Go HTTP error interface. The HTTP boundary
+and foreign-library verifier are still part of the unfinished server port.
 
 ## Compiler work exercised by this port
 
@@ -250,6 +268,9 @@ preserve record tags, nil/empty slices and pointer destinations. Native key
 generation preserves public/private/error result order and entropy errors.
 Native public-key equality and SQL affected-row results preserve Go key types,
 64-bit counts and error identity in both source and saved IR.
+Native decoded URL paths and Unix timestamp construction preserve request
+encoding, signed 64-bit seconds and nanosecond normalization. Typed callbacks
+carry native byte slices and imported authentication results through saved IR.
 
 ## Next dependencies
 

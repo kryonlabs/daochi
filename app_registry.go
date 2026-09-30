@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 )
 
 const (
@@ -493,151 +492,30 @@ func (s *Server) authenticateAdmin(w http.ResponseWriter, r *http.Request) bool 
 }
 
 func readAppRegistrationRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (AppRegistration, error) {
-	var req AppRegistration
 	body, err := readJSONBody(w, r, maxBody)
 	if err != nil {
-		return req, err
+		return AppRegistration{}, err
 	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.AppID = strings.TrimSpace(req.AppID)
-	req.DisplayName = strings.TrimSpace(req.DisplayName)
-	req.Description = strings.TrimSpace(req.Description)
-	req.HomepageURL = strings.TrimSpace(req.HomepageURL)
-	req.SourceURL = strings.TrimSpace(req.SourceURL)
-	req.PublicKey = strings.TrimSpace(req.PublicKey)
-	req.Status = strings.TrimSpace(req.Status)
-	req.MinClientVersion = strings.TrimSpace(req.MinClientVersion)
-	req.CurrentVersion = strings.TrimSpace(req.CurrentVersion)
-	req.CompatibilityUntil = strings.TrimSpace(req.CompatibilityUntil)
-	if req.Status == "" {
-		req.Status = appStatusActive
-	}
-	if !Identity_ValidNamespace(req.AppID) {
-		return req, errors.New("invalid app_id")
-	}
-	if req.DisplayName == "" || len(req.DisplayName) > 80 {
-		return req, errors.New("invalid display_name")
-	}
-	if req.Status != appStatusActive && req.Status != appStatusSuspended {
-		return req, errors.New("invalid status")
-	}
-	if req.AppSchemaVersion < 0 || req.AppSchemaVersion > 65535 {
-		return req, errors.New("invalid app_schema_version")
-	}
-	if req.CompatibilityUntil != "" && !Manifest_ValidDate(req.CompatibilityUntil) {
-		return req, errors.New("invalid compatibility_until")
-	}
-	if len(req.Collections) > 64 || len(req.Capabilities) > 64 ||
-		len(req.Features) > 128 || len(req.LegacyProtocols) > 64 ||
-		len(req.TokenPolicies) > 64 {
-		return req, errors.New("too many app fields")
-	}
-	for i := range req.Collections {
-		req.Collections[i].AppID = req.AppID
-		req.Collections[i].CollectionPrefix = strings.TrimSpace(req.Collections[i].CollectionPrefix)
-		req.Collections[i].Visibility = strings.TrimSpace(req.Collections[i].Visibility)
-		req.Collections[i].Description = strings.TrimSpace(req.Collections[i].Description)
-		if req.Collections[i].SchemaVersion < 0 {
-			return req, errors.New("invalid schema_version")
-		}
-		if !Scope_ValidCollectionPrefix(req.Collections[i].CollectionPrefix) ||
-			!Scope_ValidAppVisibility(req.Collections[i].Visibility) ||
-			!Scope_AppOwnsDeclaredScope(req.AppID, req.Collections[i]) {
-			return req, errors.New("invalid app collection")
-		}
-	}
-	for i := range req.Capabilities {
-		req.Capabilities[i] = strings.TrimSpace(req.Capabilities[i])
-		if !Identity_ValidNamespace(req.Capabilities[i]) {
-			return req, errors.New("invalid capability")
-		}
-	}
-	for i := range req.Features {
-		req.Features[i].ID = strings.TrimSpace(req.Features[i].ID)
-		req.Features[i].Description = strings.TrimSpace(req.Features[i].Description)
-		if !Identity_ValidNamespace(req.Features[i].ID) || len(req.Features[i].Collections) > 16 {
-			return req, errors.New("invalid app feature")
-		}
-		for j := range req.Features[i].Collections {
-			req.Features[i].Collections[j] = strings.TrimSpace(req.Features[i].Collections[j])
-			if !Scope_DeclaresCollection(req.Collections, req.Features[i].Collections[j]) {
-				return req, errors.New("invalid app feature collection")
-			}
-		}
-	}
-	for i := range req.LegacyProtocols {
-		req.LegacyProtocols[i].Name = strings.TrimSpace(req.LegacyProtocols[i].Name)
-		req.LegacyProtocols[i].Status = strings.TrimSpace(req.LegacyProtocols[i].Status)
-		req.LegacyProtocols[i].ValidUntil = strings.TrimSpace(req.LegacyProtocols[i].ValidUntil)
-		if !Identity_ValidNamespace(req.LegacyProtocols[i].Name) ||
-			req.LegacyProtocols[i].Version < 0 ||
-			!Scope_ValidLegacyProtocolStatus(req.LegacyProtocols[i].Status) ||
-			!Manifest_ValidDate(req.LegacyProtocols[i].ValidUntil) {
-			return req, errors.New("invalid legacy protocol")
-		}
-	}
-	for i := range req.TokenPolicies {
-		policy := &req.TokenPolicies[i]
-		policy.AssetID = strings.TrimSpace(policy.AssetID)
-		policy.Permission = strings.TrimSpace(policy.Permission)
-		policy.Status = Manifest_DefaultString(strings.TrimSpace(policy.Status), appStatusActive)
-		if policy.AssetID == "" || !Scope_ValidTokenPolicyPermission(policy.Permission) ||
-			(policy.Status != appStatusActive && policy.Status != appStatusSuspended) ||
-			policy.LegacyUnsignedUntil < 0 ||
-			policy.LegacyUnsignedUntil > time.Now().Add(365*24*time.Hour).Unix() {
-			return req, errors.New("invalid token policy")
-		}
-	}
-	return req, nil
+	decoded := AppRegistration_Decode(body)
+	return decoded.Value, decoded.Error
 }
 
 func readAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (AppGrantRequest, error) {
-	var req AppGrantRequest
 	body, err := readJSONBody(w, r, maxBody)
 	if err != nil {
-		return req, err
+		return AppGrantRequest{}, err
 	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.SourceAppID = strings.TrimSpace(req.SourceAppID)
-	req.TargetAppID = strings.TrimSpace(req.TargetAppID)
-	req.CollectionPrefix = strings.TrimSpace(req.CollectionPrefix)
-	req.Permission = strings.TrimSpace(req.Permission)
-	if req.Permission == "" {
-		req.Permission = appGrantRead
-	}
-	if !Identity_ValidNamespace(req.SourceAppID) || !Identity_ValidNamespace(req.TargetAppID) ||
-		!Scope_ValidCollectionPrefix(req.CollectionPrefix) || req.Permission != appGrantRead {
-		return req, errors.New("invalid app grant")
-	}
-	return req, nil
+	decoded := AppRegistration_DecodeGrant(body)
+	return decoded.Value, decoded.Error
 }
 
 func readSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (SignedAppGrantRequest, []byte, error) {
-	var req SignedAppGrantRequest
 	body, err := readJSONBody(w, r, maxBody)
 	if err != nil {
-		return req, nil, err
+		return SignedAppGrantRequest{}, nil, err
 	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, nil, errors.New("invalid json")
-	}
-	Transaction_Normalize(&req.Tx)
-	req.Grant.SourceAppID = strings.TrimSpace(req.Grant.SourceAppID)
-	req.Grant.TargetAppID = strings.TrimSpace(req.Grant.TargetAppID)
-	req.Grant.CollectionPrefix = strings.TrimSpace(req.Grant.CollectionPrefix)
-	req.Grant.Permission = strings.TrimSpace(req.Grant.Permission)
-	if req.Grant.Permission == "" {
-		req.Grant.Permission = appGrantRead
-	}
-	if !Identity_ValidNamespace(req.Grant.SourceAppID) || !Identity_ValidNamespace(req.Grant.TargetAppID) ||
-		!Scope_ValidCollectionPrefix(req.Grant.CollectionPrefix) || req.Grant.Permission != appGrantRead {
-		return req, nil, errors.New("invalid app grant")
-	}
-	return req, body, nil
+	decoded := AppRegistration_DecodeSignedGrant(body)
+	return decoded.Value, decoded.Body, decoded.Error
 }
 
 func auditJSON(value any) string {

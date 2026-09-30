@@ -279,7 +279,8 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 			SchemaVersion:    1,
 		}},
 	}
-	manifestBytes, manifestHash, err := formatAppManifestForTest(manifest)
+	prepared := AppRegistration_Prepare(manifest)
+	manifestBytes, manifestHash, err := prepared.Value, prepared.Hash, prepared.Error
 	if err != nil {
 		t.Fatal(err)
 	}

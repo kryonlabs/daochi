@@ -87,10 +87,8 @@ func (s *Server) ImportMeshApps(
 			return 0, fmt.Errorf("invalid mesh app %q: %w", registration.Manifest.AppID, errors.New(problem))
 		}
 
-		manifestBytes, manifestHash, err := validateSignedAppRegistration(
-			registration,
-			s.cfg.NodeRegistryPublicKey,
-		)
+		verified := AppRegistration_Verify(registration, s.cfg.NodeRegistryPublicKey)
+		manifestBytes, manifestHash, err := verified.Value, verified.Hash, authenticationError(verified.Authentication)
 		if err != nil {
 			return 0, fmt.Errorf("verify mesh app %q: %w", registration.Manifest.AppID, err)
 		}

@@ -47,8 +47,8 @@ field names, Go storage types, order and reflection tags.
 
 | Baseline file | Status | Remaining work or canonical source |
 |---|---|---|
-| `app_manifest.go` | Partial Ziran | Normalization, validation and active-key verification in `manifest.zi`; manifest transactions, key/policy queries and hydration in `app_store.zi`; approval verification and HTTP handlers remain Go |
-| `app_registry.go` | Partial Ziran | Scope grammar/ownership/matching/SQL escaping in `scope.zi`; app seeding, registry queries, metadata and collection ownership in `app_store.zi`; grants and HTTP handlers remain Go |
+| `app_manifest.go` | Partial Ziran | Normalization, validation and active-key verification in `manifest.zi`; manifest storage in `app_store.zi`; decoding, signed approval verification and exact JSON/hash bytes in `app_registration.zi`; HTTP handler remains Go |
+| `app_registry.go` | Partial Ziran | Scope policy in `scope.zi`; app seeding, registry queries, metadata and collection ownership in `app_store.zi`; app/grant request decoding in `app_registration.zi`; grant storage and HTTP handlers remain Go |
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
@@ -91,9 +91,10 @@ field names, Go storage types, order and reflection tags.
 come from Ziran's standard modules; they do not represent
 additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
-`transaction.zi` also owns the signed grant record. Their HTTP/database
-operations still need to move. Manifest normalization and validation preserve
-error text, byte limits, scopes, Gregorian dates and explicit expiry boundaries.
+`transaction.zi` also owns the signed grant record. Their remaining grant
+transactions and HTTP handlers still need to move. Manifest normalization and
+validation preserve error text, byte limits, scopes, Gregorian dates and
+explicit expiry boundaries.
 Active-key verification selects eligible keys in Ziran and uses Go Ed25519.
 
 `app_store.zi` owns app registry transactions, signed manifest persistence,
@@ -106,7 +107,18 @@ active signed manifests untouched. Baseline fixtures compare stored state,
 key expiry/revocation filtering, replacement, malformed JSON and scan errors,
 cancellation, failed writes and commits, and legacy date boundaries. Maintained
 startup, HTTP, sync, token and mesh callers use the generated surface directly.
-Grant transactions, request parsing and approval verification still need porting.
+Grant transactions and HTTP handlers still need porting.
+
+`app_registration.zi` owns signed/unsigned app and grant request decoding,
+ordered normalization/validation, manifest JSON serialization, hashes and both
+manifest and registry approval signatures. It preserves partial records on
+decoding/validation errors, exact signature contexts, active-key selection and
+HTTP rejection status/text. Signed grant decoding returns the original body
+slice and preserves nil results on errors. Baseline comparisons cover malformed
+JSON, arbitrary byte strings, Unicode whitespace, validation ordering, field
+limits, invalid/expired/suspended keys, signature encodings, signature failures
+and exact JSON escaping/hashes. The remaining Go request readers only obtain
+the bounded HTTP body and return the generated decoding result.
 
 `sync_types.zi` owns sync requests, responses, changes, snapshots and operation
 records. Its `RawMessage` declaration aliases `encoding/json.RawMessage`,

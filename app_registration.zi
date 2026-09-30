@@ -1,0 +1,288 @@
+#import "go_types"
+#import "manifest"
+#import "protocol"
+manifest :: #import "manifest";
+auth :: #import "authentication";
+codec :: #import "codec";
+signing :: #import "signing";
+transaction :: #import "signed_tx";
+envelope :: #import "transaction";
+identity :: #import "identity";
+scope :: #import "scope";
+json :: #import "json_go";
+keys :: #import "ed25519_go";
+text :: #import "text_go";
+clock :: #import "time_go";
+errors :: #import "errors_go";
+go_strings :: #system_library "go:strings";
+
+SignedRegistrationResult :: struct {
+    value: SignedAppRegistrationRequest
+    error: Error
+}
+ManifestEncodingResult :: struct {
+    value: []u8
+    hash: string
+    error: Error
+}
+ManifestVerificationResult :: struct {
+    value: []u8
+    hash: string
+    authentication: auth.AuthenticationResult
+}
+AppDecodeResult :: struct {
+    value: AppRegistration
+    error: Error
+}
+GrantDecodeResult :: struct {
+    value: AppGrantRequest
+    error: Error
+}
+SignedGrantDecodeResult :: struct {
+    value: envelope.SignedAppGrantRequest
+    body: []u8
+    error: Error
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+
+NormalizeRegistration :: (request: *AppRegistration) -> Error {
+    request.AppID = TrimSpace(request.AppID)
+    request.DisplayName = TrimSpace(request.DisplayName)
+    request.Description = TrimSpace(request.Description)
+    request.HomepageURL = TrimSpace(request.HomepageURL)
+    request.SourceURL = TrimSpace(request.SourceURL)
+    request.PublicKey = TrimSpace(request.PublicKey)
+    request.Status = TrimSpace(request.Status)
+    request.MinClientVersion = TrimSpace(request.MinClientVersion)
+    request.CurrentVersion = TrimSpace(request.CurrentVersion)
+    request.CompatibilityUntil = TrimSpace(request.CompatibilityUntil)
+    if request.Status == "" {
+        request.Status = "active"
+    }
+    if !identity.ValidNamespace(request.AppID) {
+        return errors.New("invalid app_id")
+    }
+    if request.DisplayName == "" || request.DisplayName.count > 80 {
+        return errors.New("invalid display_name")
+    }
+    if request.Status != "active" && request.Status != "suspended" {
+        return errors.New("invalid status")
+    }
+    if request.AppSchemaVersion < cast(isize)0 || request.AppSchemaVersion > cast(isize)65535 {
+        return errors.New("invalid app_schema_version")
+    }
+    if request.CompatibilityUntil != "" && !manifest.ValidDate(request.CompatibilityUntil) {
+        return errors.New("invalid compatibility_until")
+    }
+    if request.Collections.count > 64 || request.Capabilities.count > 64 ||
+       request.Features.count > 128 || request.LegacyProtocols.count > 64 || request.TokenPolicies.count > 64 {
+        return errors.New("too many app fields")
+    }
+    index: s64 = 0
+    while index < request.Collections.count {
+        collection := *request.Collections[index]
+        collection.AppID = request.AppID
+        collection.CollectionPrefix = TrimSpace(collection.CollectionPrefix)
+        collection.Visibility = TrimSpace(collection.Visibility)
+        collection.Description = TrimSpace(collection.Description)
+        if collection.SchemaVersion < cast(isize)0 {
+            return errors.New("invalid schema_version")
+        }
+        if !scope.ValidCollectionPrefix(collection.CollectionPrefix) ||
+           !scope.ValidAppVisibility(collection.Visibility) || !scope.AppOwnsDeclaredScope(request.AppID, request.Collections[index]) {
+            return errors.New("invalid app collection")
+        }
+        index += 1
+    }
+    index = 0
+    while index < request.Capabilities.count {
+        request.Capabilities[index] = TrimSpace(request.Capabilities[index])
+        if !identity.ValidNamespace(request.Capabilities[index]) {
+            return errors.New("invalid capability")
+        }
+        index += 1
+    }
+    index = 0
+    while index < request.Features.count {
+        feature := *request.Features[index]
+        feature.ID = TrimSpace(feature.ID)
+        feature.Description = TrimSpace(feature.Description)
+        if !identity.ValidNamespace(feature.ID) || feature.Collections.count > 16 {
+            return errors.New("invalid app feature")
+        }
+        inner: s64 = 0
+        while inner < feature.Collections.count {
+            feature.Collections[inner] = TrimSpace(feature.Collections[inner])
+            if !scope.DeclaresCollection(request.Collections, feature.Collections[inner]) {
+                return errors.New("invalid app feature collection")
+            }
+            inner += 1
+        }
+        index += 1
+    }
+    index = 0
+    while index < request.LegacyProtocols.count {
+        legacy := *request.LegacyProtocols[index]
+        legacy.Name = TrimSpace(legacy.Name)
+        legacy.Status = TrimSpace(legacy.Status)
+        legacy.ValidUntil = TrimSpace(legacy.ValidUntil)
+        if !identity.ValidNamespace(legacy.Name) || legacy.Version < cast(isize)0 ||
+           !scope.ValidLegacyProtocolStatus(legacy.Status) || !manifest.ValidDate(legacy.ValidUntil) {
+            return errors.New("invalid legacy protocol")
+        }
+        index += 1
+    }
+    index = 0
+    while index < request.TokenPolicies.count {
+        policy := *request.TokenPolicies[index]
+        policy.AssetID = TrimSpace(policy.AssetID)
+        policy.Permission = TrimSpace(policy.Permission)
+        policy.Status = manifest.DefaultString(TrimSpace(policy.Status), "active")
+        if policy.AssetID == "" || !scope.ValidTokenPolicyPermission(policy.Permission) ||
+           (policy.Status != "active" && policy.Status != "suspended") ||
+           policy.LegacyUnsignedUntil < 0 ||
+           policy.LegacyUnsignedUntil > clock.Unix(clock.Add(clock.Now(), cast(clock.Duration)31536000000000000)) {
+            return errors.New("invalid token policy")
+        }
+        index += 1
+    }
+    return null
+}
+
+NormalizeGrant :: (grant: *AppGrantRequest) -> Error {
+    grant.SourceAppID = TrimSpace(grant.SourceAppID)
+    grant.TargetAppID = TrimSpace(grant.TargetAppID)
+    grant.CollectionPrefix = TrimSpace(grant.CollectionPrefix)
+    grant.Permission = TrimSpace(grant.Permission)
+    if grant.Permission == "" {
+        grant.Permission = "read"
+    }
+    if !identity.ValidNamespace(grant.SourceAppID) || !identity.ValidNamespace(grant.TargetAppID) ||
+       !scope.ValidCollectionPrefix(grant.CollectionPrefix) || grant.Permission != "read" {
+        return errors.New("invalid app grant")
+    }
+    return null
+}
+
+#scope_export
+Decode :: (body: []u8) -> AppDecodeResult {
+    result: AppDecodeResult
+    if json.Unmarshal(body, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.error = NormalizeRegistration(*result.value)
+    return result
+}
+
+DecodeGrant :: (body: []u8) -> GrantDecodeResult {
+    result: GrantDecodeResult
+    if json.Unmarshal(body, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.error = NormalizeGrant(*result.value)
+    return result
+}
+
+DecodeSignedGrant :: (body: []u8) -> SignedGrantDecodeResult {
+    result: SignedGrantDecodeResult
+    if json.Unmarshal(body, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    envelope.Normalize(*result.value.Tx)
+    result.error = NormalizeGrant(*result.value.Grant)
+    if result.error == null {
+        result.body = body
+    }
+    return result
+}
+
+DecodeSigned :: (body: []u8) -> SignedRegistrationResult {
+    result: SignedRegistrationResult
+    if json.Unmarshal(body, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    manifest.Normalize(*result.value.Manifest)
+    result.value.ManifestSignature = TrimSpace(result.value.ManifestSignature)
+    result.value.ApprovalSignature = TrimSpace(result.value.ApprovalSignature)
+    problem := manifest.Validate(result.value.Manifest, clock.Unix(clock.Now()))
+    if problem != "" {
+        result.error = errors.New(problem)
+    }
+    return result
+}
+
+Verify :: (request: SignedAppRegistrationRequest, nodeKey: keys.PublicKey) -> ManifestVerificationResult {
+    result: ManifestVerificationResult
+    rawNodeKey := cast([]u8)nodeKey
+    if rawNodeKey.count != 32 {
+        result.authentication = auth.Failure(cast(isize)403, "node registry approval unavailable")
+        return result
+    }
+    encoded := json.Marshal(request.Manifest)
+    if encoded.error != null {
+        result.authentication = auth.NativeFailure(encoded.error)
+        return result
+    }
+    hash := signing.SHA256Hex(encoded.value)
+    decoded := codec.DecodeBinaryField(request.ManifestSignature)
+    signature := text.ToBytes(decoded.value)
+    if decoded.error != "" || signature.count != 64 {
+        result.authentication = auth.Failure(cast(isize)400, "invalid manifest signature")
+        return result
+    }
+    parts: [2]string = .[transaction.AppManifestContext, text.FromBytes(encoded.value)]
+    message := text.ToBytes(Join(parts[:], "\n"))
+    if !manifest.SignedByActiveKey(request.Manifest, message, signature, clock.Unix(clock.Now())) {
+        result.authentication = auth.Failure(cast(isize)401, "manifest signature rejected")
+        return result
+    }
+    decoded = codec.DecodeBinaryField(request.ApprovalSignature)
+    signature = text.ToBytes(decoded.value)
+    if decoded.error != "" || signature.count != 64 {
+        result.authentication = auth.Failure(cast(isize)400, "invalid approval signature")
+        return result
+    }
+    approval := text.ToBytes(signing.AppApprovalMessage(transaction.AppApprovalContext, request.Manifest.AppID, hash))
+    if !keys.Verify(nodeKey, approval, signature) {
+        result.authentication = auth.Failure(cast(isize)401, "node approval rejected")
+        return result
+    }
+    result.value = encoded.value
+    result.hash = hash
+    return result
+}
+
+Encode :: (value: AppManifest) -> ManifestEncodingResult {
+    result: ManifestEncodingResult
+    encoded := json.Marshal(value)
+    result.error = encoded.error
+    if encoded.error != null {
+        return result
+    }
+    result.value = encoded.value
+    result.hash = signing.SHA256Hex(encoded.value)
+    return result
+}
+
+Prepare :: (value: AppManifest) -> ManifestEncodingResult {
+    manifest.Normalize(*value)
+    problem := manifest.Validate(value, clock.Unix(clock.Now()))
+    if problem != "" {
+        result: ManifestEncodingResult
+        result.error = errors.New(problem)
+        return result
+    }
+    return Encode(value)
+}
+
+PolicyString :: (value: TokenPolicy) -> string {
+    parts: [2]string = .[value.AssetID, value.Permission]
+    return Join(parts[:], ":")
+}

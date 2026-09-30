@@ -10,6 +10,8 @@ clock :: #import "time_go";
 url :: #import "url_go";
 response :: #import "response";
 metrics :: #import "metrics";
+net :: #import "net_go";
+constant_time :: #import "constant_time";
 go_strings :: #system_library "go:strings";
 go_slog :: #system_library "go:log/slog";
 
@@ -57,6 +59,39 @@ UserHeader :: (request: *http.Request) -> UserHeaderResult {
         }
     }
     return result
+}
+
+RequireAdmin :: (writer: http.ResponseWriter, request: *http.Request, expected: string) -> bool {
+    if expected == "" {
+        response.Error(writer, cast(isize)403, "admin disabled")
+        return false
+    }
+    names: [2]string = .["X-Daochi-Admin", "X-Ksync-Admin"]
+    provided := HeaderAlias(request, names[:])
+    if !constant_time.ConstantTimeTextEqual(provided, expected) {
+        response.Error(writer, cast(isize)401, "admin token required")
+        return false
+    }
+    return true
+}
+
+RequireLocalOperator :: (writer: http.ResponseWriter, request: *http.Request, adminToken: string) -> bool {
+    if adminToken != "" {
+        return RequireAdmin(writer, request, adminToken)
+    }
+    address := http.RemoteAddress(request)
+    split := net.SplitHostPort(address)
+    host := split.host
+    if split.error != null {
+        host = address
+    }
+    ip := net.ParseIP(host)
+    if !net.ValidIP(ip) || !net.IsLoopback(ip) {
+        response.Error(writer, cast(isize)403,
+            "administration requires loopback access or DAOCHI_ADMIN_TOKEN")
+        return false
+    }
+    return true
 }
 
 AuthenticateToken :: (database: *sql.Database, request: *http.Request, secret: []u8) -> UserAuthenticationResult {

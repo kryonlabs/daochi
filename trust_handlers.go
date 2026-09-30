@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -34,25 +33,8 @@ type completePairingRequest struct {
 	Acceptance PairingAcceptance `json:"acceptance"`
 }
 
-func (s *Server) requireLocalOperator(w http.ResponseWriter, r *http.Request) bool {
-	if s.cfg.AdminToken != "" {
-		return s.requireAdmin(w, r)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		Response_Error(w, http.StatusForbidden,
-			"administration requires loopback access or DAOCHI_ADMIN_TOKEN")
-		return false
-	}
-	return true
-}
-
 func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Request) {
-	if !s.requireLocalOperator(w, r) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
 	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
@@ -121,7 +103,7 @@ func validPairingPolicy(policy NodeSyncPolicy) bool {
 }
 
 func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Request) {
-	if !s.requireLocalOperator(w, r) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
 	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
@@ -275,7 +257,7 @@ func (s *Server) handleCompletePairing(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTrustedPeers(w http.ResponseWriter, r *http.Request) {
-	if !s.requireLocalOperator(w, r) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
 	listedPeers := TrustStore_ListTrustedPeers(s.store.db, r.Context())
@@ -288,7 +270,7 @@ func (s *Server) handleListTrustedPeers(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleCreateTrustSpace(w http.ResponseWriter, r *http.Request) {
-	if !s.requireLocalOperator(w, r) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
 	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
@@ -318,7 +300,7 @@ func (s *Server) handleCreateTrustSpace(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request) {
-	if !s.requireLocalOperator(w, r) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
 		return
 	}
 	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)

@@ -7,7 +7,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
@@ -1023,7 +1022,7 @@ func (s *Server) handleTokenCheckpointLatest(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleAdminManualCredit(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
+	if !HttpAuth_RequireAdmin(w, r, s.cfg.AdminToken) {
 		return
 	}
 	var req struct {
@@ -1074,7 +1073,7 @@ func (s *Server) handleAdminManualCredit(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleAdminTokenCheckpoint(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
+	if !HttpAuth_RequireAdmin(w, r, s.cfg.AdminToken) {
 		return
 	}
 	signer, err := s.requireTokenIssuer()
@@ -1089,19 +1088,6 @@ func (s *Server) handleAdminTokenCheckpoint(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	Response_JSON(w, http.StatusOK, checkpoint)
-}
-
-func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if s.cfg.AdminToken == "" {
-		Response_Error(w, http.StatusForbidden, "admin disabled")
-		return false
-	}
-	provided := HttpAuth_HeaderAlias(r, []string{"X-Daochi-Admin", "X-Ksync-Admin"})
-	if subtle.ConstantTimeCompare([]byte(provided), []byte(s.cfg.AdminToken)) != 1 {
-		Response_Error(w, http.StatusUnauthorized, "admin token required")
-		return false
-	}
-	return true
 }
 
 func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (TokenSpendRequest, []byte, error) {

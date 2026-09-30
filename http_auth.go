@@ -55,6 +55,46 @@ func HttpAuth_UserHeader(request *Request) UserHeaderResult {
 	return result
 }
 
+func HttpAuth_RequireAdmin(writer ResponseWriter, request *Request, expected string) bool {
+	if expected == "" {
+		Response_Error(writer, int(403), "admin disabled")
+		return false
+	}
+	names := [2]string{"X-Daochi-Admin", "X-Ksync-Admin"}
+	_ = names
+	provided := HttpAuth_HeaderAlias(request, names[0:2:2])
+	var value_0 bool = ConstantTime_ConstantTimeTextEqual(provided, expected)
+	if !value_0 {
+		Response_Error(writer, int(401), "admin token required")
+		return false
+	}
+	return true
+}
+
+func HttpAuth_RequireLocalOperator(writer ResponseWriter, request *Request, adminToken string) bool {
+	if adminToken != "" {
+		return HttpAuth_RequireAdmin(writer, request, adminToken)
+	}
+	address := HttpGo_RemoteAddress(request)
+	split := NetGo_SplitHostPort(address)
+	host := split.Host
+	if split.Error != nil {
+		host = address
+	}
+	ip := NetGo_ParseIP(host)
+	var value_0 bool = NetGo_ValidIP(ip)
+	var value_1 bool = !value_0
+	if !value_1 {
+		var value_2 bool = NetGo_IsLoopback(ip)
+		value_1 = !value_2
+	}
+	if value_1 {
+		Response_Error(writer, int(403), "administration requires loopback access or DAOCHI_ADMIN_TOKEN")
+		return false
+	}
+	return true
+}
+
 func HttpAuth_AuthenticateToken(database *Database, request *Request, secret []uint8) UserAuthenticationResult {
 	var result UserAuthenticationResult = UserAuthenticationResult{}
 	header := strings.TrimSpace(HttpGo_HeaderValue(HttpGo_Headers(request), "Authorization"))

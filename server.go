@@ -300,7 +300,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// Metrics expose user counts, traffic, and topology; when an admin
 	// token is configured, require it. Deployments without one keep the
 	// historical public endpoint (health checks use /healthz and /readyz).
-	if s.cfg.AdminToken != "" && !s.requireAdmin(w, r) {
+	if s.cfg.AdminToken != "" && !HttpAuth_RequireAdmin(w, r, s.cfg.AdminToken) {
 		return
 	}
 	usage, err := s.nodeUsage(r.Context())

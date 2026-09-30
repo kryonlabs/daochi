@@ -45,9 +45,9 @@ END;`); err != nil {
 
 func TestZiranDeviceHTTPAgainstBaseline(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
-		modes := []string{"valid", "missing token", "user mismatch", "closed", "cancelled", "response panic"}
+		modes := []string{"valid", "missing token", "user mismatch", "closed", "cancelled", "response panic", "other account"}
 		if method == http.MethodGet {
-			modes = append(modes, "empty", "list failure", "other account")
+			modes = append(modes, "empty", "list failure")
 		} else {
 			modes = append(modes, "normalized", "bad JSON", "wrong shape", "null", "body limit", "read failure", "invalid fields", "expired", "invalid signature", "rejected signature", "replay", "storage failure", "missing resource")
 		}
@@ -75,6 +75,9 @@ func TestZiranDeviceHTTPAgainstBaseline(t *testing.T) {
 					status = http.StatusBadRequest
 				case "replay":
 					status = http.StatusConflict
+				}
+				if mode == "other account" && method == http.MethodDelete {
+					status = http.StatusInternalServerError
 				}
 				switch mode {
 				case "normalized":
@@ -210,6 +213,15 @@ func TestZiranDeviceHTTPAgainstBaseline(t *testing.T) {
 					got, want := deviceSnapshot(t, actual.store), deviceSnapshot(t, expected.store)
 					if !reflect.DeepEqual(got, want) {
 						t.Fatalf("device HTTP database state = %#v, baseline = %#v", got, want)
+					}
+					if mode == "other account" {
+						original := DeviceKeys_Active(actual.store.db, t.Context(), user, "target", "device-key")
+						if original.Error != nil || !original.Found {
+							t.Fatal("a request from another account changed the original device", original)
+						}
+						if method == http.MethodGet && responses[0].Body.String() != "{\"devices\":null}\n" {
+							t.Fatal("device listing exposed another account's keys", responses[0].Body.String())
+						}
 					}
 					if method != http.MethodGet && (mode == "valid" || mode == "normalized" || mode == "response panic") {
 						if len(actualVerifier.calls) != 1 {

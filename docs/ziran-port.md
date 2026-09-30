@@ -149,9 +149,15 @@ generated handlers through a small dependency record.
 `http_body.zi` owns bounded reads, JSON validity checks and body closure during
 ordinary returns and panic unwinding. `response.zi` owns JSON/error status,
 headers and streaming encoding. `http_auth.zi` owns released header precedence,
-bearer token/account validation, sync bootstrap tombstone checks and failure
-responses/metrics. Existing Go consumers use these generated helpers directly;
-their remaining application handlers still need porting. Comparisons preserve
+bearer token/account validation, sync bootstrap tombstone checks, constant-time
+administrative token checks, local-operator access and failure responses/metrics.
+Administrative access retains current/legacy header precedence and exact token
+bytes. Local-operator access uses only the direct remote IP, accepts IPv4/IPv6
+loopback without a configured token and requires the token when configured.
+Spoofed forwarding headers never grant administrative access. Baseline comparisons
+cover Unicode/byte strings, malformed remote addresses, header precedence and
+exact rejection status/body. Existing Go consumers use these generated helpers
+directly; their remaining application handlers still need porting. Comparisons preserve
 nil/empty body results, error text, context identity, encoded bytes and cleanup.
 
 `sync_types.zi` owns sync requests, responses, changes, snapshots and operation

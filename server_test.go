@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -109,7 +110,7 @@ func TestDocsEndpoints(t *testing.T) {
 
 func TestEnvNodePeers(t *testing.T) {
 	t.Setenv("DAOCHI_KNOWN_NODES", "Alpha=https://alpha.example/, Beta|https://beta.example, https://alpha.example")
-	peers := envNodePeers("DAOCHI_KNOWN_NODES")
+	peers := ConfigValues_Peers(os.Getenv("DAOCHI_KNOWN_NODES"))
 	if len(peers) != 2 {
 		t.Fatalf("peer count = %d peers=%#v", len(peers), peers)
 	}

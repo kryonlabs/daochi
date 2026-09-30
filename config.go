@@ -56,7 +56,7 @@ func loadConfig() Config {
 	secret := envBytesHex("DAOCHI_TOKEN_SECRET_HEX", nil)
 	ephemeralSecret := false
 	if len(secret) < 32 {
-		if !envBool("DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET", false) {
+		if !ConfigValues_Bool(os.Getenv("DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET"), false) {
 			log.Fatal("DAOCHI_TOKEN_SECRET_HEX must be at least 32 bytes; set DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET=1 only for local development")
 		}
 		slog.Warn("DAOCHI_TOKEN_SECRET_HEX is missing or too short; using an ephemeral token secret suitable only for local development")
@@ -102,17 +102,17 @@ func loadConfig() Config {
 		EncryptedPayloadMaxAccountBytes: envInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0),
 		EncryptedPayloadRetention:       envDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", 0),
 		NodeRegistryPublicKey:           nodeRegistryPublic,
-		KnownNodes:                      envNodePeersValue(envString("DAOCHI_KNOWN_NODES", "")),
+		KnownNodes:                      ConfigValues_Peers(envString("DAOCHI_KNOWN_NODES", "")),
 		NodeSyncToken:                   envString("DAOCHI_NODE_SYNC_TOKEN", ""),
 		NodeSyncInterval:                envDurationSeconds("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", 0),
 		NodeSyncBatchLimit:              envInt("DAOCHI_NODE_SYNC_BATCH_LIMIT", 500),
 		NodeIdentityKeyFile:             envString("DAOCHI_NODE_IDENTITY_KEY_FILE", envString("DAOCHI_DB", "daochi.db")+".node-key"),
 		NodeIdentityPrivateKey:          nodePrivateKey,
 		NodeDisplayName:                 envString("DAOCHI_NODE_NAME", "Daochi Node"),
-		LANDiscovery:                    envBool("DAOCHI_LAN_DISCOVERY", true),
+		LANDiscovery:                    ConfigValues_Bool(os.Getenv("DAOCHI_LAN_DISCOVERY"), true),
 		WaoziIssuerPublicKey:            issuerPublic,
 		WaoziIssuerPrivateKey:           issuerPrivate,
-		TokenProducts:                   envTokenProductsValue(envString("DAOCHI_TOKEN_PRODUCTS", "")),
+		TokenProducts:                   ConfigValues_Products(envString("DAOCHI_TOKEN_PRODUCTS", "")),
 		GooglePackageNames:              Sets_FromEnvironment(envString("DAOCHI_GOOGLE_PACKAGE_NAMES", "")),
 		GoogleServiceAccountJSON:        envStringOrFile("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON", "DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", ""),
 		GoogleOAuthClientJSON:           envStringOrFile("DAOCHI_GOOGLE_OAUTH_CLIENT_JSON", "DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE", ""),
@@ -125,7 +125,7 @@ func loadConfig() Config {
 		MoneroRateTokenUnits:            envInt64("MONERO_RATE_TOKEN_UNITS", 0),
 		MoneroMinimumAtomicAmount:       envInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", 1),
 		MoneroConfirmationsRequired:     envInt64("MONERO_CONFIRMATIONS_REQUIRED", 10),
-		TokenDirectPurchasesEnabled:     envBool("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED", false),
+		TokenDirectPurchasesEnabled:     ConfigValues_Bool(os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED"), false),
 	}
 }
 
@@ -188,13 +188,6 @@ func envInt64(key string, fallback int64) int64 {
 	return fallback
 }
 
-func envBool(key string, fallback bool) bool {
-	if value := strings.ToLower(strings.TrimSpace(os.Getenv(key))); value != "" {
-		return value == "1" || value == "true" || value == "yes" || value == "on"
-	}
-	return fallback
-}
-
 func envBytesHex(key string, fallback []byte) []byte {
 	if value := os.Getenv(key); value != "" {
 		decoded, err := hex.DecodeString(value)
@@ -236,149 +229,4 @@ func envBytesHexOrFile(key, fileKey string, fallback []byte) []byte {
 		}
 	}
 	return fallback
-}
-
-func envStringSet(key string) map[string]bool {
-	return Sets_FromEnvironment(os.Getenv(key))
-}
-
-func envNodePeers(key string) []NodePeer {
-	return envNodePeersValue(os.Getenv(key))
-}
-
-func envNodePeersValue(raw string) []NodePeer {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	seen := map[string]bool{}
-	var peers []NodePeer
-	for _, item := range strings.Split(raw, ",") {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		name := ""
-		urlValue := item
-		policyFields := []string{}
-		if fields := strings.Split(item, ";"); len(fields) > 1 {
-			urlValue = strings.TrimSpace(fields[0])
-			policyFields = fields[1:]
-		}
-		if before, after, ok := strings.Cut(urlValue, "="); ok {
-			name = strings.TrimSpace(before)
-			urlValue = after
-		} else if before, after, ok := strings.Cut(urlValue, "|"); ok {
-			name = strings.TrimSpace(before)
-			urlValue = after
-		}
-		urlValue = strings.TrimRight(strings.TrimSpace(urlValue), "/")
-		if urlValue == "" || seen[urlValue] {
-			continue
-		}
-		seen[urlValue] = true
-		peers = append(peers, NodePeer{Name: name, URL: urlValue, Sync: envNodeSyncPolicyValue(policyFields)})
-	}
-	return peers
-}
-
-func envNodeSyncPolicyValue(fields []string) *NodeSyncPolicy {
-	var policy NodeSyncPolicy
-	for _, field := range fields {
-		key, value, ok := strings.Cut(strings.TrimSpace(field), "=")
-		if !ok {
-			continue
-		}
-		key = strings.ToLower(strings.TrimSpace(key))
-		value = strings.TrimSpace(value)
-		switch key {
-		case "sync", "mode", "direction":
-			policy.Direction = normalizeNodeSyncDirection(value)
-		case "app", "apps", "app_id", "app_ids":
-			policy.Apps = splitNodeSyncList(value)
-		case "collection", "collections":
-			policy.Collections = splitNodeSyncList(value)
-		case "space", "spaces", "space_id", "space_ids":
-			policy.Spaces = splitNodeSyncList(value)
-		case "data", "type", "types":
-			policy.Data = splitNodeSyncList(value)
-		case "enabled":
-			if !envBoolValue(value, true) {
-				policy.Direction = "none"
-			}
-		}
-	}
-	if policy.Direction == "" && len(policy.Apps) == 0 && len(policy.Collections) == 0 &&
-		len(policy.Spaces) == 0 && len(policy.Data) == 0 {
-		return nil
-	}
-	if policy.Direction == "" {
-		policy.Direction = "bidirectional"
-	}
-	return &policy
-}
-
-func normalizeNodeSyncDirection(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "pull", "receive", "from_peer", "from-peer":
-		return "pull"
-	case "push", "send", "to_peer", "to-peer":
-		return "push"
-	case "bidirectional", "both", "mirror", "readwrite", "read-write":
-		return "bidirectional"
-	case "none", "off", "disabled", "false", "0", "no":
-		return "none"
-	default:
-		return strings.ToLower(strings.TrimSpace(value))
-	}
-}
-
-func splitNodeSyncList(value string) []string {
-	value = strings.NewReplacer("|", "+", " ", "+").Replace(value)
-	seen := map[string]bool{}
-	var out []string
-	for _, item := range strings.Split(value, "+") {
-		item = strings.TrimSpace(item)
-		if item == "" || seen[item] {
-			continue
-		}
-		seen[item] = true
-		out = append(out, item)
-	}
-	return out
-}
-
-func envBoolValue(value string, fallback bool) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return fallback
-	}
-	return value == "1" || value == "true" || value == "yes" || value == "on"
-}
-
-func envTokenProducts(key string) map[string]TokenProduct {
-	return envTokenProductsValue(os.Getenv(key))
-}
-
-func envTokenProductsValue(raw string) map[string]TokenProduct {
-	out := map[string]TokenProduct{}
-	for _, item := range strings.Split(raw, ",") {
-		parts := strings.Split(strings.TrimSpace(item), ":")
-		if len(parts) < 2 || len(parts) > 3 || parts[0] == "" {
-			continue
-		}
-		units, err := strconv.ParseInt(parts[1], 10, 64)
-		if err != nil || units <= 0 {
-			continue
-		}
-		product := TokenProduct{ProductID: parts[0], TokenUnits: units}
-		if len(parts) == 3 {
-			atomic, err := strconv.ParseInt(parts[2], 10, 64)
-			if err == nil && atomic > 0 {
-				product.MoneroAtomicAmount = atomic
-			}
-		}
-		out[product.ProductID] = product
-	}
-	return out
 }

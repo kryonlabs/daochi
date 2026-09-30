@@ -52,7 +52,7 @@ func TestLoadConfigUsesCanonicalEnv(t *testing.T) {
 }
 
 func TestEnvNodePeersValueKeepsLegacyPeerSyntax(t *testing.T) {
-	peers := envNodePeersValue("https://one.example,Two|https://two.example,Three=https://three.example")
+	peers := ConfigValues_Peers("https://one.example,Two|https://two.example,Three=https://three.example")
 	if len(peers) != 3 {
 		t.Fatalf("len(peers)=%d peers=%+v, want 3", len(peers), peers)
 	}
@@ -68,7 +68,7 @@ func TestEnvNodePeersValueKeepsLegacyPeerSyntax(t *testing.T) {
 }
 
 func TestEnvNodePeersValueParsesSyncPolicy(t *testing.T) {
-	peers := envNodePeersValue("Local=http://192.168.100.97:18080;mode=both;app=inbe;collection=inbe.habits;type=encrypted_records,Off=https://off.example;enabled=false")
+	peers := ConfigValues_Peers("Local=http://192.168.100.97:18080;mode=both;app=inbe;collection=inbe.habits;type=encrypted_records,Off=https://off.example;enabled=false")
 	if len(peers) != 2 {
 		t.Fatalf("len(peers)=%d peers=%+v, want 2", len(peers), peers)
 	}

@@ -77,7 +77,7 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "pairing invite expiry exceeds 24 hours")
 		return
 	}
-	req.Policy.Direction = normalizeNodeSyncDirection(req.Policy.Direction)
+	req.Policy.Direction = ConfigValues_SyncDirection(req.Policy.Direction)
 	if !validPairingPolicy(req.Policy) {
 		writeError(w, http.StatusBadRequest, "explicit pairing policy required")
 		return

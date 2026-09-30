@@ -1,0 +1,175 @@
+#import "protocol"
+#import "map_go"
+#import "go_types"
+go_strings :: #system_library "go:strings";
+go_numbers :: #system_library "go:strconv";
+builtin :: #system_library "go:builtin";
+
+#scope_file
+CutResult :: struct {
+    before: string
+    after: string
+    found: bool
+}
+IntegerResult :: struct {
+    value: s64
+    error: Error
+}
+Cut :: (value: string, separator: string) -> CutResult #go_results #foreign go_strings;
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+TrimRight :: (value: string, cutset: string) -> string #foreign go_strings;
+ToLower :: (value: string) -> string #foreign go_strings;
+ReplaceAll :: (value: string, before: string, after: string) -> string #foreign go_strings;
+ParseInt :: (value: string, base: isize, bits: isize) -> IntegerResult #go_results #foreign go_numbers;
+AppendPeer :: (values: []NodePeer, value: NodePeer) -> []NodePeer #foreign builtin "append";
+AppendText :: (values: []string, value: string) -> []string #foreign builtin "append";
+AllocatePolicy :: () -> *NodeSyncPolicy #foreign builtin "new";
+
+#scope_export
+Bool :: (value: string, fallback: bool) -> bool {
+    normalized := ToLower(TrimSpace(value))
+    if normalized == "" {
+        return fallback
+    }
+    return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
+}
+
+SyncDirection :: (value: string) -> string {
+    normalized := ToLower(TrimSpace(value))
+    if normalized == "pull" || normalized == "receive" || normalized == "from_peer" || normalized == "from-peer" {
+        return "pull"
+    }
+    if normalized == "push" || normalized == "send" || normalized == "to_peer" || normalized == "to-peer" {
+        return "push"
+    }
+    if normalized == "bidirectional" || normalized == "both" || normalized == "mirror" || normalized == "readwrite" || normalized == "read-write" {
+        return "bidirectional"
+    }
+    if normalized == "none" || normalized == "off" || normalized == "disabled" || normalized == "false" || normalized == "0" || normalized == "no" {
+        return "none"
+    }
+    return normalized
+}
+
+SyncList :: (value: string) -> []string {
+    normalized := ReplaceAll(ReplaceAll(value, "|", "+"), " ", "+")
+    seen: Map(string, bool)
+    result: []string
+    items := Split(normalized, "+")
+    for item: items {
+        entry := TrimSpace(item)
+        if entry == "" || MapGet(seen, entry) {
+            continue
+        }
+        MapSet(seen, entry, true)
+        result = AppendText(result, entry)
+    }
+    return result
+}
+
+SyncPolicy :: (fields: []string) -> *NodeSyncPolicy {
+    policy: NodeSyncPolicy
+    for field: fields {
+        parts := Cut(TrimSpace(field), "=")
+        if !parts.found {
+            continue
+        }
+        key := ToLower(TrimSpace(parts.before))
+        value := TrimSpace(parts.after)
+        if key == "sync" || key == "mode" || key == "direction" {
+            policy.Direction = SyncDirection(value)
+        } else if key == "app" || key == "apps" || key == "app_id" || key == "app_ids" {
+            policy.Apps = SyncList(value)
+        } else if key == "collection" || key == "collections" {
+            policy.Collections = SyncList(value)
+        } else if key == "space" || key == "spaces" || key == "space_id" || key == "space_ids" {
+            policy.Spaces = SyncList(value)
+        } else if key == "data" || key == "type" || key == "types" {
+            policy.Data = SyncList(value)
+        } else if key == "enabled" {
+            if !Bool(value, true) {
+                policy.Direction = "none"
+            }
+        }
+    }
+    if policy.Direction == "" && policy.Apps.count == 0 && policy.Collections.count == 0 && policy.Spaces.count == 0 && policy.Data.count == 0 {
+        return null
+    }
+    if policy.Direction == "" {
+        policy.Direction = "bidirectional"
+    }
+    result := AllocatePolicy()
+    <<result = policy
+    return result
+}
+
+Peers :: (raw: string) -> []NodePeer {
+    normalized := TrimSpace(raw)
+    result: []NodePeer
+    if normalized == "" {
+        return result
+    }
+    seen: Map(string, bool)
+    items := Split(normalized, ",")
+    for rawItem: items {
+        item := TrimSpace(rawItem)
+        if item == "" {
+            continue
+        }
+        name := ""
+        url := item
+        policyFields: []string
+        fields := Split(item, ";")
+        if fields.count > 1 {
+            url = TrimSpace(fields[0])
+            policyFields = fields[1:]
+        }
+        named := Cut(url, "=")
+        if !named.found {
+            named = Cut(url, "|")
+        }
+        if named.found {
+            name = TrimSpace(named.before)
+            url = named.after
+        }
+        url = TrimRight(TrimSpace(url), "/")
+        if url == "" || MapGet(seen, url) {
+            continue
+        }
+        MapSet(seen, url, true)
+        peer: NodePeer
+        peer.Name = name
+        peer.URL = url
+        peer.Sync = SyncPolicy(policyFields)
+        result = AppendPeer(result, peer)
+    }
+    return result
+}
+
+Products :: (raw: string) -> Map(string, TokenProduct) {
+    result: Map(string, TokenProduct)
+    MapInit(result)
+    items := Split(raw, ",")
+    for item: items {
+        parts := Split(TrimSpace(item), ":")
+        if parts.count < 2 || parts.count > 3 || parts[0] == "" {
+            continue
+        }
+        units := ParseInt(parts[1], cast(isize)10, cast(isize)64)
+        if units.error != null || units.value <= 0 {
+            continue
+        }
+        product: TokenProduct
+        product.ProductID = parts[0]
+        product.TokenUnits = units.value
+        if parts.count == 3 {
+            atomic := ParseInt(parts[2], cast(isize)10, cast(isize)64)
+            if atomic.error == null && atomic.value > 0 {
+                product.MoneroAtomicAmount = atomic.value
+            }
+        }
+        MapSet(result, product.ProductID, product)
+    }
+    return result
+}

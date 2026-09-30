@@ -46,7 +46,7 @@ field names, Go storage types, order and reflection tags.
 | `app_registry.go` | Partial Ziran | Scope grammar/ownership/matching/SQL escaping in `scope.zi`; grants, registry, handlers remain Go |
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
-| `config.go` | Partial Ziran | Environment string sets in `sets.zi`; other settings, products, URLs and keys remain Go |
+| `config.go` | Partial Ziran | String sets in `sets.zi`; booleans, peer lists, sync policy/directions/lists and products in `config_values.zi`; environment/file access, startup settings, fatal errors and keys remain Go |
 | `device_keys.go` | Go with ported callers | Device registration, signatures, revocation, replay policy |
 | `discovery.go` | Go | LAN discovery and runtime cancellation |
 | `docs.go` | Go | Embedded public API documentation |
@@ -98,6 +98,10 @@ preserving raw JSON payloads and Go type identity. Maintained callers use
 the original `map[string][]map[string]any` and `map[string]int` Go types and
 JSON behavior. `sets.zi` owns environment parsing and app-name normalization,
 including Unicode whitespace/case conversion and allocated empty results.
+`config_values.zi` owns peer/product parsing and sync-policy normalization,
+including duplicate selection, nil/empty results, integer limits, policy field
+order and Unicode handling. Tests compare the baseline Go parsers against
+source and saved IR on table cases and 1,000 arbitrary byte strings.
 
 `challenge.zi` and `rate_limit.zi` own their state, map updates, locking and
 expiry decisions. They keep Go's monotonic timestamps and exact strict expiry
@@ -138,6 +142,8 @@ results now survive checked IR. `#go_results` preserves the native error
 interface and result order. `#go_field` reads declared native fields without
 redeclaring their opaque layout. Typed `go:builtin` operations provide heap
 allocation, slice/map construction, copied byte strings and native lengths.
+Typed single-element `append` preserves nil slices, lengths, capacities and
+shared backing storage while rejecting owned vector elements.
 Compiler tests compare source and saved IR, including altered diagnostic
 declaration strings, to ensure typed metadata controls generation.
 

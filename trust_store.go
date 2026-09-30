@@ -200,13 +200,13 @@ WHERE invite_id=?2 AND completed_node_id=''`, acceptance.NodeID, invite.InviteID
 
 func inverseNodeSyncPolicy(policy NodeSyncPolicy) NodeSyncPolicy {
 	inverse := policy
-	switch normalizeNodeSyncDirection(policy.Direction) {
+	switch ConfigValues_SyncDirection(policy.Direction) {
 	case "pull":
 		inverse.Direction = "push"
 	case "push":
 		inverse.Direction = "pull"
 	default:
-		inverse.Direction = normalizeNodeSyncDirection(policy.Direction)
+		inverse.Direction = ConfigValues_SyncDirection(policy.Direction)
 	}
 	return inverse
 }

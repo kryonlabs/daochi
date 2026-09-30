@@ -11,8 +11,25 @@ ExecResult :: struct {
 }
 UpdateSeen :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, seen: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
 EnsureSync :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+QueryTombstone :: (database: *sql.Database, context: ctx.Context, query: string, userID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
 
 #scope_export
+TombstoneResult :: struct {
+    value: bool
+    error: Error
+}
+
+Tombstoned :: (database: *sql.Database, context: ctx.Context, userID: string) -> TombstoneResult {
+    result: TombstoneResult
+    count: isize = 0
+    row := QueryTombstone(database, context,
+        "SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)", userID)
+    result.error = ScanCount(row, *count)
+    result.value = count != cast(isize)0
+    return result
+}
+
 Touch :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, missingUser: Error) -> Error {
     updated := UpdateSeen(transaction, context,
         "UPDATE server_users SET last_seen_at=?2 WHERE user_id_hash=?1", userID, timestamp.CanonicalNow())

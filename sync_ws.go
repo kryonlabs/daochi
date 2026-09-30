@@ -98,7 +98,7 @@ func (h *syncHub) stats() syncHubStats {
 
 func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		Response_Error(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	userID, err := s.authenticateWebSocket(r)
@@ -110,12 +110,12 @@ func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !s.allowRequest(r, "ws:ip:"+ClientAddress_FromRequest(r), 120, time.Minute) ||
 		!s.allowRequest(r, "ws:user:"+userID, 40, time.Minute) {
 		Metrics_RecordWebSocketReject(s.metrics, "rate_limited")
-		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+		Response_Error(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
 	if s.syncHub.count(userID) >= 8 {
 		Metrics_RecordWebSocketReject(s.metrics, "too_many_connections")
-		writeError(w, http.StatusTooManyRequests, "too many websocket connections")
+		Response_Error(w, http.StatusTooManyRequests, "too many websocket connections")
 		return
 	}
 	conn, rw, err := acceptWebSocket(w, r)
@@ -182,17 +182,17 @@ func (s *Server) authenticateWebSocket(r *http.Request) (string, error) {
 func acceptWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, *bufio.ReadWriter, error) {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") ||
 		!headerContainsToken(r.Header.Get("Connection"), "upgrade") {
-		writeError(w, http.StatusBadRequest, "websocket upgrade required")
+		Response_Error(w, http.StatusBadRequest, "websocket upgrade required")
 		return nil, nil, errors.New("missing upgrade")
 	}
 	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
 	if !validWebSocketKey(key) || r.Header.Get("Sec-WebSocket-Version") != "13" {
-		writeError(w, http.StatusBadRequest, "invalid websocket handshake")
+		Response_Error(w, http.StatusBadRequest, "invalid websocket handshake")
 		return nil, nil, errors.New("invalid handshake")
 	}
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "websocket unsupported")
+		Response_Error(w, http.StatusInternalServerError, "websocket unsupported")
 		return nil, nil, errors.New("hijack unsupported")
 	}
 	conn, rw, err := hijacker.Hijack()

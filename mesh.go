@@ -83,9 +83,10 @@ type meshCursor struct {
 }
 
 func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !s.authorizeNodeSync(w, r, body) {
@@ -94,12 +95,12 @@ func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 	var req NodeMeshExportRequest
 	if len(bytes.TrimSpace(body)) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid mesh export request")
+			Response_Error(w, http.StatusBadRequest, "invalid mesh export request")
 			return
 		}
 	}
 	if !validInboundMeshPolicy(req.Policy) {
-		writeError(w, http.StatusBadRequest, "explicit mesh policy required")
+		Response_Error(w, http.StatusBadRequest, "explicit mesh policy required")
 		return
 	}
 	if !s.authorizeRequestedPolicy(w, r, req.Policy, "export") {
@@ -108,24 +109,24 @@ func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 	apps, err := s.store.ExportMeshApps(r.Context(), req.Policy)
 	if err != nil {
 		slog.Error("mesh app registry export", "error", err)
-		writeError(w, http.StatusInternalServerError, "mesh app registry export failed")
+		Response_Error(w, http.StatusInternalServerError, "mesh app registry export failed")
 		return
 	}
 	limit := meshBatchLimit(req.Limit, s.cfg.NodeSyncBatchLimit)
 	records, deletions, nextCursor, truncated, err := s.store.ExportMeshEncryptedRecords(r.Context(), req.Policy, req.Cursor, limit)
 	if err != nil {
 		slog.Error("mesh export", "error", err)
-		writeError(w, http.StatusInternalServerError, "mesh export failed")
+		Response_Error(w, http.StatusInternalServerError, "mesh export failed")
 		return
 	}
 	exportedNames := TrustStore_ExportMeshNames(s.store.db, r.Context(), req.Policy)
 	spaces, names, err := exportedNames.Spaces, exportedNames.Names, exportedNames.Error
 	if err != nil {
 		slog.Error("mesh name export", "error", err)
-		writeError(w, http.StatusInternalServerError, "mesh name export failed")
+		Response_Error(w, http.StatusInternalServerError, "mesh name export failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, NodeMeshExportResponse{
+	Response_JSON(w, http.StatusOK, NodeMeshExportResponse{
 		Status:     "ok",
 		Apps:       apps,
 		Records:    records,
@@ -138,9 +139,10 @@ func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !s.authorizeNodeSync(w, r, body) {
@@ -148,11 +150,11 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 	}
 	var req NodeMeshImportRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid mesh import request")
+		Response_Error(w, http.StatusBadRequest, "invalid mesh import request")
 		return
 	}
 	if !validInboundMeshPolicy(req.Policy) {
-		writeError(w, http.StatusBadRequest, "explicit mesh policy required")
+		Response_Error(w, http.StatusBadRequest, "explicit mesh policy required")
 		return
 	}
 	if !s.authorizeRequestedPolicy(w, r, req.Policy, "import") {
@@ -161,23 +163,23 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 	appCount, err := s.ImportMeshApps(r.Context(), req.Policy, req.Apps)
 	if err != nil {
 		slog.Error("mesh app registry import", "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	applied, err := s.store.ImportMeshEncryptedBatch(r.Context(), req.Policy, req.Records, req.Deletions)
 	if err != nil {
 		slog.Error("mesh import", "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	importedNames := TrustStore_ImportMeshNames(s.store.db, r.Context(), req.Policy, req.Spaces, req.Names)
 	nameCount, err := importedNames.Value, importedNames.Error
 	if err != nil {
 		slog.Error("mesh name import", "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, NodeMeshImportResponse{
+	Response_JSON(w, http.StatusOK, NodeMeshImportResponse{
 		Status:  "ok",
 		Records: len(req.Apps) + len(req.Records) + len(req.Deletions) + len(req.Names),
 		Applied: appCount + applied + nameCount,
@@ -187,22 +189,22 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authorizeNodeSync(w http.ResponseWriter, r *http.Request, body []byte) bool {
 	if nodeID := strings.TrimSpace(r.Header.Get("X-Daochi-Node-ID")); nodeID != "" {
 		if err := NodeAuth_Verify(s.store.db, r.Context(), r, body); err != nil {
-			writeError(w, http.StatusUnauthorized, err.Error())
+			Response_Error(w, http.StatusUnauthorized, err.Error())
 			return false
 		}
 		return true
 	}
 	token := strings.TrimSpace(s.cfg.NodeSyncToken)
 	if token == "" {
-		writeError(w, http.StatusServiceUnavailable, "node sync disabled")
+		Response_Error(w, http.StatusServiceUnavailable, "node sync disabled")
 		return false
 	}
-	got := strings.TrimSpace(requestHeaderAlias(r, "X-Daochi-Node-Token", "X-Ksync-Node-Token"))
+	got := strings.TrimSpace(HttpAuth_HeaderAlias(r, []string{"X-Daochi-Node-Token", "X-Ksync-Node-Token"}))
 	if got == "" {
 		got = bearerToken(r.Header.Get("Authorization"))
 	}
 	if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
-		writeError(w, http.StatusUnauthorized, "invalid node token")
+		Response_Error(w, http.StatusUnauthorized, "invalid node token")
 		return false
 	}
 	return true
@@ -221,11 +223,11 @@ func (s *Server) authorizeRequestedPolicy(
 	trustedPolicy := TrustStore_TrustedPeerPolicy(s.store.db, r.Context(), nodeID)
 	approved, found, err := trustedPolicy.Value, trustedPolicy.Found, trustedPolicy.Error
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "peer policy lookup failed")
+		Response_Error(w, http.StatusInternalServerError, "peer policy lookup failed")
 		return false
 	}
 	if !found || !policyAllowsOperation(approved, requested, operation) {
-		writeError(w, http.StatusForbidden, "requested mesh policy exceeds paired scope")
+		Response_Error(w, http.StatusForbidden, "requested mesh policy exceeds paired scope")
 		return false
 	}
 	return true

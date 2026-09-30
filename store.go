@@ -2315,13 +2315,6 @@ WHERE account_id=?1 AND disabled_at=''`, userID); err != nil {
 	return tx.Commit()
 }
 
-func (s *Store) AccountTombstoned(ctx context.Context, userID string) (bool, error) {
-	var exists int
-	err := s.db.QueryRowContext(ctx, `
-SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, userID).Scan(&exists)
-	return exists != 0, err
-}
-
 func (s *Store) PublicStats(ctx context.Context, dbPath string) (PublicStats, error) {
 	var stats PublicStats
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_users`).Scan(&stats.UserCount); err != nil {

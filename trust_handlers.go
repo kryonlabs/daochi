@@ -44,7 +44,7 @@ func (s *Server) requireLocalOperator(w http.ResponseWriter, r *http.Request) bo
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
-		writeError(w, http.StatusForbidden,
+		Response_Error(w, http.StatusForbidden,
 			"administration requires loopback access or DAOCHI_ADMIN_TOKEN")
 		return false
 	}
@@ -55,15 +55,16 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 	if !s.requireLocalOperator(w, r) {
 		return
 	}
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var req createInviteRequest
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid pairing invite request")
+			Response_Error(w, http.StatusBadRequest, "invalid pairing invite request")
 			return
 		}
 	}
@@ -73,12 +74,12 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 		lifetime = time.Duration(req.ExpiresIn) * time.Second
 	}
 	if lifetime > maximumInviteLifetime {
-		writeError(w, http.StatusBadRequest, "pairing invite expiry exceeds 24 hours")
+		Response_Error(w, http.StatusBadRequest, "pairing invite expiry exceeds 24 hours")
 		return
 	}
 	req.Policy.Direction = ConfigValues_SyncDirection(req.Policy.Direction)
 	if !validPairingPolicy(req.Policy) {
-		writeError(w, http.StatusBadRequest, "explicit pairing policy required")
+		Response_Error(w, http.StatusBadRequest, "explicit pairing policy required")
 		return
 	}
 	addresses := req.Addresses
@@ -86,7 +87,7 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 		addresses = []string{strings.TrimRight(s.cfg.BaseURL, "/")}
 	}
 	if err := NodeIdentity_ValidateAddresses(addresses); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -104,10 +105,10 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 	}
 	NodeIdentity_SignInvite(s.node, &invite)
 	if err := TrustStore_RecordIssuedPairingInvite(s.store.db, r.Context(), invite); err != nil {
-		writeError(w, http.StatusInternalServerError, "pairing invite creation failed")
+		Response_Error(w, http.StatusInternalServerError, "pairing invite creation failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, invite)
+	Response_JSON(w, http.StatusOK, invite)
 }
 
 func validPairingPolicy(policy NodeSyncPolicy) bool {
@@ -123,39 +124,40 @@ func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Reques
 	if !s.requireLocalOperator(w, r) {
 		return
 	}
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var invite PairingInvite
 	if err := json.Unmarshal(body, &invite); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid pairing invite")
+		Response_Error(w, http.StatusBadRequest, "invalid pairing invite")
 		return
 	}
 	publicKey := NodeIdentity_ValidateInvite(invite, time.Now())
 	if publicKey.Error != nil {
-		writeError(w, http.StatusBadRequest, publicKey.Error.Error())
+		Response_Error(w, http.StatusBadRequest, publicKey.Error.Error())
 		return
 	}
 	if invite.NodeID == s.node.ID {
-		writeError(w, http.StatusBadRequest, "cannot pair a node with itself")
+		Response_Error(w, http.StatusBadRequest, "cannot pair a node with itself")
 		return
 	}
 	acceptance, err := s.newPairingAcceptance(invite)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := completeRemotePairing(r.Context(), invite, acceptance); err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		Response_Error(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	if err := TrustStore_TrustPeer(s.store.db, r.Context(), invite, publicKey.Value); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		Response_Error(w, http.StatusConflict, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	Response_JSON(w, http.StatusOK, map[string]any{
 		"status":  "paired",
 		"node_id": invite.NodeID,
 	})
@@ -229,31 +231,32 @@ func completeRemotePairing(
 }
 
 func (s *Server) handleCompletePairing(w http.ResponseWriter, r *http.Request) {
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var request completePairingRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid pairing completion")
+		Response_Error(w, http.StatusBadRequest, "invalid pairing completion")
 		return
 	}
 	if validated := NodeIdentity_ValidateInvite(request.Invite, time.Now()); validated.Error != nil {
-		writeError(w, http.StatusBadRequest, validated.Error.Error())
+		Response_Error(w, http.StatusBadRequest, validated.Error.Error())
 		return
 	}
 	if request.Invite.NodeID != s.node.ID {
-		writeError(w, http.StatusBadRequest, "pairing invite belongs to another node")
+		Response_Error(w, http.StatusBadRequest, "pairing invite belongs to another node")
 		return
 	}
 	publicKey := NodeIdentity_ValidateAcceptance(request.Invite, request.Acceptance, time.Now())
 	if publicKey.Error != nil {
-		writeError(w, http.StatusBadRequest, publicKey.Error.Error())
+		Response_Error(w, http.StatusBadRequest, publicKey.Error.Error())
 		return
 	}
 	if request.Acceptance.NodeID == s.node.ID {
-		writeError(w, http.StatusBadRequest, "cannot pair a node with itself")
+		Response_Error(w, http.StatusBadRequest, "cannot pair a node with itself")
 		return
 	}
 	if err := TrustStore_CompleteIssuedPairing(s.store.db,
@@ -262,10 +265,10 @@ func (s *Server) handleCompletePairing(w http.ResponseWriter, r *http.Request) {
 		request.Acceptance,
 		publicKey.Value,
 	); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		Response_Error(w, http.StatusConflict, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	Response_JSON(w, http.StatusOK, map[string]any{
 		"status":  "paired",
 		"node_id": request.Acceptance.NodeID,
 	})
@@ -278,36 +281,37 @@ func (s *Server) handleListTrustedPeers(w http.ResponseWriter, r *http.Request) 
 	listedPeers := TrustStore_ListTrustedPeers(s.store.db, r.Context())
 	peers, err := listedPeers.Value, listedPeers.Error
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "peer list failed")
+		Response_Error(w, http.StatusInternalServerError, "peer list failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"peers": peers})
+	Response_JSON(w, http.StatusOK, map[string]any{"peers": peers})
 }
 
 func (s *Server) handleCreateTrustSpace(w http.ResponseWriter, r *http.Request) {
 	if !s.requireLocalOperator(w, r) {
 		return
 	}
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var req struct {
 		DisplayName string `json:"display_name"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil || strings.TrimSpace(req.DisplayName) == "" {
-		writeError(w, http.StatusBadRequest, "invalid trust space")
+		Response_Error(w, http.StatusBadRequest, "invalid trust space")
 		return
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
 	createdSpace := TrustStore_CreateTrustSpace(s.store.db, r.Context(), displayName)
 	spaceID, err := createdSpace.Value, createdSpace.Error
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "trust space creation failed")
+		Response_Error(w, http.StatusInternalServerError, "trust space creation failed")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
+	Response_JSON(w, http.StatusCreated, map[string]any{
 		"space_id":     spaceID,
 		"display_name": displayName,
 	})
@@ -317,14 +321,15 @@ func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request)
 	if !s.requireLocalOperator(w, r) {
 		return
 	}
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var claim NameClaim
 	if err := json.Unmarshal(body, &claim); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid name claim")
+		Response_Error(w, http.StatusBadRequest, "invalid name claim")
 		return
 	}
 	claim.SpaceID = strings.TrimSpace(claim.SpaceID)
@@ -332,7 +337,7 @@ func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request)
 	claim.NodeID = strings.TrimSpace(claim.NodeID)
 	if !Identity_ValidUserID(claim.SpaceID) || !NodeIdentity_ValidName(claim.Name) ||
 		!Identity_ValidUserID(claim.NodeID) {
-		writeError(w, http.StatusBadRequest, "invalid space, name, or node ID")
+		Response_Error(w, http.StatusBadRequest, "invalid space, name, or node ID")
 		return
 	}
 	if claim.ExpiresAt == 0 {
@@ -340,40 +345,40 @@ func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request)
 	}
 	remaining := time.Until(time.Unix(claim.ExpiresAt, 0))
 	if remaining <= 0 || remaining > maximumNameLifetime {
-		writeError(w, http.StatusBadRequest, "invalid name expiry")
+		Response_Error(w, http.StatusBadRequest, "invalid name expiry")
 		return
 	}
 	if err := TrustStore_ValidateServices(claim.Services); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	signedClaim := TrustStore_SignAndStoreNameClaim(s.store.db, r.Context(), claim)
 	claim, err = signedClaim.Value, signedClaim.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, claim)
+	Response_JSON(w, http.StatusOK, claim)
 }
 
 func (s *Server) handleResolveName(w http.ResponseWriter, r *http.Request) {
 	spaceID := strings.TrimSpace(r.URL.Query().Get("space_id"))
 	name := NodeIdentity_NormalizeName(r.URL.Query().Get("name"))
 	if !Identity_ValidUserID(spaceID) || !NodeIdentity_ValidName(name) {
-		writeError(w, http.StatusBadRequest, "invalid space or name")
+		Response_Error(w, http.StatusBadRequest, "invalid space or name")
 		return
 	}
 	resolvedClaim := TrustStore_ResolveNameClaim(s.store.db, r.Context(), spaceID, name)
 	claim, found, err := resolvedClaim.Value, resolvedClaim.Found, resolvedClaim.Error
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "name resolution failed")
+		Response_Error(w, http.StatusInternalServerError, "name resolution failed")
 		return
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "name not found")
+		Response_Error(w, http.StatusNotFound, "name not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	Response_JSON(w, http.StatusOK, map[string]any{
 		"uri":         "daochi://" + spaceID + "/" + name,
 		"claim":       claim,
 		"ttl_seconds": claim.ExpiresAt - time.Now().Unix(),

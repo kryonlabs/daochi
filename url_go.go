@@ -6,6 +6,8 @@ import url "net/url"
 // #import go_types
 type URL = url.URL
 
+type Values = url.Values
+
 type ParseURLResult struct {
 	Value *URL
 	Error Error
@@ -47,4 +49,12 @@ func UrlGo_Path(value *URL) string {
 
 func UrlGo_EscapedPath(value *URL) string {
 	return (*url.URL).EscapedPath(value)
+}
+
+func UrlGo_Query(value *URL) Values {
+	return (*url.URL).Query(value)
+}
+
+func UrlGo_Value(values Values, name string) string {
+	return (url.Values).Get(values, name)
 }

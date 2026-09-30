@@ -526,10 +526,10 @@ func (s *Server) handleTokenAssets(w http.ResponseWriter, r *http.Request) {
 	assets, err := s.store.TokenAssets(r.Context())
 	if err != nil {
 		slog.Error("list token assets", "error", err)
-		writeError(w, http.StatusInternalServerError, "token assets failed")
+		Response_Error(w, http.StatusInternalServerError, "token assets failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, TokenAssetsResponse{Assets: assets})
+	Response_JSON(w, http.StatusOK, TokenAssetsResponse{Assets: assets})
 }
 
 func (s *Server) handleTokenProducts(w http.ResponseWriter, r *http.Request) {
@@ -543,11 +543,11 @@ func (s *Server) handleTokenProducts(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(products, func(i, j int) bool {
 		return products[i].ProductID < products[j].ProductID
 	})
-	writeJSON(w, http.StatusOK, TokenProductsResponse{Products: products})
+	Response_JSON(w, http.StatusOK, TokenProductsResponse{Products: products})
 }
 
 func (s *Server) handleTokenIssuer(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, TokenIssuerResponse{
+	Response_JSON(w, http.StatusOK, TokenIssuerResponse{
 		IssuerID:  waoziIssuerID,
 		PublicKey: hex.EncodeToString(s.cfg.WaoziIssuerPublicKey),
 		Algorithm: "Ed25519",
@@ -562,7 +562,7 @@ func (s *Server) handleTokenBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	appID, appScoped, err := tokenAppFilter(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var balance int64
@@ -573,10 +573,10 @@ func (s *Server) handleTokenBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Error("token balance", "user", LogSafety_LogText(userID), "error", err)
-		writeError(w, http.StatusInternalServerError, "token balance failed")
+		Response_Error(w, http.StatusInternalServerError, "token balance failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, TokenBalanceResponse{
+	Response_JSON(w, http.StatusOK, TokenBalanceResponse{
 		AccountID: userID,
 		AssetID:   waoziTokenAssetID,
 		AppID:     appID,
@@ -592,7 +592,7 @@ func (s *Server) handleTokenLedger(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("since")), 10, 64)
 	appID, appScoped, err := tokenAppFilter(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var events []TokenReceipt
@@ -603,34 +603,34 @@ func (s *Server) handleTokenLedger(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Error("token ledger", "user", LogSafety_LogText(userID), "error", err)
-		writeError(w, http.StatusInternalServerError, "token ledger failed")
+		Response_Error(w, http.StatusInternalServerError, "token ledger failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, TokenLedgerResponse{Events: events})
+	Response_JSON(w, http.StatusOK, TokenLedgerResponse{Events: events})
 }
 
 func (s *Server) handleTokenReceipt(w http.ResponseWriter, r *http.Request) {
 	receiptID := strings.TrimPrefix(r.URL.Path, "/api/v1/tokens/receipts/")
 	if !Identity_ValidResourceID(receiptID) {
-		writeError(w, http.StatusBadRequest, "invalid receipt_id")
+		Response_Error(w, http.StatusBadRequest, "invalid receipt_id")
 		return
 	}
 	// Receipt IDs are 128-bit capabilities; rate-limit probing by IP.
 	if !s.allowRequest(r, "token-receipt:"+ClientAddress_FromRequest(r), 60, time.Minute) {
-		writeError(w, http.StatusTooManyRequests, "too many receipt requests")
+		Response_Error(w, http.StatusTooManyRequests, "too many receipt requests")
 		return
 	}
 	receipt, found, err := s.store.TokenReceipt(r.Context(), receiptID)
 	if err != nil {
 		slog.Error("token receipt", "receipt", LogSafety_LogText(receiptID), "error", err)
-		writeError(w, http.StatusInternalServerError, "token receipt failed")
+		Response_Error(w, http.StatusInternalServerError, "token receipt failed")
 		return
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "receipt not found")
+		Response_Error(w, http.StatusNotFound, "receipt not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, receipt)
+	Response_JSON(w, http.StatusOK, receipt)
 }
 
 func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
@@ -640,25 +640,25 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 	}
 	req, body, err := readTokenSpendRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	signer, err := s.requireTokenIssuer()
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "token issuer unavailable")
+		Response_Error(w, http.StatusServiceUnavailable, "token issuer unavailable")
 		return
 	}
 	if req.AssetID != waoziTokenAssetID {
-		writeError(w, http.StatusBadRequest, "unsupported asset_id")
+		Response_Error(w, http.StatusBadRequest, "unsupported asset_id")
 		return
 	}
 	existence := AppStore_Exists(s.store.db, r.Context(), req.AppID)
 	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("token spend app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
-		writeError(w, http.StatusInternalServerError, "token spend failed")
+		Response_Error(w, http.StatusInternalServerError, "token spend failed")
 		return
 	} else if !exists {
-		writeError(w, http.StatusBadRequest, "unknown app_id")
+		Response_Error(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
 	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, req.AssetID, tokenPermissionSpend)
@@ -689,19 +689,19 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 	}, req.IdempotencyKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "insufficient balance") {
-			writeError(w, http.StatusConflict, "insufficient balance")
+			Response_Error(w, http.StatusConflict, "insufficient balance")
 			return
 		}
 		if strings.Contains(err.Error(), "idempotency key reused") {
-			writeError(w, http.StatusConflict, err.Error())
+			Response_Error(w, http.StatusConflict, err.Error())
 			return
 		}
 		slog.Error("token spend", "user", LogSafety_LogText(userID), "error", err)
-		writeError(w, http.StatusInternalServerError, "token spend failed")
+		Response_Error(w, http.StatusInternalServerError, "token spend failed")
 		return
 	}
 	completed = true
-	writeJSON(w, http.StatusOK, TokenSpendResponse{Status: "ok", Balance: balance, Receipt: receipt})
+	Response_JSON(w, http.StatusOK, TokenSpendResponse{Status: "ok", Balance: balance, Receipt: receipt})
 }
 
 func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Request) {
@@ -711,26 +711,26 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 	}
 	req, body, err := readGooglePurchaseVerifyRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	signer, err := s.requireTokenIssuer()
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "token issuer unavailable")
+		Response_Error(w, http.StatusServiceUnavailable, "token issuer unavailable")
 		return
 	}
 	product, ok := s.cfg.TokenProducts[req.ProductID]
 	if !ok {
-		writeError(w, http.StatusBadRequest, "unknown product_id")
+		Response_Error(w, http.StatusBadRequest, "unknown product_id")
 		return
 	}
 	existence := AppStore_Exists(s.store.db, r.Context(), req.AppID)
 	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("google token purchase app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
-		writeError(w, http.StatusInternalServerError, "token purchase failed")
+		Response_Error(w, http.StatusInternalServerError, "token purchase failed")
 		return
 	} else if !exists {
-		writeError(w, http.StatusBadRequest, "unknown app_id")
+		Response_Error(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
 	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase)
@@ -748,7 +748,7 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		}
 	}()
 	if len(s.cfg.GooglePackageNames) > 0 && !s.cfg.GooglePackageNames[req.PackageName] {
-		writeError(w, http.StatusBadRequest, "package not allowed")
+		Response_Error(w, http.StatusBadRequest, "package not allowed")
 		return
 	}
 	paymentID, err := verifyGooglePlayPurchase(r.Context(), s.cfg, req)
@@ -766,7 +766,7 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 	})
 	if err != nil {
 		slog.Error("google token credit", "user", LogSafety_LogText(userID), "payment", LogSafety_LogText(paymentID), "error", err)
-		writeError(w, http.StatusInternalServerError, "token credit failed")
+		Response_Error(w, http.StatusInternalServerError, "token credit failed")
 		return
 	}
 	if err := consumeGooglePlayPurchase(r.Context(), s.cfg, req); err != nil {
@@ -774,11 +774,11 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 	}
 	balance, err := s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "token balance failed")
+		Response_Error(w, http.StatusInternalServerError, "token balance failed")
 		return
 	}
 	completed = true
-	writeJSON(w, http.StatusOK, TokenPurchaseResponse{Status: "ok", Balance: balance, Receipt: receipt})
+	Response_JSON(w, http.StatusOK, TokenPurchaseResponse{Status: "ok", Balance: balance, Receipt: receipt})
 }
 
 func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
@@ -788,25 +788,25 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 	}
 	req, body, err := readMoneroInvoiceRequest(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !s.cfg.TokenDirectPurchasesEnabled {
-		writeError(w, http.StatusServiceUnavailable, "direct token purchases disabled")
+		Response_Error(w, http.StatusServiceUnavailable, "direct token purchases disabled")
 		return
 	}
 	product, ok := s.cfg.TokenProducts[req.ProductID]
 	if !ok || product.MoneroAtomicAmount <= 0 {
-		writeError(w, http.StatusBadRequest, "unknown monero product_id")
+		Response_Error(w, http.StatusBadRequest, "unknown monero product_id")
 		return
 	}
 	existence := AppStore_Exists(s.store.db, r.Context(), req.AppID)
 	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("monero invoice app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
-		writeError(w, http.StatusInternalServerError, "monero invoice failed")
+		Response_Error(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	} else if !exists {
-		writeError(w, http.StatusBadRequest, "unknown app_id")
+		Response_Error(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
 	signedTx, hasSignedTx, err := s.authorizeTokenApp(r.Context(), r, body, userID, req.AppID, waoziTokenAssetID, tokenPermissionPurchase)
@@ -826,11 +826,11 @@ func (s *Server) handleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
 	invoice, err := s.store.CreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.cfg)
 	if err != nil {
 		slog.Error("create monero invoice", "user", LogSafety_LogText(userID), "error", err)
-		writeError(w, http.StatusInternalServerError, "monero invoice failed")
+		Response_Error(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	}
 	completed = true
-	writeJSON(w, http.StatusCreated, invoice)
+	Response_JSON(w, http.StatusCreated, invoice)
 }
 
 func (s *Server) handleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request) {
@@ -840,17 +840,17 @@ func (s *Server) handleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/tokens/purchases/monero/invoices/")
 	if !Identity_ValidResourceID(id) {
-		writeError(w, http.StatusBadRequest, "invalid invoice id")
+		Response_Error(w, http.StatusBadRequest, "invalid invoice id")
 		return
 	}
 	invoice, found, err := s.store.MoneroInvoice(r.Context(), userID, id)
 	if err != nil {
 		slog.Error("load monero invoice", "user", LogSafety_LogText(userID), "invoice", LogSafety_LogText(id), "error", err)
-		writeError(w, http.StatusInternalServerError, "monero invoice failed")
+		Response_Error(w, http.StatusInternalServerError, "monero invoice failed")
 		return
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "invoice not found")
+		Response_Error(w, http.StatusNotFound, "invoice not found")
 		return
 	}
 	if invoice.Status == "pending" {
@@ -860,7 +860,7 @@ func (s *Server) handleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request
 			invoice = updated
 		}
 	}
-	writeJSON(w, http.StatusOK, invoice)
+	Response_JSON(w, http.StatusOK, invoice)
 }
 
 func (s *Server) trySettleOrExpireMoneroInvoice(ctx context.Context, userID string, invoice MoneroInvoiceResponse) (MoneroInvoiceResponse, error) {
@@ -1012,14 +1012,14 @@ func (s *Server) handleTokenCheckpointLatest(w http.ResponseWriter, r *http.Requ
 	checkpoint, found, err := s.store.LatestTokenCheckpoint(r.Context())
 	if err != nil {
 		slog.Error("token checkpoint", "error", err)
-		writeError(w, http.StatusInternalServerError, "token checkpoint failed")
+		Response_Error(w, http.StatusInternalServerError, "token checkpoint failed")
 		return
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "checkpoint not found")
+		Response_Error(w, http.StatusNotFound, "checkpoint not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, checkpoint)
+	Response_JSON(w, http.StatusOK, checkpoint)
 }
 
 func (s *Server) handleAdminManualCredit(w http.ResponseWriter, r *http.Request) {
@@ -1032,13 +1032,14 @@ func (s *Server) handleAdminManualCredit(w http.ResponseWriter, r *http.Request)
 		Amount    int64  `json:"amount"`
 		SourceRef string `json:"source_ref"`
 	}
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		Response_Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 	req.AccountID = strings.ToLower(strings.TrimSpace(req.AccountID))
@@ -1046,7 +1047,7 @@ func (s *Server) handleAdminManualCredit(w http.ResponseWriter, r *http.Request)
 	req.SourceRef = strings.TrimSpace(req.SourceRef)
 	signer, err := s.requireTokenIssuer()
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "token issuer unavailable")
+		Response_Error(w, http.StatusServiceUnavailable, "token issuer unavailable")
 		return
 	}
 	if req.SourceRef == "" {
@@ -1061,15 +1062,15 @@ func (s *Server) handleAdminManualCredit(w http.ResponseWriter, r *http.Request)
 		SourceRef:   req.SourceRef,
 	})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	balance, err := s.store.TokenBalance(r.Context(), req.AccountID, waoziTokenAssetID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "token balance failed")
+		Response_Error(w, http.StatusInternalServerError, "token balance failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, TokenPurchaseResponse{Status: "ok", Balance: balance, Receipt: receipt})
+	Response_JSON(w, http.StatusOK, TokenPurchaseResponse{Status: "ok", Balance: balance, Receipt: receipt})
 }
 
 func (s *Server) handleAdminTokenCheckpoint(w http.ResponseWriter, r *http.Request) {
@@ -1078,26 +1079,26 @@ func (s *Server) handleAdminTokenCheckpoint(w http.ResponseWriter, r *http.Reque
 	}
 	signer, err := s.requireTokenIssuer()
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "token issuer unavailable")
+		Response_Error(w, http.StatusServiceUnavailable, "token issuer unavailable")
 		return
 	}
 	checkpoint, err := s.store.CreateTokenCheckpoint(r.Context(), signer)
 	if err != nil {
 		slog.Error("create token checkpoint", "error", err)
-		writeError(w, http.StatusInternalServerError, "token checkpoint failed")
+		Response_Error(w, http.StatusInternalServerError, "token checkpoint failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, checkpoint)
+	Response_JSON(w, http.StatusOK, checkpoint)
 }
 
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if s.cfg.AdminToken == "" {
-		writeError(w, http.StatusForbidden, "admin disabled")
+		Response_Error(w, http.StatusForbidden, "admin disabled")
 		return false
 	}
-	provided := requestHeaderAlias(r, "X-Daochi-Admin", "X-Ksync-Admin")
+	provided := HttpAuth_HeaderAlias(r, []string{"X-Daochi-Admin", "X-Ksync-Admin"})
 	if subtle.ConstantTimeCompare([]byte(provided), []byte(s.cfg.AdminToken)) != 1 {
-		writeError(w, http.StatusUnauthorized, "admin token required")
+		Response_Error(w, http.StatusUnauthorized, "admin token required")
 		return false
 	}
 	return true
@@ -1105,7 +1106,8 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 
 func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (TokenSpendRequest, []byte, error) {
 	var req TokenSpendRequest
-	body, err := readJSONBody(w, r, maxBody)
+	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		return req, nil, err
 	}
@@ -1137,7 +1139,8 @@ func readTokenSpendRequest(w http.ResponseWriter, r *http.Request, maxBody int64
 
 func readGooglePurchaseVerifyRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (GooglePurchaseVerifyRequest, []byte, error) {
 	var req GooglePurchaseVerifyRequest
-	body, err := readJSONBody(w, r, maxBody)
+	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		return req, nil, err
 	}
@@ -1159,7 +1162,8 @@ func readGooglePurchaseVerifyRequest(w http.ResponseWriter, r *http.Request, max
 
 func readMoneroInvoiceRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (MoneroInvoiceRequest, []byte, error) {
 	var req MoneroInvoiceRequest
-	body, err := readJSONBody(w, r, maxBody)
+	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		return req, nil, err
 	}
@@ -1229,10 +1233,10 @@ func (s *Server) authorizeTokenApp(ctx context.Context, r *http.Request, body []
 
 func writePaymentError(w http.ResponseWriter, err error) {
 	if errors.Is(err, errPaymentUnavailable) {
-		writeError(w, http.StatusServiceUnavailable, "payment verifier unavailable")
+		Response_Error(w, http.StatusServiceUnavailable, "payment verifier unavailable")
 		return
 	}
-	writeError(w, http.StatusBadRequest, err.Error())
+	Response_Error(w, http.StatusBadRequest, err.Error())
 }
 
 func shortHash(value string) string {

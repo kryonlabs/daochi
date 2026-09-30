@@ -25,6 +25,10 @@ func HttpGo_URLRaw(Request *Request) *URL {
 	return Request.URL
 }
 
+func HttpGo_BodyRaw(Request *Request) ReadCloser {
+	return Request.Body
+}
+
 func HttpGo_RemoteAddress(request *Request) string {
 	return HttpGo_RemoteAddressRaw(request)
 }
@@ -39,6 +43,22 @@ func HttpGo_Method(request *Request) string {
 
 func HttpGo_RequestURL(request *Request) *URL {
 	return HttpGo_URLRaw(request)
+}
+
+func HttpGo_Body(request *Request) ReadCloser {
+	return HttpGo_BodyRaw(request)
+}
+
+func HttpGo_Context(request *Request) Context {
+	return (*http.Request).Context(request)
+}
+
+func HttpGo_MaxBytesReader(writer ResponseWriter, reader ReadCloser, limit int64) ReadCloser {
+	return http.MaxBytesReader(writer, reader, int64(limit))
+}
+
+func HttpGo_WriteHeader(writer ResponseWriter, status int) {
+	(http.ResponseWriter).WriteHeader(writer, int(status))
 }
 
 func HttpGo_HeaderValue(header Header, name string) string {

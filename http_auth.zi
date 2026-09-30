@@ -1,0 +1,122 @@
+#import "go_types"
+#import "metrics"
+auth :: #import "authentication";
+accounts :: #import "account_keys";
+state :: #import "account_state";
+token :: #import "token";
+http :: #import "http_go";
+sql :: #import "sql_go";
+clock :: #import "time_go";
+url :: #import "url_go";
+response :: #import "response";
+metrics :: #import "metrics";
+go_strings :: #system_library "go:strings";
+go_slog :: #system_library "go:log/slog";
+
+UserHeaderResult :: struct {
+    value: string
+    name: string
+}
+UserAuthenticationResult :: struct {
+    value: string
+    authentication: auth.AuthenticationResult
+}
+
+#scope_file
+PrefixResult :: struct {
+    value: string
+    found: bool
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+ToLower :: (value: string) -> string #foreign go_strings;
+CutPrefix :: (value: string, prefix: string) -> PrefixResult #go_results #foreign go_strings "CutPrefix";
+LogError :: (message: string, key: string, error: Error) #foreign go_slog "Error";
+
+#scope_export
+HeaderAlias :: (request: *http.Request, names: []string) -> string {
+    headers := http.Headers(request)
+    for name: names {
+        value := TrimSpace(http.HeaderValue(headers, name))
+        if value != "" {
+            return value
+        }
+    }
+    return ""
+}
+
+UserHeader :: (request: *http.Request) -> UserHeaderResult {
+    result: UserHeaderResult
+    headers := http.Headers(request)
+    names: [3]string = .["X-Daochi-User", "X-Ksync-User", "X-Inbe-User"]
+    for name: names {
+        value := ToLower(TrimSpace(http.HeaderValue(headers, name)))
+        if value != "" {
+            result.value = value
+            result.name = name
+            return result
+        }
+    }
+    return result
+}
+
+AuthenticateToken :: (database: *sql.Database, request: *http.Request, secret: []u8) -> UserAuthenticationResult {
+    result: UserAuthenticationResult
+    header := TrimSpace(http.HeaderValue(http.Headers(request), "Authorization"))
+    bearer := CutPrefix(header, "Bearer ")
+    if !bearer.found || TrimSpace(bearer.value) == "" {
+        result.authentication = auth.Failure(cast(isize)401, "bearer token required")
+        return result
+    }
+    verified := token.VerifyAuthToken(secret, TrimSpace(bearer.value), clock.Unix(clock.Now()))
+    if verified.error != "" {
+        result.authentication = auth.Failure(cast(isize)401, "invalid bearer token")
+        return result
+    }
+    context := http.Context(request)
+    account := accounts.PublicKey(database, context, verified.value)
+    if account.error != null {
+        result.authentication = auth.NativeFailure(account.error)
+        return result
+    }
+    if !account.found {
+        if url.Path(http.RequestURL(request)) == "/api/v1/sync" {
+            deleted := state.Tombstoned(database, context, verified.value)
+            if deleted.error != null {
+                result.authentication = auth.NativeFailure(deleted.error)
+                return result
+            }
+            if !deleted.value {
+                result.value = verified.value
+                return result
+            }
+        }
+        result.authentication = auth.Failure(cast(isize)401, "sync account not found")
+        return result
+    }
+    result.value = verified.value
+    return result
+}
+
+BearerUser :: (database: *sql.Database, request: *http.Request, secret: []u8) -> UserAuthenticationResult {
+    result := AuthenticateToken(database, request, secret)
+    if result.authentication.error != null || result.authentication.status != cast(isize)0 {
+        return result
+    }
+    header := UserHeader(request)
+    if header.value != "" && header.value != result.value {
+        result.value = ""
+        result.authentication = auth.Failure(cast(isize)401, "token user mismatch")
+    }
+    return result
+}
+
+Respond :: (writer: http.ResponseWriter, counters: *ServerMetrics, result: auth.AuthenticationResult) {
+    if result.error == null && result.status != cast(isize)0 {
+        metrics.RecordAuthFailure(counters, result.status, result.message)
+        response.Error(writer, result.status, result.message)
+        return
+    }
+    LogError("auth", "error", result.error)
+    metrics.RecordAuthFailure(counters, cast(isize)500, "authentication failed")
+    response.Error(writer, cast(isize)500, "authentication failed")
+}

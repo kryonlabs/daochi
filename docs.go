@@ -10,7 +10,7 @@ import (
 
 func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
-		writeError(w, http.StatusNotFound, "not found")
+		Response_Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	stats, err := s.store.PublicStats(r.Context(), s.cfg.DBPath)

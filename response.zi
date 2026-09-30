@@ -1,0 +1,22 @@
+#import "go_types"
+http :: #import "http_go";
+io :: #import "io_go";
+json :: #import "json_go";
+
+#scope_file
+ErrorResponse :: struct {
+    message: string #go_tag "json:\"error\""
+}
+
+#scope_export
+JSON :: (writer: http.ResponseWriter, status: isize, value: Any) {
+    http.SetHeader(http.ResponseHeaders(writer), "Content-Type", "application/json")
+    http.WriteHeader(writer, status)
+    json.Encode(json.NewEncoder(cast(io.Writer)writer), value)
+}
+
+Error :: (writer: http.ResponseWriter, status: isize, message: string) {
+    value: ErrorResponse
+    value.message = message
+    JSON(writer, status, value)
+}

@@ -9,6 +9,11 @@ type zir_2688387c33a72186_ExecResult struct {
 	Error Error
 }
 
+type TombstoneResult struct {
+	Value bool
+	Error Error
+}
+
 func AccountState_UpdateSeen(Transaction *Transaction, Context Context, Query string, UserID string, Seen string) zir_2688387c33a72186_ExecResult {
 	var result zir_2688387c33a72186_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID, Seen)
@@ -18,6 +23,17 @@ func AccountState_UpdateSeen(Transaction *Transaction, Context Context, Query st
 func AccountState_EnsureSync(Transaction *Transaction, Context Context, Query string, UserID string) zir_2688387c33a72186_ExecResult {
 	var result zir_2688387c33a72186_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID)
+	return result
+}
+
+func AccountState_Tombstoned(database *Database, context Context, userID string) TombstoneResult {
+	var result TombstoneResult = TombstoneResult{}
+	var count int = 0
+	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)", userID)
+	row := value_0
+	var value_1 Error = (*sql.Row).Scan(row, &(count))
+	result.Error = value_1
+	result.Value = count != int(0)
 	return result
 }
 

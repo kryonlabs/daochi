@@ -47,8 +47,8 @@ field names, Go storage types, order and reflection tags.
 
 | Baseline file | Status | Remaining work or canonical source |
 |---|---|---|
-| `app_manifest.go` | Partial Ziran | Normalization, validation and active-key verification in `manifest.zi`; manifest storage in `app_store.zi`; decoding, signed approval verification and exact JSON/hash bytes in `app_registration.zi`; HTTP handler remains Go |
-| `app_registry.go` | Partial Ziran | Scope policy in `scope.zi`; app seeding, registry queries, metadata and collection ownership in `app_store.zi`; app/grant request decoding in `app_registration.zi`; grant transactions, revocation, scope checks and encrypted-record reads in `app_grants.zi`; HTTP handlers remain Go |
+| `app_manifest.go` | Ziran | Normalization, validation and active-key verification in `manifest.zi`; manifest storage in `app_store.zi`; decoding, signed approval verification and exact JSON/hash bytes in `app_registration.zi`; signed registration HTTP handling in `app_http.zi` |
+| `app_registry.go` | Ziran | Scope policy in `scope.zi`; app seeding, registry queries, metadata and collection ownership in `app_store.zi`; decoding in `app_registration.zi`; grant transactions and authorized reads in `app_grants.zi`; registry, grant and record HTTP handlers in `app_http.zi` |
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
@@ -66,10 +66,10 @@ field names, Go storage types, order and reflection tags.
 | `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
 | `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
-| `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; random resource identifiers in `resource_id.zi`; HTTP handlers remain Go |
+| `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; remaining HTTP handlers and lifecycle remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch in `account_state.zi`; schema, sync transactions, conflicts and projections remain Go |
+| `store.go` | Partial Ziran | Timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch and tombstone queries in `account_state.zi`; schema, sync transactions, conflicts and projections remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -92,7 +92,7 @@ come from Ziran's standard modules; they do not represent
 additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Grant transactions live in
-`app_grants.zi`; HTTP handlers still need to move. Manifest normalization and
+`app_grants.zi`; HTTP handlers live in `app_http.zi`. Manifest normalization and
 validation preserve error text, byte limits, scopes, Gregorian dates and
 explicit expiry boundaries.
 Active-key verification selects eligible keys in Ziran and uses Go Ed25519.
@@ -107,7 +107,7 @@ active signed manifests untouched. Baseline fixtures compare stored state,
 key expiry/revocation filtering, replacement, malformed JSON and scan errors,
 cancellation, failed writes and commits, and legacy date boundaries. Maintained
 startup, HTTP, sync, token and mesh callers use the generated surface directly.
-HTTP handlers still need porting.
+The corresponding HTTP handlers now live in `app_http.zi`.
 
 `app_grants.zi` owns grant creation, detail/list queries, revocation and
 authorized encrypted-record reads. Account, grant and audit changes commit
@@ -121,7 +121,7 @@ commits, and connection reuse. `account_state.zi` owns the shared transactional
 account-touch and sync-state initialization; `resource_id.zi` owns the exact
 16-byte random hexadecimal identifiers. Entropy-failure comparisons run in
 isolated subprocesses and preserve Go 1.24's fatal behavior. Maintained callers
-use the generated functions directly; the HTTP handlers remain Go.
+use the generated functions directly; the HTTP handlers live in `app_http.zi`.
 
 `app_registration.zi` owns signed/unsigned app and grant request decoding,
 ordered normalization/validation, manifest JSON serialization, hashes and both
@@ -131,8 +131,27 @@ HTTP rejection status/text. Signed grant decoding returns the original body
 slice and preserves nil results on errors. Baseline comparisons cover malformed
 JSON, arbitrary byte strings, Unicode whitespace, validation ordering, field
 limits, invalid/expired/suspended keys, signature encodings, signature failures
-and exact JSON escaping/hashes. The remaining Go request readers only obtain
-the bounded HTTP body and return the generated decoding result.
+and exact JSON escaping/hashes. `app_http.zi` owns the bounded request readers
+and their HTTP responses.
+
+`app_http.zi` completes the app registry and signed manifest HTTP boundary,
+including admin registration, registry detail and collections, grant creation
+and revocation, signed grants and authorized record reads. It preserves exact
+status codes, JSON bytes and headers, authentication counters, validation order
+and SQL error mapping. Signed requests retain their replay after a completed
+write/read, including a later response panic; failed operations forget it even
+when logging panics. Baseline HTTP comparisons cover successful registration
+and grants, signature rejection, failed writes, cancellation, database errors,
+scope denial and native panic identity. Server routes dispatch directly to the
+generated handlers through a small dependency record.
+
+`http_body.zi` owns bounded reads, JSON validity checks and body closure during
+ordinary returns and panic unwinding. `response.zi` owns JSON/error status,
+headers and streaming encoding. `http_auth.zi` owns released header precedence,
+bearer token/account validation, sync bootstrap tombstone checks and failure
+responses/metrics. Existing Go consumers use these generated helpers directly;
+their remaining application handlers still need porting. Comparisons preserve
+nil/empty body results, error text, context identity, encoded bytes and cleanup.
 
 `sync_types.zi` owns sync requests, responses, changes, snapshots and operation
 records. Its `RawMessage` declaration aliases `encoding/json.RawMessage`,
@@ -309,6 +328,13 @@ Native public-key equality and SQL affected-row results preserve Go key types,
 Native decoded URL paths and Unix timestamp construction preserve request
 encoding, signed 64-bit seconds and nanosecond normalization. Typed callbacks
 carry native byte slices and imported authentication results through saved IR.
+Typed native `call` bindings invoke a procedure argument with checked parameter
+and result types. Void callbacks support `#go_defer`, capturing values when
+scheduled and observing later state through explicit pointers. The `io_go`
+module and extended HTTP, JSON and URL modules provide native stream interfaces,
+request bodies/contexts, bounded reads, response status, JSON encoders and query
+values. Source and saved-IR checks exercise reverse-order cleanup, error and
+panic identity, immediate argument capture and ownership/signature rejection.
 Foreign slice return validation now runs after the complete import graph is
 linked. Public record types re-exported through intermediate modules therefore
 resolve independently of module/declaration order in source and saved IR.

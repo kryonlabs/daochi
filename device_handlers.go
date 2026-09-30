@@ -16,23 +16,24 @@ func (s *Server) handleAccountDevices(w http.ResponseWriter, r *http.Request) {
 		listed := DeviceKeys_List(s.store.db, r.Context(), accountID)
 		devices, err := listed.Value, listed.Error
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "device list failed")
+			Response_Error(w, http.StatusInternalServerError, "device list failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"devices": devices})
+		Response_JSON(w, http.StatusOK, map[string]any{"devices": devices})
 		return
 	case http.MethodDelete:
 		s.handleDeviceRevocation(w, r, accountID)
 		return
 	}
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var request DeviceRegistrationRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device registration")
+		Response_Error(w, http.StatusBadRequest, "invalid device registration")
 		return
 	}
 	DeviceKeys_NormalizeRegistration(&request)
@@ -49,24 +50,25 @@ func (s *Server) handleAccountDevices(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := DeviceKeys_Register(s.store.db, r.Context(), device, request.Nonce, errSignedTxReplay); err != nil {
 		if errors.Is(err, errSignedTxReplay) {
-			writeError(w, http.StatusConflict, "device registration replay")
+			Response_Error(w, http.StatusConflict, "device registration replay")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "device registration failed")
+		Response_Error(w, http.StatusInternalServerError, "device registration failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, device)
+	Response_JSON(w, http.StatusOK, device)
 }
 
 func (s *Server) handleDeviceRevocation(w http.ResponseWriter, r *http.Request, accountID string) {
-	body, err := readJSONBody(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var request DeviceRevocationRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device revocation")
+		Response_Error(w, http.StatusBadRequest, "invalid device revocation")
 		return
 	}
 	DeviceKeys_NormalizeRevocation(&request)
@@ -76,11 +78,11 @@ func (s *Server) handleDeviceRevocation(w http.ResponseWriter, r *http.Request, 
 	}
 	if err := DeviceKeys_Revoke(s.store.db, r.Context(), accountID, request, errSignedTxReplay); err != nil {
 		if errors.Is(err, errSignedTxReplay) {
-			writeError(w, http.StatusConflict, "device revocation replay")
+			Response_Error(w, http.StatusConflict, "device revocation replay")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "device revocation failed")
+		Response_Error(w, http.StatusInternalServerError, "device revocation failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+	Response_JSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }

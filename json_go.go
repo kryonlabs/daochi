@@ -4,6 +4,8 @@ package main
 import json "encoding/json"
 
 // #import go_types
+type Encoder = json.Encoder
+
 type JSONResult struct {
 	Value []uint8
 	Error Error
@@ -21,4 +23,16 @@ func JsonGo_Marshal(value Any) JSONResult {
 
 func JsonGo_Unmarshal(data []uint8, value Any) Error {
 	return json.Unmarshal(data, value)
+}
+
+func JsonGo_Valid(data []uint8) bool {
+	return json.Valid(data)
+}
+
+func JsonGo_NewEncoder(writer Writer) *Encoder {
+	return json.NewEncoder(writer)
+}
+
+func JsonGo_Encode(encoder *Encoder, value Any) Error {
+	return (*json.Encoder).Encode(encoder, value)
 }

@@ -61,11 +61,11 @@ func moneroTokenUnits(amount, rateAtomic, rateTokens int64) (int64, error) {
 
 func (s *Server) handleMoneroAddress(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.TokenDirectPurchasesEnabled || !validMoneroRate(s.cfg) || strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
-		writeError(w, http.StatusServiceUnavailable, "monero purchases disabled")
+		Response_Error(w, http.StatusServiceUnavailable, "monero purchases disabled")
 		return
 	}
 	if !s.allowRequest(r, "monero-address:"+ClientAddress_FromRequest(r), 60, time.Hour) {
-		writeError(w, http.StatusTooManyRequests, "too many address requests")
+		Response_Error(w, http.StatusTooManyRequests, "too many address requests")
 		return
 	}
 
@@ -83,11 +83,11 @@ func (s *Server) handleMoneroAddress(w http.ResponseWriter, r *http.Request) {
 		accountID, found, err = s.store.ResolveAccountRef(r.Context(), ref)
 		if err != nil {
 			slog.Error("resolve monero recipient", "error", err)
-			writeError(w, http.StatusInternalServerError, "recipient lookup failed")
+			Response_Error(w, http.StatusInternalServerError, "recipient lookup failed")
 			return
 		}
 		if !found {
-			writeError(w, http.StatusNotFound, "recipient not found")
+			Response_Error(w, http.StatusNotFound, "recipient not found")
 			return
 		}
 	}
@@ -105,14 +105,14 @@ func (s *Server) handleMoneroAddress(w http.ResponseWriter, r *http.Request) {
 	addressLock.Unlock()
 	if err != nil {
 		slog.Error("allocate monero account address", "account", LogSafety_LogText(accountID), "error", err)
-		writeError(w, http.StatusInternalServerError, "monero address unavailable")
+		Response_Error(w, http.StatusInternalServerError, "monero address unavailable")
 		return
 	}
 	network := strings.ToLower(strings.TrimSpace(s.cfg.MoneroNetwork))
 	if network != "mainnet" && network != "stagenet" && network != "testnet" {
 		network = "mainnet"
 	}
-	writeJSON(w, http.StatusOK, MoneroAddressResponse{
+	Response_JSON(w, http.StatusOK, MoneroAddressResponse{
 		AccountID:             address.AccountID,
 		Alias:                 address.Alias,
 		ProfileIcon:           address.ProfileIcon,
@@ -137,10 +137,10 @@ func (s *Server) handleMoneroDeposits(w http.ResponseWriter, r *http.Request) {
 	deposits, err := s.store.MoneroDeposits(r.Context(), accountID, 100)
 	if err != nil {
 		slog.Error("list monero deposits", "account", LogSafety_LogText(accountID), "error", err)
-		writeError(w, http.StatusInternalServerError, "monero deposits unavailable")
+		Response_Error(w, http.StatusInternalServerError, "monero deposits unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, MoneroDepositsResponse{Deposits: deposits})
+	Response_JSON(w, http.StatusOK, MoneroDepositsResponse{Deposits: deposits})
 }
 
 func (s *Store) MoneroAccountAddress(ctx context.Context, accountID string) (MoneroAccountAddress, bool, error) {

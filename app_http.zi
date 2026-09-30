@@ -1,0 +1,420 @@
+#import "go_types"
+#import "protocol"
+#import "manifest"
+config :: #import "config";
+auth :: #import "authentication";
+http_auth :: #import "http_auth";
+http_body :: #import "http_body";
+response :: #import "response";
+http :: #import "http_go";
+url :: #import "url_go";
+sql :: #import "sql_go";
+ctx :: #import "context_go";
+apps :: #import "app_store";
+grants :: #import "app_grants";
+registration :: #import "app_registration";
+signed :: #import "signed_tx";
+envelope :: #import "transaction";
+signing :: #import "signing";
+identity :: #import "identity";
+scope :: #import "scope";
+json :: #import "json_go";
+errors :: #import "errors_go";
+metrics :: #import "metrics";
+logs :: #import "log_safety";
+go_strings :: #system_library "go:strings";
+go_slog :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+Registry :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    verify: auth.VerifySignature
+    replayError: Error
+    missingUser: Error
+    scopeNotOwned: Error
+}
+
+#scope_file
+CollectionsResponse :: struct {
+    collections: []AppCollection #go_tag "json:\"collections\""
+}
+StatusResponse :: struct {
+    status: string #go_tag "json:\"status\""
+}
+ReplayCleanup :: #type (database: *sql.Database, context: ctx.Context, transaction: envelope.SignedTxEnvelope, completed: *bool) -> void;
+CleanupAtReturn :: (callback: ReplayCleanup, database: *sql.Database, context: ctx.Context, transaction: envelope.SignedTxEnvelope, completed: *bool) #go_defer #foreign builtin "call";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Trim :: (value: string, cutset: string) -> string #foreign go_strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign go_strings;
+TrimSuffix :: (value: string, suffix: string) -> string #foreign go_strings;
+HasPrefix :: (value: string, prefix: string) -> bool #foreign go_strings;
+HasSuffix :: (value: string, suffix: string) -> bool #foreign go_strings;
+Contains :: (value: string, part: string) -> bool #foreign go_strings;
+LogError :: (message: string, key: string, error: Error) #foreign go_slog "Error";
+LogSubjectError :: (message: string, subjectKey: string, subject: string, errorKey: string, error: Error) #foreign go_slog "Error";
+LogGrantError :: (message: string, userKey: string, user: string, grantKey: string, grant: string, errorKey: string, error: Error) #foreign go_slog "Error";
+LogRecordsError :: (message: string, userKey: string, user: string, sourceKey: string, source: string, targetKey: string, target: string, errorKey: string, error: Error) #foreign go_slog "Error";
+
+ForgetOnFailure :: (database: *sql.Database, context: ctx.Context, transaction: envelope.SignedTxEnvelope, completed: *bool) {
+    if !<<completed {
+        signed.Forget(database, context, transaction)
+    }
+}
+
+Bearer :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) -> http_auth.UserAuthenticationResult {
+    result := http_auth.BearerUser(registry.database, request, registry.configuration.TokenSecret)
+    if result.authentication.error != null || result.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, registry.counters, result.authentication)
+    }
+    return result
+}
+
+GrantFailure :: (writer: http.ResponseWriter, user: string, error: Error, message: string) {
+    if errors.Is(error, sql.NoRows()) {
+        response.Error(writer, cast(isize)404, "app not found")
+        return
+    }
+    text := errors.Message(error)
+    if Contains(text, "private") || Contains(text, "registered") {
+        response.Error(writer, cast(isize)400, text)
+        return
+    }
+    LogSubjectError(message, "user", logs.LogText(user), "error", error)
+    response.Error(writer, cast(isize)500, "app grant failed")
+}
+
+#scope_export
+ReadRegistration :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> registration.AppDecodeResult {
+    result: registration.AppDecodeResult
+    body := http_body.ReadJSON(writer, request, limit)
+    if body.error != null {
+        result.error = body.error
+        return result
+    }
+    return registration.Decode(body.value)
+}
+
+ReadSignedRegistration :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> registration.SignedRegistrationResult {
+    result: registration.SignedRegistrationResult
+    body := http_body.ReadJSON(writer, request, limit)
+    if body.error != null {
+        result.error = body.error
+        return result
+    }
+    return registration.DecodeSigned(body.value)
+}
+
+ReadGrant :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> registration.GrantDecodeResult {
+    result: registration.GrantDecodeResult
+    body := http_body.ReadJSON(writer, request, limit)
+    if body.error != null {
+        result.error = body.error
+        return result
+    }
+    return registration.DecodeGrant(body.value)
+}
+
+ReadSignedGrant :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> registration.SignedGrantDecodeResult {
+    result: registration.SignedGrantDecodeResult
+    body := http_body.ReadJSON(writer, request, limit)
+    if body.error != null {
+        result.error = body.error
+        return result
+    }
+    return registration.DecodeSignedGrant(body.value)
+}
+
+AuthenticateAdmin :: (writer: http.ResponseWriter, request: *http.Request, expected: string) -> bool {
+    if expected == "" {
+        response.Error(writer, cast(isize)403, "admin registration disabled")
+        return false
+    }
+    names: [2]string = .["X-Daochi-Admin", "X-Ksync-Admin"]
+    if http_auth.HeaderAlias(request, names[:]) != expected {
+        response.Error(writer, cast(isize)401, "admin token required")
+        return false
+    }
+    return true
+}
+
+List :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) {
+    if http.Method(request) == "POST" {
+        Register(registry, writer, request)
+        return
+    }
+    listed := apps.List(registry.database, http.Context(request))
+    if listed.error != null {
+        LogError("list apps", "error", listed.error)
+        response.Error(writer, cast(isize)500, "apps failed")
+        return
+    }
+    value: AppRegistryResponse
+    value.Apps = listed.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Route :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) {
+    appID := Trim(TrimPrefix(url.Path(http.RequestURL(request)), "/api/v1/apps/"), "/")
+    context := http.Context(request)
+    if HasSuffix(appID, "/collections") {
+        appID = Trim(TrimSuffix(appID, "/collections"), "/")
+        collections := apps.Collections(registry.database, context, appID)
+        if collections.error != null {
+            LogSubjectError("app collections", "app", logs.LogText(appID), "error", collections.error)
+            response.Error(writer, cast(isize)500, "apps failed")
+            return
+        }
+        if collections.value.count == 0 {
+            exists := apps.Exists(registry.database, context, appID)
+            if exists.error != null {
+                LogSubjectError("app exists", "app", logs.LogText(appID), "error", exists.error)
+                response.Error(writer, cast(isize)500, "apps failed")
+                return
+            }
+            if !exists.value {
+                response.Error(writer, cast(isize)404, "app not found")
+                return
+            }
+        }
+        value: CollectionsResponse
+        value.collections = collections.value
+        response.JSON(writer, cast(isize)200, value)
+        return
+    }
+    if http.Method(request) == "PUT" {
+        Register(registry, writer, request)
+        return
+    }
+    if !identity.ValidNamespace(appID) {
+        response.Error(writer, cast(isize)404, "app not found")
+        return
+    }
+    app := apps.ByID(registry.database, context, appID)
+    if app.error != null {
+        LogSubjectError("load app", "app", logs.LogText(appID), "error", app.error)
+        response.Error(writer, cast(isize)500, "apps failed")
+        return
+    }
+    if !app.found {
+        response.Error(writer, cast(isize)404, "app not found")
+        return
+    }
+    response.JSON(writer, cast(isize)200, app.value)
+}
+
+Register :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) {
+    if !AuthenticateAdmin(writer, request, registry.configuration.AdminToken) {
+        return
+    }
+    decoded := ReadRegistration(writer, request, registry.configuration.MaxBodyBytes)
+    if decoded.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    pathID := ""
+    path := url.Path(http.RequestURL(request))
+    if HasPrefix(path, "/api/v1/apps/") {
+        pathID = Trim(TrimPrefix(path, "/api/v1/apps/"), "/")
+    }
+    if pathID != "" && pathID != decoded.value.AppID {
+        response.Error(writer, cast(isize)400, "app_id path mismatch")
+        return
+    }
+    context := http.Context(request)
+    error := apps.Upsert(registry.database, context, decoded.value)
+    if error != null {
+        LogSubjectError("register app", "app", logs.LogText(decoded.value.AppID), "error", error)
+        response.Error(writer, cast(isize)500, "app registration failed")
+        return
+    }
+    app := apps.ByID(registry.database, context, decoded.value.AppID)
+    if app.error != null {
+        LogSubjectError("load registered app", "app", logs.LogText(decoded.value.AppID), "error", app.error)
+        response.Error(writer, cast(isize)500, "app registration failed")
+        return
+    }
+    response.JSON(writer, cast(isize)200, app.value)
+}
+
+RegisterSigned :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) {
+    decoded := ReadSignedRegistration(writer, request, registry.configuration.MaxBodyBytes)
+    if decoded.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    value := decoded.value
+    verified := registration.Verify(value, registry.configuration.NodeRegistryPublicKey)
+    if verified.authentication.error != null || verified.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, registry.counters, verified.authentication)
+        return
+    }
+    context := http.Context(request)
+    error := apps.UpsertSignedManifest(registry.database, context, value.Manifest,
+        verified.value, verified.hash, value.ManifestSignature, value.ApprovalSignature)
+    if error != null {
+        LogSubjectError("register signed app manifest", "app", logs.LogText(value.Manifest.AppID), "error", error)
+        response.Error(writer, cast(isize)500, "app registration failed")
+        return
+    }
+    app := apps.ByID(registry.database, context, value.Manifest.AppID)
+    if app.error != null {
+        LogSubjectError("load signed app manifest", "app", logs.LogText(value.Manifest.AppID), "error", app.error)
+        response.Error(writer, cast(isize)500, "app registration failed")
+        return
+    }
+    response.JSON(writer, cast(isize)200, app.value)
+}
+
+Grants :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(registry, writer, request)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        return
+    }
+    context := http.Context(request)
+    if http.Method(request) == "POST" {
+        decoded := ReadGrant(writer, request, registry.configuration.MaxBodyBytes)
+        if decoded.error != null {
+            response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+            return
+        }
+        created := grants.Create(registry.database, context, user.value, decoded.value, registry.missingUser)
+        if created.error != null {
+            GrantFailure(writer, user.value, created.error, "create app grant")
+            return
+        }
+        response.JSON(writer, cast(isize)201, created.value)
+        return
+    }
+    listed := grants.List(registry.database, context, user.value)
+    if listed.error != null {
+        LogSubjectError("list app grants", "user", logs.LogText(user.value), "error", listed.error)
+        response.Error(writer, cast(isize)500, "app grants failed")
+        return
+    }
+    value: AppGrantsResponse
+    value.Grants = listed.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+GrantSigned :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(registry, writer, request)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        return
+    }
+    decoded := ReadSignedGrant(writer, request, registry.configuration.MaxBodyBytes)
+    if decoded.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    value := decoded.value
+    encoded := json.Marshal(value.Grant)
+    if encoded.error != null {
+        response.Error(writer, cast(isize)400, "invalid app grant")
+        return
+    }
+    hash := signing.SHA256Hex(encoded.value)
+    if value.Tx.bodySHA256 != "" && value.Tx.bodySHA256 != hash {
+        response.Error(writer, cast(isize)400, "signed transaction body hash must cover grant payload")
+        return
+    }
+    if value.Tx.bodySHA256 == "" {
+        value.Tx.bodySHA256 = hash
+    }
+    context := http.Context(request)
+    verified := signed.Verify(registry.database, context, request, encoded.value, value.Tx,
+        user.value, value.Grant.TargetAppID, registry.verify, registry.replayError)
+    if verified.error != null || verified.status != cast(isize)0 {
+        http_auth.Respond(writer, registry.counters, verified)
+        return
+    }
+    completed: bool = false
+    CleanupAtReturn(ForgetOnFailure, registry.database, context, value.Tx, *completed)
+    created := grants.Create(registry.database, context, user.value, value.Grant, registry.missingUser)
+    if created.error != null {
+        GrantFailure(writer, user.value, created.error, "create signed app grant")
+        return
+    }
+    completed = true
+    response.JSON(writer, cast(isize)201, created.value)
+}
+
+GrantRoute :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(registry, writer, request)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        return
+    }
+    id := Trim(TrimPrefix(url.Path(http.RequestURL(request)), "/api/v1/account/app-grants/"), "/")
+    if id == "" {
+        response.Error(writer, cast(isize)404, "app grant not found")
+        return
+    }
+    error := grants.Revoke(registry.database, http.Context(request), user.value, id)
+    if error != null {
+        if errors.Is(error, sql.NoRows()) {
+            response.Error(writer, cast(isize)404, "app grant not found")
+            return
+        }
+        LogGrantError("revoke app grant", "user", logs.LogText(user.value), "grant", logs.LogText(id), "error", error)
+        response.Error(writer, cast(isize)500, "app grant failed")
+        return
+    }
+    value: StatusResponse
+    value.status = "revoked"
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Records :: (registry: Registry, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(registry, writer, request)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        return
+    }
+    query := url.Query(http.RequestURL(request))
+    source := TrimSpace(url.Value(query, "source_app_id"))
+    target := TrimSpace(url.Value(query, "target_app_id"))
+    prefix := TrimSpace(url.Value(query, "collection_prefix"))
+    if !identity.ValidNamespace(source) || !identity.ValidNamespace(target) || !scope.ValidCollectionPrefix(prefix) {
+        response.Error(writer, cast(isize)400, "invalid app records query")
+        return
+    }
+    header := signed.ReadHeader(request)
+    if header.authentication.error != null || header.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, registry.counters, header.authentication)
+        return
+    }
+    context := http.Context(request)
+    emptyBody: []u8
+    verified := signed.Verify(registry.database, context, request, emptyBody, header.value,
+        user.value, target, registry.verify, registry.replayError)
+    if verified.error != null || verified.status != cast(isize)0 {
+        http_auth.Respond(writer, registry.counters, verified)
+        return
+    }
+    completed: bool = false
+    CleanupAtReturn(ForgetOnFailure, registry.database, context, header.value, *completed)
+    records := grants.AuthorizedRecords(registry.database, context, user.value, source, target, prefix,
+        registry.scopeNotOwned, registry.missingUser)
+    if records.error != null {
+        if errors.Is(records.error, registry.missingUser) {
+            response.Error(writer, cast(isize)403, "app grant required")
+            return
+        }
+        if errors.Is(records.error, registry.scopeNotOwned) {
+            response.Error(writer, cast(isize)400, "source app does not own collection scope")
+            return
+        }
+        if errors.Is(records.error, sql.NoRows()) {
+            response.Error(writer, cast(isize)404, "app not found")
+            return
+        }
+        LogRecordsError("read app records", "user", logs.LogText(user.value), "source_app", logs.LogText(source),
+            "target_app", logs.LogText(target), "error", records.error)
+        response.Error(writer, cast(isize)500, "app records failed")
+        return
+    }
+    completed = true
+    value: AppRecordsResponse
+    value.Records = records.value
+    response.JSON(writer, cast(isize)200, value)
+}

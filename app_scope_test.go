@@ -10,19 +10,19 @@ import (
 func TestAppRegistrationOwnsItsDeclaredScopes(t *testing.T) {
 	valid := `{"app_id":"ukuvota","display_name":"Ukuvota","status":"active","collections":[{"collection_prefix":"private.ukuvota.v1.records.*","visibility":"private"}],"features":[{"id":"records.sync","collections":["private.ukuvota.v1.records.*"]}]}`
 	req := httptest.NewRequest("POST", "/api/v1/apps", strings.NewReader(valid))
-	if _, err := readAppRegistrationRequest(httptest.NewRecorder(), req, 1<<20); err != nil {
-		t.Fatalf("own scope rejected: %v", err)
+	if result := AppHttp_ReadRegistration(httptest.NewRecorder(), req, 1<<20); result.Error != nil {
+		t.Fatalf("own scope rejected: %v", result.Error)
 	}
 
 	foreign := `{"app_id":"ukuvota","display_name":"Ukuvota","status":"active","collections":[{"collection_prefix":"private.krait.v1.records.*","visibility":"private"}]}`
 	req = httptest.NewRequest("POST", "/api/v1/apps", strings.NewReader(foreign))
-	if _, err := readAppRegistrationRequest(httptest.NewRecorder(), req, 1<<20); err == nil {
+	if result := AppHttp_ReadRegistration(httptest.NewRecorder(), req, 1<<20); result.Error == nil {
 		t.Fatal("app registration accepted another app's scope")
 	}
 
 	mismatchedVisibility := `{"app_id":"ukuvota","display_name":"Ukuvota","status":"active","collections":[{"collection_prefix":"public.ukuvota.v1.records.*","visibility":"private"}]}`
 	req = httptest.NewRequest("POST", "/api/v1/apps", strings.NewReader(mismatchedVisibility))
-	if _, err := readAppRegistrationRequest(httptest.NewRecorder(), req, 1<<20); err == nil {
+	if result := AppHttp_ReadRegistration(httptest.NewRecorder(), req, 1<<20); result.Error == nil {
 		t.Fatal("app registration accepted a visibility mismatch")
 	}
 }

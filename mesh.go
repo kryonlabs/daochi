@@ -118,7 +118,8 @@ func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "mesh export failed")
 		return
 	}
-	spaces, names, err := s.store.ExportMeshNames(r.Context(), req.Policy)
+	exportedNames := TrustStore_ExportMeshNames(s.store.db, r.Context(), req.Policy)
+	spaces, names, err := exportedNames.Spaces, exportedNames.Names, exportedNames.Error
 	if err != nil {
 		slog.Error("mesh name export", "error", err)
 		writeError(w, http.StatusInternalServerError, "mesh name export failed")
@@ -169,7 +170,8 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	nameCount, err := s.store.ImportMeshNames(r.Context(), req.Policy, req.Spaces, req.Names)
+	importedNames := TrustStore_ImportMeshNames(s.store.db, r.Context(), req.Policy, req.Spaces, req.Names)
+	nameCount, err := importedNames.Value, importedNames.Error
 	if err != nil {
 		slog.Error("mesh name import", "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -216,7 +218,8 @@ func (s *Server) authorizeRequestedPolicy(
 	if nodeID == "" {
 		return true
 	}
-	approved, found, err := s.store.TrustedPeerPolicy(r.Context(), nodeID)
+	trustedPolicy := TrustStore_TrustedPeerPolicy(s.store.db, r.Context(), nodeID)
+	approved, found, err := trustedPolicy.Value, trustedPolicy.Found, trustedPolicy.Error
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "peer policy lookup failed")
 		return false
@@ -298,7 +301,8 @@ func (s *Server) runNodeSync(ctx context.Context) {
 
 func (s *Server) pullConfiguredNodePeers(ctx context.Context) {
 	peers := append([]NodePeer(nil), s.cfg.KnownNodes...)
-	trusted, err := s.store.ListTrustedPeers(ctx)
+	listedPeers := TrustStore_ListTrustedPeers(s.store.db, ctx)
+	trusted, err := listedPeers.Value, listedPeers.Error
 	if err != nil {
 		slog.Warn("load paired mesh peers", "error", err)
 	}
@@ -356,7 +360,8 @@ func (s *Server) pullNodePeer(ctx context.Context, peer NodePeer) error {
 		if err != nil {
 			return err
 		}
-		nameCount, err := s.store.ImportMeshNames(ctx, policy, exported.Spaces, exported.Names)
+		importedNames := TrustStore_ImportMeshNames(s.store.db, ctx, policy, exported.Spaces, exported.Names)
+		nameCount, err := importedNames.Value, importedNames.Error
 		if err != nil {
 			return err
 		}
@@ -429,9 +434,9 @@ func nodePolicyAllowsPull(policy *NodeSyncPolicy) bool {
 	}
 	switch strings.ToLower(strings.TrimSpace(policy.Direction)) {
 	case "pull", "bidirectional":
-		return nodePolicyIncludesData(policy, "encrypted_records") ||
-			nodePolicyIncludesData(policy, "names") ||
-			nodePolicyIncludesData(policy, "app_registry")
+		return MeshPolicy_IncludesData(policy, "encrypted_records") ||
+			MeshPolicy_IncludesData(policy, "names") ||
+			MeshPolicy_IncludesData(policy, "app_registry")
 	default:
 		return false
 	}
@@ -450,26 +455,14 @@ func meshPeerCursorKey(baseURL string, policy NodeSyncPolicy) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func nodePolicyIncludesData(policy *NodeSyncPolicy, dataType string) bool {
-	if policy == nil || len(policy.Data) == 0 {
-		return true
-	}
-	for _, item := range policy.Data {
-		if strings.EqualFold(strings.TrimSpace(item), dataType) {
-			return true
-		}
-	}
-	return false
-}
-
 func validInboundMeshPolicy(policy NodeSyncPolicy) bool {
 	if len(policy.Data) == 0 {
 		return false
 	}
-	hasRecords := nodePolicyIncludesData(&policy, "encrypted_records") &&
+	hasRecords := MeshPolicy_IncludesData(&policy, "encrypted_records") &&
 		(len(policy.Apps) > 0 || len(policy.Collections) > 0)
-	hasNames := nodePolicyIncludesData(&policy, "names") && len(policy.Spaces) > 0
-	hasAppRegistry := nodePolicyIncludesData(&policy, "app_registry") && len(policy.Apps) > 0
+	hasNames := MeshPolicy_IncludesData(&policy, "names") && len(policy.Spaces) > 0
+	hasAppRegistry := MeshPolicy_IncludesData(&policy, "app_registry") && len(policy.Apps) > 0
 	return hasRecords || hasNames || hasAppRegistry
 }
 

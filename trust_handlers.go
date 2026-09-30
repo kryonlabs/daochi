@@ -103,7 +103,7 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 		Policy:      req.Policy,
 	}
 	NodeIdentity_SignInvite(s.node, &invite)
-	if err := s.store.RecordIssuedPairingInvite(r.Context(), invite); err != nil {
+	if err := TrustStore_RecordIssuedPairingInvite(s.store.db, r.Context(), invite); err != nil {
 		writeError(w, http.StatusInternalServerError, "pairing invite creation failed")
 		return
 	}
@@ -151,7 +151,7 @@ func (s *Server) handleAcceptPairingInvite(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	if err := s.store.TrustPeer(r.Context(), invite, publicKey.Value); err != nil {
+	if err := TrustStore_TrustPeer(s.store.db, r.Context(), invite, publicKey.Value); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -256,7 +256,7 @@ func (s *Server) handleCompletePairing(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cannot pair a node with itself")
 		return
 	}
-	if err := s.store.CompleteIssuedPairing(
+	if err := TrustStore_CompleteIssuedPairing(s.store.db,
 		r.Context(),
 		request.Invite,
 		request.Acceptance,
@@ -275,7 +275,8 @@ func (s *Server) handleListTrustedPeers(w http.ResponseWriter, r *http.Request) 
 	if !s.requireLocalOperator(w, r) {
 		return
 	}
-	peers, err := s.store.ListTrustedPeers(r.Context())
+	listedPeers := TrustStore_ListTrustedPeers(s.store.db, r.Context())
+	peers, err := listedPeers.Value, listedPeers.Error
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "peer list failed")
 		return
@@ -300,7 +301,8 @@ func (s *Server) handleCreateTrustSpace(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
-	spaceID, err := s.store.CreateTrustSpace(r.Context(), displayName)
+	createdSpace := TrustStore_CreateTrustSpace(s.store.db, r.Context(), displayName)
+	spaceID, err := createdSpace.Value, createdSpace.Error
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "trust space creation failed")
 		return
@@ -341,28 +343,17 @@ func (s *Server) handleRegisterNameClaim(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid name expiry")
 		return
 	}
-	if err := validateServices(claim.Services); err != nil {
+	if err := TrustStore_ValidateServices(claim.Services); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	claim, err = s.store.SignAndStoreNameClaim(r.Context(), claim)
+	signedClaim := TrustStore_SignAndStoreNameClaim(s.store.db, r.Context(), claim)
+	claim, err = signedClaim.Value, signedClaim.Error
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, claim)
-}
-
-func validateServices(services []ServiceRecord) error {
-	for _, service := range services {
-		if !NodeIdentity_ValidName(NodeIdentity_NormalizeName(service.Service)) {
-			return errors.New("invalid service name")
-		}
-		if err := NodeIdentity_ValidateAddresses(service.Endpoints); err != nil {
-			return errors.New("invalid service endpoint")
-		}
-	}
-	return nil
 }
 
 func (s *Server) handleResolveName(w http.ResponseWriter, r *http.Request) {
@@ -372,7 +363,8 @@ func (s *Server) handleResolveName(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid space or name")
 		return
 	}
-	claim, found, err := s.store.ResolveNameClaim(r.Context(), spaceID, name)
+	resolvedClaim := TrustStore_ResolveNameClaim(s.store.db, r.Context(), spaceID, name)
+	claim, found, err := resolvedClaim.Value, resolvedClaim.Found, resolvedClaim.Error
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "name resolution failed")
 		return

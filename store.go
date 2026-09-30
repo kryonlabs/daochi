@@ -240,7 +240,7 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := store.ensureMeshTrustSchema(context.Background()); err != nil {
+	if err := TrustStore_EnsureSchema(store.db, context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

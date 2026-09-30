@@ -1,0 +1,32 @@
+#import "protocol"
+config :: #import "config_values";
+go_strings :: #system_library "go:strings";
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign go_strings;
+EqualFold :: (left: string, right: string) -> bool #foreign go_strings;
+
+#scope_export
+IncludesData :: (policy: *NodeSyncPolicy, dataType: string) -> bool {
+    if policy == null || policy.Data.count == 0 {
+        return true
+    }
+    for item: policy.Data {
+        if EqualFold(TrimSpace(item), dataType) {
+            return true
+        }
+    }
+    return false
+}
+Inverse :: (policy: NodeSyncPolicy) -> NodeSyncPolicy {
+    inverse := policy
+    direction := config.SyncDirection(policy.Direction)
+    if direction == "pull" {
+        inverse.Direction = "push"
+    } else if direction == "push" {
+        inverse.Direction = "pull"
+    } else {
+        inverse.Direction = direction
+    }
+    return inverse
+}

@@ -19,7 +19,7 @@ func (s *Store) ExportMeshApps(
 	ctx context.Context,
 	policy NodeSyncPolicy,
 ) ([]SignedAppRegistrationRequest, error) {
-	if !nodePolicyIncludesData(&policy, "app_registry") || len(policy.Apps) == 0 {
+	if !MeshPolicy_IncludesData(&policy, "app_registry") || len(policy.Apps) == 0 {
 		return []SignedAppRegistrationRequest{}, nil
 	}
 
@@ -72,7 +72,7 @@ func (s *Server) ImportMeshApps(
 	policy NodeSyncPolicy,
 	registrations []SignedAppRegistrationRequest,
 ) (int, error) {
-	if !nodePolicyIncludesData(&policy, "app_registry") {
+	if !MeshPolicy_IncludesData(&policy, "app_registry") {
 		return 0, nil
 	}
 

@@ -19,7 +19,7 @@ func (s *Store) ExportMeshEncryptedRecords(ctx context.Context, policy NodeSyncP
 	if err != nil {
 		return nil, nil, "", false, err
 	}
-	if !nodePolicyIncludesData(&policy, "encrypted_records") {
+	if !MeshPolicy_IncludesData(&policy, "encrypted_records") {
 		return []MeshEncryptedRecord{}, nil, "", false, nil
 	}
 	matchers, err := s.appCollectionMatchers(ctx)
@@ -128,7 +128,7 @@ func (s *Store) ImportMeshEncryptedRecords(ctx context.Context, policy NodeSyncP
 // ordered by their change-log seq so a delete-then-recreate sequence in
 // one batch converges to the recreated record.
 func (s *Store) ImportMeshEncryptedBatch(ctx context.Context, policy NodeSyncPolicy, records []MeshEncryptedRecord, deletions []MeshEncryptedRecordDeletion) (int, error) {
-	if !nodePolicyIncludesData(&policy, "encrypted_records") {
+	if !MeshPolicy_IncludesData(&policy, "encrypted_records") {
 		return 0, nil
 	}
 	matchers, err := s.appCollectionMatchers(ctx)

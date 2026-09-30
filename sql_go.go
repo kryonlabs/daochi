@@ -18,6 +18,11 @@ type Result = sql.Result
 
 type NullString = sql.NullString
 
+type AffectedRowsResult struct {
+	Value int64
+	Error Error
+}
+
 func SqlGo_NullStringValidRaw(Value NullString) bool {
 	return Value.Valid
 }
@@ -32,6 +37,12 @@ func SqlGo_NoRowsRaw() Error {
 
 func SqlGo_TransactionDoneRaw() Error {
 	return sql.ErrTxDone
+}
+
+func SqlGo_RowsAffectedRaw(Result Result) AffectedRowsResult {
+	var result AffectedRowsResult
+	result.Value, result.Error = (sql.Result).RowsAffected(Result)
+	return result
 }
 
 func SqlGo_Next(rows *Rows) bool {
@@ -68,4 +79,8 @@ func SqlGo_NoRows() Error {
 
 func SqlGo_TransactionDone() Error {
 	return SqlGo_TransactionDoneRaw()
+}
+
+func SqlGo_RowsAffected(result Result) AffectedRowsResult {
+	return SqlGo_RowsAffectedRaw(result)
 }

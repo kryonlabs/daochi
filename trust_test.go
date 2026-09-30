@@ -152,14 +152,15 @@ func TestPairedPolicyCannotBeExpanded(t *testing.T) {
 	if policyAllowsOperation(pullOnly, approved, "export") {
 		t.Fatal("pull-only peer was allowed to export data")
 	}
-	if inverseNodeSyncPolicy(pullOnly).Direction != "push" {
+	if MeshPolicy_Inverse(pullOnly).Direction != "push" {
 		t.Fatal("reciprocal policy did not invert pull to push")
 	}
 }
 
 func TestTrustSpaceNameRegistrationAndResolution(t *testing.T) {
 	server, store, _ := testServer(t)
-	spaceID, err := store.CreateTrustSpace(t.Context(), "Neighborhood")
+	createdSpace := TrustStore_CreateTrustSpace(store.db, t.Context(), "Neighborhood")
+	spaceID, err := createdSpace.Value, createdSpace.Error
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,11 +174,13 @@ func TestTrustSpaceNameRegistrationAndResolution(t *testing.T) {
 		}},
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
-	stored, err := store.SignAndStoreNameClaim(t.Context(), claim)
+	signedClaim := TrustStore_SignAndStoreNameClaim(store.db, t.Context(), claim)
+	stored, err := signedClaim.Value, signedClaim.Error
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, found, err := store.ResolveNameClaim(t.Context(), spaceID, "home")
+	resolvedClaim := TrustStore_ResolveNameClaim(store.db, t.Context(), spaceID, "home")
+	resolved, found, err := resolvedClaim.Value, resolvedClaim.Found, resolvedClaim.Error
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +195,8 @@ func TestTrustSpaceNameRegistrationAndResolution(t *testing.T) {
 func TestTrustSpaceNamesReplicateWithoutAuthorityPrivateKey(t *testing.T) {
 	source, sourceStore, _ := testServer(t)
 	_, targetStore, _ := testServer(t)
-	spaceID, err := sourceStore.CreateTrustSpace(t.Context(), "Neighborhood")
+	createdSpace := TrustStore_CreateTrustSpace(sourceStore.db, t.Context(), "Neighborhood")
+	spaceID, err := createdSpace.Value, createdSpace.Error
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,29 +210,32 @@ func TestTrustSpaceNamesReplicateWithoutAuthorityPrivateKey(t *testing.T) {
 			Endpoints: []string{"http://192.168.1.10:8080"},
 		}},
 	}
-	if _, err := sourceStore.SignAndStoreNameClaim(t.Context(), claim); err != nil {
-		t.Fatal(err)
+	if signed := TrustStore_SignAndStoreNameClaim(sourceStore.db, t.Context(), claim); signed.Error != nil {
+		t.Fatal(signed.Error)
 	}
 	policy := NodeSyncPolicy{
 		Direction: "bidirectional",
 		Spaces:    []string{spaceID},
 		Data:      []string{"names"},
 	}
-	spaces, claims, err := sourceStore.ExportMeshNames(t.Context(), policy)
+	exportedNames := TrustStore_ExportMeshNames(sourceStore.db, t.Context(), policy)
+	spaces, claims, err := exportedNames.Spaces, exportedNames.Names, exportedNames.Error
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(spaces) != 1 || len(claims) != 1 {
 		t.Fatalf("exported spaces=%d names=%d", len(spaces), len(claims))
 	}
-	applied, err := targetStore.ImportMeshNames(t.Context(), policy, spaces, claims)
+	importedNames := TrustStore_ImportMeshNames(targetStore.db, t.Context(), policy, spaces, claims)
+	applied, err := importedNames.Value, importedNames.Error
 	if err != nil {
 		t.Fatal(err)
 	}
 	if applied != 1 {
 		t.Fatalf("applied names = %d, want 1", applied)
 	}
-	resolved, found, err := targetStore.ResolveNameClaim(t.Context(), spaceID, "home")
+	resolvedClaim := TrustStore_ResolveNameClaim(targetStore.db, t.Context(), spaceID, "home")
+	resolved, found, err := resolvedClaim.Value, resolvedClaim.Found, resolvedClaim.Error
 	if err != nil || !found || resolved.NodeID != source.node.ID {
 		t.Fatalf("replicated name resolution = %#v, %v, %v", resolved, found, err)
 	}
@@ -422,7 +429,7 @@ func trustServer(t *testing.T, store *Store, peer *Server) {
 	if publicKey.Error != nil {
 		t.Fatal(publicKey.Error)
 	}
-	if err := store.TrustPeer(t.Context(), invite, ed25519.PublicKey(publicKey.Value)); err != nil {
+	if err := TrustStore_TrustPeer(store.db, t.Context(), invite, ed25519.PublicKey(publicKey.Value)); err != nil {
 		t.Fatal(err)
 	}
 }

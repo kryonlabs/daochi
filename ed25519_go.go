@@ -45,3 +45,7 @@ func Ed25519Go_Sign(key PrivateKey, message []uint8) []uint8 {
 func Ed25519Go_Verify(key PublicKey, message []uint8, signature []uint8) bool {
 	return ed25519.Verify(key, message, signature)
 }
+
+func Ed25519Go_Equal(key PublicKey, other PublicKey) bool {
+	return (ed25519.PublicKey).Equal(key, other)
+}

@@ -76,7 +76,7 @@ field names, Go storage types, order and reflection tags.
 | `token_assets.go` | Ziran | `token_assets.zi`: native SQL upsert, released asset fields and error propagation |
 | `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
 | `trust_handlers.go` | Go with ported callers | Pairing and namespace HTTP handlers |
-| `trust_store.go` | Partial Ziran | Nonce consumption/expiry in `node_nonce.zi` and public-key lookup in `peer_trust.zi`; pairing, peer policies and claims remain Go |
+| `trust_store.go` | Ziran | `trust_store.zi`: schema, atomic pairing, peer policy/list queries, trust spaces, namespace signing/resolution and scoped mesh name replication; nonces in `node_nonce.zi`, public-key lookup in `peer_trust.zi` |
 | `types.go` | Ziran | All 77 original records and profile constants in `protocol.zi`, `manifest.zi`, `sync_types.zi` and `types.zi` |
 | `verifier.go` | Go | Signature verifier contract |
 | `verifier_nocgo.go` | Go | Unsupported-build error path |
@@ -163,7 +163,7 @@ key-length checks, signature decoding and atomic nonce consumption. Native
 SQL and cancellation errors retain their identity. Baseline comparisons also
 exercise signature line breaks and malformed headers, and concurrent replay
 tests accept a shared signed request exactly once. `peer_trust.zi` owns the
-trusted-peer public-key query; the remaining trust store is still handwritten.
+trusted-peer public-key query.
 
 `node_identity.zi` completes key creation and persistence, pairing invitations
 and acceptances, their signatures and validation, and namespace claim messages
@@ -175,6 +175,16 @@ hashes, sorted address copies, exact integer formatting and raw URL base64
 signatures. Validation retains its original order and expiry boundaries.
 Independent baseline fixtures cover the six record layouts, key ownership,
 filesystem/entropy failures, signatures, malformed input and native errors.
+
+`trust_store.zi` completes the original trust store. It preserves schema,
+single-use invite consumption, reciprocal policies, idempotent completion,
+revocation filtering and nil/empty JSON results. Namespace operations retain
+authority keys, claim signatures, expiry, sequence ordering and fork rejection.
+Scoped imports commit together and roll back all writes on a late failure;
+export never includes authority private keys. Baseline comparisons cover stored
+state, malformed JSON, cancellation and entropy errors, failed commits,
+connection reuse, concurrent invite consumers and record reflection tags.
+`mesh_policy.zi` owns the shared data-scope and reciprocal-direction helpers.
 
 ## Compiler work exercised by this port
 
@@ -227,6 +237,8 @@ The `file_go` and `json_go` modules provide native file permissions, path/error
 operations and JSON serialization/deserialization. Go interface arguments
 preserve record tags, nil/empty slices and pointer destinations. Native key
 generation preserves public/private/error result order and entropy errors.
+Native public-key equality and SQL affected-row results preserve Go key types,
+64-bit counts and error identity in both source and saved IR.
 
 ## Next dependencies
 

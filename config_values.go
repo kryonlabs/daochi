@@ -129,7 +129,7 @@ func ConfigValues_SyncPolicy(fields []string) *NodeSyncPolicy {
 		policy.Direction = "bidirectional"
 	}
 	result := new(NodeSyncPolicy)
-	*(result) = policy
+	(*(result)) = policy
 	return result
 }
 

@@ -1,14 +1,14 @@
-#import "go_types"
+#import "std/go_types"
 #import "protocol"
 apps :: #import "app_store";
 accounts :: #import "account_state";
 ids :: #import "resource_id";
-ctx :: #import "context_go";
-sql :: #import "sql_go";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
 scope :: #import "scope";
-json :: #import "json_go";
-text :: #import "text_go";
-errors :: #import "errors_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
 go_sql :: #system_library "go:database/sql";
 go_strings :: #system_library "go:strings";
 builtin :: #system_library "go:builtin";

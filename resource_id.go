@@ -3,7 +3,7 @@ package main
 
 import hex "encoding/hex"
 
-// #import go_types
+// #import std_go_types
 type ResourceIDResult struct {
 	Value string
 	Error Error
@@ -13,7 +13,7 @@ func ResourceId_New() ResourceIDResult {
 	var result ResourceIDResult = ResourceIDResult{}
 	var bytes [16]uint8
 	_ = bytes
-	filled := RandomGo_Fill(bytes[0:16:16])
+	filled := StdRandomGo_Fill(bytes[0:16:16])
 	result.Error = filled.Error
 	if filled.Error != nil {
 		return result

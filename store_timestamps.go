@@ -7,7 +7,7 @@ import (
 	slog "log/slog"
 )
 
-// #import go_types
+// #import std_go_types
 // #import timestamp
 type TimestampColumn struct {
 	Table  string
@@ -78,18 +78,18 @@ func StoreTimestamps_CanonicalizeColumn(context Context, transaction *Transactio
 	}
 	rows := queried.Value
 	pending := make([]PendingRewrite, int(int(0)))
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var rowid int64 = 0
 		var value NullString = *new(NullString)
 		error := (*sql.Rows).Scan(rows, &(rowid), &(value))
 		_ = error
 		if error != nil {
-			SqlGo_CloseRows(rows)
+			StdSqlGo_CloseRows(rows)
 			result.Error = error
 			return result
 		}
-		text := SqlGo_NullStringValue(value)
-		var value_0 bool = SqlGo_NullStringValid(value)
+		text := StdSqlGo_NullStringValue(value)
+		var value_0 bool = StdSqlGo_NullStringValid(value)
 		if !value_0 || text == "" {
 			continue
 		}
@@ -105,14 +105,14 @@ func StoreTimestamps_CanonicalizeColumn(context Context, transaction *Transactio
 			pending = append(pending, rewrite)
 		}
 	}
-	error := SqlGo_RowsError(rows)
+	error := StdSqlGo_RowsError(rows)
 	_ = error
 	if error != nil {
-		SqlGo_CloseRows(rows)
+		StdSqlGo_CloseRows(rows)
 		result.Error = error
 		return result
 	}
-	SqlGo_CloseRows(rows)
+	StdSqlGo_CloseRows(rows)
 	for it_index := int64(0); it_index < int64(len(pending)); it_index++ {
 		item := pending[it_index]
 		query := fmt.Sprintf("UPDATE %s SET %s=?2 WHERE rowid=?1", table, column)
@@ -157,7 +157,7 @@ func StoreTimestamps_Canonicalize(database *Database, context Context) Error {
 	if updated.Error != nil {
 		return updated.Error
 	}
-	error = SqlGo_Commit(transaction)
+	error = StdSqlGo_Commit(transaction)
 	if error != nil {
 		return error
 	}

@@ -1,6 +1,6 @@
 #import "protocol"
-#import "map_go"
-#import "go_types"
+#import "std/map_go"
+#import "std/go_types"
 go_strings :: #system_library "go:strings";
 go_numbers :: #system_library "go:strconv";
 builtin :: #system_library "go:builtin";

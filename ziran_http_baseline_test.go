@@ -165,7 +165,7 @@ func (s *Server) baselineHandleSignedAppGrant(w http.ResponseWriter, r *http.Req
 		baselineWriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	serialized := JsonGo_Marshal(req.Grant)
+	serialized := StdJsonGo_Marshal(req.Grant)
 	grantBody, err := serialized.Value, serialized.Error
 	if err != nil {
 		baselineWriteError(w, http.StatusBadRequest, "invalid app grant")

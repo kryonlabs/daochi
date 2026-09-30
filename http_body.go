@@ -3,21 +3,21 @@ package main
 
 import io "io"
 
-// #import go_types
+// #import std_go_types
 func HttpBody_ReadJSON(writer ResponseWriter, request *Request, limit int64) JSONResult {
 	var result JSONResult = JSONResult{}
-	body := HttpGo_Body(request)
+	body := StdHttpGo_Body(request)
 	defer (io.ReadCloser).Close(body)
-	var value_0 ReadCloser = HttpGo_MaxBytesReader(writer, body, limit)
-	read := IoGo_ReadAll(Reader(value_0))
+	var value_0 ReadCloser = StdHttpGo_MaxBytesReader(writer, body, limit)
+	read := StdIoGo_ReadAll(Reader(value_0))
 	if read.Error != nil {
-		var value_1 Error = ErrorsGo_New("request body too large")
+		var value_1 Error = StdErrorsGo_New("request body too large")
 		result.Error = value_1
 		return result
 	}
-	var value_2 bool = JsonGo_Valid(read.Value)
+	var value_2 bool = StdJsonGo_Valid(read.Value)
 	if !value_2 {
-		var value_3 Error = ErrorsGo_New("invalid json")
+		var value_3 Error = StdErrorsGo_New("invalid json")
 		result.Error = value_3
 		return result
 	}

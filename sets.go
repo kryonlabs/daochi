@@ -3,7 +3,7 @@ package main
 
 import strings "strings"
 
-// #import map_go
+// #import std_map_go
 type StringSet = map[string]bool
 
 func Sets_FromEnvironment(raw string) StringSet {

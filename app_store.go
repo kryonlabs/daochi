@@ -6,7 +6,7 @@ import (
 	strings "strings"
 )
 
-// #import go_types
+// #import std_go_types
 // #import manifest
 // #import protocol
 type AppKeyResult struct {
@@ -155,14 +155,14 @@ const HydrateSQL = "\nSELECT manifest_version,manifest_json,manifest_hash,manife
 
 func AppStore_DecodeMetadata(features string, legacy string, app *AppRegistration) Error {
 	if strings.TrimSpace(features) != "" {
-		error := JsonGo_Unmarshal(TextGo_ToBytes(features), &(app.Features))
+		error := StdJsonGo_Unmarshal(StdTextGo_ToBytes(features), &(app.Features))
 		_ = error
 		if error != nil {
 			return error
 		}
 	}
 	if strings.TrimSpace(legacy) != "" {
-		error := JsonGo_Unmarshal(TextGo_ToBytes(legacy), &(app.LegacyProtocols))
+		error := StdJsonGo_Unmarshal(StdTextGo_ToBytes(legacy), &(app.LegacyProtocols))
 		_ = error
 		if error != nil {
 			return error
@@ -204,11 +204,11 @@ func AppStore_ReplacePolicies(transaction *Transaction, context Context, appID s
 
 func AppStore_UpsertTransaction(transaction *Transaction, context Context, app AppRegistration) Error {
 	status := strings.TrimSpace(app.Status)
-	features := JsonGo_Marshal(app.Features)
+	features := StdJsonGo_Marshal(app.Features)
 	if features.Error != nil {
 		return features.Error
 	}
-	legacy := JsonGo_Marshal(app.LegacyProtocols)
+	legacy := StdJsonGo_Marshal(app.LegacyProtocols)
 	if legacy.Error != nil {
 		return legacy.Error
 	}
@@ -229,7 +229,7 @@ func AppStore_UpsertTransaction(transaction *Transaction, context Context, app A
 	var value_11 string = app.MinClientVersion
 	var value_12 string = app.CurrentVersion
 	var value_13 string = app.CompatibilityUntil
-	var value_14 zir_29bde45da7d805e7_ExecResult = AppStore_InsertApp(value_0, value_1, value_2, value_3, value_4, value_5, value_6, value_7, value_8, value_9, int(value_10), value_11, value_12, value_13, TextGo_FromBytes(features.Value), TextGo_FromBytes(legacy.Value))
+	var value_14 zir_29bde45da7d805e7_ExecResult = AppStore_InsertApp(value_0, value_1, value_2, value_3, value_4, value_5, value_6, value_7, value_8, value_9, int(value_10), value_11, value_12, value_13, StdTextGo_FromBytes(features.Value), StdTextGo_FromBytes(legacy.Value))
 	inserted := value_14
 	if inserted.Error != nil {
 		return inserted.Error
@@ -299,7 +299,7 @@ func AppStore_Upsert(database *Database, context Context, app AppRegistration) E
 	if error != nil {
 		return error
 	}
-	return SqlGo_Commit(transaction)
+	return StdSqlGo_Commit(transaction)
 }
 
 func AppStore_UpsertSignedManifest(database *Database, context Context, value AppManifest, bytes []uint8, hash string, signature string, approval string) Error {
@@ -341,7 +341,7 @@ func AppStore_UpsertSignedManifest(database *Database, context Context, value Ap
 	var value_2 string = "\nINSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at,status)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8)\nON CONFLICT(app_id) DO UPDATE SET\n manifest_version=excluded.manifest_version,\n manifest_json=excluded.manifest_json,\n manifest_hash=excluded.manifest_hash,\n manifest_signature=excluded.manifest_signature,\n approval_signature=excluded.approval_signature,\n expires_at=excluded.expires_at,\n status=excluded.status,\n updated_at=CURRENT_TIMESTAMP\n"
 	var value_3 string = value.AppID
 	var value_4 int = value.ManifestVersion
-	var value_5 string = TextGo_FromBytes(bytes)
+	var value_5 string = StdTextGo_FromBytes(bytes)
 	var value_6 zir_29bde45da7d805e7_ExecResult = AppStore_InsertManifest(value_0, value_1, value_2, value_3, int(value_4), value_5, hash, signature, approval, int64(value.ExpiresAt), status)
 	written := value_6
 	if written.Error != nil {
@@ -384,7 +384,7 @@ func AppStore_UpsertSignedManifest(database *Database, context Context, value Ap
 	if error != nil {
 		return error
 	}
-	return SqlGo_Commit(transaction)
+	return StdSqlGo_Commit(transaction)
 }
 
 func AppStore_ActiveKey(database *Database, context Context, appID string, keyID string) AppKeyResult {
@@ -395,7 +395,7 @@ func AppStore_ActiveKey(database *Database, context Context, appID string, keyID
 	var value_1 Error = (*sql.Row).Scan(row, &(key.KeyID), &(key.Algorithm), &(key.PublicKey), &(key.Purpose), &(key.Status), &(key.ExpiresAt), &(key.CreatedAt))
 	error := value_1
 	var value_2 Error = error
-	if ErrorsGo_Is(value_2, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {
@@ -405,7 +405,7 @@ func AppStore_ActiveKey(database *Database, context Context, appID string, keyID
 	var value_3 bool = key.ExpiresAt > 0
 	var value_4 bool = value_3
 	if value_4 {
-		var value_5 int64 = TimeGo_Unix(TimeGo_Now())
+		var value_5 int64 = StdTimeGo_Unix(StdTimeGo_Now())
 		value_4 = (value_5 > key.ExpiresAt)
 	}
 	if value_4 {
@@ -426,7 +426,7 @@ func AppStore_HydrateManifest(database *Database, context Context, app *AppRegis
 	var value_3 bool = value_2
 	if value_3 {
 		var value_4 Error = error
-		var value_5 bool = ErrorsGo_Is(value_4, SqlGo_NoRows())
+		var value_5 bool = StdErrorsGo_Is(value_4, StdSqlGo_NoRows())
 		value_3 = !value_5
 	}
 	if value_3 {
@@ -434,7 +434,7 @@ func AppStore_HydrateManifest(database *Database, context Context, app *AppRegis
 	}
 	if manifestJSON != "" {
 		var value AppManifest = AppManifest{}
-		error = JsonGo_Unmarshal(TextGo_ToBytes(manifestJSON), &(value))
+		error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(manifestJSON), &(value))
 		if error != nil {
 			return error
 		}
@@ -469,7 +469,7 @@ func AppStore_Keys(database *Database, context Context, appID string) AppKeysRes
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	var keys []AppKey = nil
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var key AppKey = AppKey{}
 		var value_1 Error = (*sql.Rows).Scan(rows, &(key.KeyID), &(key.Algorithm), &(key.PublicKey), &(key.Purpose), &(key.Status), &(key.ExpiresAt), &(key.CreatedAt))
 		result.Error = value_1
@@ -479,7 +479,7 @@ func AppStore_Keys(database *Database, context Context, appID string) AppKeysRes
 		keys = append(keys, key)
 	}
 	result.Value = keys
-	var value_2 Error = SqlGo_RowsError(rows)
+	var value_2 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_2
 	return result
 }
@@ -495,7 +495,7 @@ func AppStore_Policies(database *Database, context Context, appID string) TokenP
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	var policies []TokenPolicy = nil
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var policy TokenPolicy = TokenPolicy{}
 		var value_1 Error = (*sql.Rows).Scan(rows, &(policy.AssetID), &(policy.Permission), &(policy.Status), &(policy.LegacyUnsignedUntil))
 		result.Error = value_1
@@ -505,7 +505,7 @@ func AppStore_Policies(database *Database, context Context, appID string) TokenP
 		policies = append(policies, policy)
 	}
 	result.Value = policies
-	var value_2 Error = SqlGo_RowsError(rows)
+	var value_2 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_2
 	return result
 }
@@ -518,7 +518,7 @@ func AppStore_Permission(database *Database, context Context, appID string, asse
 	var value_1 Error = (*sql.Row).Scan(row, &(policy.AssetID), &(policy.Permission), &(policy.Status), &(policy.LegacyUnsignedUntil))
 	error := value_1
 	var value_2 Error = error
-	if ErrorsGo_Is(value_2, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
 		return result
 	}
 	result.Value = policy
@@ -549,7 +549,7 @@ func AppStore_List(database *Database, context Context) AppsResult {
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	apps := make([]AppRegistration, int(0))
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var app AppRegistration = AppRegistration{}
 		features := ""
 		legacy := ""
@@ -565,7 +565,7 @@ func AppStore_List(database *Database, context Context) AppsResult {
 		}
 		apps = append(apps, app)
 	}
-	var value_3 Error = SqlGo_RowsError(rows)
+	var value_3 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_3
 	if result.Error != nil {
 		return result
@@ -593,7 +593,7 @@ func AppStore_ByID(database *Database, context Context, appID string) AppResult 
 	var value_1 Error = (*sql.Row).Scan(row, &(app.AppID), &(app.DisplayName), &(app.Description), &(app.HomepageURL), &(app.SourceURL), &(app.PublicKey), &(app.Status), &(app.AppSchemaVersion), &(app.MinClientVersion), &(app.CurrentVersion), &(app.CompatibilityUntil), &(features), &(legacy), &(app.CreatedAt), &(app.UpdatedAt))
 	error := value_1
 	var value_2 Error = error
-	if ErrorsGo_Is(value_2, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {
@@ -633,7 +633,7 @@ func AppStore_AllowsLegacyProtocol(database *Database, context Context, appID st
 	if loaded.Error != nil || !loaded.Found {
 		return result
 	}
-	today := TimeGo_Format(TimeGo_UTC(TimeGo_Now()), "2006-01-02")
+	today := StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02")
 	{
 		value_0 := loaded.Value.LegacyProtocols[:]
 		if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
@@ -681,7 +681,7 @@ func AppStore_Collections(database *Database, context Context, appID string) Col
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	collections := make([]AppCollection, int(0))
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var collection AppCollection = AppCollection{}
 		var value_1 Error = (*sql.Rows).Scan(rows, &(collection.AppID), &(collection.CollectionPrefix), &(collection.Visibility), &(collection.SchemaVersion), &(collection.Description), &(collection.CreatedAt))
 		result.Error = value_1
@@ -691,7 +691,7 @@ func AppStore_Collections(database *Database, context Context, appID string) Col
 		collections = append(collections, collection)
 	}
 	result.Value = collections
-	var value_2 Error = SqlGo_RowsError(rows)
+	var value_2 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_2
 	return result
 }
@@ -707,7 +707,7 @@ func AppStore_Capabilities(database *Database, context Context, appID string) Ca
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	values := make([]string, int(0))
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		value := ""
 		var value_1 Error = (*sql.Rows).Scan(rows, &(value))
 		result.Error = value_1
@@ -717,7 +717,7 @@ func AppStore_Capabilities(database *Database, context Context, appID string) Ca
 		values = append(values, value)
 	}
 	result.Value = values
-	var value_2 Error = SqlGo_RowsError(rows)
+	var value_2 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_2
 	return result
 }

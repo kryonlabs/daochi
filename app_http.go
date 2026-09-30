@@ -6,7 +6,7 @@ import (
 	strings "strings"
 )
 
-// #import go_types
+// #import std_go_types
 // #import protocol
 // #import manifest
 type Registry struct {
@@ -48,11 +48,11 @@ func AppHttp_Bearer(registry Registry, writer ResponseWriter, request *Request) 
 }
 
 func AppHttp_GrantFailure(writer ResponseWriter, user string, error Error, message string) {
-	if ErrorsGo_Is(error, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		Response_Error(writer, int(404), "app not found")
 		return
 	}
-	text := ErrorsGo_Message(error)
+	text := StdErrorsGo_Message(error)
 	var value_0 bool = strings.Contains(text, "private")
 	var value_1 bool = value_0
 	if !value_1 {
@@ -123,11 +123,11 @@ func AppHttp_AuthenticateAdmin(writer ResponseWriter, request *Request, expected
 }
 
 func AppHttp_List(registry Registry, writer ResponseWriter, request *Request) {
-	if HttpGo_Method(request) == "POST" {
+	if StdHttpGo_Method(request) == "POST" {
 		AppHttp_Register(registry, writer, request)
 		return
 	}
-	listed := AppStore_List(registry.Database, HttpGo_Context(request))
+	listed := AppStore_List(registry.Database, StdHttpGo_Context(request))
 	if listed.Error != nil {
 		slog.Error("list apps", "error", listed.Error)
 		Response_Error(writer, int(500), "apps failed")
@@ -139,8 +139,9 @@ func AppHttp_List(registry Registry, writer ResponseWriter, request *Request) {
 }
 
 func AppHttp_Route(registry Registry, writer ResponseWriter, request *Request) {
-	appID := strings.Trim(strings.TrimPrefix(UrlGo_Path(HttpGo_RequestURL(request)), "/api/v1/apps/"), "/")
-	context := HttpGo_Context(request)
+	var value_0 string = strings.Trim(strings.TrimPrefix(StdUrlGo_Path(StdHttpGo_RequestURL(request)), "/api/v1/apps/"), "/")
+	appID := value_0
+	context := StdHttpGo_Context(request)
 	if strings.HasSuffix(appID, "/collections") {
 		appID = strings.Trim(strings.TrimSuffix(appID, "/collections"), "/")
 		collections := AppStore_Collections(registry.Database, context, appID)
@@ -166,12 +167,12 @@ func AppHttp_Route(registry Registry, writer ResponseWriter, request *Request) {
 		Response_JSON(writer, int(200), value)
 		return
 	}
-	if HttpGo_Method(request) == "PUT" {
+	if StdHttpGo_Method(request) == "PUT" {
 		AppHttp_Register(registry, writer, request)
 		return
 	}
-	var value_0 bool = Identity_ValidNamespace(appID)
-	if !value_0 {
+	var value_1 bool = Identity_ValidNamespace(appID)
+	if !value_1 {
 		Response_Error(writer, int(404), "app not found")
 		return
 	}
@@ -195,11 +196,11 @@ func AppHttp_Register(registry Registry, writer ResponseWriter, request *Request
 	}
 	decoded := AppHttp_ReadRegistration(writer, request, registry.Configuration.MaxBodyBytes)
 	if decoded.Error != nil {
-		Response_Error(writer, int(400), ErrorsGo_Message(decoded.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(decoded.Error))
 		return
 	}
 	pathID := ""
-	path := UrlGo_Path(HttpGo_RequestURL(request))
+	path := StdUrlGo_Path(StdHttpGo_RequestURL(request))
 	if strings.HasPrefix(path, "/api/v1/apps/") {
 		pathID = strings.Trim(strings.TrimPrefix(path, "/api/v1/apps/"), "/")
 	}
@@ -207,7 +208,7 @@ func AppHttp_Register(registry Registry, writer ResponseWriter, request *Request
 		Response_Error(writer, int(400), "app_id path mismatch")
 		return
 	}
-	context := HttpGo_Context(request)
+	context := StdHttpGo_Context(request)
 	error := AppStore_Upsert(registry.Database, context, decoded.Value)
 	if error != nil {
 		slog.Error("register app", "app", LogSafety_LogText(decoded.Value.AppID), "error", error)
@@ -226,7 +227,7 @@ func AppHttp_Register(registry Registry, writer ResponseWriter, request *Request
 func AppHttp_RegisterSigned(registry Registry, writer ResponseWriter, request *Request) {
 	decoded := AppHttp_ReadSignedRegistration(writer, request, registry.Configuration.MaxBodyBytes)
 	if decoded.Error != nil {
-		Response_Error(writer, int(400), ErrorsGo_Message(decoded.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(decoded.Error))
 		return
 	}
 	value := decoded.Value
@@ -235,7 +236,7 @@ func AppHttp_RegisterSigned(registry Registry, writer ResponseWriter, request *R
 		HttpAuth_Respond(writer, registry.Counters, verified.Authentication)
 		return
 	}
-	context := HttpGo_Context(request)
+	context := StdHttpGo_Context(request)
 	var value_0 Error = AppStore_UpsertSignedManifest(registry.Database, context, value.Manifest, verified.Value, verified.Hash, value.ManifestSignature, value.ApprovalSignature)
 	error := value_0
 	if error != nil {
@@ -257,11 +258,11 @@ func AppHttp_Grants(registry Registry, writer ResponseWriter, request *Request) 
 	if user.Authentication.Error != nil || user.Authentication.Status != int(0) {
 		return
 	}
-	context := HttpGo_Context(request)
-	if HttpGo_Method(request) == "POST" {
+	context := StdHttpGo_Context(request)
+	if StdHttpGo_Method(request) == "POST" {
 		decoded := AppHttp_ReadGrant(writer, request, registry.Configuration.MaxBodyBytes)
 		if decoded.Error != nil {
-			Response_Error(writer, int(400), ErrorsGo_Message(decoded.Error))
+			Response_Error(writer, int(400), StdErrorsGo_Message(decoded.Error))
 			return
 		}
 		created := AppGrants_Create(registry.Database, context, user.Value, decoded.Value, registry.MissingUser)
@@ -291,11 +292,11 @@ func AppHttp_GrantSigned(registry Registry, writer ResponseWriter, request *Requ
 	decoded := AppHttp_ReadSignedGrant(writer, request, registry.Configuration.MaxBodyBytes)
 	if decoded.Error != nil {
 		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), ErrorsGo_Message(decoded.Error))
+		Response_Error(value_0, int(400), StdErrorsGo_Message(decoded.Error))
 		return
 	}
 	value := decoded.Value
-	encoded := JsonGo_Marshal(value.Grant)
+	encoded := StdJsonGo_Marshal(value.Grant)
 	if encoded.Error != nil {
 		Response_Error(writer, int(400), "invalid app grant")
 		return
@@ -308,7 +309,7 @@ func AppHttp_GrantSigned(registry Registry, writer ResponseWriter, request *Requ
 	if value.Tx.BodySHA256 == "" {
 		value.Tx.BodySHA256 = hash
 	}
-	context := HttpGo_Context(request)
+	context := StdHttpGo_Context(request)
 	var value_1 AuthenticationResult = SignedTx_Verify(registry.Database, context, request, encoded.Value, value.Tx, user.Value, value.Grant.TargetAppID, registry.Verify, registry.ReplayError)
 	verified := value_1
 	if verified.Error != nil || verified.Status != int(0) {
@@ -334,15 +335,15 @@ func AppHttp_GrantRoute(registry Registry, writer ResponseWriter, request *Reque
 	if user.Authentication.Error != nil || user.Authentication.Status != int(0) {
 		return
 	}
-	var value_0 string = strings.Trim(strings.TrimPrefix(UrlGo_Path(HttpGo_RequestURL(request)), "/api/v1/account/app-grants/"), "/")
+	var value_0 string = strings.Trim(strings.TrimPrefix(StdUrlGo_Path(StdHttpGo_RequestURL(request)), "/api/v1/account/app-grants/"), "/")
 	id := value_0
 	if id == "" {
 		Response_Error(writer, int(404), "app grant not found")
 		return
 	}
-	error := AppGrants_Revoke(registry.Database, HttpGo_Context(request), user.Value, id)
+	error := AppGrants_Revoke(registry.Database, StdHttpGo_Context(request), user.Value, id)
 	if error != nil {
-		if ErrorsGo_Is(error, SqlGo_NoRows()) {
+		if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 			Response_Error(writer, int(404), "app grant not found")
 			return
 		}
@@ -360,10 +361,10 @@ func AppHttp_Records(registry Registry, writer ResponseWriter, request *Request)
 	if user.Authentication.Error != nil || user.Authentication.Status != int(0) {
 		return
 	}
-	query := UrlGo_Query(HttpGo_RequestURL(request))
-	source := strings.TrimSpace(UrlGo_Value(query, "source_app_id"))
-	target := strings.TrimSpace(UrlGo_Value(query, "target_app_id"))
-	prefix := strings.TrimSpace(UrlGo_Value(query, "collection_prefix"))
+	query := StdUrlGo_Query(StdHttpGo_RequestURL(request))
+	source := strings.TrimSpace(StdUrlGo_Value(query, "source_app_id"))
+	target := strings.TrimSpace(StdUrlGo_Value(query, "target_app_id"))
+	prefix := strings.TrimSpace(StdUrlGo_Value(query, "collection_prefix"))
 	var value_0 bool = Identity_ValidNamespace(source)
 	var value_1 bool = !value_0
 	if !value_1 {
@@ -384,7 +385,7 @@ func AppHttp_Records(registry Registry, writer ResponseWriter, request *Request)
 		HttpAuth_Respond(writer, registry.Counters, header.Authentication)
 		return
 	}
-	context := HttpGo_Context(request)
+	context := StdHttpGo_Context(request)
 	var emptyBody []uint8 = nil
 	var value_5 AuthenticationResult = SignedTx_Verify(registry.Database, context, request, emptyBody, header.Value, user.Value, target, registry.Verify, registry.ReplayError)
 	verified := value_5
@@ -400,16 +401,16 @@ func AppHttp_Records(registry Registry, writer ResponseWriter, request *Request)
 	var value_11 GrantedRecordsResult = AppGrants_AuthorizedRecords(registry.Database, context, user.Value, source, target, prefix, registry.ScopeNotOwned, registry.MissingUser)
 	records := value_11
 	if records.Error != nil {
-		if ErrorsGo_Is(records.Error, registry.MissingUser) {
+		if StdErrorsGo_Is(records.Error, registry.MissingUser) {
 			Response_Error(writer, int(403), "app grant required")
 			return
 		}
-		if ErrorsGo_Is(records.Error, registry.ScopeNotOwned) {
+		if StdErrorsGo_Is(records.Error, registry.ScopeNotOwned) {
 			Response_Error(writer, int(400), "source app does not own collection scope")
 			return
 		}
 		var value_12 Error = records.Error
-		if ErrorsGo_Is(value_12, SqlGo_NoRows()) {
+		if StdErrorsGo_Is(value_12, StdSqlGo_NoRows()) {
 			Response_Error(writer, int(404), "app not found")
 			return
 		}

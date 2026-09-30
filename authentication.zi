@@ -1,4 +1,4 @@
-#import "go_types"
+#import "std/go_types"
 
 VerifySignature :: #type (publicKey: []u8, message: []u8, signature: []u8) -> bool;
 

@@ -1,4 +1,4 @@
-#import "vec"
+#import "std/vec"
 
 go_strings :: #system_library "go:strings";
 TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";

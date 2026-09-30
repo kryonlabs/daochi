@@ -7,7 +7,7 @@ import (
 	strings "strings"
 )
 
-// #import go_types
+// #import std_go_types
 type ParsedTimestamp struct {
 	Value int64
 	Error Error
@@ -24,7 +24,7 @@ const NodeAuthenticationWindowSeconds = 300
 
 func NodeAuth_RandomHex(count int) string {
 	bytes := make([]uint8, int(count))
-	filled := RandomGo_Fill(bytes)
+	filled := StdRandomGo_Fill(bytes)
 	if filled.Error != nil {
 		panic(filled.Error)
 	}
@@ -32,54 +32,54 @@ func NodeAuth_RandomHex(count int) string {
 }
 
 func NodeAuth_Sign(nodeID string, key PrivateKey, request *Request, body []uint8) {
-	timestamp := strconv.FormatInt(int64(TimeGo_Unix(TimeGo_Now())), int(int(10)))
+	timestamp := strconv.FormatInt(int64(StdTimeGo_Unix(StdTimeGo_Now())), int(int(10)))
 	nonce := NodeAuth_RandomHex(int(16))
-	var value_0 string = Signing_NodeRequestMessage("daochi-node-request-v1", nodeID, timestamp, nonce, HttpGo_Method(request), UrlGo_EscapedPath(HttpGo_RequestURL(request)), body)
+	var value_0 string = Signing_NodeRequestMessage("daochi-node-request-v1", nodeID, timestamp, nonce, StdHttpGo_Method(request), StdUrlGo_EscapedPath(StdHttpGo_RequestURL(request)), body)
 	message := value_0
-	signature := Ed25519Go_Sign(key, TextGo_ToBytes(message))
-	var value_1 string = TextGo_FromBytes(signature)
+	signature := StdEd25519Go_Sign(key, StdTextGo_ToBytes(message))
+	var value_1 string = StdTextGo_FromBytes(signature)
 	encoded := Codec_EncodeBase64(value_1, true, false)
-	header := HttpGo_Headers(request)
-	HttpGo_SetHeader(header, "X-Daochi-Node-ID", nodeID)
-	HttpGo_SetHeader(header, "X-Daochi-Node-Time", timestamp)
-	HttpGo_SetHeader(header, "X-Daochi-Node-Nonce", nonce)
-	HttpGo_SetHeader(header, "X-Daochi-Node-Signature", encoded.Value)
+	header := StdHttpGo_Headers(request)
+	StdHttpGo_SetHeader(header, "X-Daochi-Node-ID", nodeID)
+	StdHttpGo_SetHeader(header, "X-Daochi-Node-Time", timestamp)
+	StdHttpGo_SetHeader(header, "X-Daochi-Node-Nonce", nonce)
+	StdHttpGo_SetHeader(header, "X-Daochi-Node-Signature", encoded.Value)
 }
 
 func NodeAuth_Verify(database *Database, context Context, request *Request, body []uint8) Error {
-	header := HttpGo_Headers(request)
-	nodeID := strings.TrimSpace(HttpGo_HeaderValue(header, "X-Daochi-Node-ID"))
-	timestampText := strings.TrimSpace(HttpGo_HeaderValue(header, "X-Daochi-Node-Time"))
-	nonce := strings.TrimSpace(HttpGo_HeaderValue(header, "X-Daochi-Node-Nonce"))
+	header := StdHttpGo_Headers(request)
+	nodeID := strings.TrimSpace(StdHttpGo_HeaderValue(header, "X-Daochi-Node-ID"))
+	timestampText := strings.TrimSpace(StdHttpGo_HeaderValue(header, "X-Daochi-Node-Time"))
+	nonce := strings.TrimSpace(StdHttpGo_HeaderValue(header, "X-Daochi-Node-Nonce"))
 	var value_0 bool = Identity_ValidUserID(nodeID)
 	if !value_0 || nonce == "" || int64(len(nonce)) > 128 {
-		return ErrorsGo_New("invalid node authentication")
+		return StdErrorsGo_New("invalid node authentication")
 	}
 	timestamp := NodeAuth_ParseInteger(timestampText, int(int(10)), int(int(64)))
 	if timestamp.Error != nil {
-		return ErrorsGo_New("invalid node authentication time")
+		return StdErrorsGo_New("invalid node authentication time")
 	}
-	now := TimeGo_Unix(TimeGo_Now())
+	now := StdTimeGo_Unix(StdTimeGo_Now())
 	if timestamp.Value < now-300 || timestamp.Value > now+300 {
-		return ErrorsGo_New("expired node authentication")
+		return StdErrorsGo_New("expired node authentication")
 	}
 	peer := PeerTrust_PublicKey(database, context, nodeID)
 	if peer.Error != nil {
 		return peer.Error
 	}
 	if !peer.Found {
-		return ErrorsGo_New("node is not paired")
+		return StdErrorsGo_New("node is not paired")
 	}
-	var value_1 string = HttpGo_HeaderValue(header, "X-Daochi-Node-Signature")
+	var value_1 string = StdHttpGo_HeaderValue(header, "X-Daochi-Node-Signature")
 	signature := Codec_DecodeBase64(value_1, true, false)
 	if signature.Error != "" || int64(len(signature.Value)) != 64 {
-		return ErrorsGo_New("invalid node signature")
+		return StdErrorsGo_New("invalid node signature")
 	}
-	var value_2 string = Signing_NodeRequestMessage("daochi-node-request-v1", nodeID, timestampText, nonce, HttpGo_Method(request), UrlGo_EscapedPath(HttpGo_RequestURL(request)), body)
+	var value_2 string = Signing_NodeRequestMessage("daochi-node-request-v1", nodeID, timestampText, nonce, StdHttpGo_Method(request), StdUrlGo_EscapedPath(StdHttpGo_RequestURL(request)), body)
 	message := value_2
-	var value_3 bool = Ed25519Go_Verify(peer.Value, TextGo_ToBytes(message), TextGo_ToBytes(signature.Value))
+	var value_3 bool = StdEd25519Go_Verify(peer.Value, StdTextGo_ToBytes(message), StdTextGo_ToBytes(signature.Value))
 	if !value_3 {
-		return ErrorsGo_New("invalid node signature")
+		return StdErrorsGo_New("invalid node signature")
 	}
 	return NodeNonce_Consume(database, context, nodeID, nonce, timestamp.Value+300)
 }

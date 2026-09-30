@@ -6,7 +6,7 @@ import (
 	strings "strings"
 )
 
-// #import go_types
+// #import std_go_types
 // #import metrics
 type UserHeaderResult struct {
 	Value string
@@ -30,9 +30,9 @@ func HttpAuth_CutPrefix(Value string, Prefix string) PrefixResult {
 }
 
 func HttpAuth_HeaderAlias(request *Request, names []string) string {
-	headers := HttpGo_Headers(request)
+	headers := StdHttpGo_Headers(request)
 	for _, name := range names {
-		value := strings.TrimSpace(HttpGo_HeaderValue(headers, name))
+		value := strings.TrimSpace(StdHttpGo_HeaderValue(headers, name))
 		if value != "" {
 			return value
 		}
@@ -42,10 +42,10 @@ func HttpAuth_HeaderAlias(request *Request, names []string) string {
 
 func HttpAuth_UserHeader(request *Request) UserHeaderResult {
 	var result UserHeaderResult = UserHeaderResult{}
-	headers := HttpGo_Headers(request)
+	headers := StdHttpGo_Headers(request)
 	names := [3]string{"X-Daochi-User", "X-Ksync-User", "X-Inbe-User"}
 	for _, name := range names {
-		value := strings.ToLower(strings.TrimSpace(HttpGo_HeaderValue(headers, name)))
+		value := strings.ToLower(strings.TrimSpace(StdHttpGo_HeaderValue(headers, name)))
 		if value != "" {
 			result.Value = value
 			result.Name = name
@@ -63,7 +63,7 @@ func HttpAuth_RequireAdmin(writer ResponseWriter, request *Request, expected str
 	names := [2]string{"X-Daochi-Admin", "X-Ksync-Admin"}
 	_ = names
 	provided := HttpAuth_HeaderAlias(request, names[0:2:2])
-	var value_0 bool = ConstantTime_ConstantTimeTextEqual(provided, expected)
+	var value_0 bool = StdConstantTime_ConstantTimeTextEqual(provided, expected)
 	if !value_0 {
 		Response_Error(writer, int(401), "admin token required")
 		return false
@@ -75,17 +75,17 @@ func HttpAuth_RequireLocalOperator(writer ResponseWriter, request *Request, admi
 	if adminToken != "" {
 		return HttpAuth_RequireAdmin(writer, request, adminToken)
 	}
-	address := HttpGo_RemoteAddress(request)
-	split := NetGo_SplitHostPort(address)
+	address := StdHttpGo_RemoteAddress(request)
+	split := StdNetGo_SplitHostPort(address)
 	host := split.Host
 	if split.Error != nil {
 		host = address
 	}
-	ip := NetGo_ParseIP(host)
-	var value_0 bool = NetGo_ValidIP(ip)
+	ip := StdNetGo_ParseIP(host)
+	var value_0 bool = StdNetGo_ValidIP(ip)
 	var value_1 bool = !value_0
 	if !value_1 {
-		var value_2 bool = NetGo_IsLoopback(ip)
+		var value_2 bool = StdNetGo_IsLoopback(ip)
 		value_1 = !value_2
 	}
 	if value_1 {
@@ -97,7 +97,7 @@ func HttpAuth_RequireLocalOperator(writer ResponseWriter, request *Request, admi
 
 func HttpAuth_AuthenticateToken(database *Database, request *Request, secret []uint8) UserAuthenticationResult {
 	var result UserAuthenticationResult = UserAuthenticationResult{}
-	header := strings.TrimSpace(HttpGo_HeaderValue(HttpGo_Headers(request), "Authorization"))
+	header := strings.TrimSpace(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "Authorization"))
 	bearer := HttpAuth_CutPrefix(header, "Bearer ")
 	var value_0 bool = !bearer.Found
 	if !value_0 {
@@ -109,13 +109,13 @@ func HttpAuth_AuthenticateToken(database *Database, request *Request, secret []u
 		result.Authentication = value_2
 		return result
 	}
-	verified := Token_VerifyAuthToken(secret, strings.TrimSpace(bearer.Value), TimeGo_Unix(TimeGo_Now()))
+	verified := Token_VerifyAuthToken(secret, strings.TrimSpace(bearer.Value), StdTimeGo_Unix(StdTimeGo_Now()))
 	if verified.Error != "" {
 		var value_3 AuthenticationResult = Authentication_Failure(int(401), "invalid bearer token")
 		result.Authentication = value_3
 		return result
 	}
-	context := HttpGo_Context(request)
+	context := StdHttpGo_Context(request)
 	account := AccountKeys_PublicKey(database, context, verified.Value)
 	if account.Error != nil {
 		var value_4 AuthenticationResult = Authentication_NativeFailure(account.Error)
@@ -123,7 +123,7 @@ func HttpAuth_AuthenticateToken(database *Database, request *Request, secret []u
 		return result
 	}
 	if !account.Found {
-		if UrlGo_Path(HttpGo_RequestURL(request)) == "/api/v1/sync" {
+		if StdUrlGo_Path(StdHttpGo_RequestURL(request)) == "/api/v1/sync" {
 			deleted := AccountState_Tombstoned(database, context, verified.Value)
 			if deleted.Error != nil {
 				var value_5 AuthenticationResult = Authentication_NativeFailure(deleted.Error)

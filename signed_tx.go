@@ -6,7 +6,7 @@ import (
 	strings "strings"
 )
 
-// #import go_types
+// #import std_go_types
 // #import transaction
 type SignedHeaderResult struct {
 	Value          SignedTxEnvelope
@@ -43,7 +43,7 @@ const MaxFutureSkew = 900000000000
 
 func SignedTx_ReadHeader(request *Request) SignedHeaderResult {
 	var result SignedHeaderResult = SignedHeaderResult{}
-	value := strings.TrimSpace(HttpGo_HeaderValue(HttpGo_Headers(request), "X-Daochi-Tx"))
+	value := strings.TrimSpace(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "X-Daochi-Tx"))
 	if value == "" {
 		var value_0 AuthenticationResult = Authentication_Failure(int(401), "signed transaction required")
 		result.Authentication = value_0
@@ -64,7 +64,7 @@ func SignedTx_ReadHeader(request *Request) SignedHeaderResult {
 		raw = decoded.Value
 	}
 	var tx SignedTxEnvelope = SignedTxEnvelope{}
-	var value_3 Error = JsonGo_Unmarshal(TextGo_ToBytes(raw), &(tx))
+	var value_3 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(raw), &(tx))
 	if value_3 != nil {
 		var value_4 AuthenticationResult = Authentication_Failure(int(400), "invalid signed transaction")
 		result.Authentication = value_4
@@ -101,10 +101,10 @@ func SignedTx_Verify(database *Database, context Context, request *Request, body
 	if !value_4 || tx.AppID != appID {
 		return Authentication_Failure(int(401), "signed transaction app mismatch")
 	}
-	var value_5 bool = tx.Method != HttpGo_Method(request)
+	var value_5 bool = tx.Method != StdHttpGo_Method(request)
 	var value_6 bool = value_5
 	if !value_6 {
-		var value_7 bool = tx.Path != UrlGo_Path(HttpGo_RequestURL(request))
+		var value_7 bool = tx.Path != StdUrlGo_Path(StdHttpGo_RequestURL(request))
 		value_6 = value_7
 	}
 	if value_6 {
@@ -113,11 +113,11 @@ func SignedTx_Verify(database *Database, context Context, request *Request, body
 	if tx.BodySHA256 != Signing_SHA256Hex(body) {
 		return Authentication_Failure(int(401), "signed transaction body mismatch")
 	}
-	now := TimeGo_Now()
-	var value_8 bool = tx.ExpiresAt <= TimeGo_Unix(now)
+	now := StdTimeGo_Now()
+	var value_8 bool = tx.ExpiresAt <= StdTimeGo_Unix(now)
 	var value_9 bool = value_8
 	if !value_9 {
-		var value_10 bool = TimeGo_After(TimeGo_FromUnix(tx.ExpiresAt, 0), TimeGo_Add(now, Duration(900000000000)))
+		var value_10 bool = StdTimeGo_After(StdTimeGo_FromUnix(tx.ExpiresAt, 0), StdTimeGo_Add(now, Duration(900000000000)))
 		value_9 = value_10
 	}
 	if value_9 {
@@ -134,9 +134,9 @@ func SignedTx_Verify(database *Database, context Context, request *Request, body
 	if signature.Error != "" || int64(len(signature.Value)) != 2420 {
 		return Authentication_Failure(int(400), "invalid signed transaction signature")
 	}
-	message := TextGo_ToBytes(Transaction_CanonicalMessage("daochi-tx-v1", tx))
+	message := StdTextGo_ToBytes(Transaction_CanonicalMessage("daochi-tx-v1", tx))
 	var value_11 VerifySignature = verifySignature
-	var value_12 bool = value_11(account.Value, message, TextGo_ToBytes(signature.Value))
+	var value_12 bool = value_11(account.Value, message, StdTextGo_ToBytes(signature.Value))
 	if !value_12 {
 		return Authentication_Failure(int(401), "signed transaction rejected")
 	}
@@ -146,7 +146,7 @@ func SignedTx_Verify(database *Database, context Context, request *Request, body
 	}
 	recorded := SignedTx_Record(database, context, tx, replay)
 	if recorded != nil {
-		if ErrorsGo_Is(recorded, replay) {
+		if StdErrorsGo_Is(recorded, replay) {
 			return Authentication_Failure(int(409), "signed transaction replay")
 		}
 		return Authentication_NativeFailure(recorded)
@@ -175,8 +175,8 @@ func SignedTx_VerifyDevice(database *Database, context Context, tx SignedTxEnvel
 	if signature.Error != "" || int64(len(signature.Value)) != 64 {
 		return Authentication_Failure(int(400), "invalid device signature")
 	}
-	var value_1 []uint8 = TextGo_ToBytes(publicKey.Value)
-	var value_2 bool = Ed25519Go_Verify(PublicKey(value_1), message, TextGo_ToBytes(signature.Value))
+	var value_1 []uint8 = StdTextGo_ToBytes(publicKey.Value)
+	var value_2 bool = StdEd25519Go_Verify(PublicKey(value_1), message, StdTextGo_ToBytes(signature.Value))
 	if !value_2 {
 		return Authentication_Failure(int(401), "device signature rejected")
 	}
@@ -184,7 +184,7 @@ func SignedTx_VerifyDevice(database *Database, context Context, tx SignedTxEnvel
 }
 
 func SignedTx_Record(database *Database, context Context, tx SignedTxEnvelope, replay Error) Error {
-	var value_0 zir_773b400a7b2b4942_ExecResult = SignedTx_DeleteExpired(database, context, "DELETE FROM server_signed_transactions WHERE expires_at<?1", int64(TimeGo_Unix(TimeGo_Now())))
+	var value_0 zir_773b400a7b2b4942_ExecResult = SignedTx_DeleteExpired(database, context, "DELETE FROM server_signed_transactions WHERE expires_at<?1", int64(StdTimeGo_Unix(StdTimeGo_Now())))
 	deleted := value_0
 	if deleted.Error != nil {
 		return deleted.Error
@@ -195,7 +195,7 @@ func SignedTx_Record(database *Database, context Context, tx SignedTxEnvelope, r
 	var value_3 bool = inserted.Error != nil
 	var value_4 bool = value_3
 	if value_4 {
-		var value_5 bool = strings.Contains(ErrorsGo_Message(inserted.Error), "UNIQUE")
+		var value_5 bool = strings.Contains(StdErrorsGo_Message(inserted.Error), "UNIQUE")
 		value_4 = value_5
 	}
 	if value_4 {

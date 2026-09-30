@@ -9,11 +9,16 @@ import subprocess
 import tempfile
 
 
+def project_flags(repo):
+    if (repo / "ziran.local.toml").is_file():
+        return ["--project"]
+    return ["--project", "--locked"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
-    parser.add_argument("--compiler", default=os.environ.get("ZI2GO", "../ziran/build/bin/zi2go"))
-    parser.add_argument("--std", default=os.environ.get("ZIRAN_STD", "../ziran/std"))
+    parser.add_argument("--ziran", default=os.environ.get("ZIRAN", "ziran"))
     args = parser.parse_args()
     repo = Path(__file__).resolve().parent.parent
     sources = sorted(path.name for path in repo.glob("*.zi"))
@@ -24,10 +29,11 @@ def main():
     env.pop("WAYLAND_DISPLAY", None)
     build = repo / "build"
     build.mkdir(exist_ok=True)
+    env.setdefault("XDG_CACHE_HOME", str(build / "package-cache"))
     with tempfile.TemporaryDirectory(prefix="zi-go-", dir=build) as output:
         subprocess.run([
-            args.compiler, "--no-main", "--pkg", "main", "--root", ".",
-            "--module-path", args.std, "-o", output, *sources,
+            args.ziran, "build", *project_flags(repo), "--target=go",
+            "--no-main", "--pkg", "main", "-o", output, *sources,
         ], cwd=repo, env=env, check=True)
         generated = sorted(Path(output).glob("*.go"))
         subprocess.run(["gofmt", "-w", *(str(path) for path in generated)],

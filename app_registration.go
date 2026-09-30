@@ -3,7 +3,7 @@ package main
 
 import strings "strings"
 
-// #import go_types
+// #import std_go_types
 // #import manifest
 // #import protocol
 type SignedRegistrationResult struct {
@@ -65,16 +65,16 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 	}
 	var value_10 bool = Identity_ValidNamespace(request.AppID)
 	if !value_10 {
-		return ErrorsGo_New("invalid app_id")
+		return StdErrorsGo_New("invalid app_id")
 	}
 	if request.DisplayName == "" || int64(len(request.DisplayName)) > 80 {
-		return ErrorsGo_New("invalid display_name")
+		return StdErrorsGo_New("invalid display_name")
 	}
 	if request.Status != "active" && request.Status != "suspended" {
-		return ErrorsGo_New("invalid status")
+		return StdErrorsGo_New("invalid status")
 	}
 	if request.AppSchemaVersion < int(0) || request.AppSchemaVersion > int(65535) {
-		return ErrorsGo_New("invalid app_schema_version")
+		return StdErrorsGo_New("invalid app_schema_version")
 	}
 	var value_11 bool = request.CompatibilityUntil != ""
 	var value_12 bool = value_11
@@ -83,11 +83,11 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 		value_12 = !value_13
 	}
 	if value_12 {
-		return ErrorsGo_New("invalid compatibility_until")
+		return StdErrorsGo_New("invalid compatibility_until")
 	}
 	var value_14 bool = int64(len(request.Collections)) > 64 || int64(len(request.Capabilities)) > 64 || int64(len(request.Features)) > 128
 	if value_14 || int64(len(request.LegacyProtocols)) > 64 || int64(len(request.TokenPolicies)) > 64 {
-		return ErrorsGo_New("too many app fields")
+		return StdErrorsGo_New("too many app fields")
 	}
 	var index int64 = 0
 	for index < int64(len(request.Collections)) {
@@ -100,7 +100,7 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 		var value_17 string = strings.TrimSpace(collection.Description)
 		collection.Description = value_17
 		if collection.SchemaVersion < int(0) {
-			return ErrorsGo_New("invalid schema_version")
+			return StdErrorsGo_New("invalid schema_version")
 		}
 		var value_18 bool = Scope_ValidCollectionPrefix(collection.CollectionPrefix)
 		var value_19 bool = !value_18
@@ -114,7 +114,7 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 			value_21 = !value_22
 		}
 		if value_21 {
-			return ErrorsGo_New("invalid app collection")
+			return StdErrorsGo_New("invalid app collection")
 		}
 		index++
 	}
@@ -124,7 +124,7 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 		request.Capabilities[index] = value_23
 		var value_24 bool = Identity_ValidNamespace(request.Capabilities[index])
 		if !value_24 {
-			return ErrorsGo_New("invalid capability")
+			return StdErrorsGo_New("invalid capability")
 		}
 		index++
 	}
@@ -137,7 +137,7 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 		feature.Description = value_26
 		var value_27 bool = Identity_ValidNamespace(feature.ID)
 		if !value_27 || int64(len(feature.Collections)) > 16 {
-			return ErrorsGo_New("invalid app feature")
+			return StdErrorsGo_New("invalid app feature")
 		}
 		var inner int64 = 0
 		for inner < int64(len(feature.Collections)) {
@@ -145,7 +145,7 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 			feature.Collections[inner] = value_28
 			var value_29 bool = Scope_DeclaresCollection(request.Collections, feature.Collections[inner])
 			if !value_29 {
-				return ErrorsGo_New("invalid app feature collection")
+				return StdErrorsGo_New("invalid app feature collection")
 			}
 			inner++
 		}
@@ -174,7 +174,7 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 			value_38 = !value_39
 		}
 		if value_38 {
-			return ErrorsGo_New("invalid legacy protocol")
+			return StdErrorsGo_New("invalid legacy protocol")
 		}
 		index++
 	}
@@ -198,11 +198,11 @@ func AppRegistration_NormalizeRegistration(request *AppRegistration) Error {
 		var value_48 bool = value_47
 		if !value_48 {
 			var value_49 int64 = policy.LegacyUnsignedUntil
-			var value_50 bool = value_49 > TimeGo_Unix(TimeGo_Add(TimeGo_Now(), Duration(31536000000000000)))
+			var value_50 bool = value_49 > StdTimeGo_Unix(StdTimeGo_Add(StdTimeGo_Now(), Duration(31536000000000000)))
 			value_48 = value_50
 		}
 		if value_48 {
-			return ErrorsGo_New("invalid token policy")
+			return StdErrorsGo_New("invalid token policy")
 		}
 		index++
 	}
@@ -233,16 +233,16 @@ func AppRegistration_NormalizeGrant(grant *AppGrantRequest) Error {
 		value_7 = !value_8
 	}
 	if value_7 || grant.Permission != "read" {
-		return ErrorsGo_New("invalid app grant")
+		return StdErrorsGo_New("invalid app grant")
 	}
 	return nil
 }
 
 func AppRegistration_Decode(body []uint8) AppDecodeResult {
 	var result AppDecodeResult = AppDecodeResult{}
-	var value_0 Error = JsonGo_Unmarshal(body, &(result.Value))
+	var value_0 Error = StdJsonGo_Unmarshal(body, &(result.Value))
 	if value_0 != nil {
-		var value_1 Error = ErrorsGo_New("invalid json")
+		var value_1 Error = StdErrorsGo_New("invalid json")
 		result.Error = value_1
 		return result
 	}
@@ -253,9 +253,9 @@ func AppRegistration_Decode(body []uint8) AppDecodeResult {
 
 func AppRegistration_DecodeGrant(body []uint8) GrantDecodeResult {
 	var result GrantDecodeResult = GrantDecodeResult{}
-	var value_0 Error = JsonGo_Unmarshal(body, &(result.Value))
+	var value_0 Error = StdJsonGo_Unmarshal(body, &(result.Value))
 	if value_0 != nil {
-		var value_1 Error = ErrorsGo_New("invalid json")
+		var value_1 Error = StdErrorsGo_New("invalid json")
 		result.Error = value_1
 		return result
 	}
@@ -266,9 +266,9 @@ func AppRegistration_DecodeGrant(body []uint8) GrantDecodeResult {
 
 func AppRegistration_DecodeSignedGrant(body []uint8) SignedGrantDecodeResult {
 	var result SignedGrantDecodeResult = SignedGrantDecodeResult{}
-	var value_0 Error = JsonGo_Unmarshal(body, &(result.Value))
+	var value_0 Error = StdJsonGo_Unmarshal(body, &(result.Value))
 	if value_0 != nil {
-		var value_1 Error = ErrorsGo_New("invalid json")
+		var value_1 Error = StdErrorsGo_New("invalid json")
 		result.Error = value_1
 		return result
 	}
@@ -283,9 +283,9 @@ func AppRegistration_DecodeSignedGrant(body []uint8) SignedGrantDecodeResult {
 
 func AppRegistration_DecodeSigned(body []uint8) SignedRegistrationResult {
 	var result SignedRegistrationResult = SignedRegistrationResult{}
-	var value_0 Error = JsonGo_Unmarshal(body, &(result.Value))
+	var value_0 Error = StdJsonGo_Unmarshal(body, &(result.Value))
 	if value_0 != nil {
-		var value_1 Error = ErrorsGo_New("invalid json")
+		var value_1 Error = StdErrorsGo_New("invalid json")
 		result.Error = value_1
 		return result
 	}
@@ -295,9 +295,9 @@ func AppRegistration_DecodeSigned(body []uint8) SignedRegistrationResult {
 	var value_3 string = strings.TrimSpace(result.Value.ApprovalSignature)
 	result.Value.ApprovalSignature = value_3
 	var value_4 AppManifest = result.Value.Manifest
-	problem := Manifest_Validate(value_4, TimeGo_Unix(TimeGo_Now()))
+	problem := Manifest_Validate(value_4, StdTimeGo_Unix(StdTimeGo_Now()))
 	if problem != "" {
-		var value_5 Error = ErrorsGo_New(problem)
+		var value_5 Error = StdErrorsGo_New(problem)
 		result.Error = value_5
 	}
 	return result
@@ -311,7 +311,7 @@ func AppRegistration_Verify(request SignedAppRegistrationRequest, nodeKey Public
 		result.Authentication = value_0
 		return result
 	}
-	encoded := JsonGo_Marshal(request.Manifest)
+	encoded := StdJsonGo_Marshal(request.Manifest)
 	if encoded.Error != nil {
 		var value_1 AuthenticationResult = Authentication_NativeFailure(encoded.Error)
 		result.Authentication = value_1
@@ -319,35 +319,35 @@ func AppRegistration_Verify(request SignedAppRegistrationRequest, nodeKey Public
 	}
 	hash := Signing_SHA256Hex(encoded.Value)
 	decoded := Codec_DecodeBinaryField(request.ManifestSignature)
-	signature := TextGo_ToBytes(decoded.Value)
+	signature := StdTextGo_ToBytes(decoded.Value)
 	if decoded.Error != "" || int64(len(signature)) != 64 {
 		var value_2 AuthenticationResult = Authentication_Failure(int(400), "invalid manifest signature")
 		result.Authentication = value_2
 		return result
 	}
-	var value_3 string = TextGo_FromBytes(encoded.Value)
+	var value_3 string = StdTextGo_FromBytes(encoded.Value)
 	parts := [2]string{"daochi-app-manifest-v1", value_3}
 	_ = parts
-	message := TextGo_ToBytes(strings.Join(parts[0:2:2], "\n"))
+	message := StdTextGo_ToBytes(strings.Join(parts[0:2:2], "\n"))
 	var value_4 AppManifest = request.Manifest
 	var value_5 []uint8 = message
 	var value_6 []uint8 = signature
-	var value_7 bool = Manifest_SignedByActiveKey(value_4, value_5, value_6, TimeGo_Unix(TimeGo_Now()))
+	var value_7 bool = Manifest_SignedByActiveKey(value_4, value_5, value_6, StdTimeGo_Unix(StdTimeGo_Now()))
 	if !value_7 {
 		var value_8 AuthenticationResult = Authentication_Failure(int(401), "manifest signature rejected")
 		result.Authentication = value_8
 		return result
 	}
 	decoded = Codec_DecodeBinaryField(request.ApprovalSignature)
-	signature = TextGo_ToBytes(decoded.Value)
+	signature = StdTextGo_ToBytes(decoded.Value)
 	if decoded.Error != "" || int64(len(signature)) != 64 {
 		var value_9 AuthenticationResult = Authentication_Failure(int(400), "invalid approval signature")
 		result.Authentication = value_9
 		return result
 	}
-	var value_10 []uint8 = TextGo_ToBytes(Signing_AppApprovalMessage("daochi-app-approval-v1", request.Manifest.AppID, hash))
+	var value_10 []uint8 = StdTextGo_ToBytes(Signing_AppApprovalMessage("daochi-app-approval-v1", request.Manifest.AppID, hash))
 	approval := value_10
-	var value_11 bool = Ed25519Go_Verify(nodeKey, approval, signature)
+	var value_11 bool = StdEd25519Go_Verify(nodeKey, approval, signature)
 	if !value_11 {
 		var value_12 AuthenticationResult = Authentication_Failure(int(401), "node approval rejected")
 		result.Authentication = value_12
@@ -360,7 +360,7 @@ func AppRegistration_Verify(request SignedAppRegistrationRequest, nodeKey Public
 
 func AppRegistration_Encode(value AppManifest) ManifestEncodingResult {
 	var result ManifestEncodingResult = ManifestEncodingResult{}
-	encoded := JsonGo_Marshal(value)
+	encoded := StdJsonGo_Marshal(value)
 	result.Error = encoded.Error
 	if encoded.Error != nil {
 		return result
@@ -374,10 +374,10 @@ func AppRegistration_Encode(value AppManifest) ManifestEncodingResult {
 func AppRegistration_Prepare(value AppManifest) ManifestEncodingResult {
 	Manifest_Normalize(&(value))
 	var value_0 AppManifest = value
-	problem := Manifest_Validate(value_0, TimeGo_Unix(TimeGo_Now()))
+	problem := Manifest_Validate(value_0, StdTimeGo_Unix(StdTimeGo_Now()))
 	if problem != "" {
 		var result ManifestEncodingResult = ManifestEncodingResult{}
-		var value_1 Error = ErrorsGo_New(problem)
+		var value_1 Error = StdErrorsGo_New(problem)
 		result.Error = value_1
 		return result
 	}

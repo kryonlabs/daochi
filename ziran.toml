@@ -1,0 +1,7 @@
+[package]
+name = "Daochi"
+module_roots = ["."]
+
+[toolchain]
+git = "https://github.com/ziranlang/ziran.git"
+ref = "master"

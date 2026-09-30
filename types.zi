@@ -1,8 +1,8 @@
 // Export and diagnostic records preserve native Go map wire shapes.
 #import "protocol";
 #import "sync_types";
-#import "map_go";
-#import "go_types";
+#import "std/map_go";
+#import "std/go_types";
 
 AccountExportResponse :: struct {
     Status: string #go_tag "json:\"status\""

@@ -3,7 +3,7 @@ package main
 
 import strings "strings"
 
-// #import vec
+// #import std_vec
 type BinaryField struct {
 	Value string
 	Error string

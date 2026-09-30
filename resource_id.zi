@@ -1,5 +1,5 @@
-#import "go_types"
-random :: #import "random_go";
+#import "std/go_types"
+random :: #import "std/random_go";
 go_hex :: #system_library "go:encoding/hex";
 
 ResourceIDResult :: struct {

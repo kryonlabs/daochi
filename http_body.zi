@@ -1,8 +1,8 @@
-#import "go_types"
-http :: #import "http_go";
-io :: #import "io_go";
-json :: #import "json_go";
-errors :: #import "errors_go";
+#import "std/go_types"
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+json :: #import "std/json_go";
+errors :: #import "std/errors_go";
 go_io :: #system_library "go:io";
 
 #scope_file

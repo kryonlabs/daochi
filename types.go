@@ -3,8 +3,8 @@ package main
 
 // #import protocol
 // #import sync_types
-// #import map_go
-// #import go_types
+// #import std_map_go
+// #import std_go_types
 type __type_7f1b14325d38f3e4 = map[string][]__type_7d6cc8a85f09fc88
 
 type AccountExportResponse struct {

@@ -1,7 +1,7 @@
-#import "go_types"
-http :: #import "http_go";
-io :: #import "io_go";
-json :: #import "json_go";
+#import "std/go_types"
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+json :: #import "std/json_go";
 
 #scope_file
 ErrorResponse :: struct {

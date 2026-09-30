@@ -3,7 +3,7 @@ package main
 
 import sql "database/sql"
 
-// #import go_types
+// #import std_go_types
 type zir_7c100c35610e9bbb_ExecResult struct {
 	Value Result
 	Error Error

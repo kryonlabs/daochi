@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "packages": [
+
+  ],
+  "root": {
+    "dependencies": {},
+    "name": "Daochi"
+  },
+  "toolchain": {
+    "commit": "0e5348319fc8a81ad054733c6a30aeacadd21050",
+    "ref": "master",
+    "url": "https://github.com/ziranlang/ziran.git"
+  }
+}

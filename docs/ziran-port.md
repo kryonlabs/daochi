@@ -19,8 +19,21 @@ make test-ziran
 make test-ziran GOFLAGS='-mod=mod -race -count=1'
 ```
 
-`make generate` invokes `../ziran/build/bin/zi2go` and formats the generated Go.
-Set `ZI2GO` and `ZIRAN_STD` for another compiler or standard module location.
+`make generate` invokes `ziran build --project --target=go` and formats the
+generated Go. The committed `ziran.lock` pins the compiler and standard library;
+standard imports use explicit `std/` paths. Override `ZIRAN` to choose the
+launcher. The launcher resolves the project's toolchain through package commands.
+Without local overrides, generation and saved-IR checks require `--locked`.
+For development in the organization-based workspace, create an ignored
+`ziran.local.toml`:
+
+```toml
+[overrides]
+ziran = "../../ziranlang/ziran"
+```
+
+Run `ziran update ziran` after committing an upstream compiler change to refresh
+the toolchain pin through the package manager.
 Generated Go is committed so ordinary Go and container builds work without
 having a compiler checkout installed. `make check-generated` detects drift.
 
@@ -85,12 +98,8 @@ field names, Go storage types, order and reflection tags.
 | `version.go` | Ziran | `version.zi`: default build version, stamped through Makefile and Docker linker arguments |
 
 `identity.zi` is a new canonical module extracted from `server.go`. Generated
-`vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go`, `go_types.go`,
-`option.go`, `sync_go.go`, `time_go.go`, `random_go.go`, `text_go.go`,
-`net_go.go`, `http_go.go`, `atomic_go.go`, `context_go.go`, `sql_go.go` and
-`errors_go.go`, `ed25519_go.go`, `url_go.go`, `file_go.go` and `json_go.go`
-come from Ziran's standard modules; they do not represent
-additional completed baseline modules.
+`std_*.go` files come from the pinned Ziran standard modules; they do not
+represent additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Grant transactions live in
 `app_grants.zi`; HTTP handlers live in `app_http.zi`. Manifest normalization and

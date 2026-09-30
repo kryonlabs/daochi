@@ -1,5 +1,5 @@
-network :: #import "net_go";
-http :: #import "http_go";
+network :: #import "std/net_go";
+http :: #import "std/http_go";
 go_strings :: #system_library "go:strings";
 
 #scope_file

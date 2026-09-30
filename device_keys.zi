@@ -1,9 +1,9 @@
-#import "go_types"
-ctx :: #import "context_go";
-sql :: #import "sql_go";
-clock :: #import "time_go";
-errors :: #import "errors_go";
-text :: #import "text_go";
+#import "std/go_types"
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+text :: #import "std/text_go";
 timestamp :: #import "timestamp";
 identity :: #import "identity";
 accounts :: #import "account_keys";

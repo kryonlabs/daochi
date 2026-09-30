@@ -1,13 +1,13 @@
-#import "go_types"
+#import "std/go_types"
 #import "manifest"
 #import "protocol"
 manifest :: #import "manifest";
-ctx :: #import "context_go";
-sql :: #import "sql_go";
-clock :: #import "time_go";
-errors :: #import "errors_go";
-json :: #import "json_go";
-text :: #import "text_go";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
 scope :: #import "scope";
 go_sql :: #system_library "go:database/sql";
 go_strings :: #system_library "go:strings";

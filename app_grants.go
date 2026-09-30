@@ -6,7 +6,7 @@ import (
 	strings "strings"
 )
 
-// #import go_types
+// #import std_go_types
 // #import protocol
 type GrantResult struct {
 	Value AppGrant
@@ -98,11 +98,11 @@ const ExactRecordsSQL = "SELECT collection,id,key_id,nonce,ciphertext,updated_at
 const PrefixRecordsSQL = "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\\' ORDER BY collection,id\n"
 
 func AppGrants_AuditJSON(request AppGrantRequest) string {
-	encoded := JsonGo_Marshal(request)
+	encoded := StdJsonGo_Marshal(request)
 	if encoded.Error != nil {
 		return "{}"
 	}
-	return TextGo_FromBytes(encoded.Value)
+	return StdTextGo_FromBytes(encoded.Value)
 }
 
 func AppGrants_Create(database *Database, context Context, userID string, request AppGrantRequest, missingUser Error) GrantResult {
@@ -121,7 +121,7 @@ func AppGrants_Create(database *Database, context Context, userID string, reques
 		return result
 	}
 	if !source.Value {
-		var value_0 Error = SqlGo_NoRows()
+		var value_0 Error = StdSqlGo_NoRows()
 		result.Error = value_0
 		return result
 	}
@@ -131,7 +131,7 @@ func AppGrants_Create(database *Database, context Context, userID string, reques
 		return result
 	}
 	if !target.Value {
-		var value_1 Error = SqlGo_NoRows()
+		var value_1 Error = StdSqlGo_NoRows()
 		result.Error = value_1
 		return result
 	}
@@ -141,12 +141,12 @@ func AppGrants_Create(database *Database, context Context, userID string, reques
 		return result
 	}
 	if !visibility.Found {
-		var value_2 Error = ErrorsGo_New("collection is not registered for source app")
+		var value_2 Error = StdErrorsGo_New("collection is not registered for source app")
 		result.Error = value_2
 		return result
 	}
 	if visibility.Value == "private" {
-		var value_3 Error = ErrorsGo_New("private collections cannot be granted across apps")
+		var value_3 Error = StdErrorsGo_New("private collections cannot be granted across apps")
 		result.Error = value_3
 		return result
 	}
@@ -176,7 +176,7 @@ func AppGrants_Create(database *Database, context Context, userID string, reques
 	if audited.Error != nil {
 		return result
 	}
-	var value_9 Error = SqlGo_Commit(transaction)
+	var value_9 Error = StdSqlGo_Commit(transaction)
 	result.Error = value_9
 	if result.Error != nil {
 		return result
@@ -204,7 +204,7 @@ func AppGrants_List(database *Database, context Context, userID string) GrantsRe
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	values := make([]AppGrant, int(0))
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var grant AppGrant = AppGrant{}
 		var value_1 Error = (*sql.Rows).Scan(rows, &(grant.ID), &(grant.UserIDHash), &(grant.SourceAppID), &(grant.TargetAppID), &(grant.CollectionPrefix), &(grant.Permission), &(grant.Status), &(grant.CreatedAt), &(grant.UpdatedAt), &(grant.RevokedAt))
 		result.Error = value_1
@@ -214,7 +214,7 @@ func AppGrants_List(database *Database, context Context, userID string) GrantsRe
 		values = append(values, grant)
 	}
 	result.Value = values
-	var value_2 Error = SqlGo_RowsError(rows)
+	var value_2 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_2
 	return result
 }
@@ -231,16 +231,16 @@ func AppGrants_Revoke(database *Database, context Context, userID string, id str
 	if revoked.Error != nil {
 		return revoked.Error
 	}
-	affected := SqlGo_RowsAffected(revoked.Value)
+	affected := StdSqlGo_RowsAffected(revoked.Value)
 	if affected.Error != nil || int(affected.Value) == int(0) {
-		return SqlGo_NoRows()
+		return StdSqlGo_NoRows()
 	}
 	var value_1 zir_dd25b20526eae9d3_ExecResult = AppGrants_InsertRevokeAudit(transaction, context, "INSERT INTO server_app_grant_audit(grant_id,user_id_hash,action) VALUES(?1,?2,'revoke')", id, userID)
 	audited := value_1
 	if audited.Error != nil {
 		return audited.Error
 	}
-	return SqlGo_Commit(transaction)
+	return StdSqlGo_Commit(transaction)
 }
 
 func AppGrants_AuthorizedRecords(database *Database, context Context, userID string, source string, target string, prefix string, scopeNotOwned Error, missingUser Error) GrantedRecordsResult {
@@ -249,7 +249,7 @@ func AppGrants_AuthorizedRecords(database *Database, context Context, userID str
 	target = strings.TrimSpace(target)
 	prefix = strings.TrimSpace(prefix)
 	if source == "" || target == "" || prefix == "" {
-		var value_0 Error = ErrorsGo_New("source_app_id, target_app_id, and collection_prefix are required")
+		var value_0 Error = StdErrorsGo_New("source_app_id, target_app_id, and collection_prefix are required")
 		result.Error = value_0
 		return result
 	}
@@ -268,7 +268,7 @@ func AppGrants_AuthorizedRecords(database *Database, context Context, userID str
 		return result
 	}
 	if !exists.Value {
-		var value_1 Error = SqlGo_NoRows()
+		var value_1 Error = StdSqlGo_NoRows()
 		result.Error = value_1
 		return result
 	}
@@ -296,7 +296,7 @@ func AppGrants_Visibility(database *Database, context Context, appID string, pre
 	row := value_0
 	error := (*sql.Row).Scan(row, &(value))
 	var value_1 Error = error
-	if ErrorsGo_Is(value_1, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
 		return result
 	}
 	result.Error = error
@@ -326,7 +326,7 @@ func AppGrants_Records(database *Database, context Context, userID string, prefi
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	values := make([]EncryptedRecord, int(0))
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var record EncryptedRecord = EncryptedRecord{}
 		var value_2 Error = (*sql.Rows).Scan(rows, &(record.Collection), &(record.ID), &(record.KeyID), &(record.Nonce), &(record.Ciphertext), &(record.UpdatedAt), &(record.DeletedAt), &(record.ContentHash), &(record.SchemaVersion), &(record.ParentID))
 		result.Error = value_2
@@ -336,7 +336,7 @@ func AppGrants_Records(database *Database, context Context, userID string, prefi
 		values = append(values, record)
 	}
 	result.Value = values
-	var value_3 Error = SqlGo_RowsError(rows)
+	var value_3 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_3
 	return result
 }

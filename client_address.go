@@ -9,34 +9,35 @@ func ClientAddress_FirstForwardedFor(header string) string {
 	}
 	parts := strings.Split(header, ",")
 	first := strings.TrimSpace(parts[0])
-	ip := NetGo_ParseIP(first)
-	if NetGo_ValidIP(ip) {
-		return NetGo_FormatIP(ip)
+	ip := StdNetGo_ParseIP(first)
+	if StdNetGo_ValidIP(ip) {
+		return StdNetGo_FormatIP(ip)
 	}
 	return ""
 }
 
 func ClientAddress_IsLoopbackHost(host string) bool {
-	ip := NetGo_ParseIP(host)
-	var value_0 bool = NetGo_ValidIP(ip)
+	ip := StdNetGo_ParseIP(host)
+	var value_0 bool = StdNetGo_ValidIP(ip)
 	var value_1 bool = value_0
 	if value_1 {
-		var value_2 bool = NetGo_IsLoopback(ip)
+		var value_2 bool = StdNetGo_IsLoopback(ip)
 		value_1 = value_2
 	}
 	return value_1
 }
 
 func ClientAddress_FromRequest(request *Request) string {
-	remote := HttpGo_RemoteAddress(request)
-	parsed := NetGo_SplitHostPort(remote)
+	remote := StdHttpGo_RemoteAddress(request)
+	parsed := StdNetGo_SplitHostPort(remote)
 	host := parsed.Host
 	if parsed.Error != nil {
 		host = remote
 	}
 	host = strings.TrimSpace(host)
 	if ClientAddress_IsLoopbackHost(host) {
-		forwarded := ClientAddress_FirstForwardedFor(HttpGo_HeaderValue(HttpGo_Headers(request), "X-Forwarded-For"))
+		var value_0 string = ClientAddress_FirstForwardedFor(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "X-Forwarded-For"))
+		forwarded := value_0
 		if forwarded != "" {
 			return forwarded
 		}

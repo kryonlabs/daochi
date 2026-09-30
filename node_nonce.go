@@ -3,7 +3,7 @@ package main
 
 import sql "database/sql"
 
-// #import go_types
+// #import std_go_types
 type zir_b5da7444bda7630d_TransactionResult struct {
 	Value *Transaction
 	Error Error
@@ -39,7 +39,7 @@ func NodeNonce_Consume(database *Database, context Context, nodeID string, nonce
 	}
 	transaction := begun.Value
 	defer (*sql.Tx).Rollback(transaction)
-	var value_0 zir_39ef582091ea3a89_ExecResult = NodeNonce_DeleteExpired(transaction, context, "DELETE FROM node_request_nonces WHERE expires_at<?1", int64(TimeGo_Unix(TimeGo_Now())))
+	var value_0 zir_39ef582091ea3a89_ExecResult = NodeNonce_DeleteExpired(transaction, context, "DELETE FROM node_request_nonces WHERE expires_at<?1", int64(StdTimeGo_Unix(StdTimeGo_Now())))
 	deleted := value_0
 	if deleted.Error != nil {
 		return deleted.Error
@@ -47,7 +47,7 @@ func NodeNonce_Consume(database *Database, context Context, nodeID string, nonce
 	var value_1 zir_39ef582091ea3a89_ExecResult = NodeNonce_Insert(transaction, context, "INSERT INTO node_request_nonces(node_id,nonce,expires_at) VALUES(?1,?2,?3)", nodeID, nonce, int64(expiresAt))
 	inserted := value_1
 	if inserted.Error != nil {
-		return ErrorsGo_New("node request replayed")
+		return StdErrorsGo_New("node request replayed")
 	}
-	return SqlGo_Commit(transaction)
+	return StdSqlGo_Commit(transaction)
 }

@@ -1,8 +1,8 @@
 #import "codec"
-#import "vec"
+#import "std/vec"
 #import "identity"
-#import "hmac_sha256_go"
-#import "constant_time"
+#import "std/hmac_sha256_go"
+#import "std/constant_time"
 
 go_strings :: #system_library "go:strings";
 Split :: (value: string, separator: string) -> []string #foreign go_strings "Split";

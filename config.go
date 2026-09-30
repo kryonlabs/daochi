@@ -14,10 +14,10 @@ import (
 
 // #import protocol
 // #import config_values
-// #import map_go
-// #import go_types
+// #import std_map_go
+// #import std_go_types
 // #import sets
-// #import ed25519_go
+// #import std_ed25519_go
 type __type_cd75cecb5feef7fa = map[string]TokenProduct
 
 type __type_c922d3f56b74fd5a = map[string]bool
@@ -197,7 +197,7 @@ func Config_EnvStringOrFile(key string, fileKey string, fallback string) string 
 	if path != "" {
 		file := Config_ReadFile(path)
 		if file.Error == nil {
-			return strings.TrimSpace(TextGo_FromBytes(file.Value))
+			return strings.TrimSpace(StdTextGo_FromBytes(file.Value))
 		}
 		slog.Warn("failed to read config file", "env", fileKey, "path", path, "error", file.Error)
 	}
@@ -252,7 +252,7 @@ func Config_Load() Config {
 	issuerPrivateBytes := value_6
 	var issuerPrivate PrivateKey = *new(PrivateKey)
 	if int64(len(issuerPrivateBytes)) == 32 {
-		issuerPrivate = Ed25519Go_NewKeyFromSeed(issuerPrivateBytes)
+		issuerPrivate = StdEd25519Go_NewKeyFromSeed(issuerPrivateBytes)
 	} else if int64(len(issuerPrivateBytes)) == 64 {
 		issuerPrivate = PrivateKey(issuerPrivateBytes)
 	}
@@ -269,7 +269,7 @@ func Config_Load() Config {
 	nodeKeyBytes := value_8
 	var nodePrivateKey PrivateKey = *new(PrivateKey)
 	if int64(len(nodeKeyBytes)) == 32 {
-		nodePrivateKey = Ed25519Go_NewKeyFromSeed(nodeKeyBytes)
+		nodePrivateKey = StdEd25519Go_NewKeyFromSeed(nodeKeyBytes)
 	} else if int64(len(nodeKeyBytes)) == 64 {
 		nodePrivateKey = PrivateKey(nodeKeyBytes)
 	} else if int64(len(nodeKeyBytes)) != 0 {

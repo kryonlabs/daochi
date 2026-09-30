@@ -1,11 +1,11 @@
-#import "map_go"
-#import "option"
-#import "sync_go"
-#import "go_types"
-#import "random_go"
-#import "text_go"
+#import "std/map_go"
+#import "std/option"
+#import "std/sync_go"
+#import "std/go_types"
+#import "std/random_go"
+#import "std/text_go"
 #import "codec"
-clock :: #import "time_go";
+clock :: #import "std/time_go";
 builtin :: #system_library "go:builtin";
 
 Challenge :: struct {

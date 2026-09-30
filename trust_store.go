@@ -6,10 +6,10 @@ import (
 	hex "encoding/hex"
 )
 
-// #import go_types
+// #import std_go_types
 // #import protocol
 // #import node_identity
-// #import map_go
+// #import std_map_go
 type TrustedNodePeer struct {
 	NodeID      string         "json:\"node_id\""
 	PublicKey   string         "json:\"public_key\""
@@ -169,16 +169,16 @@ const ClaimHistoryQuery = "\nSELECT sequence,signature FROM name_claims\nWHERE s
 const ImportClaimSQL = "\nINSERT INTO name_claims(\n    space_id,name,node_id,sequence,expires_at,services_json,signature,updated_at\n) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)\nON CONFLICT(space_id,name) DO UPDATE SET\n    node_id=excluded.node_id,\n    sequence=excluded.sequence,\n    expires_at=excluded.expires_at,\n    services_json=excluded.services_json,\n    signature=excluded.signature,\n    updated_at=excluded.updated_at\n"
 
 func TrustStore_UpsertTrustedPeer(context Context, transaction *Transaction, invite PairingInvite, publicKey PublicKey) Error {
-	addresses := JsonGo_Marshal(invite.Addresses)
+	addresses := StdJsonGo_Marshal(invite.Addresses)
 	if addresses.Error != nil {
 		return addresses.Error
 	}
-	policyJSON := JsonGo_Marshal(invite.Policy)
+	policyJSON := StdJsonGo_Marshal(invite.Policy)
 	if policyJSON.Error != nil {
 		return policyJSON.Error
 	}
 	var value_0 string = "\nINSERT INTO trusted_node_peers(\n    node_id,public_key,display_name,addresses_json,space_id,policy_json,trusted_at\n) VALUES(?1,?2,?3,?4,?5,?6,?7)\nON CONFLICT(node_id) DO UPDATE SET\n    public_key=excluded.public_key,\n    display_name=excluded.display_name,\n    addresses_json=excluded.addresses_json,\n    space_id=excluded.space_id,\n    policy_json=excluded.policy_json,\n    trusted_at=excluded.trusted_at,\n    revoked_at=''\n"
-	var value_1 zir_8544a7a0be53e0d0_ExecResult = TrustStore_UpsertPeer(transaction, context, value_0, invite.NodeID, []uint8(publicKey), invite.DisplayName, TextGo_FromBytes(addresses.Value), invite.SpaceID, TextGo_FromBytes(policyJSON.Value), Timestamp_CanonicalNow())
+	var value_1 zir_8544a7a0be53e0d0_ExecResult = TrustStore_UpsertPeer(transaction, context, value_0, invite.NodeID, []uint8(publicKey), invite.DisplayName, StdTextGo_FromBytes(addresses.Value), invite.SpaceID, StdTextGo_FromBytes(policyJSON.Value), Timestamp_CanonicalNow())
 	written := value_1
 	return written.Error
 }
@@ -192,7 +192,7 @@ func TrustStore_ImportTrustSpace(context Context, transaction *Transaction, spac
 	var value_2 bool = value_1
 	if value_2 {
 		var value_3 Error = error
-		var value_4 bool = ErrorsGo_Is(value_3, SqlGo_NoRows())
+		var value_4 bool = StdErrorsGo_Is(value_3, StdSqlGo_NoRows())
 		value_2 = !value_4
 	}
 	if value_2 {
@@ -201,11 +201,11 @@ func TrustStore_ImportTrustSpace(context Context, transaction *Transaction, spac
 	var value_5 bool = error == nil
 	var value_6 bool = value_5
 	if value_6 {
-		var value_7 bool = Ed25519Go_Equal(PublicKey(existing), publicKey)
+		var value_7 bool = StdEd25519Go_Equal(PublicKey(existing), publicKey)
 		value_6 = !value_7
 	}
 	if value_6 {
-		return ErrorsGo_New("trust-space authority fork detected")
+		return StdErrorsGo_New("trust-space authority fork detected")
 	}
 	var value_8 *Transaction = transaction
 	var value_9 Context = context
@@ -239,7 +239,7 @@ func TrustStore_ImportNameClaim(context Context, transaction *Transaction, claim
 		value_7 = !value_8
 	}
 	if value_7 || claim.Sequence <= 0 {
-		var value_9 Error = ErrorsGo_New("invalid mesh name claim")
+		var value_9 Error = StdErrorsGo_New("invalid mesh name claim")
 		result.Error = value_9
 		return result
 	}
@@ -253,7 +253,7 @@ func TrustStore_ImportNameClaim(context Context, transaction *Transaction, claim
 	row := value_11
 	var value_12 Error = (*sql.Row).Scan(row, &(publicKey))
 	if value_12 != nil {
-		var value_13 Error = ErrorsGo_New("mesh name claim has no trusted authority")
+		var value_13 Error = StdErrorsGo_New("mesh name claim has no trusted authority")
 		result.Error = value_13
 		return result
 	}
@@ -262,11 +262,11 @@ func TrustStore_ImportNameClaim(context Context, transaction *Transaction, claim
 	var value_15 bool = value_14
 	if !value_15 {
 		var value_16 PublicKey = PublicKey(publicKey)
-		var value_17 bool = Ed25519Go_Verify(value_16, NodeIdentity_NameClaimMessage(claim), TextGo_ToBytes(signature.Value))
+		var value_17 bool = StdEd25519Go_Verify(value_16, NodeIdentity_NameClaimMessage(claim), StdTextGo_ToBytes(signature.Value))
 		value_15 = !value_17
 	}
 	if value_15 {
-		var value_18 Error = ErrorsGo_New("invalid mesh name claim signature")
+		var value_18 Error = StdErrorsGo_New("invalid mesh name claim signature")
 		result.Error = value_18
 		return result
 	}
@@ -279,7 +279,7 @@ func TrustStore_ImportNameClaim(context Context, transaction *Transaction, claim
 	var value_21 bool = value_20
 	if value_21 {
 		var value_22 Error = error
-		var value_23 bool = ErrorsGo_Is(value_22, SqlGo_NoRows())
+		var value_23 bool = StdErrorsGo_Is(value_22, StdSqlGo_NoRows())
 		value_21 = !value_23
 	}
 	if value_21 {
@@ -292,13 +292,13 @@ func TrustStore_ImportNameClaim(context Context, transaction *Transaction, claim
 		}
 		if currentSequence == claim.Sequence {
 			if currentSignature != claim.Signature {
-				var value_24 Error = ErrorsGo_New("namespace history fork detected")
+				var value_24 Error = StdErrorsGo_New("namespace history fork detected")
 				result.Error = value_24
 			}
 			return result
 		}
 	}
-	services := JsonGo_Marshal(claim.Services)
+	services := StdJsonGo_Marshal(claim.Services)
 	if services.Error != nil {
 		result.Error = services.Error
 		return result
@@ -311,7 +311,7 @@ func TrustStore_ImportNameClaim(context Context, transaction *Transaction, claim
 	var value_30 string = claim.NodeID
 	var value_31 int64 = claim.Sequence
 	var value_32 int64 = claim.ExpiresAt
-	var value_33 string = TextGo_FromBytes(services.Value)
+	var value_33 string = StdTextGo_FromBytes(services.Value)
 	var value_34 string = claim.Signature
 	var value_35 zir_8544a7a0be53e0d0_ExecResult = TrustStore_ImportClaim(value_25, value_26, value_27, value_28, value_29, value_30, int64(value_31), int64(value_32), value_33, value_34, Timestamp_CanonicalNow())
 	written := value_35
@@ -343,7 +343,7 @@ func TrustStore_TrustPeer(database *Database, context Context, invite PairingInv
 		return error
 	}
 	if consumed != 0 {
-		return ErrorsGo_New("pairing invite already consumed")
+		return StdErrorsGo_New("pairing invite already consumed")
 	}
 	var value_1 *Transaction = transaction
 	var value_2 Context = context
@@ -357,7 +357,7 @@ func TrustStore_TrustPeer(database *Database, context Context, invite PairingInv
 	if error != nil {
 		return error
 	}
-	return SqlGo_Commit(transaction)
+	return StdSqlGo_Commit(transaction)
 }
 
 func TrustStore_RecordIssuedPairingInvite(database *Database, context Context, invite PairingInvite) Error {
@@ -381,36 +381,36 @@ func TrustStore_CompleteIssuedPairing(database *Database, context Context, invit
 	row := (*sql.Tx).QueryRowContext(transaction, context, value_0, invite.InviteID)
 	error := (*sql.Row).Scan(row, &(storedSignature), &(expiresAt), &(completedNodeID))
 	var value_1 Error = error
-	if ErrorsGo_Is(value_1, SqlGo_NoRows()) {
-		return ErrorsGo_New("pairing invite was not issued by this node")
+	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
+		return StdErrorsGo_New("pairing invite was not issued by this node")
 	}
 	if error != nil {
 		return error
 	}
 	if storedSignature != invite.Signature || expiresAt != invite.ExpiresAt {
-		return ErrorsGo_New("pairing invite does not match the issued invite")
+		return StdErrorsGo_New("pairing invite does not match the issued invite")
 	}
 	var value_2 int64 = expiresAt
-	if value_2 <= TimeGo_Unix(TimeGo_Now()) {
-		return ErrorsGo_New("pairing invite expired")
+	if value_2 <= StdTimeGo_Unix(StdTimeGo_Now()) {
+		return StdErrorsGo_New("pairing invite expired")
 	}
 	if completedNodeID != "" {
 		if completedNodeID == acceptance.NodeID {
-			return SqlGo_Commit(transaction)
+			return StdSqlGo_Commit(transaction)
 		}
-		return ErrorsGo_New("pairing invite already completed by another node")
+		return StdErrorsGo_New("pairing invite already completed by another node")
 	}
 	var value_3 string = "\nUPDATE issued_pairing_invites\nSET completed_node_id=?1\nWHERE invite_id=?2 AND completed_node_id=''\n"
 	written := TrustStore_TransactionExecTwo(transaction, context, value_3, acceptance.NodeID, invite.InviteID)
 	if written.Error != nil {
 		return written.Error
 	}
-	updated := SqlGo_RowsAffected(written.Value)
+	updated := StdSqlGo_RowsAffected(written.Value)
 	if updated.Error != nil {
 		return updated.Error
 	}
 	if updated.Value != 1 {
-		return ErrorsGo_New("pairing invite was completed concurrently")
+		return StdErrorsGo_New("pairing invite was completed concurrently")
 	}
 	var peer PairingInvite = PairingInvite{}
 	peer.NodeID = acceptance.NodeID
@@ -424,7 +424,7 @@ func TrustStore_CompleteIssuedPairing(database *Database, context Context, invit
 	if error != nil {
 		return error
 	}
-	return SqlGo_Commit(transaction)
+	return StdSqlGo_Commit(transaction)
 }
 
 func TrustStore_TrustedPeerPolicy(database *Database, context Context, nodeID string) PolicyResult {
@@ -434,7 +434,7 @@ func TrustStore_TrustedPeerPolicy(database *Database, context Context, nodeID st
 	row := value_0
 	error := (*sql.Row).Scan(row, &(policyJSON))
 	var value_1 Error = error
-	if ErrorsGo_Is(value_1, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {
@@ -442,7 +442,7 @@ func TrustStore_TrustedPeerPolicy(database *Database, context Context, nodeID st
 		return result
 	}
 	var value NodeSyncPolicy = NodeSyncPolicy{}
-	var value_2 Error = JsonGo_Unmarshal(TextGo_ToBytes(policyJSON), &(value))
+	var value_2 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(policyJSON), &(value))
 	result.Error = value_2
 	if result.Error != nil {
 		return result
@@ -463,7 +463,7 @@ func TrustStore_ListTrustedPeers(database *Database, context Context) PeersResul
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	peers := make([]TrustedNodePeer, int(int(0)))
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var peer TrustedNodePeer = TrustedNodePeer{}
 		var publicKey []uint8 = nil
 		addressesJSON := ""
@@ -475,12 +475,12 @@ func TrustStore_ListTrustedPeers(database *Database, context Context) PeersResul
 		}
 		var value_2 string = hex.EncodeToString(publicKey)
 		peer.PublicKey = value_2
-		var value_3 Error = JsonGo_Unmarshal(TextGo_ToBytes(addressesJSON), &(peer.Addresses))
+		var value_3 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(addressesJSON), &(peer.Addresses))
 		result.Error = value_3
 		if result.Error != nil {
 			return result
 		}
-		var value_4 Error = JsonGo_Unmarshal(TextGo_ToBytes(policyJSON), &(peer.Policy))
+		var value_4 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(policyJSON), &(peer.Policy))
 		result.Error = value_4
 		if result.Error != nil {
 			return result
@@ -488,14 +488,14 @@ func TrustStore_ListTrustedPeers(database *Database, context Context) PeersResul
 		peers = append(peers, peer)
 	}
 	result.Value = peers
-	var value_5 Error = SqlGo_RowsError(rows)
+	var value_5 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_5
 	return result
 }
 
 func TrustStore_CreateTrustSpace(database *Database, context Context, displayName string) TrustSpaceResult {
 	var result TrustSpaceResult = TrustSpaceResult{}
-	generated := Ed25519Go_GenerateKey()
+	generated := StdEd25519Go_GenerateKey()
 	if generated.Error != nil {
 		result.Error = generated.Error
 		return result
@@ -521,7 +521,7 @@ func TrustStore_SignAndStoreNameClaim(database *Database, context Context, claim
 		return result
 	}
 	if int64(len(privateKey)) != 64 {
-		var value_2 Error = ErrorsGo_New("namespace authority is not available on this node")
+		var value_2 Error = StdErrorsGo_New("namespace authority is not available on this node")
 		result.Error = value_2
 		return result
 	}
@@ -533,7 +533,7 @@ func TrustStore_SignAndStoreNameClaim(database *Database, context Context, claim
 	var value_5 bool = value_4
 	if value_5 {
 		var value_6 Error = error
-		var value_7 bool = ErrorsGo_Is(value_6, SqlGo_NoRows())
+		var value_7 bool = StdErrorsGo_Is(value_6, StdSqlGo_NoRows())
 		value_5 = !value_7
 	}
 	if value_5 {
@@ -542,14 +542,14 @@ func TrustStore_SignAndStoreNameClaim(database *Database, context Context, claim
 	}
 	result.Value.Version = 1
 	result.Value.Sequence = currentSequence + 1
-	services := JsonGo_Marshal(claim.Services)
+	services := StdJsonGo_Marshal(claim.Services)
 	if services.Error != nil {
 		result.Error = services.Error
 		return result
 	}
 	var value_8 PrivateKey = PrivateKey(privateKey)
-	signature := Ed25519Go_Sign(value_8, NodeIdentity_NameClaimMessage(result.Value))
-	var value_9 string = TextGo_FromBytes(signature)
+	signature := StdEd25519Go_Sign(value_8, NodeIdentity_NameClaimMessage(result.Value))
+	var value_9 string = StdTextGo_FromBytes(signature)
 	encoded := Codec_EncodeBase64(value_9, true, false)
 	result.Value.Signature = encoded.Value
 	var value_10 *Database = database
@@ -560,7 +560,7 @@ func TrustStore_SignAndStoreNameClaim(database *Database, context Context, claim
 	var value_15 string = claim.NodeID
 	var value_16 int64 = result.Value.Sequence
 	var value_17 int64 = claim.ExpiresAt
-	var value_18 string = TextGo_FromBytes(services.Value)
+	var value_18 string = StdTextGo_FromBytes(services.Value)
 	var value_19 string = result.Value.Signature
 	var value_20 zir_8544a7a0be53e0d0_ExecResult = TrustStore_StoreClaim(value_10, value_11, value_12, value_13, value_14, value_15, int64(value_16), int64(value_17), value_18, value_19, Timestamp_CanonicalNow())
 	written := value_20
@@ -576,7 +576,7 @@ func TrustStore_ResolveNameClaim(database *Database, context Context, spaceID st
 	var value_1 Error = (*sql.Row).Scan(row, &(result.Value.SpaceID), &(result.Value.Name), &(result.Value.NodeID), &(result.Value.Sequence), &(result.Value.ExpiresAt), &(servicesJSON), &(result.Value.Signature))
 	error := value_1
 	var value_2 Error = error
-	if ErrorsGo_Is(value_2, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {
@@ -584,13 +584,13 @@ func TrustStore_ResolveNameClaim(database *Database, context Context, spaceID st
 		return result
 	}
 	result.Value.Version = 1
-	var value_3 Error = JsonGo_Unmarshal(TextGo_ToBytes(servicesJSON), &(result.Value.Services))
+	var value_3 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(servicesJSON), &(result.Value.Services))
 	result.Error = value_3
 	if result.Error != nil {
 		return result
 	}
 	var value_4 int64 = result.Value.ExpiresAt
-	if value_4 <= TimeGo_Unix(TimeGo_Now()) {
+	if value_4 <= StdTimeGo_Unix(StdTimeGo_Now()) {
 		return result
 	}
 	var publicKey []uint8 = nil
@@ -606,11 +606,11 @@ func TrustStore_ResolveNameClaim(database *Database, context Context, spaceID st
 	var value_8 bool = value_7
 	if !value_8 {
 		var value_9 PublicKey = PublicKey(publicKey)
-		var value_10 bool = Ed25519Go_Verify(value_9, NodeIdentity_NameClaimMessage(result.Value), TextGo_ToBytes(signature.Value))
+		var value_10 bool = StdEd25519Go_Verify(value_9, NodeIdentity_NameClaimMessage(result.Value), StdTextGo_ToBytes(signature.Value))
 		value_8 = !value_10
 	}
 	if value_8 {
-		var value_11 Error = ErrorsGo_New("invalid stored name claim signature")
+		var value_11 Error = StdErrorsGo_New("invalid stored name claim signature")
 		result.Error = value_11
 		return result
 	}
@@ -643,7 +643,7 @@ func TrustStore_ExportMeshNames(database *Database, context Context, meshPolicy 
 			row := value_2
 			error := (*sql.Row).Scan(row, &(space.SpaceID), &(space.DisplayName), &(publicKey))
 			var value_3 Error = error
-			if ErrorsGo_Is(value_3, SqlGo_NoRows()) {
+			if StdErrorsGo_Is(value_3, StdSqlGo_NoRows()) {
 				loop_cursor_6++
 				continue
 			}
@@ -661,25 +661,25 @@ func TrustStore_ExportMeshNames(database *Database, context Context, meshPolicy 
 				return result
 			}
 			rows := queried.Value
-			for SqlGo_Next(rows) {
+			for StdSqlGo_Next(rows) {
 				var claim NameClaim = NameClaim{}
 				servicesJSON := ""
 				var value_6 Error = (*sql.Rows).Scan(rows, &(claim.SpaceID), &(claim.Name), &(claim.NodeID), &(claim.Sequence), &(claim.ExpiresAt), &(servicesJSON), &(claim.Signature))
 				result.Error = value_6
 				if result.Error != nil {
-					SqlGo_CloseRows(rows)
+					StdSqlGo_CloseRows(rows)
 					return result
 				}
 				claim.Version = 1
-				var value_7 Error = JsonGo_Unmarshal(TextGo_ToBytes(servicesJSON), &(claim.Services))
+				var value_7 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(servicesJSON), &(claim.Services))
 				result.Error = value_7
 				if result.Error != nil {
-					SqlGo_CloseRows(rows)
+					StdSqlGo_CloseRows(rows)
 					return result
 				}
 				names = append(names, claim)
 			}
-			var value_8 Error = SqlGo_CloseRows(rows)
+			var value_8 Error = StdSqlGo_CloseRows(rows)
 			result.Error = value_8
 			if result.Error != nil {
 				return result
@@ -761,7 +761,7 @@ func TrustStore_ImportMeshNames(database *Database, context Context, meshPolicy 
 		}
 		result.Value += applied.Value
 	}
-	var value_12 Error = SqlGo_Commit(transaction)
+	var value_12 Error = StdSqlGo_Commit(transaction)
 	result.Error = value_12
 	return result
 }
@@ -770,13 +770,13 @@ func TrustStore_ValidateMeshTrustSpace(space MeshTrustSpace) PublicKeyResult {
 	var result PublicKeyResult = PublicKeyResult{}
 	decoded := TrustStore_DecodeHex(space.AuthorityPublicKey)
 	if decoded.Error != nil || int64(len(decoded.Value)) != 32 {
-		var value_0 Error = ErrorsGo_New("invalid mesh trust-space public key")
+		var value_0 Error = StdErrorsGo_New("invalid mesh trust-space public key")
 		result.Error = value_0
 		return result
 	}
 	publicKey := decoded.Value
 	if Signing_SHA256Hex(publicKey) != space.SpaceID {
-		var value_1 Error = ErrorsGo_New("mesh trust-space ID does not match authority key")
+		var value_1 Error = StdErrorsGo_New("mesh trust-space ID does not match authority key")
 		result.Error = value_1
 		return result
 	}
@@ -788,11 +788,11 @@ func TrustStore_ValidateServices(services []ServiceRecord) Error {
 	for _, service := range services {
 		var value_0 bool = NodeIdentity_ValidName(NodeIdentity_NormalizeName(service.Service))
 		if !value_0 {
-			return ErrorsGo_New("invalid service name")
+			return StdErrorsGo_New("invalid service name")
 		}
 		var value_1 Error = NodeIdentity_ValidateAddresses(service.Endpoints)
 		if value_1 != nil {
-			return ErrorsGo_New("invalid service endpoint")
+			return StdErrorsGo_New("invalid service endpoint")
 		}
 	}
 	return nil

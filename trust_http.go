@@ -7,7 +7,7 @@ import (
 	strings "strings"
 )
 
-// #import go_types
+// #import std_go_types
 // #import protocol
 // #import node_identity
 // #import trust_store
@@ -75,12 +75,12 @@ func TrustHttp_CreateInvite(trust Trust, writer ResponseWriter, request *Request
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
 		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), ErrorsGo_Message(body.Error))
+		Response_Error(value_1, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var input CreateInviteRequest = CreateInviteRequest{}
 	if int64(len(body.Value)) > 0 {
-		var value_2 Error = JsonGo_Unmarshal(body.Value, &(input))
+		var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(input))
 		if value_2 != nil {
 			Response_Error(writer, int(400), "invalid pairing invite request")
 			return
@@ -116,7 +116,7 @@ func TrustHttp_CreateInvite(trust Trust, writer ResponseWriter, request *Request
 	invalid := NodeIdentity_ValidateAddresses(addresses)
 	if invalid != nil {
 		var value_9 ResponseWriter = writer
-		Response_Error(value_9, int(400), ErrorsGo_Message(invalid))
+		Response_Error(value_9, int(400), StdErrorsGo_Message(invalid))
 		return
 	}
 	var invite PairingInvite = PairingInvite{}
@@ -132,15 +132,15 @@ func TrustHttp_CreateInvite(trust Trust, writer ResponseWriter, request *Request
 	invite.Addresses = addresses
 	var value_14 string = strings.TrimSpace(input.SpaceID)
 	invite.SpaceID = value_14
-	var value_15 Time = TimeGo_Now()
-	var value_16 int64 = TimeGo_Unix(TimeGo_Add(value_15, Duration(lifetime)))
+	var value_15 Time = StdTimeGo_Now()
+	var value_16 int64 = StdTimeGo_Unix(StdTimeGo_Add(value_15, Duration(lifetime)))
 	invite.ExpiresAt = value_16
 	var value_17 string = NodeAuth_RandomHex(int(16))
 	invite.Nonce = value_17
 	invite.Policy = input.Policy
 	NodeIdentity_SignInvite(trust.Identity, &(invite))
 	var value_18 *Database = trust.Database
-	var value_19 Context = HttpGo_Context(request)
+	var value_19 Context = StdHttpGo_Context(request)
 	var value_20 Error = TrustStore_RecordIssuedPairingInvite(value_18, value_19, invite)
 	if value_20 != nil {
 		Response_Error(writer, int(500), "pairing invite creation failed")
@@ -156,7 +156,7 @@ func TrustHttp_NewAcceptance(trust Trust, invite PairingInvite) PairingAcceptanc
 	addresses[0] = value_0
 	var value_1 Error = NodeIdentity_ValidateAddresses(addresses)
 	if value_1 != nil {
-		var value_2 Error = ErrorsGo_New("this node needs a reachable DAOCHI_BASE_URL")
+		var value_2 Error = StdErrorsGo_New("this node needs a reachable DAOCHI_BASE_URL")
 		result.Error = value_2
 		return result
 	}
@@ -167,7 +167,7 @@ func TrustHttp_NewAcceptance(trust Trust, invite PairingInvite) PairingAcceptanc
 	result.Value.PublicKey = value_3
 	result.Value.DisplayName = trust.Configuration.NodeDisplayName
 	result.Value.Addresses = addresses
-	var value_4 int64 = TimeGo_Unix(TimeGo_Now())
+	var value_4 int64 = StdTimeGo_Unix(StdTimeGo_Now())
 	result.Value.AcceptedAt = value_4
 	var value_5 string = NodeAuth_RandomHex(int(16))
 	result.Value.Nonce = value_5
@@ -179,11 +179,11 @@ func TrustHttp_CompleteRemote(context Context, invite PairingInvite, acceptance 
 	var input CompletePairingRequest = CompletePairingRequest{}
 	input.Invite = invite
 	input.Acceptance = acceptance
-	body := JsonGo_Marshal(input)
+	body := StdJsonGo_Marshal(input)
 	if body.Error != nil {
 		return body.Error
 	}
-	client := HttpGo_NewClient(Duration(10000000000))
+	client := StdHttpGo_NewClient(Duration(10000000000))
 	var lastError Error = *new(Error)
 	{
 		value_0 := invite.Addresses[:]
@@ -202,38 +202,38 @@ func TrustHttp_CompleteRemote(context Context, invite PairingInvite, acceptance 
 			target := strings.Join(targetParts[0:2:2], "")
 			var value_2 Context = context
 			var value_3 string = target
-			request := HttpGo_NewRequest(value_2, "POST", value_3, IoGo_FromBytes(body.Value))
+			request := StdHttpGo_NewRequest(value_2, "POST", value_3, StdIoGo_FromBytes(body.Value))
 			if request.Error != nil {
 				lastError = request.Error
 				loop_cursor_9++
 				continue
 			}
-			HttpGo_SetHeader(HttpGo_Headers(request.Value), "Content-Type", "application/json")
-			reply := HttpGo_Do(client, request.Value)
+			StdHttpGo_SetHeader(StdHttpGo_Headers(request.Value), "Content-Type", "application/json")
+			reply := StdHttpGo_Do(client, request.Value)
 			if reply.Error != nil {
 				lastError = reply.Error
 				loop_cursor_9++
 				continue
 			}
-			reader := HttpGo_ResponseBody(reply.Value)
-			responseBody := IoGo_ReadAll(IoGo_LimitReader(Reader(reader), 2048))
-			IoGo_Close(reader)
+			reader := StdHttpGo_ResponseBody(reply.Value)
+			responseBody := StdIoGo_ReadAll(StdIoGo_LimitReader(Reader(reader), 2048))
+			StdIoGo_Close(reader)
 			if responseBody.Error != nil {
 				lastError = responseBody.Error
 				loop_cursor_9++
 				continue
 			}
-			status := HttpGo_StatusCode(reply.Value)
+			status := StdHttpGo_StatusCode(reply.Value)
 			if status >= int(200) && status < int(300) {
 				return nil
 			}
-			var value_4 Error = fmt.Errorf("pairing completion failed: %s %s", HttpGo_Status(reply.Value), strings.TrimSpace(TextGo_FromBytes(responseBody.Value)))
+			var value_4 Error = fmt.Errorf("pairing completion failed: %s %s", StdHttpGo_Status(reply.Value), strings.TrimSpace(StdTextGo_FromBytes(responseBody.Value)))
 			lastError = value_4
 			loop_cursor_9++
 		}
 	}
 	if lastError == nil {
-		lastError = ErrorsGo_New("invite has no reachable address")
+		lastError = StdErrorsGo_New("invite has no reachable address")
 	}
 	return fmt.Errorf("could not complete pairing with inviter: %w", lastError)
 }
@@ -246,20 +246,20 @@ func TrustHttp_AcceptInvite(trust Trust, writer ResponseWriter, request *Request
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
 		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), ErrorsGo_Message(body.Error))
+		Response_Error(value_1, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var invite PairingInvite = PairingInvite{}
-	var value_2 Error = JsonGo_Unmarshal(body.Value, &(invite))
+	var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(invite))
 	if value_2 != nil {
 		Response_Error(writer, int(400), "invalid pairing invite")
 		return
 	}
 	var value_3 PairingInvite = invite
-	publicKey := NodeIdentity_ValidateInvite(value_3, TimeGo_Now())
+	publicKey := NodeIdentity_ValidateInvite(value_3, StdTimeGo_Now())
 	if publicKey.Error != nil {
 		var value_4 ResponseWriter = writer
-		Response_Error(value_4, int(400), ErrorsGo_Message(publicKey.Error))
+		Response_Error(value_4, int(400), StdErrorsGo_Message(publicKey.Error))
 		return
 	}
 	if invite.NodeID == trust.Identity.ID {
@@ -269,22 +269,22 @@ func TrustHttp_AcceptInvite(trust Trust, writer ResponseWriter, request *Request
 	acceptance := TrustHttp_NewAcceptance(trust, invite)
 	if acceptance.Error != nil {
 		var value_5 ResponseWriter = writer
-		Response_Error(value_5, int(400), ErrorsGo_Message(acceptance.Error))
+		Response_Error(value_5, int(400), StdErrorsGo_Message(acceptance.Error))
 		return
 	}
-	var value_6 Context = HttpGo_Context(request)
+	var value_6 Context = StdHttpGo_Context(request)
 	remoteError := TrustHttp_CompleteRemote(value_6, invite, acceptance.Value)
 	if remoteError != nil {
 		var value_7 ResponseWriter = writer
-		Response_Error(value_7, int(502), ErrorsGo_Message(remoteError))
+		Response_Error(value_7, int(502), StdErrorsGo_Message(remoteError))
 		return
 	}
 	var value_8 *Database = trust.Database
-	var value_9 Context = HttpGo_Context(request)
+	var value_9 Context = StdHttpGo_Context(request)
 	trustError := TrustStore_TrustPeer(value_8, value_9, invite, publicKey.Value)
 	if trustError != nil {
 		var value_10 ResponseWriter = writer
-		Response_Error(value_10, int(409), ErrorsGo_Message(trustError))
+		Response_Error(value_10, int(409), StdErrorsGo_Message(trustError))
 		return
 	}
 	var value PairingResponse = PairingResponse{}
@@ -297,20 +297,20 @@ func TrustHttp_CompletePairing(trust Trust, writer ResponseWriter, request *Requ
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
 		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), ErrorsGo_Message(body.Error))
+		Response_Error(value_0, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var input CompletePairingRequest = CompletePairingRequest{}
-	var value_1 Error = JsonGo_Unmarshal(body.Value, &(input))
+	var value_1 Error = StdJsonGo_Unmarshal(body.Value, &(input))
 	if value_1 != nil {
 		Response_Error(writer, int(400), "invalid pairing completion")
 		return
 	}
 	var value_2 PairingInvite = input.Invite
-	validated := NodeIdentity_ValidateInvite(value_2, TimeGo_Now())
+	validated := NodeIdentity_ValidateInvite(value_2, StdTimeGo_Now())
 	if validated.Error != nil {
 		var value_3 ResponseWriter = writer
-		Response_Error(value_3, int(400), ErrorsGo_Message(validated.Error))
+		Response_Error(value_3, int(400), StdErrorsGo_Message(validated.Error))
 		return
 	}
 	if input.Invite.NodeID != trust.Identity.ID {
@@ -319,10 +319,10 @@ func TrustHttp_CompletePairing(trust Trust, writer ResponseWriter, request *Requ
 	}
 	var value_4 PairingInvite = input.Invite
 	var value_5 PairingAcceptance = input.Acceptance
-	publicKey := NodeIdentity_ValidateAcceptance(value_4, value_5, TimeGo_Now())
+	publicKey := NodeIdentity_ValidateAcceptance(value_4, value_5, StdTimeGo_Now())
 	if publicKey.Error != nil {
 		var value_6 ResponseWriter = writer
-		Response_Error(value_6, int(400), ErrorsGo_Message(publicKey.Error))
+		Response_Error(value_6, int(400), StdErrorsGo_Message(publicKey.Error))
 		return
 	}
 	if input.Acceptance.NodeID == trust.Identity.ID {
@@ -330,12 +330,12 @@ func TrustHttp_CompletePairing(trust Trust, writer ResponseWriter, request *Requ
 		return
 	}
 	var value_7 *Database = trust.Database
-	var value_8 Context = HttpGo_Context(request)
+	var value_8 Context = StdHttpGo_Context(request)
 	var value_9 Error = TrustStore_CompleteIssuedPairing(value_7, value_8, input.Invite, input.Acceptance, publicKey.Value)
 	error := value_9
 	if error != nil {
 		var value_10 ResponseWriter = writer
-		Response_Error(value_10, int(409), ErrorsGo_Message(error))
+		Response_Error(value_10, int(409), StdErrorsGo_Message(error))
 		return
 	}
 	var value PairingResponse = PairingResponse{}
@@ -349,7 +349,7 @@ func TrustHttp_ListPeers(trust Trust, writer ResponseWriter, request *Request) {
 	if !value_0 {
 		return
 	}
-	listed := TrustStore_ListTrustedPeers(trust.Database, HttpGo_Context(request))
+	listed := TrustStore_ListTrustedPeers(trust.Database, StdHttpGo_Context(request))
 	if listed.Error != nil {
 		Response_Error(writer, int(500), "peer list failed")
 		return
@@ -367,11 +367,11 @@ func TrustHttp_CreateSpace(trust Trust, writer ResponseWriter, request *Request)
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
 		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), ErrorsGo_Message(body.Error))
+		Response_Error(value_1, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var input CreateSpaceRequest = CreateSpaceRequest{}
-	var value_2 Error = JsonGo_Unmarshal(body.Value, &(input))
+	var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(input))
 	var value_3 bool = value_2 != nil
 	var value_4 bool = value_3
 	if !value_4 {
@@ -384,7 +384,7 @@ func TrustHttp_CreateSpace(trust Trust, writer ResponseWriter, request *Request)
 	}
 	displayName := strings.TrimSpace(input.DisplayName)
 	var value_6 *Database = trust.Database
-	var value_7 Context = HttpGo_Context(request)
+	var value_7 Context = StdHttpGo_Context(request)
 	created := TrustStore_CreateTrustSpace(value_6, value_7, displayName)
 	if created.Error != nil {
 		Response_Error(writer, int(500), "trust space creation failed")
@@ -404,11 +404,11 @@ func TrustHttp_RegisterName(trust Trust, writer ResponseWriter, request *Request
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
 		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), ErrorsGo_Message(body.Error))
+		Response_Error(value_1, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var claim NameClaim = NameClaim{}
-	var value_2 Error = JsonGo_Unmarshal(body.Value, &(claim))
+	var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(claim))
 	if value_2 != nil {
 		Response_Error(writer, int(400), "invalid name claim")
 		return
@@ -435,10 +435,10 @@ func TrustHttp_RegisterName(trust Trust, writer ResponseWriter, request *Request
 		return
 	}
 	if claim.ExpiresAt == 0 {
-		var value_11 int64 = TimeGo_Unix(TimeGo_Add(TimeGo_Now(), Duration(31536000000000000)))
+		var value_11 int64 = StdTimeGo_Unix(StdTimeGo_Add(StdTimeGo_Now(), Duration(31536000000000000)))
 		claim.ExpiresAt = value_11
 	}
-	var value_12 Duration = TimeGo_Until(TimeGo_FromUnix(claim.ExpiresAt, 0))
+	var value_12 Duration = StdTimeGo_Until(StdTimeGo_FromUnix(claim.ExpiresAt, 0))
 	remaining := int64(value_12)
 	if remaining <= 0 || remaining > 31622400000000000 {
 		Response_Error(writer, int(400), "invalid name expiry")
@@ -447,24 +447,24 @@ func TrustHttp_RegisterName(trust Trust, writer ResponseWriter, request *Request
 	invalid := TrustStore_ValidateServices(claim.Services)
 	if invalid != nil {
 		var value_13 ResponseWriter = writer
-		Response_Error(value_13, int(400), ErrorsGo_Message(invalid))
+		Response_Error(value_13, int(400), StdErrorsGo_Message(invalid))
 		return
 	}
 	var value_14 *Database = trust.Database
-	var value_15 Context = HttpGo_Context(request)
+	var value_15 Context = StdHttpGo_Context(request)
 	signed := TrustStore_SignAndStoreNameClaim(value_14, value_15, claim)
 	if signed.Error != nil {
 		var value_16 ResponseWriter = writer
-		Response_Error(value_16, int(400), ErrorsGo_Message(signed.Error))
+		Response_Error(value_16, int(400), StdErrorsGo_Message(signed.Error))
 		return
 	}
 	Response_JSON(writer, int(200), signed.Value)
 }
 
 func TrustHttp_ResolveName(trust Trust, writer ResponseWriter, request *Request) {
-	query := UrlGo_Query(HttpGo_RequestURL(request))
-	spaceID := strings.TrimSpace(UrlGo_Value(query, "space_id"))
-	name := NodeIdentity_NormalizeName(UrlGo_Value(query, "name"))
+	query := StdUrlGo_Query(StdHttpGo_RequestURL(request))
+	spaceID := strings.TrimSpace(StdUrlGo_Value(query, "space_id"))
+	name := NodeIdentity_NormalizeName(StdUrlGo_Value(query, "name"))
 	var value_0 bool = Identity_ValidUserID(spaceID)
 	var value_1 bool = !value_0
 	if !value_1 {
@@ -476,7 +476,7 @@ func TrustHttp_ResolveName(trust Trust, writer ResponseWriter, request *Request)
 		return
 	}
 	var value_3 *Database = trust.Database
-	var value_4 Context = HttpGo_Context(request)
+	var value_4 Context = StdHttpGo_Context(request)
 	resolved := TrustStore_ResolveNameClaim(value_3, value_4, spaceID, name)
 	if resolved.Error != nil {
 		Response_Error(writer, int(500), "name resolution failed")
@@ -489,7 +489,7 @@ func TrustHttp_ResolveName(trust Trust, writer ResponseWriter, request *Request)
 	var value NameResponse = NameResponse{}
 	value.Claim = resolved.Value
 	var value_5 int64 = resolved.Value.ExpiresAt
-	var value_6 int64 = value_5 - TimeGo_Unix(TimeGo_Now())
+	var value_6 int64 = value_5 - StdTimeGo_Unix(StdTimeGo_Now())
 	value.TtlSeconds = value_6
 	uriParts := [4]string{"daochi://", spaceID, "/", name}
 	_ = uriParts

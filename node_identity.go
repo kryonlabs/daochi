@@ -10,7 +10,7 @@ import (
 )
 
 // #import protocol
-// #import go_types
+// #import std_go_types
 type NodeIdentity struct {
 	ID         string
 	PublicKey  PublicKey
@@ -122,8 +122,8 @@ func NodeIdentity_SortedAddresses(addresses []string) string {
 }
 
 func NodeIdentity_SignedMessage(key PrivateKey, message []uint8) string {
-	signature := Ed25519Go_Sign(key, message)
-	var value_0 string = TextGo_FromBytes(signature)
+	signature := StdEd25519Go_Sign(key, message)
+	var value_0 string = StdTextGo_FromBytes(signature)
 	encoded := Codec_EncodeBase64(value_0, true, false)
 	return encoded.Value
 }
@@ -132,7 +132,7 @@ func NodeIdentity_New(privateKey PrivateKey) NodeIdentityResult {
 	var result NodeIdentityResult = NodeIdentityResult{}
 	privateBytes := []uint8(privateKey)
 	if int64(len(privateBytes)) == 0 {
-		generated := Ed25519Go_GenerateKey()
+		generated := StdEd25519Go_GenerateKey()
 		if generated.Error != nil {
 			result.Error = generated.Error
 			return result
@@ -141,7 +141,7 @@ func NodeIdentity_New(privateKey PrivateKey) NodeIdentityResult {
 		privateBytes = []uint8(privateKey)
 	}
 	if int64(len(privateBytes)) != 64 {
-		var value_0 Error = ErrorsGo_New("invalid Ed25519 node identity key")
+		var value_0 Error = StdErrorsGo_New("invalid Ed25519 node identity key")
 		result.Error = value_0
 		return result
 	}
@@ -161,57 +161,57 @@ func NodeIdentity_LoadOrCreateKey(rawPath string) PrivateKeyResult {
 	var result PrivateKeyResult = PrivateKeyResult{}
 	path := strings.TrimSpace(rawPath)
 	if path == "" {
-		var value_0 Error = ErrorsGo_New("empty node identity key path")
+		var value_0 Error = StdErrorsGo_New("empty node identity key path")
 		result.Error = value_0
 		return result
 	}
-	read := FileGo_ReadFile(path)
+	read := StdFileGo_ReadFile(path)
 	if read.Error == nil {
-		decoded := NodeIdentity_DecodeHex(strings.TrimSpace(TextGo_FromBytes(read.Value)))
+		decoded := NodeIdentity_DecodeHex(strings.TrimSpace(StdTextGo_FromBytes(read.Value)))
 		if decoded.Error != nil {
 			var value_1 Error = fmt.Errorf("decode %s: %w", path, decoded.Error)
 			result.Error = value_1
 			return result
 		}
 		if int64(len(decoded.Value)) == 32 {
-			var value_2 PrivateKey = Ed25519Go_NewKeyFromSeed(decoded.Value)
+			var value_2 PrivateKey = StdEd25519Go_NewKeyFromSeed(decoded.Value)
 			result.Value = value_2
 			return result
 		}
 		if int64(len(decoded.Value)) != 64 {
-			var value_3 Error = ErrorsGo_New(NodeIdentity_Concat(path, " has invalid key length"))
+			var value_3 Error = StdErrorsGo_New(NodeIdentity_Concat(path, " has invalid key length"))
 			result.Error = value_3
 			return result
 		}
 		result.Value = PrivateKey(decoded.Value)
 		return result
 	}
-	var value_4 bool = ErrorsGo_Is(read.Error, FileGo_NotExist())
+	var value_4 bool = StdErrorsGo_Is(read.Error, StdFileGo_NotExist())
 	if !value_4 {
 		result.Error = read.Error
 		return result
 	}
-	var value_5 Error = FileGo_MkdirAll(FileGo_Dir(path), FileMode(448))
+	var value_5 Error = StdFileGo_MkdirAll(StdFileGo_Dir(path), FileMode(448))
 	result.Error = value_5
 	if result.Error != nil {
 		return result
 	}
-	generated := Ed25519Go_GenerateKey()
+	generated := StdEd25519Go_GenerateKey()
 	if generated.Error != nil {
 		result.Error = generated.Error
 		return result
 	}
 	temporary := NodeIdentity_Concat(path, ".tmp")
 	encoded := NodeIdentity_Concat(hex.EncodeToString([]uint8(generated.PrivateKey)), "\n")
-	var value_6 Error = FileGo_WriteFile(temporary, TextGo_ToBytes(encoded), FileMode(384))
+	var value_6 Error = StdFileGo_WriteFile(temporary, StdTextGo_ToBytes(encoded), FileMode(384))
 	result.Error = value_6
 	if result.Error != nil {
 		return result
 	}
-	var value_7 Error = FileGo_Rename(temporary, path)
+	var value_7 Error = StdFileGo_Rename(temporary, path)
 	result.Error = value_7
 	if result.Error != nil {
-		FileGo_Remove(temporary)
+		StdFileGo_Remove(temporary)
 		return result
 	}
 	result.Value = generated.PrivateKey
@@ -219,7 +219,7 @@ func NodeIdentity_LoadOrCreateKey(rawPath string) PrivateKeyResult {
 }
 
 func NodeIdentity_InviteMessage(invite PairingInvite) []uint8 {
-	policy := JsonGo_Marshal(invite.Policy)
+	policy := StdJsonGo_Marshal(invite.Policy)
 	var value_0 string = strconv.FormatInt(int64(int64(invite.Version)), int(int(10)))
 	var value_1 string = NodeIdentity_SortedAddresses(invite.Addresses)
 	var value_2 string = strconv.FormatInt(int64(invite.ExpiresAt), int(int(10)))
@@ -227,7 +227,7 @@ func NodeIdentity_InviteMessage(invite PairingInvite) []uint8 {
 	var value_4 [12]string = [12]string{"daochi-pairing-invite-v1", value_0, invite.InviteID, invite.NodeID, invite.PublicKey, invite.DisplayName, value_1, invite.SpaceID, value_2, invite.Nonce, value_3, ""}
 	parts := value_4
 	_ = parts
-	return TextGo_ToBytes(strings.Join(parts[0:12:12], "\n"))
+	return StdTextGo_ToBytes(strings.Join(parts[0:12:12], "\n"))
 }
 
 func NodeIdentity_SignInvite(node NodeIdentity, invite *PairingInvite) {
@@ -239,11 +239,11 @@ func NodeIdentity_AcceptanceMessage(invite PairingInvite, acceptance PairingAcce
 	var value_0 string = strconv.FormatInt(int64(int64(acceptance.Version)), int(int(10)))
 	var value_1 string = NodeIdentity_SortedAddresses(acceptance.Addresses)
 	var value_2 string = strconv.FormatInt(int64(acceptance.AcceptedAt), int(int(10)))
-	var value_3 string = Signing_SHA256Hex(TextGo_ToBytes(invite.Signature))
+	var value_3 string = Signing_SHA256Hex(StdTextGo_ToBytes(invite.Signature))
 	var value_4 [11]string = [11]string{"daochi-pairing-invite-v1-acceptance", value_0, acceptance.InviteID, acceptance.NodeID, acceptance.PublicKey, acceptance.DisplayName, value_1, value_2, acceptance.Nonce, value_3, ""}
 	parts := value_4
 	_ = parts
-	return TextGo_ToBytes(strings.Join(parts[0:11:11], "\n"))
+	return StdTextGo_ToBytes(strings.Join(parts[0:11:11], "\n"))
 }
 
 func NodeIdentity_SignAcceptance(node NodeIdentity, invite PairingInvite, acceptance *PairingAcceptance) {
@@ -253,29 +253,29 @@ func NodeIdentity_SignAcceptance(node NodeIdentity, invite PairingInvite, accept
 
 func NodeIdentity_ValidateAddresses(addresses []string) Error {
 	if int64(len(addresses)) == 0 {
-		return ErrorsGo_New("at least one reachable address is required")
+		return StdErrorsGo_New("at least one reachable address is required")
 	}
 	for _, address := range addresses {
-		parsed := UrlGo_Parse(address)
+		parsed := StdUrlGo_Parse(address)
 		var value_0 bool = parsed.Error != nil
 		var value_1 bool = value_0
 		if !value_1 {
-			var value_2 bool = UrlGo_Host(parsed.Value) == ""
+			var value_2 bool = StdUrlGo_Host(parsed.Value) == ""
 			value_1 = value_2
 		}
 		var value_3 bool = value_1
 		var value_4 bool = value_3
 		if !value_4 {
-			var value_5 bool = UrlGo_Scheme(parsed.Value) != "http"
+			var value_5 bool = StdUrlGo_Scheme(parsed.Value) != "http"
 			var value_6 bool = value_5
 			if value_6 {
-				var value_7 bool = UrlGo_Scheme(parsed.Value) != "https"
+				var value_7 bool = StdUrlGo_Scheme(parsed.Value) != "https"
 				value_6 = value_7
 			}
 			value_4 = value_6
 		}
 		if value_4 {
-			return ErrorsGo_New("invalid pairing address")
+			return StdErrorsGo_New("invalid pairing address")
 		}
 	}
 	return nil
@@ -289,19 +289,19 @@ func NodeIdentity_ValidateAcceptance(invite PairingInvite, acceptance PairingAcc
 		value_0 = !value_1
 	}
 	if value_0 || acceptance.Nonce == "" {
-		var value_2 Error = ErrorsGo_New("invalid pairing acceptance")
+		var value_2 Error = StdErrorsGo_New("invalid pairing acceptance")
 		result.Error = value_2
 		return result
 	}
 	var window int64 = 300000000000
-	var value_3 bool = acceptance.AcceptedAt < TimeGo_Unix(TimeGo_Add(now, Duration(0-window)))
+	var value_3 bool = acceptance.AcceptedAt < StdTimeGo_Unix(StdTimeGo_Add(now, Duration(0-window)))
 	var value_4 bool = value_3
 	if !value_4 {
-		var value_5 bool = acceptance.AcceptedAt > TimeGo_Unix(TimeGo_Add(now, Duration(window)))
+		var value_5 bool = acceptance.AcceptedAt > StdTimeGo_Unix(StdTimeGo_Add(now, Duration(window)))
 		value_4 = value_5
 	}
 	if value_4 {
-		var value_6 Error = ErrorsGo_New("pairing acceptance time is outside the allowed window")
+		var value_6 Error = StdErrorsGo_New("pairing acceptance time is outside the allowed window")
 		result.Error = value_6
 		return result
 	}
@@ -312,12 +312,12 @@ func NodeIdentity_ValidateAcceptance(invite PairingInvite, acceptance PairingAcc
 	}
 	publicBytes := NodeIdentity_DecodeHex(acceptance.PublicKey)
 	if publicBytes.Error != nil || int64(len(publicBytes.Value)) != 32 {
-		var value_8 Error = ErrorsGo_New("invalid pairing acceptance public key")
+		var value_8 Error = StdErrorsGo_New("invalid pairing acceptance public key")
 		result.Error = value_8
 		return result
 	}
 	if Signing_SHA256Hex(publicBytes.Value) != acceptance.NodeID {
-		var value_9 Error = ErrorsGo_New("pairing acceptance node ID does not match public key")
+		var value_9 Error = StdErrorsGo_New("pairing acceptance node ID does not match public key")
 		result.Error = value_9
 		return result
 	}
@@ -325,11 +325,11 @@ func NodeIdentity_ValidateAcceptance(invite PairingInvite, acceptance PairingAcc
 	key := PublicKey(publicBytes.Value)
 	var value_10 bool = signature.Error != ""
 	if !value_10 {
-		var value_11 bool = Ed25519Go_Verify(key, NodeIdentity_AcceptanceMessage(invite, acceptance), TextGo_ToBytes(signature.Value))
+		var value_11 bool = StdEd25519Go_Verify(key, NodeIdentity_AcceptanceMessage(invite, acceptance), StdTextGo_ToBytes(signature.Value))
 		value_10 = !value_11
 	}
 	if value_10 {
-		var value_12 Error = ErrorsGo_New("invalid pairing acceptance signature")
+		var value_12 Error = StdErrorsGo_New("invalid pairing acceptance signature")
 		result.Error = value_12
 		return result
 	}
@@ -345,30 +345,30 @@ func NodeIdentity_ValidateInvite(invite PairingInvite, now Time) PublicKeyResult
 		value_0 = !value_1
 	}
 	if value_0 || invite.InviteID == "" || invite.Nonce == "" {
-		var value_2 Error = ErrorsGo_New("invalid pairing invite")
+		var value_2 Error = StdErrorsGo_New("invalid pairing invite")
 		result.Error = value_2
 		return result
 	}
 	lifetime := Duration(86400000000000)
-	var value_3 bool = invite.ExpiresAt <= TimeGo_Unix(now)
+	var value_3 bool = invite.ExpiresAt <= StdTimeGo_Unix(now)
 	var value_4 bool = value_3
 	if !value_4 {
-		var value_5 bool = invite.ExpiresAt > TimeGo_Unix(TimeGo_Add(now, lifetime))
+		var value_5 bool = invite.ExpiresAt > StdTimeGo_Unix(StdTimeGo_Add(now, lifetime))
 		value_4 = value_5
 	}
 	if value_4 {
-		var value_6 Error = ErrorsGo_New("pairing invite expired or too far in the future")
+		var value_6 Error = StdErrorsGo_New("pairing invite expired or too far in the future")
 		result.Error = value_6
 		return result
 	}
 	publicBytes := NodeIdentity_DecodeHex(invite.PublicKey)
 	if publicBytes.Error != nil || int64(len(publicBytes.Value)) != 32 {
-		var value_7 Error = ErrorsGo_New("invalid pairing public key")
+		var value_7 Error = StdErrorsGo_New("invalid pairing public key")
 		result.Error = value_7
 		return result
 	}
 	if Signing_SHA256Hex(publicBytes.Value) != invite.NodeID {
-		var value_8 Error = ErrorsGo_New("pairing node ID does not match public key")
+		var value_8 Error = StdErrorsGo_New("pairing node ID does not match public key")
 		result.Error = value_8
 		return result
 	}
@@ -376,11 +376,11 @@ func NodeIdentity_ValidateInvite(invite PairingInvite, now Time) PublicKeyResult
 	key := PublicKey(publicBytes.Value)
 	var value_9 bool = signature.Error != ""
 	if !value_9 {
-		var value_10 bool = Ed25519Go_Verify(key, NodeIdentity_InviteMessage(invite), TextGo_ToBytes(signature.Value))
+		var value_10 bool = StdEd25519Go_Verify(key, NodeIdentity_InviteMessage(invite), StdTextGo_ToBytes(signature.Value))
 		value_9 = !value_10
 	}
 	if value_9 {
-		var value_11 Error = ErrorsGo_New("invalid pairing signature")
+		var value_11 Error = StdErrorsGo_New("invalid pairing signature")
 		result.Error = value_11
 		return result
 	}
@@ -415,7 +415,7 @@ func NodeIdentity_ValidName(name string) bool {
 }
 
 func NodeIdentity_NameClaimMessage(claim NameClaim) []uint8 {
-	services := JsonGo_Marshal(claim.Services)
+	services := StdJsonGo_Marshal(claim.Services)
 	var value_0 string = strconv.FormatInt(int64(int64(claim.Version)), int(int(10)))
 	var value_1 string = strconv.FormatInt(int64(claim.Sequence), int(int(10)))
 	var value_2 string = strconv.FormatInt(int64(claim.ExpiresAt), int(int(10)))
@@ -423,5 +423,5 @@ func NodeIdentity_NameClaimMessage(claim NameClaim) []uint8 {
 	var value_4 [9]string = [9]string{"daochi-name-claim-v1", value_0, claim.SpaceID, claim.Name, claim.NodeID, value_1, value_2, value_3, ""}
 	parts := value_4
 	_ = parts
-	return TextGo_ToBytes(strings.Join(parts[0:9:9], "\n"))
+	return StdTextGo_ToBytes(strings.Join(parts[0:9:9], "\n"))
 }

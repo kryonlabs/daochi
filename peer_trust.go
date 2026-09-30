@@ -3,7 +3,7 @@ package main
 
 import sql "database/sql"
 
-// #import go_types
+// #import std_go_types
 type PeerKeyResult struct {
 	Value PublicKey
 	Found bool
@@ -17,7 +17,7 @@ func PeerTrust_PublicKey(database *Database, context Context, nodeID string) Pee
 	row := value_0
 	error := (*sql.Row).Scan(row, &(key))
 	var value_1 Error = error
-	if ErrorsGo_Is(value_1, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {
@@ -25,7 +25,7 @@ func PeerTrust_PublicKey(database *Database, context Context, nodeID string) Pee
 		return result
 	}
 	if int64(len(key)) != 32 {
-		var value_2 Error = ErrorsGo_New("stored peer key is invalid")
+		var value_2 Error = StdErrorsGo_New("stored peer key is invalid")
 		result.Error = value_2
 		return result
 	}

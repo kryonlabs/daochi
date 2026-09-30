@@ -1,4 +1,4 @@
-clock :: #import "time_go";
+clock :: #import "std/time_go";
 
 // Fixed-width UTC fractions keep stored timestamps in chronological string order.
 CanonicalTimestampLayout :: "2006-01-02T15:04:05.000000000Z07:00";

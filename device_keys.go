@@ -9,7 +9,7 @@ import (
 	time "time"
 )
 
-// #import go_types
+// #import std_go_types
 type DeviceKey struct {
 	AccountID  string "json:\"account_id,omitempty\""
 	AppID      string "json:\"app_id\""
@@ -127,7 +127,7 @@ const TouchSQL = "\nUPDATE server_device_keys SET last_used_at=?4\nWHERE account
 const ListSQL = "\nSELECT account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at\nFROM server_device_keys WHERE account_id=?1 ORDER BY app_id,device_key_id\n"
 
 func DeviceKeys_RecordNonce(transaction *Transaction, context Context, accountID string, nonce string, replay Error) Error {
-	cutoff := Timestamp_CanonicalTimestamp(TimeGo_Add(TimeGo_Now(), Duration(-1800000000000)))
+	cutoff := Timestamp_CanonicalTimestamp(StdTimeGo_Add(StdTimeGo_Now(), Duration(-1800000000000)))
 	var value_0 zir_0291b470ede4d422_ExecResult = DeviceKeys_DeleteNonces(transaction, context, "DELETE FROM server_device_registration_nonces WHERE created_at<?1", cutoff)
 	deleted := value_0
 	if deleted.Error != nil {
@@ -138,7 +138,7 @@ func DeviceKeys_RecordNonce(transaction *Transaction, context Context, accountID
 	var value_2 bool = inserted.Error != nil
 	var value_3 bool = value_2
 	if value_3 {
-		var value_4 bool = strings.Contains(ErrorsGo_Message(inserted.Error), "UNIQUE")
+		var value_4 bool = strings.Contains(StdErrorsGo_Message(inserted.Error), "UNIQUE")
 		value_3 = value_4
 	}
 	if value_3 {
@@ -152,7 +152,7 @@ func DeviceKeys_RegistrationMessage(accountID string, request DeviceRegistration
 	var value_1 [9]string = [9]string{"daochi-device-registration-v1", accountID, request.AppID, request.KeyID, request.ClientID, request.PublicKey, request.Nonce, value_0, ""}
 	parts := value_1
 	_ = parts
-	return TextGo_ToBytes(strings.Join(parts[0:9:9], "\n"))
+	return StdTextGo_ToBytes(strings.Join(parts[0:9:9], "\n"))
 }
 
 func DeviceKeys_RevocationMessage(accountID string, request DeviceRevocationRequest) []uint8 {
@@ -160,7 +160,7 @@ func DeviceKeys_RevocationMessage(accountID string, request DeviceRevocationRequ
 	var value_1 [7]string = [7]string{"daochi-device-revocation-v1", accountID, request.AppID, request.KeyID, request.Nonce, value_0, ""}
 	parts := value_1
 	_ = parts
-	return TextGo_ToBytes(strings.Join(parts[0:7:7], "\n"))
+	return StdTextGo_ToBytes(strings.Join(parts[0:7:7], "\n"))
 }
 
 func DeviceKeys_NormalizeRegistration(request *DeviceRegistrationRequest) {
@@ -190,11 +190,11 @@ func DeviceKeys_NormalizeRevocation(request *DeviceRevocationRequest) {
 }
 
 func DeviceKeys_ValidExpiry(expiresAt int64) bool {
-	now := TimeGo_Now()
-	var value_0 bool = expiresAt > TimeGo_Unix(now)
+	now := StdTimeGo_Now()
+	var value_0 bool = expiresAt > StdTimeGo_Unix(now)
 	var value_1 bool = value_0
 	if value_1 {
-		var value_2 bool = TimeGo_After(time.Unix(int64(expiresAt), int64(0)), TimeGo_Add(now, Duration(900000000000)))
+		var value_2 bool = StdTimeGo_After(time.Unix(int64(expiresAt), int64(0)), StdTimeGo_Add(now, Duration(900000000000)))
 		value_1 = !value_2
 	}
 	return value_1
@@ -244,7 +244,7 @@ func DeviceKeys_VerifyRegistration(database *Database, context Context, accountI
 		return Authentication_Failure(int(400), "invalid device registration signature")
 	}
 	var value_1 VerifySignature = verifySignature
-	var value_2 bool = value_1(account.Value, DeviceKeys_RegistrationMessage(accountID, request), TextGo_ToBytes(signature.Value))
+	var value_2 bool = value_1(account.Value, DeviceKeys_RegistrationMessage(accountID, request), StdTextGo_ToBytes(signature.Value))
 	if !value_2 {
 		return Authentication_Failure(int(401), "device registration rejected")
 	}
@@ -283,7 +283,7 @@ func DeviceKeys_VerifyRevocation(database *Database, context Context, accountID 
 		return Authentication_Failure(int(400), "invalid device revocation signature")
 	}
 	var value_7 VerifySignature = verifySignature
-	var value_8 bool = value_7(account.Value, DeviceKeys_RevocationMessage(accountID, request), TextGo_ToBytes(signature.Value))
+	var value_8 bool = value_7(account.Value, DeviceKeys_RevocationMessage(accountID, request), StdTextGo_ToBytes(signature.Value))
 	if !value_8 {
 		return Authentication_Failure(int(401), "device revocation rejected")
 	}
@@ -307,7 +307,7 @@ func DeviceKeys_Register(database *Database, context Context, device DeviceKey, 
 	if inserted.Error != nil {
 		return inserted.Error
 	}
-	return SqlGo_Commit(transaction)
+	return StdSqlGo_Commit(transaction)
 }
 
 func DeviceKeys_Revoke(database *Database, context Context, accountID string, request DeviceRevocationRequest, replay Error) Error {
@@ -327,14 +327,14 @@ func DeviceKeys_Revoke(database *Database, context Context, accountID string, re
 	if revoked.Error != nil {
 		return revoked.Error
 	}
-	changed := SqlGo_RowsAffected(revoked.Value)
+	changed := StdSqlGo_RowsAffected(revoked.Value)
 	if changed.Error != nil {
 		return changed.Error
 	}
 	if changed.Value == 0 {
-		return SqlGo_NoRows()
+		return StdSqlGo_NoRows()
 	}
-	return SqlGo_Commit(transaction)
+	return StdSqlGo_Commit(transaction)
 }
 
 func DeviceKeys_Active(database *Database, context Context, accountID string, appID string, keyID string) DeviceKeyResult {
@@ -345,7 +345,7 @@ func DeviceKeys_Active(database *Database, context Context, accountID string, ap
 	var value_1 Error = (*sql.Row).Scan(row, &(device.AccountID), &(device.AppID), &(device.KeyID), &(device.ClientID), &(device.PublicKey), &(device.CreatedAt), &(device.LastUsedAt), &(device.RevokedAt))
 	error := value_1
 	var value_2 Error = error
-	if ErrorsGo_Is(value_2, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
 		return result
 	}
 	result.Value = device
@@ -372,7 +372,7 @@ func DeviceKeys_List(database *Database, context Context, accountID string) Devi
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
 	var devices []DeviceKey = nil
-	for SqlGo_Next(rows) {
+	for StdSqlGo_Next(rows) {
 		var device DeviceKey = DeviceKey{}
 		var value_1 Error = (*sql.Rows).Scan(rows, &(device.AccountID), &(device.AppID), &(device.KeyID), &(device.ClientID), &(device.PublicKey), &(device.CreatedAt), &(device.LastUsedAt), &(device.RevokedAt))
 		result.Error = value_1
@@ -382,7 +382,7 @@ func DeviceKeys_List(database *Database, context Context, accountID string) Devi
 		devices = append(devices, device)
 	}
 	result.Value = devices
-	var value_2 Error = SqlGo_RowsError(rows)
+	var value_2 Error = StdSqlGo_RowsError(rows)
 	result.Error = value_2
 	return result
 }

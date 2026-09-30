@@ -19,17 +19,18 @@ CGO_ENV := CGO_ENABLED=1 \
 all: build
 
 # Generated Go is committed so ordinary Go/container builds remain usable.
-# Use the sibling Ziran checkout, or set ZI2GO and ZIRAN_STD explicitly.
+# Resolve the pinned toolchain through Ziran's project package commands.
+ZIRAN ?= ziran
 generate:
-	python3 scripts/generate_go.py
+	ZIRAN="$(ZIRAN)" python3 scripts/generate_go.py
 
 check-generated:
-	python3 scripts/generate_go.py --check
+	ZIRAN="$(ZIRAN)" python3 scripts/generate_go.py --check
 
 test-ziran: check-generated test test-ziran-ir
 
 test-ziran-ir: $(LIBOQS_A)
-	$(CGO_ENV) GOCACHE=/tmp/daochi-gocache python3 scripts/test_saved_ir.py
+	$(CGO_ENV) ZIRAN="$(ZIRAN)" GOCACHE=/tmp/daochi-gocache python3 scripts/test_saved_ir.py
 
 liboqs: $(LIBOQS_A)
 

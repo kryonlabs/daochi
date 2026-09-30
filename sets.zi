@@ -1,4 +1,4 @@
-#import "map_go"
+#import "std/map_go"
 
 go_strings :: #system_library "go:strings";
 Split :: (value: string, separator: string) -> []string #foreign go_strings;

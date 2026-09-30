@@ -1,15 +1,15 @@
-#import "go_types"
+#import "std/go_types"
 #import "device_keys"
 config :: #import "config";
 auth :: #import "authentication";
 http_auth :: #import "http_auth";
 http_body :: #import "http_body";
 response :: #import "response";
-http :: #import "http_go";
-sql :: #import "sql_go";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
 keys :: #import "device_keys";
-json :: #import "json_go";
-errors :: #import "errors_go";
+json :: #import "std/json_go";
+errors :: #import "std/errors_go";
 metrics :: #import "metrics";
 
 Devices :: struct {

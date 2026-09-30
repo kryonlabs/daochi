@@ -1,4 +1,4 @@
-#import "go_types"
+#import "std/go_types"
 #import "protocol"
 #import "manifest"
 config :: #import "config";
@@ -6,10 +6,10 @@ auth :: #import "authentication";
 http_auth :: #import "http_auth";
 http_body :: #import "http_body";
 response :: #import "response";
-http :: #import "http_go";
-url :: #import "url_go";
-sql :: #import "sql_go";
-ctx :: #import "context_go";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
 apps :: #import "app_store";
 grants :: #import "app_grants";
 registration :: #import "app_registration";
@@ -18,8 +18,8 @@ envelope :: #import "transaction";
 signing :: #import "signing";
 identity :: #import "identity";
 scope :: #import "scope";
-json :: #import "json_go";
-errors :: #import "errors_go";
+json :: #import "std/json_go";
+errors :: #import "std/errors_go";
 metrics :: #import "metrics";
 logs :: #import "log_safety";
 go_strings :: #system_library "go:strings";

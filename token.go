@@ -4,10 +4,10 @@ package main
 import strings "strings"
 
 // #import codec
-// #import vec
+// #import std_vec
 // #import identity
-// #import hmac_sha256_go
-// #import constant_time
+// #import std_hmac_sha256_go
+// #import std_constant_time
 type AuthTokenResult struct {
 	Value string
 	Error string
@@ -140,7 +140,7 @@ func Token_IssueAuthToken(secret []uint8, userID string, expiresAt int64) AuthTo
 	parts := [4]string{"v1", userID, expiry.Value, ""}
 	_ = parts
 	payload := strings.Join(parts[0:4:4], "\n")
-	mac := HmacSha256Go_HMACSHA256(secret, payload)
+	mac := StdHmacSha256Go_HMACSHA256(secret, payload)
 	if mac.Error != "" {
 		result.Error = mac.Error
 		return result
@@ -175,12 +175,12 @@ func Token_VerifyAuthToken(secret []uint8, token string, now int64) AuthTokenRes
 		result.Error = "invalid token signature"
 		return result
 	}
-	mac := HmacSha256Go_HMACSHA256(secret, payload.Value)
+	mac := StdHmacSha256Go_HMACSHA256(secret, payload.Value)
 	if mac.Error != "" {
 		result.Error = mac.Error
 		return result
 	}
-	var value_0 bool = ConstantTime_ConstantTimeTextEqual(signature.Value, mac.Value)
+	var value_0 bool = StdConstantTime_ConstantTimeTextEqual(signature.Value, mac.Value)
 	if !value_0 {
 		result.Error = "invalid token signature"
 		return result

@@ -1,4 +1,5 @@
 build/
+ziran.local.toml
 lyra
 secrets/
 *.db

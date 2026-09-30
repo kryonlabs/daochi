@@ -7,8 +7,8 @@ import (
 )
 
 // #import protocol
-// #import map_go
-// #import go_types
+// #import std_map_go
+// #import std_go_types
 type CutResult struct {
 	Before string
 	After  string

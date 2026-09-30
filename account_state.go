@@ -3,7 +3,7 @@ package main
 
 import sql "database/sql"
 
-// #import go_types
+// #import std_go_types
 type zir_2688387c33a72186_ExecResult struct {
 	Value Result
 	Error Error
@@ -43,7 +43,7 @@ func AccountState_Touch(transaction *Transaction, context Context, userID string
 	if updated.Error != nil {
 		return updated.Error
 	}
-	affected := SqlGo_RowsAffected(updated.Value)
+	affected := StdSqlGo_RowsAffected(updated.Value)
 	if affected.Error != nil || int(affected.Value) == int(0) {
 		return missingUser
 	}

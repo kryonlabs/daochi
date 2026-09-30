@@ -1,17 +1,17 @@
-#import "go_types"
+#import "std/go_types"
 #import "metrics"
 auth :: #import "authentication";
 accounts :: #import "account_keys";
 state :: #import "account_state";
 token :: #import "token";
-http :: #import "http_go";
-sql :: #import "sql_go";
-clock :: #import "time_go";
-url :: #import "url_go";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+clock :: #import "std/time_go";
+url :: #import "std/url_go";
 response :: #import "response";
 metrics :: #import "metrics";
-net :: #import "net_go";
-constant_time :: #import "constant_time";
+net :: #import "std/net_go";
+constant_time :: #import "std/constant_time";
 go_strings :: #system_library "go:strings";
 go_slog :: #system_library "go:log/slog";
 

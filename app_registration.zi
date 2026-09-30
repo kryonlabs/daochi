@@ -1,4 +1,4 @@
-#import "go_types"
+#import "std/go_types"
 #import "manifest"
 #import "protocol"
 manifest :: #import "manifest";
@@ -9,11 +9,11 @@ transaction :: #import "signed_tx";
 envelope :: #import "transaction";
 identity :: #import "identity";
 scope :: #import "scope";
-json :: #import "json_go";
-keys :: #import "ed25519_go";
-text :: #import "text_go";
-clock :: #import "time_go";
-errors :: #import "errors_go";
+json :: #import "std/json_go";
+keys :: #import "std/ed25519_go";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
 go_strings :: #system_library "go:strings";
 
 SignedRegistrationResult :: struct {

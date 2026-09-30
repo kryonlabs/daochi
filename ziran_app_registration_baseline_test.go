@@ -27,7 +27,7 @@ func baselineValidateSignedAppRegistration(req SignedAppRegistrationRequest, nod
 	if len(nodePublicKey) != ed25519.PublicKeySize {
 		return nil, "", authError{status: http.StatusForbidden, message: "node registry approval unavailable"}
 	}
-	serialized := JsonGo_Marshal(req.Manifest)
+	serialized := StdJsonGo_Marshal(req.Manifest)
 	manifestBytes, err := serialized.Value, serialized.Error
 	if err != nil {
 		return nil, "", err

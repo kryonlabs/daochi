@@ -10,15 +10,15 @@ const CanonicalTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 const MinCanonicalTimestamp = "0001-01-01T00:00:00.000000000Z"
 
 func Timestamp_CanonicalNow() string {
-	return Timestamp_CanonicalTimestamp(TimeGo_Now())
+	return Timestamp_CanonicalTimestamp(StdTimeGo_Now())
 }
 
 func Timestamp_CanonicalTimestamp(value Time) string {
-	return TimeGo_Format(TimeGo_UTC(value), "2006-01-02T15:04:05.000000000Z07:00")
+	return StdTimeGo_Format(StdTimeGo_UTC(value), "2006-01-02T15:04:05.000000000Z07:00")
 }
 
 func Timestamp_ParseTimestamp(value string) TimestampResult {
-	parsed := TimeGo_Parse("2006-01-02T15:04:05.999999999Z07:00", value)
+	parsed := StdTimeGo_Parse("2006-01-02T15:04:05.999999999Z07:00", value)
 	if parsed.Error == nil {
 		var result TimestampResult = TimestampResult{}
 		_ = result
@@ -26,7 +26,7 @@ func Timestamp_ParseTimestamp(value string) TimestampResult {
 		result.Valid = true
 		return result
 	}
-	parsed = TimeGo_Parse("2006-01-02 15:04:05", value)
+	parsed = StdTimeGo_Parse("2006-01-02 15:04:05", value)
 	if parsed.Error == nil {
 		var result TimestampResult = TimestampResult{}
 		_ = result

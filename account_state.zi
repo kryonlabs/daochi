@@ -1,6 +1,6 @@
-#import "go_types"
-ctx :: #import "context_go";
-sql :: #import "sql_go";
+#import "std/go_types"
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
 timestamp :: #import "timestamp";
 go_sql :: #system_library "go:database/sql";
 

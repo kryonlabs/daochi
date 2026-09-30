@@ -10,9 +10,9 @@ import (
 )
 
 // #import protocol
-// #import map_go
-// #import sync_go
-// #import vec
+// #import std_map_go
+// #import std_sync_go
+// #import std_vec
 type __type_bac941a75fbbc62b = map[string]uint64
 
 type ServerMetrics struct {
@@ -76,7 +76,7 @@ func Metrics_EnsureMaps(metrics *ServerMetrics) {
 }
 
 func Metrics_WriteMaps(metrics *ServerMetrics, writer ResponseWriter) {
-	SyncGo_Lock(&(metrics.Mu))
+	StdSyncGo_Lock(&(metrics.Mu))
 	defer (*sync.Mutex).Unlock(&(metrics.Mu))
 	Metrics_EnsureMaps(metrics)
 	Metrics_WriteLabelMap(writer, "daochi_http_requests_total", "counter", "method,route,status", metrics.HttpRequests)
@@ -183,7 +183,7 @@ func Metrics_SortedKeys(values __type_bac941a75fbbc62b) []string {
 func Metrics_RecordHTTP(metrics *ServerMetrics, method string, path string, status int, elapsed Duration) {
 	route := Metrics_Route(path)
 	key := fmt.Sprintf("%s|%s|%d", method, route, int(status))
-	SyncGo_Lock(&(metrics.Mu))
+	StdSyncGo_Lock(&(metrics.Mu))
 	Metrics_EnsureMaps(metrics)
 	var value_0 *__type_bac941a75fbbc62b = &(metrics.HttpRequests)
 	var value_1 string = key
@@ -206,14 +206,14 @@ func Metrics_RecordHTTP(metrics *ServerMetrics, method string, path string, stat
 		(*value_6) = make(__type_bac941a75fbbc62b)
 	}
 	(*value_6)[value_7] = value_8
-	SyncGo_Unlock(&(metrics.Mu))
+	StdSyncGo_Unlock(&(metrics.Mu))
 }
 
 func Metrics_RecordAuthFailure(metrics *ServerMetrics, status int, message string) {
-	AtomicGo_Add(&(metrics.AuthFailures), 1)
+	StdAtomicGo_Add(&(metrics.AuthFailures), 1)
 	reason := Metrics_Reason(message)
 	key := fmt.Sprintf("%d|%s", int(status), reason)
-	SyncGo_Lock(&(metrics.Mu))
+	StdSyncGo_Lock(&(metrics.Mu))
 	Metrics_EnsureMaps(metrics)
 	var value_0 *__type_bac941a75fbbc62b = &(metrics.AuthFailuresBy)
 	var value_1 string = key
@@ -225,16 +225,16 @@ func Metrics_RecordAuthFailure(metrics *ServerMetrics, status int, message strin
 		(*value_0) = make(__type_bac941a75fbbc62b)
 	}
 	(*value_0)[value_1] = value_2
-	SyncGo_Unlock(&(metrics.Mu))
+	StdSyncGo_Unlock(&(metrics.Mu))
 }
 
 func Metrics_RecordFullSnapshot(metrics *ServerMetrics, reason string) {
-	AtomicGo_Add(&(metrics.SyncFullSnapshots), 1)
+	StdAtomicGo_Add(&(metrics.SyncFullSnapshots), 1)
 	normalized := Metrics_Reason(reason)
 	if normalized == "" {
 		normalized = "unspecified"
 	}
-	SyncGo_Lock(&(metrics.Mu))
+	StdSyncGo_Lock(&(metrics.Mu))
 	Metrics_EnsureMaps(metrics)
 	var value_0 *__type_bac941a75fbbc62b = &(metrics.FullSnapshotsBy)
 	var value_1 string = normalized
@@ -246,16 +246,16 @@ func Metrics_RecordFullSnapshot(metrics *ServerMetrics, reason string) {
 		(*value_0) = make(__type_bac941a75fbbc62b)
 	}
 	(*value_0)[value_1] = value_2
-	SyncGo_Unlock(&(metrics.Mu))
+	StdSyncGo_Unlock(&(metrics.Mu))
 }
 
 func Metrics_RecordWebSocketReject(metrics *ServerMetrics, reason string) {
-	AtomicGo_Add(&(metrics.WebSocketRejected), 1)
+	StdAtomicGo_Add(&(metrics.WebSocketRejected), 1)
 	normalized := Metrics_Reason(reason)
 	if normalized == "" {
 		normalized = "rejected"
 	}
-	SyncGo_Lock(&(metrics.Mu))
+	StdSyncGo_Lock(&(metrics.Mu))
 	Metrics_EnsureMaps(metrics)
 	var value_0 *__type_bac941a75fbbc62b = &(metrics.WebSocketRejects)
 	var value_1 string = normalized
@@ -267,7 +267,7 @@ func Metrics_RecordWebSocketReject(metrics *ServerMetrics, reason string) {
 		(*value_0) = make(__type_bac941a75fbbc62b)
 	}
 	(*value_0)[value_1] = value_2
-	SyncGo_Unlock(&(metrics.Mu))
+	StdSyncGo_Unlock(&(metrics.Mu))
 }
 
 func Metrics_WriteScalar(writer ResponseWriter, name string, kind string, value uint64) {
@@ -342,30 +342,30 @@ func Metrics_WriteSingleLabelMap(writer ResponseWriter, name string, kind string
 }
 
 func Metrics_Prometheus(metrics *ServerMetrics, writer ResponseWriter, usage NodeUsage, storage NodeStorageUsage, version string) {
-	HttpGo_SetHeader(HttpGo_ResponseHeaders(writer), "Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	fmt.Fprintf(writer, "# TYPE daochi_build_info gauge\ndaochi_build_info{version=%q} 1\n", version)
 	var value_0 ResponseWriter = writer
-	Metrics_WriteScalar(value_0, "daochi_sync_requests_total", "counter", AtomicGo_Load(&(metrics.SyncRequests)))
+	Metrics_WriteScalar(value_0, "daochi_sync_requests_total", "counter", StdAtomicGo_Load(&(metrics.SyncRequests)))
 	var value_1 ResponseWriter = writer
-	Metrics_WriteScalar(value_1, "daochi_sync_failures_total", "counter", AtomicGo_Load(&(metrics.SyncFailures)))
+	Metrics_WriteScalar(value_1, "daochi_sync_failures_total", "counter", StdAtomicGo_Load(&(metrics.SyncFailures)))
 	var value_2 ResponseWriter = writer
-	Metrics_WriteScalar(value_2, "daochi_sync_full_snapshots_total", "counter", AtomicGo_Load(&(metrics.SyncFullSnapshots)))
+	Metrics_WriteScalar(value_2, "daochi_sync_full_snapshots_total", "counter", StdAtomicGo_Load(&(metrics.SyncFullSnapshots)))
 	var value_3 ResponseWriter = writer
-	Metrics_WriteScalar(value_3, "daochi_sync_encrypted_records_applied_total", "counter", AtomicGo_Load(&(metrics.SyncEncryptedRecords)))
+	Metrics_WriteScalar(value_3, "daochi_sync_encrypted_records_applied_total", "counter", StdAtomicGo_Load(&(metrics.SyncEncryptedRecords)))
 	var value_4 ResponseWriter = writer
-	Metrics_WriteScalar(value_4, "daochi_sync_encrypted_payloads_applied_total", "counter", AtomicGo_Load(&(metrics.SyncEncryptedPayloads)))
+	Metrics_WriteScalar(value_4, "daochi_sync_encrypted_payloads_applied_total", "counter", StdAtomicGo_Load(&(metrics.SyncEncryptedPayloads)))
 	var value_5 ResponseWriter = writer
-	Metrics_WriteScalar(value_5, "daochi_rate_limited_requests_total", "counter", AtomicGo_Load(&(metrics.RateLimitedRequests)))
+	Metrics_WriteScalar(value_5, "daochi_rate_limited_requests_total", "counter", StdAtomicGo_Load(&(metrics.RateLimitedRequests)))
 	var value_6 ResponseWriter = writer
-	Metrics_WriteScalar(value_6, "daochi_auth_failures_total", "counter", AtomicGo_Load(&(metrics.AuthFailures)))
+	Metrics_WriteScalar(value_6, "daochi_auth_failures_total", "counter", StdAtomicGo_Load(&(metrics.AuthFailures)))
 	var value_7 ResponseWriter = writer
-	Metrics_WriteScalar(value_7, "daochi_legacy_client_hints_total", "counter", AtomicGo_Load(&(metrics.LegacyClientHints)))
+	Metrics_WriteScalar(value_7, "daochi_legacy_client_hints_total", "counter", StdAtomicGo_Load(&(metrics.LegacyClientHints)))
 	var value_8 ResponseWriter = writer
-	Metrics_WriteScalar(value_8, "daochi_websocket_accepted_total", "counter", AtomicGo_Load(&(metrics.WebSocketAccepted)))
+	Metrics_WriteScalar(value_8, "daochi_websocket_accepted_total", "counter", StdAtomicGo_Load(&(metrics.WebSocketAccepted)))
 	var value_9 ResponseWriter = writer
-	Metrics_WriteScalar(value_9, "daochi_websocket_rejected_total", "counter", AtomicGo_Load(&(metrics.WebSocketRejected)))
+	Metrics_WriteScalar(value_9, "daochi_websocket_rejected_total", "counter", StdAtomicGo_Load(&(metrics.WebSocketRejected)))
 	var value_10 ResponseWriter = writer
-	Metrics_WriteScalar(value_10, "daochi_monero_stuck_invoices_total", "counter", AtomicGo_Load(&(metrics.MoneroStuckInvoices)))
+	Metrics_WriteScalar(value_10, "daochi_monero_stuck_invoices_total", "counter", StdAtomicGo_Load(&(metrics.MoneroStuckInvoices)))
 	Metrics_WriteScalar(writer, "daochi_websocket_active", "gauge", uint64(usage.ConnectedWebSocketClients))
 	Metrics_WriteScalar(writer, "daochi_connected_users", "gauge", uint64(usage.ConnectedUsers))
 	Metrics_WriteScalar(writer, "daochi_registered_users", "gauge", uint64(usage.RegisteredUsers))
@@ -391,25 +391,25 @@ func Metrics_Prometheus(metrics *ServerMetrics, writer ResponseWriter, usage Nod
 	Metrics_WriteAppStorage(writer, "daochi_storage_app_logical_bytes", "gauge", storage.Apps)
 	Metrics_WriteCollectionStorage(writer, "daochi_storage_collection_logical_bytes", "gauge", storage.Apps)
 	var value_21 ResponseWriter = writer
-	Metrics_WriteScalar(value_21, "ksync_sync_requests_total", "counter", AtomicGo_Load(&(metrics.SyncRequests)))
+	Metrics_WriteScalar(value_21, "ksync_sync_requests_total", "counter", StdAtomicGo_Load(&(metrics.SyncRequests)))
 	var value_22 ResponseWriter = writer
-	Metrics_WriteScalar(value_22, "ksync_sync_failures_total", "counter", AtomicGo_Load(&(metrics.SyncFailures)))
+	Metrics_WriteScalar(value_22, "ksync_sync_failures_total", "counter", StdAtomicGo_Load(&(metrics.SyncFailures)))
 	var value_23 ResponseWriter = writer
-	Metrics_WriteScalar(value_23, "ksync_sync_full_snapshots_total", "counter", AtomicGo_Load(&(metrics.SyncFullSnapshots)))
+	Metrics_WriteScalar(value_23, "ksync_sync_full_snapshots_total", "counter", StdAtomicGo_Load(&(metrics.SyncFullSnapshots)))
 	var value_24 ResponseWriter = writer
-	Metrics_WriteScalar(value_24, "ksync_sync_encrypted_records_applied_total", "counter", AtomicGo_Load(&(metrics.SyncEncryptedRecords)))
+	Metrics_WriteScalar(value_24, "ksync_sync_encrypted_records_applied_total", "counter", StdAtomicGo_Load(&(metrics.SyncEncryptedRecords)))
 	var value_25 ResponseWriter = writer
-	Metrics_WriteScalar(value_25, "ksync_sync_encrypted_payloads_applied_total", "counter", AtomicGo_Load(&(metrics.SyncEncryptedPayloads)))
+	Metrics_WriteScalar(value_25, "ksync_sync_encrypted_payloads_applied_total", "counter", StdAtomicGo_Load(&(metrics.SyncEncryptedPayloads)))
 	var value_26 ResponseWriter = writer
-	Metrics_WriteScalar(value_26, "ksync_rate_limited_requests_total", "counter", AtomicGo_Load(&(metrics.RateLimitedRequests)))
+	Metrics_WriteScalar(value_26, "ksync_rate_limited_requests_total", "counter", StdAtomicGo_Load(&(metrics.RateLimitedRequests)))
 	var value_27 ResponseWriter = writer
-	Metrics_WriteScalar(value_27, "ksync_auth_failures_total", "counter", AtomicGo_Load(&(metrics.AuthFailures)))
+	Metrics_WriteScalar(value_27, "ksync_auth_failures_total", "counter", StdAtomicGo_Load(&(metrics.AuthFailures)))
 	var value_28 ResponseWriter = writer
-	Metrics_WriteScalar(value_28, "ksync_legacy_client_hints_total", "counter", AtomicGo_Load(&(metrics.LegacyClientHints)))
+	Metrics_WriteScalar(value_28, "ksync_legacy_client_hints_total", "counter", StdAtomicGo_Load(&(metrics.LegacyClientHints)))
 	var value_29 ResponseWriter = writer
-	Metrics_WriteScalar(value_29, "ksync_websocket_accepted_total", "counter", AtomicGo_Load(&(metrics.WebSocketAccepted)))
+	Metrics_WriteScalar(value_29, "ksync_websocket_accepted_total", "counter", StdAtomicGo_Load(&(metrics.WebSocketAccepted)))
 	var value_30 ResponseWriter = writer
-	Metrics_WriteScalar(value_30, "ksync_websocket_rejected_total", "counter", AtomicGo_Load(&(metrics.WebSocketRejected)))
+	Metrics_WriteScalar(value_30, "ksync_websocket_rejected_total", "counter", StdAtomicGo_Load(&(metrics.WebSocketRejected)))
 	Metrics_WriteScalar(writer, "ksync_websocket_active", "gauge", uint64(usage.ConnectedWebSocketClients))
 	Metrics_WriteMaps(metrics, writer)
 }

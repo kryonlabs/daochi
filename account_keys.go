@@ -3,7 +3,7 @@ package main
 
 import sql "database/sql"
 
-// #import go_types
+// #import std_go_types
 type AccountKeyResult struct {
 	Value []uint8
 	Found bool
@@ -17,7 +17,7 @@ func AccountKeys_PublicKey(database *Database, context Context, accountID string
 	row := value_0
 	error := (*sql.Row).Scan(row, &(key))
 	var value_1 Error = error
-	if ErrorsGo_Is(value_1, SqlGo_NoRows()) {
+	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {

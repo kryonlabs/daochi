@@ -63,7 +63,7 @@ field names, Go storage types, order and reflection tags.
 | `mesh_store.go` | Go with ported callers | Mesh export/import and scope enforcement |
 | `metrics.go` | Ziran | `metrics.zi`: concurrent counters, route/reason normalization, escaped labels, sorted maps, aggregate usage and exact Prometheus output |
 | `monero_deposits.go` | Go with ported callers | Deposit reconciliation and credit transactions |
-| `node_auth.go` | Partial Ziran | Canonical message in `signing.zi`; signatures, time window, peer lookup, nonce consumption remain Go |
+| `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
 | `node_identity.go` | Go with ported callers | Identity persistence, invites, pairing, namespace claims |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
 | `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; HTTP handlers remain Go |
@@ -76,7 +76,7 @@ field names, Go storage types, order and reflection tags.
 | `token_assets.go` | Ziran | `token_assets.zi`: native SQL upsert, released asset fields and error propagation |
 | `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
 | `trust_handlers.go` | Go with ported callers | Pairing and namespace HTTP handlers |
-| `trust_store.go` | Partial Ziran | Atomic nonce consumption/expiry in `node_nonce.zi`; peer trust, pairing and claims remain Go |
+| `trust_store.go` | Partial Ziran | Nonce consumption/expiry in `node_nonce.zi` and public-key lookup in `peer_trust.zi`; pairing, peer policies and claims remain Go |
 | `types.go` | Ziran | All 77 original records and profile constants in `protocol.zi`, `manifest.zi`, `sync_types.zi` and `types.zi` |
 | `verifier.go` | Go | Signature verifier contract |
 | `verifier_nocgo.go` | Go | Unsupported-build error path |
@@ -87,7 +87,7 @@ field names, Go storage types, order and reflection tags.
 `vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go`, `go_types.go`,
 `option.go`, `sync_go.go`, `time_go.go`, `random_go.go`, `text_go.go`,
 `net_go.go`, `http_go.go`, `atomic_go.go`, `context_go.go`, `sql_go.go` and
-`errors_go.go` come from Ziran's standard modules; they do not represent
+`errors_go.go`, `ed25519_go.go` and `url_go.go` come from Ziran's standard modules; they do not represent
 additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Their HTTP/database
@@ -154,6 +154,16 @@ nonces retain the released replay error, while begin, deletion and commit
 errors retain native identity. Native Go error operations and package-value
 getters preserve SQL/context sentinel errors without handwritten adapters.
 
+`node_auth.zi` completes the original request authentication module. Signing
+preserves the exact canonical message, raw URL base64 encoding, cryptographic
+nonce generation and escaped URL path. Verification preserves Unicode header
+trimming, the five-minute time window, validation order, peer revocation and
+key-length checks, signature decoding and atomic nonce consumption. Native
+SQL and cancellation errors retain their identity. Baseline comparisons also
+exercise signature line breaks and malformed headers, and concurrent replay
+tests accept a shared signed request exactly once. `peer_trust.zi` owns the
+trusted-peer public-key query; the remaining trust store is still handwritten.
+
 ## Compiler work exercised by this port
 
 Ziran now accepts explicit `go:` foreign package imports, including standard
@@ -197,6 +207,10 @@ The `context_go`, `sql_go` and extended `time_go` standard modules provide
 native contexts, SQL iteration/cleanup and timestamp parsing/formatting.
 Imported record fields retain their declared type identity through additional
 modules, including qualified procedure parameters in portable bundles.
+The `ed25519_go` and `url_go` modules provide native key types, signature
+operations and escaped paths. Extended HTTP/time operations read the original
+request method, URL pointer and Unix timestamp. `text_go.ToBytes` produces an
+independent, byte-preserving slice, including allocated empty values.
 
 ## Next dependencies
 

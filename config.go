@@ -2,7 +2,6 @@
 package main
 
 import (
-	ed25519 "crypto/ed25519"
 	rand "crypto/rand"
 	hex "encoding/hex"
 	fmt "fmt"
@@ -18,10 +17,7 @@ import (
 // #import map_go
 // #import go_types
 // #import sets
-type PublicKey = ed25519.PublicKey
-
-type PrivateKey = ed25519.PrivateKey
-
+// #import ed25519_go
 type __type_cd75cecb5feef7fa = map[string]TokenProduct
 
 type __type_c922d3f56b74fd5a = map[string]bool
@@ -256,7 +252,7 @@ func Config_Load() Config {
 	issuerPrivateBytes := value_6
 	var issuerPrivate PrivateKey = *new(PrivateKey)
 	if int64(len(issuerPrivateBytes)) == 32 {
-		issuerPrivate = ed25519.NewKeyFromSeed(issuerPrivateBytes)
+		issuerPrivate = Ed25519Go_NewKeyFromSeed(issuerPrivateBytes)
 	} else if int64(len(issuerPrivateBytes)) == 64 {
 		issuerPrivate = PrivateKey(issuerPrivateBytes)
 	}
@@ -273,7 +269,7 @@ func Config_Load() Config {
 	nodeKeyBytes := value_8
 	var nodePrivateKey PrivateKey = *new(PrivateKey)
 	if int64(len(nodeKeyBytes)) == 32 {
-		nodePrivateKey = ed25519.NewKeyFromSeed(nodeKeyBytes)
+		nodePrivateKey = Ed25519Go_NewKeyFromSeed(nodeKeyBytes)
 	} else if int64(len(nodeKeyBytes)) == 64 {
 		nodePrivateKey = PrivateKey(nodeKeyBytes)
 	} else if int64(len(nodeKeyBytes)) != 0 {

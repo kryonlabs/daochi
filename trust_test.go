@@ -41,13 +41,13 @@ func TestPairingInviteSignatureAndTampering(t *testing.T) {
 	}
 	invite := PairingInvite{
 		Version:     1,
-		InviteID:    randomHex(16),
+		InviteID:    NodeAuth_RandomHex(16),
 		NodeID:      identity.ID,
 		PublicKey:   encodeHex(identity.PublicKey),
 		DisplayName: "Home",
 		Addresses:   []string{"http://192.168.1.10:8080"},
 		ExpiresAt:   time.Now().Add(time.Minute).Unix(),
-		Nonce:       randomHex(16),
+		Nonce:       NodeAuth_RandomHex(16),
 		Policy: NodeSyncPolicy{
 			Direction:   "bidirectional",
 			Apps:        []string{"inbe"},
@@ -76,12 +76,12 @@ func TestPairingAcceptanceSignatureAndTampering(t *testing.T) {
 	}
 	invite := PairingInvite{
 		Version:   1,
-		InviteID:  randomHex(16),
+		InviteID:  NodeAuth_RandomHex(16),
 		NodeID:    inviter.ID,
 		PublicKey: encodeHex(inviter.PublicKey),
 		Addresses: []string{"http://192.168.1.10:8080"},
 		ExpiresAt: time.Now().Add(time.Minute).Unix(),
-		Nonce:     randomHex(16),
+		Nonce:     NodeAuth_RandomHex(16),
 		Policy: NodeSyncPolicy{
 			Direction: "bidirectional",
 			Apps:      []string{"inbe"},
@@ -97,7 +97,7 @@ func TestPairingAcceptanceSignatureAndTampering(t *testing.T) {
 		DisplayName: "Neighbor",
 		Addresses:   []string{"http://192.168.1.11:8080"},
 		AcceptedAt:  time.Now().Unix(),
-		Nonce:       randomHex(16),
+		Nonce:       NodeAuth_RandomHex(16),
 	}
 	acceptor.signAcceptance(invite, &acceptance)
 	if _, err := validatePairingAcceptance(invite, acceptance, time.Now()); err != nil {
@@ -116,11 +116,11 @@ func TestSignedNodeRequestRejectsReplay(t *testing.T) {
 
 	body := []byte(`{"policy":{"apps":["inbe"],"data":["encrypted_records"]}}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/node/mesh/export", bytes.NewReader(body))
-	source.signNodeRequest(req, body)
-	if err := target.verifyNodeRequest(req.Context(), req, body); err != nil {
+	NodeAuth_Sign(source.node.ID, source.node.PrivateKey, req, body)
+	if err := NodeAuth_Verify(target.store.db, req.Context(), req, body); err != nil {
 		t.Fatalf("signed request rejected: %v", err)
 	}
-	if err := target.verifyNodeRequest(req.Context(), req, body); err == nil {
+	if err := NodeAuth_Verify(target.store.db, req.Context(), req, body); err == nil {
 		t.Fatal("replayed request accepted")
 	}
 }
@@ -385,11 +385,11 @@ func TestPairingHandlersRequireOperatorAndConsumeInvite(t *testing.T) {
 	if response := accept(); response.Code != http.StatusConflict {
 		t.Fatalf("reused invite status = %d, want 409", response.Code)
 	}
-	if _, found, err := sourceStore.TrustedPeerPublicKey(t.Context(), target.node.ID); err != nil || !found {
-		t.Fatalf("inviter reciprocal trust = %v, %v", found, err)
+	if peer := PeerTrust_PublicKey(sourceStore.db, t.Context(), target.node.ID); peer.Error != nil || !peer.Found {
+		t.Fatalf("inviter reciprocal trust = %v, %v", peer.Found, peer.Error)
 	}
-	if _, found, err := targetStore.TrustedPeerPublicKey(t.Context(), source.node.ID); err != nil || !found {
-		t.Fatalf("acceptor trust = %v, %v", found, err)
+	if peer := PeerTrust_PublicKey(targetStore.db, t.Context(), source.node.ID); peer.Error != nil || !peer.Found {
+		t.Fatalf("acceptor trust = %v, %v", peer.Found, peer.Error)
 	}
 	meshBody := []byte(`{"policy":{"direction":"bidirectional","apps":["inbe"],"data":["encrypted_records"]}}`)
 	meshRequest := httptest.NewRequest(
@@ -397,8 +397,8 @@ func TestPairingHandlersRequireOperatorAndConsumeInvite(t *testing.T) {
 		"/api/v1/node/mesh/export",
 		bytes.NewReader(meshBody),
 	)
-	target.signNodeRequest(meshRequest, meshBody)
-	if err := source.verifyNodeRequest(t.Context(), meshRequest, meshBody); err != nil {
+	NodeAuth_Sign(target.node.ID, target.node.PrivateKey, meshRequest, meshBody)
+	if err := NodeAuth_Verify(source.store.db, t.Context(), meshRequest, meshBody); err != nil {
 		t.Fatalf("reciprocally paired request rejected: %v", err)
 	}
 }
@@ -407,13 +407,13 @@ func trustServer(t *testing.T, store *Store, peer *Server) {
 	t.Helper()
 	invite := PairingInvite{
 		Version:     1,
-		InviteID:    randomHex(16),
+		InviteID:    NodeAuth_RandomHex(16),
 		NodeID:      peer.node.ID,
 		PublicKey:   encodeHex(peer.node.PublicKey),
 		DisplayName: "Peer",
 		Addresses:   []string{"http://192.168.1.11:8080"},
 		ExpiresAt:   time.Now().Add(time.Minute).Unix(),
-		Nonce:       randomHex(16),
+		Nonce:       NodeAuth_RandomHex(16),
 	}
 	peer.node.signInvite(&invite)
 	publicKey, err := validatePairingInvite(invite, time.Now())

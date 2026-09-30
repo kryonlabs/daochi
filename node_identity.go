@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	nodeRequestContext   = "daochi-node-request-v1"
 	pairingInviteContext = "daochi-pairing-invite-v1"
 	nameClaimContext     = "daochi-name-claim-v1"
 )
@@ -161,8 +160,9 @@ func validatePairingAcceptance(
 		!Identity_ValidUserID(acceptance.NodeID) || acceptance.Nonce == "" {
 		return nil, errors.New("invalid pairing acceptance")
 	}
-	if acceptance.AcceptedAt < now.Add(-nodeAuthenticationWindow).Unix() ||
-		acceptance.AcceptedAt > now.Add(nodeAuthenticationWindow).Unix() {
+	window := time.Duration(NodeAuthenticationWindowSeconds) * time.Second
+	if acceptance.AcceptedAt < now.Add(-window).Unix() ||
+		acceptance.AcceptedAt > now.Add(window).Unix() {
 		return nil, errors.New("pairing acceptance time is outside the allowed window")
 	}
 	if err := validateHTTPAddresses(acceptance.Addresses); err != nil {

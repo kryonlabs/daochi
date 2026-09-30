@@ -42,3 +42,7 @@ func TimeGo_UTC(value Time) Time {
 func TimeGo_Format(value Time, layout string) string {
 	return (time.Time).Format(value, layout)
 }
+
+func TimeGo_Unix(value Time) int64 {
+	return (time.Time).Unix(value)
+}

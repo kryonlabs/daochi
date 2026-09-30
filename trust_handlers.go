@@ -93,14 +93,14 @@ func (s *Server) handleCreatePairingInvite(w http.ResponseWriter, r *http.Reques
 
 	invite := PairingInvite{
 		Version:     1,
-		InviteID:    randomHex(16),
+		InviteID:    NodeAuth_RandomHex(16),
 		NodeID:      s.node.ID,
 		PublicKey:   hex.EncodeToString(s.node.PublicKey),
 		DisplayName: Manifest_DefaultString(strings.TrimSpace(req.DisplayName), s.cfg.NodeDisplayName),
 		Addresses:   addresses,
 		SpaceID:     strings.TrimSpace(req.SpaceID),
 		ExpiresAt:   time.Now().Add(lifetime).Unix(),
-		Nonce:       randomHex(16),
+		Nonce:       NodeAuth_RandomHex(16),
 		Policy:      req.Policy,
 	}
 	s.node.signInvite(&invite)
@@ -189,7 +189,7 @@ func (s *Server) newPairingAcceptance(invite PairingInvite) (PairingAcceptance, 
 		DisplayName: s.cfg.NodeDisplayName,
 		Addresses:   addresses,
 		AcceptedAt:  time.Now().Unix(),
-		Nonce:       randomHex(16),
+		Nonce:       NodeAuth_RandomHex(16),
 	}
 	s.node.signAcceptance(invite, &acceptance)
 	return acceptance, nil

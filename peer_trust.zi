@@ -1,0 +1,38 @@
+#import "go_types"
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+keys :: #import "ed25519_go";
+errors :: #import "errors_go";
+go_sql :: #system_library "go:database/sql";
+
+PeerKeyResult :: struct {
+    value: keys.PublicKey
+    found: bool
+    error: Error
+}
+
+#scope_file
+Query :: (database: *sql.Database, context: ctx.Context, query: string, nodeID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+Scan :: (row: *sql.Row, value: *[]u8) -> Error #foreign go_sql "(*Row).Scan";
+
+#scope_export
+PublicKey :: (database: *sql.Database, context: ctx.Context, nodeID: string) -> PeerKeyResult {
+    result: PeerKeyResult
+    key: []u8
+    row := Query(database, context, "SELECT public_key FROM trusted_node_peers WHERE node_id=?1 AND revoked_at=''", nodeID)
+    error := Scan(row, *key)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    if error != null {
+        result.error = error
+        return result
+    }
+    if key.count != 32 {
+        result.error = errors.New("stored peer key is invalid")
+        return result
+    }
+    result.value = cast(keys.PublicKey)key
+    result.found = true
+    return result
+}

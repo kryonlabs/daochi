@@ -223,23 +223,6 @@ func withTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
-func (s *Store) TrustedPeerPublicKey(ctx context.Context, nodeID string) (ed25519.PublicKey, bool, error) {
-	var publicKey []byte
-	err := s.db.QueryRowContext(ctx, `
-SELECT public_key FROM trusted_node_peers
-WHERE node_id=?1 AND revoked_at=''`, nodeID).Scan(&publicKey)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	if len(publicKey) != ed25519.PublicKeySize {
-		return nil, false, errors.New("stored peer key is invalid")
-	}
-	return ed25519.PublicKey(publicKey), true, nil
-}
-
 func (s *Store) TrustedPeerPolicy(ctx context.Context, nodeID string) (NodeSyncPolicy, bool, error) {
 	var policyJSON string
 	err := s.db.QueryRowContext(ctx, `

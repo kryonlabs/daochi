@@ -3,6 +3,7 @@
 #import "map_go"
 #import "go_types"
 #import "sets"
+#import "ed25519_go"
 text :: #import "text_go";
 clock :: #import "time_go";
 go_os :: #system_library "go:os";
@@ -10,13 +11,10 @@ go_strings :: #system_library "go:strings";
 go_numbers :: #system_library "go:strconv";
 go_hex :: #system_library "go:encoding/hex";
 go_random :: #system_library "go:crypto/rand";
-go_crypto :: #system_library "go:crypto/ed25519";
 go_log :: #system_library "go:log";
 go_slog :: #system_library "go:log/slog";
 go_format :: #system_library "go:fmt";
 builtin :: #system_library "go:builtin";
-PublicKey :: #type #foreign go_crypto "PublicKey";
-PrivateKey :: #type #foreign go_crypto "PrivateKey";
 
 Config :: struct {
     Addr: string
@@ -82,7 +80,6 @@ Atoi :: (value: string) -> NativeIntegerResult #go_results #foreign go_numbers;
 ParseInt :: (value: string, base: isize, bits: isize) -> WideIntegerResult #go_results #foreign go_numbers;
 DecodeString :: (value: string) -> FileResult #go_results #foreign go_hex;
 ReadRandom :: (value: []u8) -> RandomResult #go_results #foreign go_random "Read";
-NewKeyFromSeed :: (value: []u8) -> PrivateKey #foreign go_crypto;
 AllocateBytes :: (count: isize) -> []u8 #foreign builtin "make";
 PrivateLength :: (value: PrivateKey) -> isize #foreign builtin "len";
 Panic :: (value: Error) #foreign builtin "panic";

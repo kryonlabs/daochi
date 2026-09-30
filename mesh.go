@@ -184,7 +184,7 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authorizeNodeSync(w http.ResponseWriter, r *http.Request, body []byte) bool {
 	if nodeID := strings.TrimSpace(r.Header.Get("X-Daochi-Node-ID")); nodeID != "" {
-		if err := s.verifyNodeRequest(r.Context(), r, body); err != nil {
+		if err := NodeAuth_Verify(s.store.db, r.Context(), r, body); err != nil {
 			writeError(w, http.StatusUnauthorized, err.Error())
 			return false
 		}
@@ -403,7 +403,7 @@ func (s *Server) postNodeMeshJSON(ctx context.Context, peerNodeID, target string
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if peerNodeID != "" {
-		s.signNodeRequest(httpReq, body)
+		NodeAuth_Sign(s.node.ID, s.node.PrivateKey, httpReq, body)
 	} else {
 		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.NodeSyncToken)
 	}

@@ -17,12 +17,28 @@ func HttpGo_HeadersRaw(Request *Request) Header {
 	return Request.Header
 }
 
+func HttpGo_MethodRaw(Request *Request) string {
+	return Request.Method
+}
+
+func HttpGo_URLRaw(Request *Request) *URL {
+	return Request.URL
+}
+
 func HttpGo_RemoteAddress(request *Request) string {
 	return HttpGo_RemoteAddressRaw(request)
 }
 
 func HttpGo_Headers(request *Request) Header {
 	return HttpGo_HeadersRaw(request)
+}
+
+func HttpGo_Method(request *Request) string {
+	return HttpGo_MethodRaw(request)
+}
+
+func HttpGo_RequestURL(request *Request) *URL {
+	return HttpGo_URLRaw(request)
 }
 
 func HttpGo_HeaderValue(header Header, name string) string {

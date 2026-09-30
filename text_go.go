@@ -4,3 +4,13 @@ package main
 func TextGo_FromBytes(value []uint8) string {
 	return string(value)
 }
+
+func TextGo_ToBytes(value string) []uint8 {
+	output := make([]uint8, int(int(int64(len(value)))))
+	var index int64 = 0
+	for index < int64(len(value)) {
+		output[index] = value[index]
+		index++
+	}
+	return output
+}

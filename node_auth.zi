@@ -1,0 +1,94 @@
+#import "go_types"
+codec :: #import "codec";
+identity :: #import "identity";
+signing :: #import "signing";
+peers :: #import "peer_trust";
+nonces :: #import "node_nonce";
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+clock :: #import "time_go";
+keys :: #import "ed25519_go";
+http :: #import "http_go";
+url :: #import "url_go";
+random :: #import "random_go";
+text :: #import "text_go";
+errors :: #import "errors_go";
+go_strings :: #system_library "go:strings";
+go_numbers :: #system_library "go:strconv";
+go_hex :: #system_library "go:encoding/hex";
+builtin :: #system_library "go:builtin";
+
+NodeRequestContext :: "daochi-node-request-v1";
+NodeAuthenticationWindowSeconds :: 300;
+
+#scope_file
+ParsedTimestamp :: struct {
+    value: s64
+    error: Error
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+FormatInteger :: (value: s64, base: isize) -> string #foreign go_numbers "FormatInt";
+ParseInteger :: (value: string, base: isize, bits: isize) -> ParsedTimestamp #go_results #foreign go_numbers "ParseInt";
+AllocateBytes :: (count: isize) -> []u8 #foreign builtin "make";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+Panic :: (error: Error) #foreign builtin "panic";
+
+#scope_export
+RandomHex :: (count: isize) -> string {
+    bytes := AllocateBytes(count)
+    filled := random.Fill(bytes)
+    if filled.error != null {
+        Panic(filled.error)
+    }
+    return EncodeHex(bytes)
+}
+
+Sign :: (nodeID: string, key: keys.PrivateKey, request: *http.Request, body: []u8) {
+    timestamp := FormatInteger(clock.Unix(clock.Now()), cast(isize)10)
+    nonce := RandomHex(cast(isize)16)
+    message := signing.NodeRequestMessage(NodeRequestContext, nodeID, timestamp, nonce,
+        http.Method(request), url.EscapedPath(http.RequestURL(request)), body)
+    signature := keys.Sign(key, text.ToBytes(message))
+    encoded := codec.EncodeBase64(text.FromBytes(signature), true, false)
+    header := http.Headers(request)
+    http.SetHeader(header, "X-Daochi-Node-ID", nodeID)
+    http.SetHeader(header, "X-Daochi-Node-Time", timestamp)
+    http.SetHeader(header, "X-Daochi-Node-Nonce", nonce)
+    http.SetHeader(header, "X-Daochi-Node-Signature", encoded.value)
+}
+
+Verify :: (database: *sql.Database, context: ctx.Context, request: *http.Request, body: []u8) -> Error {
+    header := http.Headers(request)
+    nodeID := TrimSpace(http.HeaderValue(header, "X-Daochi-Node-ID"))
+    timestampText := TrimSpace(http.HeaderValue(header, "X-Daochi-Node-Time"))
+    nonce := TrimSpace(http.HeaderValue(header, "X-Daochi-Node-Nonce"))
+    if !identity.ValidUserID(nodeID) || nonce == "" || nonce.count > 128 {
+        return errors.New("invalid node authentication")
+    }
+    timestamp := ParseInteger(timestampText, cast(isize)10, cast(isize)64)
+    if timestamp.error != null {
+        return errors.New("invalid node authentication time")
+    }
+    now := clock.Unix(clock.Now())
+    if timestamp.value < now - NodeAuthenticationWindowSeconds ||
+       timestamp.value > now + NodeAuthenticationWindowSeconds {
+        return errors.New("expired node authentication")
+    }
+    peer := peers.PublicKey(database, context, nodeID)
+    if peer.error != null {
+        return peer.error
+    }
+    if !peer.found {
+        return errors.New("node is not paired")
+    }
+    signature := codec.DecodeBase64(http.HeaderValue(header, "X-Daochi-Node-Signature"), true, false)
+    if signature.error != "" || signature.value.count != 64 {
+        return errors.New("invalid node signature")
+    }
+    message := signing.NodeRequestMessage(NodeRequestContext, nodeID, timestampText, nonce,
+        http.Method(request), url.EscapedPath(http.RequestURL(request)), body)
+    if !keys.Verify(peer.value, text.ToBytes(message), text.ToBytes(signature.value)) {
+        return errors.New("invalid node signature")
+    }
+    return nonces.Consume(database, context, nodeID, nonce, timestamp.value + NodeAuthenticationWindowSeconds)
+}

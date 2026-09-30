@@ -107,7 +107,7 @@ func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthError(w, err)
 		return
 	}
-	if !s.allowRequest(r, "ws:ip:"+clientAddress(r), 120, time.Minute) ||
+	if !s.allowRequest(r, "ws:ip:"+ClientAddress_FromRequest(r), 120, time.Minute) ||
 		!s.allowRequest(r, "ws:user:"+userID, 40, time.Minute) {
 		s.metrics.recordWebSocketReject("rate_limited")
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")

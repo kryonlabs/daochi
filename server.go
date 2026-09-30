@@ -80,10 +80,10 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 	return &Server{
 		cfg:        cfg,
 		store:      store,
-		challenges: NewChallengeStore(cfg.ChallengeTTL),
+		challenges: Challenge_New(cfg.ChallengeTTL),
 		verifier:   verifier,
 		syncHub:    newSyncHub(),
-		limiter:    NewRateLimiter(),
+		limiter:    RateLimit_New(),
 		metrics:    &ServerMetrics{},
 		node:       node,
 	}
@@ -289,12 +289,13 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid user_id")
 		return
 	}
-	if !s.allowRequest(r, "challenge:ip:"+clientAddress(r), 60, time.Minute) ||
+	if !s.allowRequest(r, "challenge:ip:"+ClientAddress_FromRequest(r), 60, time.Minute) ||
 		!s.allowRequest(r, "challenge:user:"+userID, 20, time.Minute) {
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
-	nonce, err := s.challenges.Issue(userID)
+	issued := Challenge_Issue(s.challenges, userID)
+	nonce, err := issued.Nonce, issued.Error
 	if err != nil {
 		slog.Error("issue challenge", "error", err)
 		writeError(w, http.StatusInternalServerError, "challenge failed")
@@ -1291,7 +1292,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid client_id")
 		return
 	}
-	if !s.allowRequest(r, "login:ip:"+clientAddress(r), 40, time.Minute) ||
+	if !s.allowRequest(r, "login:ip:"+ClientAddress_FromRequest(r), 40, time.Minute) ||
 		!s.allowRequest(r, "login:user:"+req.UserIDHash, 20, time.Minute) {
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
@@ -1370,7 +1371,7 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !s.allowRequest(r, "delete-key:ip:"+clientAddress(r), 8, time.Hour) ||
+	if !s.allowRequest(r, "delete-key:ip:"+ClientAddress_FromRequest(r), 8, time.Hour) ||
 		!s.allowRequest(r, "delete-key:user:"+req.UserIDHash, 4, time.Hour) {
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
@@ -1413,7 +1414,8 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 	if !Identity_ValidUserID(userID) {
 		return nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
 	}
-	nonce, ok := s.challenges.Consume(userID)
+	consumed := Challenge_Consume(s.challenges, userID)
+	nonce, ok := consumed.Nonce, consumed.Found
 	if !ok {
 		return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
 	}
@@ -1892,7 +1894,7 @@ func (s *Server) allowRequest(r *http.Request, key string, limit int, window tim
 	if s.limiter == nil {
 		return true
 	}
-	allowed := s.limiter.Allow(key, limit, window)
+	allowed := RateLimit_Allow(s.limiter, key, limit, window)
 	if !allowed {
 		s.metrics.rateLimitedRequests.Add(1)
 	}

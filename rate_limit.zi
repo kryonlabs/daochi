@@ -1,0 +1,58 @@
+#import "map_go"
+#import "sync_go"
+clock :: #import "time_go";
+
+builtin :: #system_library "go:builtin";
+
+RateWindow :: struct {
+    ResetAt: clock.Time
+    Count: isize
+}
+
+RateLimiter :: struct {
+    mu: Mutex
+    windows: Map(string, RateWindow)
+}
+
+#scope_file
+Allocate :: () -> *RateLimiter #foreign builtin "new";
+
+Prune :: (limiter: *RateLimiter, now: clock.Time) {
+    keys := MapKeys(limiter.windows)
+    for key: keys {
+        item := MapGet(limiter.windows, key)
+        if clock.After(now, item.ResetAt) {
+            MapDelete(limiter.windows, key)
+        }
+    }
+}
+
+Record :: (limiter: *RateLimiter, key: string, limit: isize, window: clock.Duration, now: clock.Time) -> bool {
+    Lock(*limiter.mu)
+    defer Unlock(*limiter.mu)
+    item := MapGet(limiter.windows, key)
+    if clock.After(now, item.ResetAt) {
+        item.ResetAt = clock.Add(now, window)
+        item.Count = 0
+    }
+    item.Count += 1
+    MapSet(limiter.windows, key, item)
+    if MapCount(limiter.windows) > 8192 {
+        Prune(limiter, now)
+    }
+    return item.Count <= limit
+}
+
+#scope_export
+New :: () -> *RateLimiter {
+    limiter := Allocate()
+    MapInit(limiter.windows)
+    return limiter
+}
+
+Allow :: (limiter: *RateLimiter, key: string, limit: isize, window: clock.Duration) -> bool {
+    if key == "" || limit <= 0 || cast(s64)window <= 0 {
+        return true
+    }
+    return Record(limiter, key, limit, window, clock.Now())
+}

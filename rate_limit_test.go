@@ -17,7 +17,7 @@ func TestClientAddressForwardedForTrust(t *testing.T) {
 		if forwarded != "" {
 			req.Header.Set("X-Forwarded-For", forwarded)
 		}
-		return clientAddress(req)
+		return ClientAddress_FromRequest(req)
 	}
 	cases := []struct {
 		name       string
@@ -36,27 +36,27 @@ func TestClientAddressForwardedForTrust(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := request(tc.remoteAddr, tc.forwarded); got != tc.want {
-				t.Fatalf("clientAddress(%q, %q) = %q, want %q", tc.remoteAddr, tc.forwarded, got, tc.want)
+				t.Fatalf("ClientAddress_FromRequest(%q, %q) = %q, want %q", tc.remoteAddr, tc.forwarded, got, tc.want)
 			}
 		})
 	}
 }
 
 func TestRateLimiterWindow(t *testing.T) {
-	limiter := NewRateLimiter()
+	limiter := RateLimit_New()
 	for i := 0; i < 3; i++ {
-		if !limiter.Allow("bucket", 3, time.Hour) {
+		if !RateLimit_Allow(limiter, "bucket", 3, time.Hour) {
 			t.Fatalf("request %d denied inside limit", i+1)
 		}
 	}
-	if limiter.Allow("bucket", 3, time.Hour) {
+	if RateLimit_Allow(limiter, "bucket", 3, time.Hour) {
 		t.Fatal("4th request allowed past limit")
 	}
-	if !limiter.Allow("other-bucket", 3, time.Hour) {
+	if !RateLimit_Allow(limiter, "other-bucket", 3, time.Hour) {
 		t.Fatal("unrelated bucket denied")
 	}
 	// Invalid parameters disable limiting rather than block everything.
-	if !limiter.Allow("", 3, time.Hour) || !limiter.Allow("bucket", 0, time.Hour) {
+	if !RateLimit_Allow(limiter, "", 3, time.Hour) || !RateLimit_Allow(limiter, "bucket", 0, time.Hour) {
 		t.Fatal("degenerate parameters should bypass limiting")
 	}
 }

@@ -615,7 +615,7 @@ func (s *Server) handleTokenReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Receipt IDs are 128-bit capabilities; rate-limit probing by IP.
-	if !s.allowRequest(r, "token-receipt:"+clientAddress(r), 60, time.Minute) {
+	if !s.allowRequest(r, "token-receipt:"+ClientAddress_FromRequest(r), 60, time.Minute) {
 		writeError(w, http.StatusTooManyRequests, "too many receipt requests")
 		return
 	}

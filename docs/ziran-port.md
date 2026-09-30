@@ -32,7 +32,9 @@ yet been ported in full.
 
 Additional regression cases compare binary decoding, identifier grammars,
 bearer-token bytes, HMAC results, malformed inputs, Gregorian dates,
-manifest scope/key policy, integer limits, and expiry boundaries against the original contracts and Go standard library.
+manifest scope/key policy, integer limits, expiry boundaries, concurrent
+request counts, single-use challenges and proxy trust against the original
+contracts and Go standard library.
 A fixture extracted from the baseline protects the ported protocol records'
 field names, Go storage types, order and reflection tags.
 
@@ -42,7 +44,7 @@ field names, Go storage types, order and reflection tags.
 |---|---|---|
 | `app_manifest.go` | Partial Ziran | Normalization, validation and active-key verification in `manifest.zi`; JSON, approval verification and registry transactions remain Go |
 | `app_registry.go` | Partial Ziran | Scope grammar/ownership/matching/SQL escaping in `scope.zi`; grants, registry, handlers remain Go |
-| `challenge.go` | Go | Random challenges, expiry, locking, single-use consumption |
+| `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Partial Ziran | Environment string sets in `sets.zi`; other settings, products, URLs and keys remain Go |
 | `device_keys.go` | Go with ported callers | Device registration, signatures, revocation, replay policy |
@@ -58,7 +60,7 @@ field names, Go storage types, order and reflection tags.
 | `monero_deposits.go` | Go with ported callers | Deposit reconciliation and credit transactions |
 | `node_auth.go` | Partial Ziran | Canonical message in `signing.zi`; signatures, time window, peer lookup, nonce consumption remain Go |
 | `node_identity.go` | Go with ported callers | Identity persistence, invites, pairing, namespace claims |
-| `rate_limit.go` | Go | Concurrent request windows and eviction |
+| `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
 | `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; HTTP handlers remain Go |
 | `signed_tx.go` | Partial Ziran | Record, normalization, canonical bytes in `transaction.zi`; decoding, verification and replay remain Go |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
@@ -77,8 +79,9 @@ field names, Go storage types, order and reflection tags.
 | `version.go` | Go | Build-stamped version |
 
 `identity.zi` is a new canonical module extracted from `server.go`. Generated
-`vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go` and `go_types.go`
-come from Ziran's standard
+`vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go`, `go_types.go`,
+`option.go`, `sync_go.go`, `time_go.go`, `random_go.go`, `text_go.go`,
+`net_go.go` and `http_go.go` come from Ziran's standard
 modules; they do not represent additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Their HTTP/database
@@ -95,6 +98,19 @@ preserving raw JSON payloads and Go type identity. Maintained callers use
 the original `map[string][]map[string]any` and `map[string]int` Go types and
 JSON behavior. `sets.zi` owns environment parsing and app-name normalization,
 including Unicode whitespace/case conversion and allocated empty results.
+
+`challenge.zi` and `rate_limit.zi` own their state, map updates, locking and
+expiry decisions. They keep Go's monotonic timestamps and exact strict expiry
+boundaries through standard primitives. Challenge consumption deletes the
+nonce before checking its expiry, preserving single-use behavior. Race tests
+exercise shared request counters and simultaneous consumers.
+
+`client_address.zi` also owns every address helper originally in
+`rate_limit.go`. It reads native HTTP fields through reusable compiler getters;
+no handwritten application adapter remains. Regression cases compare Unicode
+whitespace, malformed inputs, IPv4/IPv6 canonicalization and proxy trust with
+the baseline policy. Forwarded addresses remain trusted only for direct
+loopback peers, and only the first hop/header value can select the bucket.
 
 ## Compiler work exercised by this port
 
@@ -117,14 +133,23 @@ parallel regions is rejected because copies share storage. Predeclared `any`
 and `error` types are available through `go_types`; boxing owned vectors is
 rejected to preserve ownership.
 
+Typed Go receiver expressions, native field getters and record-packed multiple
+results now survive checked IR. `#go_results` preserves the native error
+interface and result order. `#go_field` reads declared native fields without
+redeclaring their opaque layout. Typed `go:builtin` operations provide heap
+allocation, slice/map construction, copied byte strings and native lengths.
+Compiler tests compare source and saved IR, including altered diagnostic
+declaration strings, to ensure typed metadata controls generation.
+
 ## Next dependencies
 
 Protocol fields now support checked Go reflection tags, including JSON names
 and omission rules. Opaque foreign Go type declarations preserve imported
 type identity, interface values, zero values and custom JSON methods in source
-and saved IR. Network and database code still needs interface operations,
-multiple results/error handling, method calls,
-variadic SQL arguments, contexts, synchronization, and worker lifecycle support.
+and saved IR. Go primitives now provide method calls, multiple results,
+HTTP field access, error interfaces and mutex synchronization. Network and
+database code still needs broader interface operations, variadic SQL arguments,
+contexts and worker lifecycle support.
 These are reusable compiler/runtime capabilities to implement upstream in
 Ziran as the corresponding application code moves; wrapping existing Go
 application functions does not complete their port.

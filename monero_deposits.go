@@ -64,7 +64,7 @@ func (s *Server) handleMoneroAddress(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "monero purchases disabled")
 		return
 	}
-	if !s.allowRequest(r, "monero-address:"+clientAddress(r), 60, time.Hour) {
+	if !s.allowRequest(r, "monero-address:"+ClientAddress_FromRequest(r), 60, time.Hour) {
 		writeError(w, http.StatusTooManyRequests, "too many address requests")
 		return
 	}

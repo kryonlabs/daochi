@@ -1,0 +1,112 @@
+#import "map_go"
+#import "option"
+#import "sync_go"
+#import "go_types"
+#import "random_go"
+#import "text_go"
+#import "codec"
+clock :: #import "time_go";
+builtin :: #system_library "go:builtin";
+
+Challenge :: struct {
+    Nonce: []u8
+    ExpiresAt: clock.Time
+}
+
+ChallengeStore :: struct {
+    mu: Mutex
+    ttl: clock.Duration
+    byUser: Map(string, Challenge)
+}
+
+IssuedChallenge :: struct {
+    Nonce: []u8
+    Error: Error
+}
+
+ConsumedChallenge :: struct {
+    Nonce: []u8
+    Found: bool
+}
+
+ChallengePreview :: struct {
+    Nonce: string
+    Found: bool
+}
+
+#scope_file
+Allocate :: () -> *ChallengeStore #foreign builtin "new";
+AllocateNonce :: (count: isize) -> []u8 #foreign builtin "make";
+
+Prune :: (store: *ChallengeStore, now: clock.Time) {
+    keys := MapKeys(store.byUser)
+    for key: keys {
+        item := MapGet(store.byUser, key)
+        if clock.After(now, item.ExpiresAt) {
+            MapDelete(store.byUser, key)
+        }
+    }
+}
+
+Consumed :: (item: Challenge, now: clock.Time) -> ConsumedChallenge {
+    result: ConsumedChallenge
+    if clock.After(now, item.ExpiresAt) {
+        return result
+    }
+    result.Nonce = item.Nonce
+    result.Found = true
+    return result
+}
+
+#scope_export
+New :: (ttl: clock.Duration) -> *ChallengeStore {
+    store := Allocate()
+    store.ttl = ttl
+    MapInit(store.byUser)
+    return store
+}
+
+Issue :: (store: *ChallengeStore, userID: string) -> IssuedChallenge {
+    result: IssuedChallenge
+    nonce := AllocateNonce(cast(isize)32)
+    random := Fill(nonce)
+    if random.error != null {
+        result.Error = random.error
+        return result
+    }
+    Lock(*store.mu)
+    defer Unlock(*store.mu)
+    Prune(store, clock.Now())
+    item: Challenge
+    item.Nonce = nonce
+    item.ExpiresAt = clock.Add(clock.Now(), store.ttl)
+    MapSet(store.byUser, userID, item)
+    result.Nonce = nonce
+    return result
+}
+
+Consume :: (store: *ChallengeStore, userID: string) -> ConsumedChallenge {
+    Lock(*store.mu)
+    defer Unlock(*store.mu)
+    item := MapLookup(store.byUser, userID)
+    result: ConsumedChallenge
+    if !item.has_value {
+        return result
+    }
+    MapDelete(store.byUser, userID)
+    return Consumed(item.value, clock.Now())
+}
+
+PeekBase64 :: (store: *ChallengeStore, userID: string) -> ChallengePreview {
+    Lock(*store.mu)
+    defer Unlock(*store.mu)
+    item := MapLookup(store.byUser, userID)
+    result: ChallengePreview
+    if !item.has_value || clock.After(clock.Now(), item.value.ExpiresAt) {
+        return result
+    }
+    encoded := EncodeBase64(FromBytes(item.value.Nonce), false, true)
+    result.Nonce = encoded.value
+    result.Found = true
+    return result
+}

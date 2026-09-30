@@ -1,0 +1,46 @@
+network :: #import "net_go";
+http :: #import "http_go";
+go_strings :: #system_library "go:strings";
+
+#scope_file
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+
+#scope_export
+FirstForwardedFor :: (header: string) -> string {
+    if header == "" {
+        return ""
+    }
+    parts := Split(header, ",")
+    first := TrimSpace(parts[0])
+    ip := network.ParseIP(first)
+    if network.ValidIP(ip) {
+        return network.FormatIP(ip)
+    }
+    return ""
+}
+
+IsLoopbackHost :: (host: string) -> bool {
+    ip := network.ParseIP(host)
+    return network.ValidIP(ip) && network.IsLoopback(ip)
+}
+
+FromRequest :: (request: *http.Request) -> string {
+    remote := http.RemoteAddress(request)
+    parsed := network.SplitHostPort(remote)
+    host := parsed.host
+    if parsed.error != null {
+        host = remote
+    }
+    host = TrimSpace(host)
+    if IsLoopbackHost(host) {
+        forwarded := FirstForwardedFor(http.HeaderValue(http.Headers(request), "X-Forwarded-For"))
+        if forwarded != "" {
+            return forwarded
+        }
+    }
+    if host == "" {
+        return "unknown"
+    }
+    return host
+}

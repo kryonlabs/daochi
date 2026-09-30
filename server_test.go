@@ -3312,20 +3312,16 @@ func TestSyncWebSocketIsScopedToTokenUser(t *testing.T) {
 	if ready.Type != "sync_ready" || ready.UserIDHash != alice.UserID {
 		t.Fatalf("ready event = %#v", ready)
 	}
-	server.syncHub.mu.Lock()
-	aliceSubs := len(server.syncHub.subs[alice.UserID])
-	bobSubs := len(server.syncHub.subs[bob.UserID])
-	server.syncHub.mu.Unlock()
+	aliceSubs := SyncHub_Count(server.syncHub, alice.UserID)
+	bobSubs := SyncHub_Count(server.syncHub, bob.UserID)
 	if aliceSubs != 1 || bobSubs != 0 {
 		t.Fatalf("unexpected websocket subscriptions alice=%d bob=%d", aliceSubs, bobSubs)
 	}
 
 	bobBody := []byte(`{"user_id_hash":"` + bob.UserID + `","client_id":"bob-client","habits":[{"id":"bob-habit","name":"Bob habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
 	syncWithBody(t, ts.Client(), ts.URL, bob.UserID, bob.Token, bobBody)
-	server.syncHub.mu.Lock()
-	aliceSubs = len(server.syncHub.subs[alice.UserID])
-	bobSubs = len(server.syncHub.subs[bob.UserID])
-	server.syncHub.mu.Unlock()
+	aliceSubs = SyncHub_Count(server.syncHub, alice.UserID)
+	bobSubs = SyncHub_Count(server.syncHub, bob.UserID)
 	if aliceSubs != 1 || bobSubs != 0 {
 		t.Fatalf("bob sync changed websocket subscriptions alice=%d bob=%d", aliceSubs, bobSubs)
 	}
@@ -3445,7 +3441,8 @@ func TestClientWebSocketFrameValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opcode, payload, err := readClientWebSocketFrame(bufio.NewReader(bytes.NewReader(tt.data)))
+			frame := Websocket_ReadClientFrame(bufio.NewReader(bytes.NewReader(tt.data)))
+			opcode, payload, err := frame.Opcode, frame.Payload, frame.Error
 			if tt.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.want) {
 					t.Fatalf("error = %v, want %q", err, tt.want)
@@ -4091,13 +4088,14 @@ func openSyncWebSocketRaw(t *testing.T, baseURL, extraHeaders string) (*bufio.Re
 	return reader, conn
 }
 
-func readTestWebSocketEvent(t *testing.T, reader *bufio.Reader) syncEvent {
+func readTestWebSocketEvent(t *testing.T, reader *bufio.Reader) SyncEvent {
 	t.Helper()
-	_, payload, err := readWebSocketFrame(reader)
+	frame := Websocket_ReadFrame(reader)
+	payload, err := frame.Payload, frame.Error
 	if err != nil {
 		t.Fatal(err)
 	}
-	var event syncEvent
+	var event SyncEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
 		t.Fatal(err)
 	}

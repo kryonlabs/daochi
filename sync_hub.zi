@@ -1,0 +1,101 @@
+#import "std/go_types"
+#import "std/map_go"
+sync :: #import "std/sync_go";
+channels :: #import "std/channel_go";
+go_sync :: #system_library "go:sync";
+builtin :: #system_library "go:builtin";
+
+SyncEvent :: struct {
+    Type: string #go_tag "json:\"type\""
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    ServerVersion: s64 #go_tag "json:\"server_version\""
+}
+SyncHub :: struct {
+    mutex: sync.Mutex
+    subscriptions: Map(string, Map(*Subscription, bool))
+}
+Subscription :: struct {
+    channel: channels.Channel
+}
+SyncHubStats :: struct {
+    connections: isize
+    users: isize
+}
+
+#scope_file
+Allocate :: () -> *SyncHub #foreign builtin "new";
+AllocateSubscription :: () -> *Subscription #foreign builtin "new";
+UnlockAtReturn :: (mutex: *sync.Mutex) #go_defer #foreign go_sync "(*Mutex).Unlock";
+
+#scope_export
+New :: () -> *SyncHub {
+    hub := Allocate()
+    MapInit(hub.subscriptions)
+    return hub
+}
+
+Subscribe :: (hub: *SyncHub, userID: string) -> *Subscription {
+    zero: SyncEvent
+    subscription := AllocateSubscription()
+    subscription.channel = channels.New(zero, cast(isize)8)
+    sync.Lock(*hub.mutex)
+    subscriptions := MapGet(hub.subscriptions, userID)
+    if subscriptions == null {
+        MapInit(subscriptions)
+        MapSet(hub.subscriptions, userID, subscriptions)
+    }
+    MapSet(subscriptions, subscription, true)
+    sync.Unlock(*hub.mutex)
+    return subscription
+}
+
+Unsubscribe :: (hub: *SyncHub, userID: string, subscription: *Subscription) {
+    sync.Lock(*hub.mutex)
+    subscriptions := MapGet(hub.subscriptions, userID)
+    if subscriptions != null {
+        MapDelete(subscriptions, subscription)
+        if MapCount(subscriptions) == 0 {
+            MapDelete(hub.subscriptions, userID)
+        }
+    }
+    sync.Unlock(*hub.mutex)
+    channels.Close(subscription.channel)
+}
+
+Publish :: (hub: *SyncHub, userID: string, version: s64) {
+    sync.Lock(*hub.mutex)
+    UnlockAtReturn(*hub.mutex)
+    subscriptions := MapGet(hub.subscriptions, userID)
+    value: SyncEvent
+    value.Type = "sync_changed"
+    value.UserIDHash = userID
+    value.ServerVersion = version
+    for subscription: MapKeys(subscriptions) {
+        channels.TrySend(subscription.channel, value)
+    }
+}
+
+Count :: (hub: *SyncHub, userID: string) -> isize {
+    sync.Lock(*hub.mutex)
+    UnlockAtReturn(*hub.mutex)
+    return cast(isize)MapCount(MapGet(hub.subscriptions, userID))
+}
+
+Total :: (hub: *SyncHub) -> isize {
+    return Stats(hub).connections
+}
+
+Stats :: (hub: *SyncHub) -> SyncHubStats {
+    sync.Lock(*hub.mutex)
+    UnlockAtReturn(*hub.mutex)
+    result: SyncHubStats
+    for userID: MapKeys(hub.subscriptions) {
+        count := MapCount(MapGet(hub.subscriptions, userID))
+        if count == 0 {
+            continue
+        }
+        result.users += 1
+        result.connections += cast(isize)count
+    }
+    return result
+}

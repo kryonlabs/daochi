@@ -32,8 +32,9 @@ For development in the organization-based workspace, create an ignored
 ziran = "../../ziranlang/ziran"
 ```
 
-Run `ziran update ziran` after committing an upstream compiler change to refresh
-the toolchain pin through the package manager.
+With a local override, run `ziran lock` after committing an upstream compiler
+change to record that checkout's exact commit. Run `ziran update ziran` to
+refresh the pin from the published toolchain ref.
 Generated Go is committed so ordinary Go and container builds work without
 having a compiler checkout installed. `make check-generated` detects drift.
 
@@ -85,7 +86,7 @@ field names, Go storage types, order and reflection tags.
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
 | `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, statistics queries, sync transactions, conflicts and projections remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
-| `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
+| `sync_ws.go` | Ziran | `sync_ws.zi`: authenticated upgrades, account and IP limits, reader worker, event/ping selection, deadlines and cancellation; `websocket.zi`: native handshakes and exact frame encoding/validation; `sync_hub.zi`: scoped subscriptions, bounded event delivery, counts and disconnect cleanup |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
 | `token_assets.go` | Ziran | `token_assets.zi`: native SQL upsert, released asset fields and error propagation |
 | `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
@@ -173,6 +174,20 @@ nil/empty body results, error text, context identity, encoded bytes and cleanup.
 records. Its `RawMessage` declaration aliases `encoding/json.RawMessage`,
 preserving raw JSON payloads and Go type identity. Maintained callers use
 `SocialSnapshot` directly; released `social_cache` fields are unchanged.
+
+`sync_ws.zi`, `websocket.zi` and `sync_hub.zi` own the complete WebSocket sync
+implementation. Upgrades retain the released subprotocol negotiation, token
+precedence, query-token rejection, limits, metrics and exact handshake bytes.
+Frame validation preserves mask requirements, reserved bits, opcodes, control
+frame bounds, fragmented-frame rejection, size bounds and native EOF errors.
+Subscribers retain eight buffered events, account isolation and nonblocking
+delivery; concurrent publishers and disconnects share the hub lock. Typed Go
+callbacks start the reader worker, and native deferred callbacks release
+subscriptions, cancellation, ticker and connection during ordinary returns
+and panic unwinding. Independent Go baseline fixtures compare every two-byte
+frame header, truncated and large payloads, arbitrary headers, write and
+upgrade errors, authentication, rate/connection limits, event delivery and
+panic cleanup. The existing server routes dispatch to the generated handler.
 
 `types.zi` owns account export and diagnostic records. Their map fields keep
 the original `map[string][]map[string]any` and `map[string]int` Go types and

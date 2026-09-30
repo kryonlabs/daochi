@@ -19,19 +19,19 @@ type CursorTextResult struct {
 	Error Error
 }
 
-type Encoding = base64.Encoding
+type zir_b10bf2f154c93a01_Encoding = base64.Encoding
 
-type BytesResult struct {
+type zir_ce06effbc92b9f42_BytesResult struct {
 	Value []uint8
 	Error Error
 }
 
-func MeshCursor_RawURL() *Encoding {
+func MeshCursor_RawURL() *zir_b10bf2f154c93a01_Encoding {
 	return base64.RawURLEncoding
 }
 
-func MeshCursor_DecodeRaw(Encoding *Encoding, Value string) BytesResult {
-	var result BytesResult
+func MeshCursor_DecodeRaw(Encoding *zir_b10bf2f154c93a01_Encoding, Value string) zir_ce06effbc92b9f42_BytesResult {
+	var result zir_ce06effbc92b9f42_BytesResult
 	result.Value, result.Error = (*base64.Encoding).DecodeString(Encoding, Value)
 	return result
 }
@@ -54,7 +54,7 @@ func MeshCursor_Decode(raw string) CursorResult {
 	if raw == "" {
 		return result
 	}
-	var value_0 *Encoding = MeshCursor_RawURL()
+	var value_0 *zir_b10bf2f154c93a01_Encoding = MeshCursor_RawURL()
 	decoded := MeshCursor_DecodeRaw(value_0, raw)
 	if decoded.Error != nil {
 		var value_1 Error = StdErrorsGo_New("invalid mesh cursor")

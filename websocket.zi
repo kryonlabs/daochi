@@ -1,0 +1,290 @@
+#import "std/go_types"
+http :: #import "std/http_go";
+errors :: #import "std/errors_go";
+text :: #import "std/text_go";
+json :: #import "std/json_go";
+response :: #import "response";
+go_http :: #system_library "go:net/http";
+go_net :: #system_library "go:net";
+go_bufio :: #system_library "go:bufio";
+go_io :: #system_library "go:io";
+go_base64 :: #system_library "go:encoding/base64";
+go_sha1 :: #system_library "go:crypto/sha1";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+Connection :: #type #foreign go_net "Conn";
+BufferedReader :: #type #foreign go_bufio "Reader";
+BufferedConnection :: #type #foreign go_bufio "ReadWriter";
+AcceptedSocket :: struct {
+    connection: Connection
+    buffer: *BufferedConnection
+    error: Error
+}
+Frame :: struct {
+    opcode: u8
+    payload: []u8
+    error: Error
+}
+
+#scope_file
+Hijacker :: #type #foreign go_http "Hijacker";
+HijackerResult :: struct {
+    value: Hijacker
+    present: bool
+}
+Encoding :: #type #foreign go_base64 "Encoding";
+BytesResult :: struct {
+    value: []u8
+    error: Error
+}
+WriteResult :: struct {
+    count: isize
+    error: Error
+}
+PrefixResult :: struct {
+    value: string
+    present: bool
+}
+GUID :: "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+EqualFold :: (left: string, right: string) -> bool #foreign go_strings;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+CutPrefix :: (value: string, prefix: string) -> PrefixResult #go_results #foreign go_strings;
+StandardEncoding :: () -> *Encoding #go_field #foreign go_base64 "StdEncoding";
+Decode :: (encoding: *Encoding, value: string) -> BytesResult #go_results #foreign go_base64 "(*Encoding).DecodeString";
+Encode :: (encoding: *Encoding, value: []u8) -> string #foreign go_base64 "(*Encoding).EncodeToString";
+SHA1 :: (value: []u8) -> [20]u8 #foreign go_sha1 "Sum";
+AsHijacker :: (value: Any) -> HijackerResult #go_results #foreign builtin "assert";
+Hijack :: (value: Hijacker) -> AcceptedSocket #go_results #foreign go_http "Hijacker.Hijack";
+WriteString :: (buffer: *BufferedConnection, value: string) -> WriteResult #go_results #foreign go_bufio "(*ReadWriter).WriteString";
+Flush :: (buffer: *BufferedConnection) -> Error #foreign go_bufio "(*ReadWriter).Flush";
+Close :: (connection: Connection) -> Error #foreign go_net "Conn.Close";
+WriteBytes :: (connection: Connection, value: []u8) -> WriteResult #go_results #foreign go_net "Conn.Write";
+ReadFull :: (reader: *BufferedReader, value: []u8) -> WriteResult #go_results #foreign go_io "ReadFull";
+EOF :: () -> Error #go_field #foreign go_io;
+AllocateBytes :: (count: isize) -> []u8 #foreign builtin "make";
+AppendByte :: (value: []u8, byte: u8) -> []u8 #foreign builtin "append";
+
+Failure :: (error: Error) -> AcceptedSocket {
+    result: AcceptedSocket
+    result.error = error
+    return result
+}
+FrameFailure :: (error: Error) -> Frame {
+    result: Frame
+    result.error = error
+    return result
+}
+
+#scope_export
+Accept :: (writer: http.ResponseWriter, request: *http.Request) -> AcceptedSocket {
+    headers := http.Headers(request)
+    if !EqualFold(http.HeaderValue(headers, "Upgrade"), "websocket") ||
+        !HeaderContainsToken(http.HeaderValue(headers, "Connection"), "upgrade") {
+        response.Error(writer, cast(isize)400, "websocket upgrade required")
+        return Failure(errors.New("missing upgrade"))
+    }
+    key := TrimSpace(http.HeaderValue(headers, "Sec-WebSocket-Key"))
+    if !ValidKey(key) || http.HeaderValue(headers, "Sec-WebSocket-Version") != "13" {
+        response.Error(writer, cast(isize)400, "invalid websocket handshake")
+        return Failure(errors.New("invalid handshake"))
+    }
+    asserted := AsHijacker(writer)
+    if !asserted.present {
+        response.Error(writer, cast(isize)500, "websocket unsupported")
+        return Failure(errors.New("hijack unsupported"))
+    }
+    hijacked := Hijack(asserted.value)
+    if hijacked.error != null {
+        return Failure(hijacked.error)
+    }
+    parts: [2]string = .[
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ",
+        AcceptKey(key)
+    ]
+    reply := Join(parts[:], "")
+    protocol := http.HeaderValue(headers, "Sec-WebSocket-Protocol")
+    if ProtocolRequested(protocol, "daochi-sync-v1") {
+        reply = AddText(reply, "\r\nSec-WebSocket-Protocol: daochi-sync-v1")
+    } else if ProtocolRequested(protocol, "ksync-sync-v1") {
+        reply = AddText(reply, "\r\nSec-WebSocket-Protocol: ksync-sync-v1")
+    } else if ProtocolRequested(protocol, "inbe-sync-v1") {
+        reply = AddText(reply, "\r\nSec-WebSocket-Protocol: inbe-sync-v1")
+    }
+    reply = AddText(reply, "\r\n\r\n")
+    written := WriteString(hijacked.buffer, reply)
+    if written.error != null {
+        Close(hijacked.connection)
+        return Failure(written.error)
+    }
+    error := Flush(hijacked.buffer)
+    if error != null {
+        Close(hijacked.connection)
+        return Failure(error)
+    }
+    return hijacked
+}
+
+BearerToken :: (header: string) -> string {
+    for part: Split(header, ",") {
+        token := CutPrefix(TrimSpace(part), "bearer.")
+        if token.present && token.value != "" {
+            return token.value
+        }
+    }
+    return ""
+}
+
+ProtocolRequested :: (header: string, protocol: string) -> bool {
+    for part: Split(header, ",") {
+        if TrimSpace(part) == protocol {
+            return true
+        }
+    }
+    return false
+}
+
+HeaderContainsToken :: (header: string, token: string) -> bool {
+    for part: Split(header, ",") {
+        if EqualFold(TrimSpace(part), token) {
+            return true
+        }
+    }
+    return false
+}
+
+ValidKey :: (key: string) -> bool {
+    decoded := Decode(StandardEncoding(), key)
+    return decoded.error == null && decoded.value.count == 16
+}
+
+AcceptKey :: (key: string) -> string {
+    sum := SHA1(text.ToBytes(AddText(key, GUID)))
+    return Encode(StandardEncoding(), sum[:])
+}
+
+AddText :: (left: string, right: string) -> string {
+    parts: [2]string = .[left, right]
+    return Join(parts[:], "")
+}
+
+WriteJSON :: (connection: Connection, value: Any) -> Error {
+    encoded := json.Marshal(value)
+    if encoded.error != null {
+        return encoded.error
+    }
+    return WriteFrame(connection, cast(u8)1, encoded.value)
+}
+
+WriteFrame :: (connection: Connection, opcode: u8, payload: []u8) -> Error {
+    header := AllocateBytes(cast(isize)2)
+    header[0] = cast(u8)128 | opcode
+    if payload.count < 126 {
+        header[1] = cast(u8)payload.count
+    } else if payload.count <= 65535 {
+        header[1] = 126
+        header = AppendByte(header, cast(u8)(payload.count >> 8))
+        header = AppendByte(header, cast(u8)payload.count)
+    } else {
+        header[1] = 127
+        size := cast(u64)payload.count
+        for index: 0..7 {
+            header = AppendByte(header, cast(u8)(size >> cast(u64)((7 - index) * 8)))
+        }
+    }
+    written := WriteBytes(connection, header)
+    if written.error != null {
+        return written.error
+    }
+    return WriteBytes(connection, payload).error
+}
+
+ReadFrame :: (reader: *BufferedReader) -> Frame {
+    return ReadMaskedFrame(reader, false)
+}
+
+ReadClientFrame :: (reader: *BufferedReader) -> Frame {
+    return ReadMaskedFrame(reader, true)
+}
+
+ReadMaskedFrame :: (reader: *BufferedReader, requireMask: bool) -> Frame {
+    first: [2]u8
+    error := ReadFull(reader, first[:]).error
+    if error != null {
+        return FrameFailure(error)
+    }
+    finished := (first[0] & cast(u8)128) != 0
+    if (first[0] & cast(u8)112) != 0 {
+        return FrameFailure(errors.New("websocket reserved bits set"))
+    }
+    opcode := first[0] & cast(u8)15
+    if !ValidOpcode(opcode) {
+        return FrameFailure(errors.New("websocket unsupported opcode"))
+    }
+    masked := (first[1] & cast(u8)128) != 0
+    if requireMask && !masked {
+        return FrameFailure(errors.New("websocket client frame not masked"))
+    }
+    length := cast(u64)(first[1] & cast(u8)127)
+    if length == cast(u64)126 {
+        extended: [2]u8
+        error = ReadFull(reader, extended[:]).error
+        if error != null {
+            return FrameFailure(error)
+        }
+        length = (cast(u64)extended[0] << cast(u64)8) | cast(u64)extended[1]
+    } else if length == cast(u64)127 {
+        extended: [8]u8
+        error = ReadFull(reader, extended[:]).error
+        if error != null {
+            return FrameFailure(error)
+        }
+        length = 0
+        for byte: extended {
+            length = (length << cast(u64)8) | cast(u64)byte
+        }
+        if (length & (cast(u64)1 << cast(u64)63)) != cast(u64)0 {
+            return FrameFailure(errors.New("websocket invalid length"))
+        }
+    }
+    if opcode >= cast(u8)8 && (!finished || length > cast(u64)125) {
+        return FrameFailure(errors.New("websocket invalid control frame"))
+    }
+    if !finished {
+        return FrameFailure(errors.New("websocket fragmented frames unsupported"))
+    }
+    if length > (cast(u64)1 << cast(u64)20) {
+        return FrameFailure(errors.New("websocket frame too large"))
+    }
+    mask: [4]u8
+    if masked {
+        error = ReadFull(reader, mask[:]).error
+        if error != null {
+            return FrameFailure(error)
+        }
+    }
+    payload := AllocateBytes(cast(isize)length)
+    error = ReadFull(reader, payload).error
+    if error != null {
+        return FrameFailure(error)
+    }
+    if masked {
+        for byte, index: payload {
+            payload[index] = byte ^ mask[index % 4]
+        }
+    }
+    result: Frame
+    result.opcode = opcode
+    result.payload = payload
+    if opcode == cast(u8)8 {
+        result.error = EOF()
+    }
+    return result
+}
+
+ValidOpcode :: (opcode: u8) -> bool {
+    return opcode == cast(u8)0 || opcode == cast(u8)1 || opcode == cast(u8)2 ||
+        opcode == cast(u8)8 || opcode == cast(u8)9 || opcode == cast(u8)10
+}

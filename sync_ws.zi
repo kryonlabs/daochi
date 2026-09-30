@@ -1,0 +1,187 @@
+#import "std/go_types"
+#import "config"
+#import "metrics"
+#import "sync_hub"
+hub :: #import "sync_hub";
+socket :: #import "websocket";
+http :: #import "std/http_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+sql :: #import "std/sql_go";
+channels :: #import "std/channel_go";
+selection :: #import "std/select_go";
+atomic :: #import "std/atomic_go";
+errors :: #import "std/errors_go";
+url :: #import "std/url_go";
+response :: #import "response";
+http_auth :: #import "http_auth";
+auth :: #import "authentication";
+address :: #import "client_address";
+rate :: #import "rate_limit";
+metrics :: #import "metrics";
+token :: #import "token";
+go_sql :: #system_library "go:database/sql";
+go_net :: #system_library "go:net";
+go_bufio :: #system_library "go:bufio";
+go_time :: #system_library "go:time";
+go_reflect :: #system_library "go:reflect";
+builtin :: #system_library "go:builtin";
+
+SyncSocket :: struct {
+    database: *sql.Database
+    configuration: *Config
+    counters: *ServerMetrics
+    limiter: *rate.RateLimiter
+    hub: *SyncHub
+}
+
+#scope_file
+VersionResult :: struct {
+    value: s64
+    error: Error
+}
+EventResult :: struct {
+    value: SyncEvent
+    present: bool
+}
+ReaderWorker :: #type (connection: socket.Connection, reader: *socket.BufferedReader, cancel: ctx.CancelFunc) -> void;
+CancelCallback :: #type (cancel: ctx.CancelFunc) -> void;
+UnsubscribeCallback :: #type (hub: *SyncHub, userID: string, subscription: *Subscription) -> void;
+CloseAtReturn :: (connection: socket.Connection) #go_defer #foreign go_net "Conn.Close";
+CancelAtReturn :: (callback: CancelCallback, cancel: ctx.CancelFunc) #go_defer #foreign builtin "call";
+UnsubscribeAtReturn :: (callback: UnsubscribeCallback, hub: *SyncHub, userID: string, subscription: *Subscription) #go_defer #foreign builtin "call";
+SpawnReader :: (callback: ReaderWorker, connection: socket.Connection, reader: *socket.BufferedReader, cancel: ctx.CancelFunc) #foreign builtin "spawn";
+SetReadDeadline :: (connection: socket.Connection, deadline: clock.Time) -> Error #foreign go_net "Conn.SetReadDeadline";
+SetWriteDeadline :: (connection: socket.Connection, deadline: clock.Time) -> Error #foreign go_net "Conn.SetWriteDeadline";
+Reader :: (buffer: *socket.BufferedConnection) -> *socket.BufferedReader #go_field #foreign go_bufio "(*ReadWriter).Reader";
+StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
+Unbox :: (value: selection.Value) -> Any #foreign go_reflect "Value.Interface";
+AsEvent :: (value: Any) -> EventResult #go_results #foreign builtin "assert";
+QueryVersion :: (database: *sql.Database, context: ctx.Context, query: string, userID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+ScanVersion :: (row: *sql.Row, version: *s64) -> Error #foreign go_sql "(*Row).Scan";
+Minute :: 60000000000;
+ReadWindow :: 90000000000;
+WriteWindow :: 10000000000;
+PingInterval :: 30000000000;
+
+Allow :: (value: SyncSocket, key: string, limit: isize) -> bool {
+    if value.limiter == null {
+        return true
+    }
+    allowed := rate.Allow(value.limiter, key, limit, cast(clock.Duration)Minute)
+    if !allowed {
+        atomic.Add(*value.counters.rateLimitedRequests, cast(u64)1)
+    }
+    return allowed
+}
+
+CurrentVersion :: (value: SyncSocket, context: ctx.Context, userID: string) -> VersionResult {
+    result: VersionResult
+    result.error = ScanVersion(QueryVersion(value.database, context,
+        "\nSELECT server_version\nFROM server_sync_state\nWHERE user_id_hash=?1", userID), *result.value)
+    if errors.Is(result.error, sql.NoRows()) {
+        result.value = 0
+        result.error = null
+    }
+    return result
+}
+
+ReadLoop :: (connection: socket.Connection, reader: *socket.BufferedReader, cancel: ctx.CancelFunc) {
+    while true {
+        SetReadDeadline(connection, clock.Add(clock.Now(), cast(clock.Duration)ReadWindow))
+        frame := socket.ReadClientFrame(reader)
+        if frame.error != null {
+            ctx.Cancel(cancel)
+            return
+        }
+    }
+}
+
+#scope_export
+Authenticate :: (value: SyncSocket, request: *http.Request) -> http_auth.UserAuthenticationResult {
+    result: http_auth.UserAuthenticationResult
+    if url.Value(url.Query(http.RequestURL(request)), "token") != "" {
+        result.authentication = auth.Failure(cast(isize)401, "websocket query tokens are not accepted")
+        return result
+    }
+    bearer := socket.BearerToken(http.HeaderValue(http.Headers(request), "Sec-WebSocket-Protocol"))
+    if bearer != "" {
+        verified := token.VerifyAuthToken(value.configuration.TokenSecret, bearer, clock.Unix(clock.Now()))
+        if verified.error != "" {
+            result.authentication = auth.Failure(cast(isize)401, "invalid bearer token")
+            return result
+        }
+        result.value = verified.value
+        return result
+    }
+    return http_auth.AuthenticateToken(value.database, request, value.configuration.TokenSecret)
+}
+
+Handle :: (value: SyncSocket, writer: http.ResponseWriter, request: *http.Request) {
+    if http.Method(request) != "GET" {
+        response.Error(writer, cast(isize)405, "method not allowed")
+        return
+    }
+    authenticated := Authenticate(value, request)
+    if authenticated.authentication.error != null || authenticated.authentication.status != cast(isize)0 {
+        metrics.RecordWebSocketReject(value.counters, "auth")
+        http_auth.Respond(writer, value.counters, authenticated.authentication)
+        return
+    }
+    userID := authenticated.value
+    if !Allow(value, socket.AddText("ws:ip:", address.FromRequest(request)), cast(isize)120) ||
+        !Allow(value, socket.AddText("ws:user:", userID), cast(isize)40) {
+        metrics.RecordWebSocketReject(value.counters, "rate_limited")
+        response.Error(writer, cast(isize)429, "rate limit exceeded")
+        return
+    }
+    if hub.Count(value.hub, userID) >= 8 {
+        metrics.RecordWebSocketReject(value.counters, "too_many_connections")
+        response.Error(writer, cast(isize)429, "too many websocket connections")
+        return
+    }
+    accepted := socket.Accept(writer, request)
+    if accepted.error != null {
+        metrics.RecordWebSocketReject(value.counters, "handshake")
+        return
+    }
+    atomic.Add(*value.counters.webSocketAccepted, cast(u64)1)
+    CloseAtReturn(accepted.connection)
+    events := hub.Subscribe(value.hub, userID)
+    UnsubscribeAtReturn(hub.Unsubscribe, value.hub, userID, events)
+    version := CurrentVersion(value, http.Context(request), userID)
+    if version.error == null {
+        ready: SyncEvent
+        ready.Type = "sync_ready"
+        ready.UserIDHash = userID
+        ready.ServerVersion = version.value
+        socket.WriteJSON(accepted.connection, ready)
+    }
+    child := ctx.WithCancel(http.Context(request))
+    CancelAtReturn(ctx.Cancel, child.cancel)
+    SpawnReader(ReadLoop, accepted.connection, Reader(accepted.buffer), child.cancel)
+    ticker := clock.NewTicker(cast(clock.Duration)PingInterval)
+    StopAtReturn(ticker)
+    while true {
+        cases: [3]selection.Case
+        cases[0] = selection.Receive(ctx.Done(child.value))
+        cases[1] = selection.Receive(channels.Interface(events.channel))
+        cases[2] = selection.Receive(clock.TickerChannel(ticker))
+        chosen := selection.Select(cases[:])
+        if chosen.chosen == cast(isize)0 {
+            return
+        }
+        SetWriteDeadline(accepted.connection, clock.Add(clock.Now(), cast(clock.Duration)WriteWindow))
+        if chosen.chosen == cast(isize)1 {
+            event := AsEvent(Unbox(chosen.value))
+            if socket.WriteJSON(accepted.connection, event.value) != null {
+                return
+            }
+        } else {
+            payload: []u8
+            if socket.WriteFrame(accepted.connection, cast(u8)9, payload) != null {
+                return
+            }
+        }
+    }
+}

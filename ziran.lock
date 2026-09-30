@@ -8,7 +8,7 @@
     "name": "Daochi"
   },
   "toolchain": {
-    "commit": "e86fb43d989683027fa5648931134f0adf442ed0",
+    "commit": "f8f91c236e03b9977a59c9f7d108bb36b60ef0b9",
     "ref": "master",
     "url": "https://github.com/ziranlang/ziran.git"
   }

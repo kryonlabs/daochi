@@ -18,13 +18,13 @@ type UserAuthenticationResult struct {
 	Authentication AuthenticationResult
 }
 
-type PrefixResult struct {
+type zir_f901dcc00a51e15e_PrefixResult struct {
 	Value string
 	Found bool
 }
 
-func HttpAuth_CutPrefix(Value string, Prefix string) PrefixResult {
-	var result PrefixResult
+func HttpAuth_CutPrefix(Value string, Prefix string) zir_f901dcc00a51e15e_PrefixResult {
+	var result zir_f901dcc00a51e15e_PrefixResult
 	result.Value, result.Found = strings.CutPrefix(Value, Prefix)
 	return result
 }

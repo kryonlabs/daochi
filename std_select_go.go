@@ -6,7 +6,7 @@ import reflect "reflect"
 // #import std_go_types
 type Case = reflect.SelectCase
 
-type Direction = reflect.SelectDir
+type zir_21c4ed21b33b473f_Direction = reflect.SelectDir
 
 type Value = reflect.Value
 
@@ -16,19 +16,19 @@ type SelectResult struct {
 	ReceiveOK bool
 }
 
-func StdSelectGo_ReceiveDirection() Direction {
+func StdSelectGo_ReceiveDirection() zir_21c4ed21b33b473f_Direction {
 	return reflect.SelectRecv
 }
 
-func StdSelectGo_SendDirection() Direction {
+func StdSelectGo_SendDirection() zir_21c4ed21b33b473f_Direction {
 	return reflect.SelectSend
 }
 
-func StdSelectGo_DefaultDirection() Direction {
+func StdSelectGo_DefaultDirection() zir_21c4ed21b33b473f_Direction {
 	return reflect.SelectDefault
 }
 
-func StdSelectGo_SetDirection(Value *Case, Direction Direction) {
+func StdSelectGo_SetDirection(Value *Case, Direction zir_21c4ed21b33b473f_Direction) {
 	Value.Dir = Direction
 }
 

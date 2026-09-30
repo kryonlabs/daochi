@@ -58,7 +58,7 @@ type Server struct {
 	store      *Store
 	challenges *ChallengeStore
 	verifier   Verifier
-	syncHub    *syncHub
+	syncHub    *SyncHub
 	limiter    *RateLimiter
 	metrics    *ServerMetrics
 	node       NodeIdentity
@@ -79,7 +79,7 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 		store:      store,
 		challenges: Challenge_New(cfg.ChallengeTTL),
 		verifier:   verifier,
-		syncHub:    newSyncHub(),
+		syncHub:    SyncHub_New(),
 		limiter:    RateLimit_New(),
 		metrics:    &ServerMetrics{},
 		node:       node.Value,
@@ -343,7 +343,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("load metrics usage", "error", err)
 		usage = NodeUsage{RecentActivityWindowDays: nodeUsageRecentWindowDays}
-		stats := s.syncHub.stats()
+		stats := SyncHub_Stats(s.syncHub)
 		usage.ConnectedUsers = stats.Users
 		usage.ConnectedWebSocketClients = stats.Connections
 		usage.WebSocketConnectionLimitPerUser = webSocketConnectionLimitPerUser
@@ -360,7 +360,7 @@ func (s *Server) nodeUsage(ctx context.Context) (NodeUsage, error) {
 	if err != nil {
 		return NodeUsage{}, err
 	}
-	stats := s.syncHub.stats()
+	stats := SyncHub_Stats(s.syncHub)
 	usage.ConnectedUsers = stats.Users
 	usage.ConnectedWebSocketClients = stats.Connections
 	usage.RecentActivityWindowDays = nodeUsageRecentWindowDays
@@ -585,7 +585,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if syncResultApplied(result) {
-		s.syncHub.publish(req.UserIDHash, serverVersion)
+		SyncHub_Publish(s.syncHub, req.UserIDHash, serverVersion)
 	}
 	accountAlias, err := s.store.AccountAlias(r.Context(), req.UserIDHash)
 	if err != nil {
@@ -842,7 +842,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		slog.Error("record encrypted sync audit", "user", LogSafety_LogText(userID), "client", LogSafety_LogText(clientID), "error", err)
 	}
 	s.metrics.SyncEncryptedPayloads.Add(1)
-	s.syncHub.publish(userID, serverVersion)
+	SyncHub_Publish(s.syncHub, userID, serverVersion)
 	response := SyncResponse{
 		ProtocolVersion:      LatestProtocol,
 		Status:               "ok",
@@ -1031,8 +1031,8 @@ func (s *Server) handleFriendRoute(w http.ResponseWriter, r *http.Request) {
 		Response_Error(w, http.StatusInternalServerError, "friend remove failed")
 		return
 	}
-	s.syncHub.publish(userID, 0)
-	s.syncHub.publish(friendID, 0)
+	SyncHub_Publish(s.syncHub, userID, 0)
+	SyncHub_Publish(s.syncHub, friendID, 0)
 	Response_JSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
@@ -1089,8 +1089,8 @@ func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Reques
 		Response_Error(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
-	s.syncHub.publish(userID, 0)
-	s.syncHub.publish(target, 0)
+	SyncHub_Publish(s.syncHub, userID, 0)
+	SyncHub_Publish(s.syncHub, target, 0)
 	Response_JSON(w, http.StatusCreated, FriendRequestResponse{Status: "ok", Request: item})
 }
 
@@ -1132,8 +1132,8 @@ func (s *Server) handleFriendRequestRoute(w http.ResponseWriter, r *http.Request
 		Response_Error(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
-	s.syncHub.publish(item.RequesterUserID, 0)
-	s.syncHub.publish(item.TargetUserID, 0)
+	SyncHub_Publish(s.syncHub, item.RequesterUserID, 0)
+	SyncHub_Publish(s.syncHub, item.TargetUserID, 0)
 	Response_JSON(w, http.StatusOK, FriendRequestResponse{Status: item.Status, Request: item})
 }
 
@@ -1154,10 +1154,10 @@ func (s *Server) handleProfileStatsPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if applied > 0 {
-		s.syncHub.publish(userID, 0)
+		SyncHub_Publish(s.syncHub, userID, 0)
 		if friends, err := s.store.ListFriends(r.Context(), userID); err == nil {
 			for _, friend := range friends {
-				s.syncHub.publish(friend.UserIDHash, 0)
+				SyncHub_Publish(s.syncHub, friend.UserIDHash, 0)
 			}
 		} else {
 			slog.Error("notify profile stats friends", "user", LogSafety_LogText(userID), "error", err)
@@ -1296,7 +1296,7 @@ func (s *Server) cacheSocialSnapshot(ctx context.Context, userID, kind string, v
 		return
 	}
 	if applied > 0 {
-		s.syncHub.publish(userID, 0)
+		SyncHub_Publish(s.syncHub, userID, 0)
 	}
 }
 
@@ -1928,4 +1928,18 @@ func validChromeExtensionID(id string) bool {
 		}
 	}
 	return true
+}
+
+func (s *Server) syncSocket() SyncSocket {
+	return SyncSocket{
+		Database:      s.store.db,
+		Configuration: &s.cfg,
+		Counters:      s.metrics,
+		Limiter:       s.limiter,
+		Hub:           s.syncHub,
+	}
+}
+
+func (s *Server) handleSyncWebSocket(w http.ResponseWriter, r *http.Request) {
+	SyncWs_Handle(s.syncSocket(), w, r)
 }

@@ -14,7 +14,7 @@ type TombstoneResult struct {
 	Error Error
 }
 
-type VersionResult struct {
+type zir_36dbc7eb84b27f76_VersionResult struct {
 	Value int64
 	Error Error
 }
@@ -31,8 +31,8 @@ func AccountState_EnsureSync(Transaction *Transaction, Context Context, Query st
 	return result
 }
 
-func AccountState_NextVersion(transaction *Transaction, context Context, userID string) VersionResult {
-	var result VersionResult = VersionResult{}
+func AccountState_NextVersion(transaction *Transaction, context Context, userID string) zir_36dbc7eb84b27f76_VersionResult {
+	var result zir_36dbc7eb84b27f76_VersionResult = zir_36dbc7eb84b27f76_VersionResult{}
 	var value_0 zir_2688387c33a72186_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
 	inserted := value_0
 	result.Error = inserted.Error

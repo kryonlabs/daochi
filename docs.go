@@ -22,21 +22,21 @@ type ReadPublicStats func(Context, string) PublicStatsResult
 
 type CachedBytes func() []uint8
 
-type WriteResult struct {
+type zir_d6432f2c25808066_WriteResult struct {
 	Count int
 	Error Error
 }
 
 type __type_7d6cc8a85f09fc88 = map[string]Any
 
-func Docs_Write(Writer Writer, Value []uint8) WriteResult {
-	var result WriteResult
+func Docs_Write(Writer Writer, Value []uint8) zir_d6432f2c25808066_WriteResult {
+	var result zir_d6432f2c25808066_WriteResult
 	result.Count, result.Error = (io.Writer).Write(Writer, Value)
 	return result
 }
 
-func Docs_WritePage(Writer Writer, Format string, Status string) WriteResult {
-	var result WriteResult
+func Docs_WritePage(Writer Writer, Format string, Status string) zir_d6432f2c25808066_WriteResult {
+	var result zir_d6432f2c25808066_WriteResult
 	result.Count, result.Error = fmt.Fprintf(Writer, Format, Status)
 	return result
 }

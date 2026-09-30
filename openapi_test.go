@@ -43,7 +43,7 @@ var undocumentedRoutes = map[string]bool{
 }
 
 func TestOpenAPISpecCoversRegisteredRoutes(t *testing.T) {
-	spec := openAPISpec()
+	spec := Docs_Spec()
 	paths, _ := spec["paths"].(map[string]any)
 	if len(paths) == 0 {
 		t.Fatal("openapi spec has no paths")

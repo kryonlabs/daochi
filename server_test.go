@@ -916,7 +916,7 @@ func TestProtocolV4AdvertisesDualWriteTransition(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.LatestProtocol != 4 || payload.ServerLatestProtocol != latestProtocol || payload.ProtocolVersion != 4 {
+	if payload.LatestProtocol != 4 || payload.ServerLatestProtocol != LatestProtocol || payload.ProtocolVersion != 4 {
 		t.Fatalf("unexpected protocol response: %#v", payload)
 	}
 	if payload.TransitionMode != "dual_write" {
@@ -943,7 +943,7 @@ func TestProtocolV5EncryptedPrimaryHidesLegacyPrivateDataByDefault(t *testing.T)
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.LatestProtocol != 5 || payload.ServerLatestProtocol != latestProtocol || payload.ProtocolVersion != 5 ||
+	if payload.LatestProtocol != 5 || payload.ServerLatestProtocol != LatestProtocol || payload.ProtocolVersion != 5 ||
 		payload.TransitionMode != "encrypted_primary" {
 		t.Fatalf("unexpected v5 response metadata: %#v", payload)
 	}
@@ -1014,7 +1014,7 @@ func TestProtocolV1ThroughV5RemainAcceptedThroughCompatibilityDeadline(t *testin
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x4f)
 
-	for version := minSupportedProtocol; version <= 5; version++ {
+	for version := MinSupportedProtocol; version <= 5; version++ {
 		clientID := "compat-client-" + strconv.Itoa(version)
 		body := []byte(`{"protocol_version":` + strconv.Itoa(version) + `,"user_id_hash":"` + identity.UserID + `","client_id":"` + clientID + `","since_server_version":0}`)
 		res := syncWithBody(t, handler, "", identity.UserID, identity.Token, body)
@@ -1023,11 +1023,11 @@ func TestProtocolV1ThroughV5RemainAcceptedThroughCompatibilityDeadline(t *testin
 			t.Fatal(err)
 		}
 		if payload.Status != "ok" ||
-			payload.MinSupportedProtocol != minSupportedProtocol ||
+			payload.MinSupportedProtocol != MinSupportedProtocol ||
 			payload.LatestProtocol != version ||
-			payload.ServerLatestProtocol != latestProtocol ||
+			payload.ServerLatestProtocol != LatestProtocol ||
 			payload.UpgradeNotice != "" ||
-			!containsString(payload.ServerCapabilities, "protocol-v1-v5-valid-through-"+compatibilityDeadline) {
+			!containsString(payload.ServerCapabilities, "protocol-v1-v5-valid-through-"+CompatibilityDeadline) {
 			t.Fatalf("protocol %d compatibility response = %#v", version, payload)
 		}
 	}
@@ -1565,8 +1565,8 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	if nodePayload.Status != "ok" ||
-		nodePayload.Protocol.MinSupported != minSupportedProtocol ||
-		nodePayload.Protocol.Latest != latestProtocol ||
+		nodePayload.Protocol.MinSupported != MinSupportedProtocol ||
+		nodePayload.Protocol.Latest != LatestProtocol ||
 		!containsString(nodePayload.Capabilities, "aliases") ||
 		!containsString(nodePayload.Capabilities, "friends") ||
 		len(nodePayload.KnownNodes) != 1 ||
@@ -1861,7 +1861,7 @@ func TestEncryptedSyncEnvelopeStoresAndRelaysOpaquely(t *testing.T) {
 		t.Fatal(err)
 	}
 	if first.Status != "ok" || first.TransitionMode != "encrypted_payload" ||
-		first.ProtocolVersion != latestProtocol || first.ServerVersion == 0 ||
+		first.ProtocolVersion != LatestProtocol || first.ServerVersion == 0 ||
 		len(first.EncryptedPayloads) != 1 {
 		t.Fatalf("unexpected encrypted envelope response: %#v", first)
 	}

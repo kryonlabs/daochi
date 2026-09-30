@@ -58,15 +58,6 @@ func isCanonicalHabitID(id string) bool {
 	return true
 }
 
-type PublicStats struct {
-	UserCount        int64
-	StorageUsedBytes int64
-	StorageUsedGB    int64
-	StorageUsedText  string
-	AvailableBytes   int64
-	AvailableGB      int64
-}
-
 func (s *Store) ExportAccount(ctx context.Context, userID string) (AccountExportResponse, error) {
 	var alias sql.NullString
 	var profileIcon int
@@ -2641,7 +2632,7 @@ func (s *Store) LegacyWritePolicy(ctx context.Context, userID string) (bool, int
 SELECT MAX(last_sync_at)
 FROM server_clients
 WHERE user_id_hash=?1 AND protocol_version<?2 AND last_sync_at>=?3`,
-		userID, latestProtocol, cutoff).Scan(&latest)
+		userID, LatestProtocol, cutoff).Scan(&latest)
 	if err != nil {
 		return false, 0, err
 	}

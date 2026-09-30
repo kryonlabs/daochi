@@ -25,3 +25,12 @@ SyncDiagnosticReport :: struct {
     RecentSyncAudit: []SyncAuditEntry #go_tag "json:\"recent_sync_audit,omitempty\""
     RecentEncryptedPayloads: []EncryptedPayload #go_tag "json:\"recent_encrypted_payloads,omitempty\""
 }
+
+PublicStats :: struct {
+    UserCount: s64
+    StorageUsedBytes: s64
+    StorageUsedGB: s64
+    StorageUsedText: string
+    AvailableBytes: s64
+    AvailableGB: s64
+}

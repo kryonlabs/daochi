@@ -7,7 +7,7 @@ import (
 
 func TestLANDiscoveryMetadataContainsIdentityButNoTrustSecret(t *testing.T) {
 	nodeID := "0123456789abcdef"
-	if got := discoveryInstanceName("Home", nodeID); got != "Home 0123456789ab" {
+	if got := Discovery_InstanceName("Home", nodeID); got != "Home 0123456789ab" {
 		t.Fatalf("instance name = %q", got)
 	}
 	want := []string{
@@ -16,13 +16,14 @@ func TestLANDiscoveryMetadataContainsIdentityButNoTrustSecret(t *testing.T) {
 		"trust=pairing-required",
 		"path=/api/v1/node",
 	}
-	if got := discoveryText(nodeID); !reflect.DeepEqual(got, want) {
+	if got := Discovery_Text(nodeID); !reflect.DeepEqual(got, want) {
 		t.Fatalf("discovery text = %#v, want %#v", got, want)
 	}
 }
 
 func TestListenerPort(t *testing.T) {
-	port, err := listenerPort("0.0.0.0:8080")
+	parsed := Discovery_ListenerPort("0.0.0.0:8080")
+	port, err := parsed.Value, parsed.Error
 	if err != nil {
 		t.Fatal(err)
 	}

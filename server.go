@@ -22,10 +22,6 @@ const (
 	daochiSignatureContext          = "daochi-sync-v1"
 	legacySyncSignatureContext      = "ksync-sync-v1"
 	legacyInbeSignatureContext      = "inbe-sync-v1"
-	minSupportedProtocol            = 1
-	latestProtocol                  = 6
-	compatibilityDeadline           = "2027-09-01"
-	previousVersionGraceDays        = 365
 	nodeUsageRecentWindowDays       = 30
 	webSocketConnectionLimitPerUser = 8
 )
@@ -145,8 +141,13 @@ func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, boo
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", s.handleDocs)
-	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		Docs_Handle(w, r, s.cfg.DBPath, func(ctx context.Context, databasePath string) PublicStatsResult {
+			value, err := s.store.PublicStats(ctx, databasePath)
+			return PublicStatsResult{Value: value, Error: err}
+		})
+	})
+	mux.HandleFunc("GET /openapi.json", Docs_OpenAPI)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("GET /api/v1/node", s.handleNodeInfo)
@@ -325,8 +326,8 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 		"usage":           usage,
 		"storage":         storage,
 		"protocol": map[string]int{
-			"min_supported": minSupportedProtocol,
-			"latest":        latestProtocol,
+			"min_supported": MinSupportedProtocol,
+			"latest":        LatestProtocol,
 		},
 	})
 }
@@ -615,9 +616,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		AcceptedOps:          acceptedOps,
 		Ops:                  remoteOps,
 		Changes:              changes,
-		MinSupportedProtocol: minSupportedProtocol,
+		MinSupportedProtocol: MinSupportedProtocol,
 		LatestProtocol:       req.ProtocolVersion,
-		ServerLatestProtocol: latestProtocol,
+		ServerLatestProtocol: LatestProtocol,
 		Diagnostics: &SyncDiagnostics{
 			SnapshotReason:              snapshotReason,
 			RequestedSinceServerVersion: req.SinceServerVersion,
@@ -692,7 +693,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		response.LegacyClients, err = s.store.LegacyClients(
-			r.Context(), req.UserIDHash, latestProtocol)
+			r.Context(), req.UserIDHash, LatestProtocol)
 		if err != nil {
 			slog.Error("load legacy clients", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "legacy clients failed")
@@ -825,13 +826,13 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		Response_Error(w, http.StatusInternalServerError, "encrypted sync failed")
 		return false
 	}
-	if err := s.store.RecordClientSync(r.Context(), userID, clientID, sinceVersion, serverVersion, latestProtocol, serverVersion); err != nil {
+	if err := s.store.RecordClientSync(r.Context(), userID, clientID, sinceVersion, serverVersion, LatestProtocol, serverVersion); err != nil {
 		slog.Error("record encrypted sync client", "user", LogSafety_LogText(userID), "client", LogSafety_LogText(clientID), "error", err)
 	}
 	if err := s.store.RecordSyncAudit(r.Context(), SyncAuditEntry{
 		UserIDHash:            userID,
 		ClientID:              clientID,
-		ProtocolVersion:       latestProtocol,
+		ProtocolVersion:       LatestProtocol,
 		SinceServerVersion:    sinceVersion,
 		ClientClock:           sinceVersion,
 		ServerVersion:         serverVersion,
@@ -843,7 +844,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 	s.metrics.SyncEncryptedPayloads.Add(1)
 	s.syncHub.publish(userID, serverVersion)
 	response := SyncResponse{
-		ProtocolVersion:      latestProtocol,
+		ProtocolVersion:      LatestProtocol,
 		Status:               "ok",
 		ServerCapabilities:   serverCapabilities,
 		TransitionMode:       "encrypted_payload",
@@ -854,8 +855,8 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		ChangesComplete:      true,
 		Changes:              emptySyncChanges(),
 		EncryptedPayloads:    payloads,
-		MinSupportedProtocol: minSupportedProtocol,
-		ServerLatestProtocol: latestProtocol,
+		MinSupportedProtocol: MinSupportedProtocol,
+		ServerLatestProtocol: LatestProtocol,
 	}
 	response.Changes.SocialCache = social
 	if truncated {

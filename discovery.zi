@@ -1,0 +1,102 @@
+#import "std/go_types"
+#import "node_identity"
+config :: #import "config";
+context :: #import "std/context_go";
+selection :: #import "std/select_go";
+net :: #import "std/net_go";
+go_net :: #system_library "go:net";
+go_zeroconf :: #system_library "go:github.com/grandcat/zeroconf";
+go_strings :: #system_library "go:strings";
+go_numbers :: #system_library "go:strconv";
+go_slog :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+Advertiser :: #type #foreign go_zeroconf "Server";
+Interface :: #type #foreign go_net "Interface";
+RegistrationResult :: struct {
+    value: *Advertiser
+    error: Error
+}
+PortResult :: struct {
+    value: isize
+    error: Error
+}
+RegisterService :: #type (instance: string, service: string, domain: string, port: isize, text: []string, interfaces: []Interface) -> RegistrationResult;
+ShutdownService :: #type (service: *Advertiser) -> void;
+
+#scope_file
+ServiceName :: "_daochi._tcp";
+Domain :: "local.";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+Atoi :: (value: string) -> PortResult #go_results #foreign go_numbers;
+AllocateText :: (count: isize) -> []string #foreign builtin "make";
+RegisterRaw :: (instance: string, service: string, domain: string, port: isize, text: []string, interfaces: []Interface) -> RegistrationResult #go_results #foreign go_zeroconf "Register";
+ShutdownRaw :: (service: *Advertiser) #foreign go_zeroconf "(*Server).Shutdown";
+ShutdownAtReturn :: (callback: ShutdownService, service: *Advertiser) #go_defer #foreign builtin "call";
+LogWarning :: (message: string, key: string, error: Error) #foreign go_slog "Warn";
+LogAdvertisement :: (message: string, nodeKey: string, nodeID: string, portKey: string, port: isize) #foreign go_slog "Info";
+
+#scope_export
+Register :: (instance: string, service: string, domain: string, port: isize, text: []string, interfaces: []Interface) -> RegistrationResult {
+    return RegisterRaw(instance, service, domain, port, text, interfaces)
+}
+
+Shutdown :: (service: *Advertiser) {
+    ShutdownRaw(service)
+}
+
+Run :: (configuration: *config.Config, identity: *NodeIdentity, value: context.Context, register: RegisterService, shutdown: ShutdownService) {
+    if !configuration.LANDiscovery {
+        return
+    }
+    port := ListenerPort(configuration.Addr)
+    if port.error != null {
+        LogWarning("LAN discovery disabled", "error", port.error)
+        return
+    }
+    interfaces: []Interface
+    registered := register(InstanceName(configuration.NodeDisplayName, identity.ID),
+        ServiceName, Domain, port.value, Text(identity.ID), interfaces)
+    if registered.error != null {
+        LogWarning("LAN discovery unavailable", "error", registered.error)
+        return
+    }
+    LogAdvertisement("advertising Daochi node on LAN", "node_id", identity.ID, "port", port.value)
+    ShutdownAtReturn(shutdown, registered.value)
+    cases: [1]selection.Case
+    cases[0] = selection.Receive(context.Done(value))
+    selection.Select(cases[:])
+}
+
+ListenerPort :: (address: string) -> PortResult {
+    split := net.SplitHostPort(address)
+    if split.error != null {
+        result: PortResult
+        result.error = split.error
+        return result
+    }
+    return Atoi(split.port)
+}
+
+InstanceName :: (displayName: string, nodeID: string) -> string {
+    name := TrimSpace(displayName)
+    if name == "" {
+        name = "Daochi Node"
+    }
+    if nodeID.count > 12 {
+        nodeID = nodeID[:12]
+    }
+    parts: [3]string = .[name, " ", nodeID]
+    return Join(parts[:], "")
+}
+
+Text :: (nodeID: string) -> []string {
+    value := AllocateText(cast(isize)4)
+    parts: [2]string = .["id=", nodeID]
+    value[0] = Join(parts[:], "")
+    value[1] = "protocol=6"
+    value[2] = "trust=pairing-required"
+    value[3] = "path=/api/v1/node"
+    return value
+}

@@ -62,7 +62,7 @@ func TestReleasedClientRealKeyLoginAndSync(t *testing.T) {
 				if err := json.Unmarshal(response.Body.Bytes(), &login); err != nil {
 					t.Fatal(err)
 				}
-				for protocol := minSupportedProtocol; protocol <= 5; protocol++ {
+				for protocol := MinSupportedProtocol; protocol <= 5; protocol++ {
 					payload := []byte(`{"protocol_version":` + strconv.Itoa(protocol) + `,"user_id_hash":"` + userID + `","client_id":"released-client"}`)
 					result := syncWithBody(t, handler, "", userID, login.AuthToken, payload)
 					var synced SyncResponse

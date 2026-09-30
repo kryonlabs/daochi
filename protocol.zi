@@ -1,3 +1,9 @@
+// Released protocol bounds are shared by API metadata and request validation.
+MinSupportedProtocol :: 1;
+LatestProtocol :: 6;
+CompatibilityDeadline :: "2027-09-01";
+PreviousVersionGraceDays :: 365;
+
 // Protocol records preserve the released JSON names and omission rules.
 
 ChallengeResponse :: struct {

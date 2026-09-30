@@ -378,7 +378,7 @@ SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, u
 		if err := baselineValidateUserIDForPublicKey(item.UserIDHash, publicKey); err != nil {
 			return 0, err
 		}
-		if !baselineValidEncryptedRecordForProtocol(item.Record, latestProtocol) {
+		if !baselineValidEncryptedRecordForProtocol(item.Record, LatestProtocol) {
 			return 0, fmt.Errorf("invalid mesh encrypted record")
 		}
 		if !baselineMeshPolicyAllowsRecord(policy, matchers, item.Record.Collection) {

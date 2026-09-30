@@ -67,8 +67,8 @@ field names, Go storage types, order and reflection tags.
 | `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
 | `device_keys.go` | Ziran | Records, canonical messages, validation, signature verification, atomic registration/revocation, nonce cleanup and key queries in `device_keys.zi`; HTTP handling in `device_http.zi` |
 | `device_handlers.go` | Ziran | `device_http.zi`: authenticated device listing, registration and revocation, ordered body/signature validation, replay errors and response serialization |
-| `discovery.go` | Go | LAN discovery and runtime cancellation |
-| `docs.go` | Go | Embedded public API documentation |
+| `discovery.go` | Ziran | `discovery.zi`: LAN advertisement metadata, native registration/shutdown, listener ports and cancellable resource lifecycle |
+| `docs.go` | Ziran | `docs.zi`: public HTML, typed OpenAPI map builders, cached JSON and both HTTP handlers; public statistics remain a storage dependency |
 | `inspect.go` | Go with ported callers | Offline database commands and redaction |
 | `log_safety.go` | Ziran | `log_safety.zi`: byte-preserving CR/LF removal |
 | `main.go` | Go | Startup, worker supervision, HTTP lifecycle |
@@ -80,10 +80,10 @@ field names, Go storage types, order and reflection tags.
 | `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
 | `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
-| `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; remaining HTTP handlers and lifecycle remain Go |
+| `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; remaining HTTP handlers and lifecycle remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, sync transactions, conflicts and projections remain Go |
+| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, statistics queries, sync transactions, conflicts and projections remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -366,7 +366,38 @@ owns the shared result and signature callback; `authentication_error.go` remains
 a small conversion to the existing Go HTTP error interface. The HTTP boundary
 and foreign-library verifier are still part of the unfinished server port.
 
+`discovery.zi` completes the LAN advertiser. Discovery advertises only the
+released identity/protocol metadata and never grants trust. Native registration
+retains default interface selection, Unicode display-name trimming and byte
+truncation of long node identifiers. Disabled discovery and invalid listeners
+return before touching network resources. Successful registration waits for
+native context cancellation and shuts down the exact registered resource;
+deferred shutdown preserves panic behavior and log ordering. Independent
+baseline comparisons cover arbitrary byte strings, native port error details,
+registration failures, cancellation, resource identity and panic cleanup.
+The real registration adapter is checked only with inputs rejected before any
+network socket opens, so tests never advertise on the user's LAN.
+
+`docs.zi` completes public HTML and OpenAPI handling. The spec retains every
+map key, concrete native value type, schema, parameter list and JSON byte.
+Builders allocate fresh maps and slices, while a native `sync.OnceValue`
+callback retains the shared newline-terminated response payload across
+concurrent requests. HTML preserves exact page bytes, status arithmetic,
+storage rounding, failure logging, response headers and write ordering.
+The storage query is an explicit typed callback dependency until storage itself
+is fully ported. `types.zi` owns its unchanged public statistics record;
+`protocol.zi` owns the shared released protocol bounds. Baseline comparisons
+cover the full spec's native types, fresh nested storage, concurrent cache use,
+writer errors and panics, query/context identity, unavailable statistics and
+signed integer boundaries. Source and saved-IR server suites run these cases.
+
 ## Compiler work exercised by this port
+
+This exposed two upstream compiler errors: generic foreign slice elements
+were validated before type normalization, and native Go string constants could
+misinterpret escaped quotes and alter punctuation. Ziran now resolves generic
+slice returns before checking their concrete elements and preserves escaped
+string bytes. Source and saved-IR compiler regressions cover both fixes.
 
 Ziran now accepts explicit `go:` foreign package imports, including standard
 packages with no slash. These are direct package calls in source and saved IR.

@@ -525,6 +525,10 @@ type SessionRound struct {
 	HoldSeconds int "json:\"hold_seconds\""
 }
 
+const MinSupportedProtocol = 1
+const LatestProtocol = 6
+const CompatibilityDeadline = "2027-09-01"
+const PreviousVersionGraceDays = 365
 const ProfileIconNone = 0
 const ProfileIconBird = 1
 const ProfileIconBowl = 2

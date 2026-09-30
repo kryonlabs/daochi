@@ -31,4 +31,11 @@ type SyncDiagnosticReport struct {
 	RecentEncryptedPayloads  []EncryptedPayload      "json:\"recent_encrypted_payloads,omitempty\""
 }
 
-type __type_7d6cc8a85f09fc88 = map[string]Any
+type PublicStats struct {
+	UserCount        int64
+	StorageUsedBytes int64
+	StorageUsedGB    int64
+	StorageUsedText  string
+	AvailableBytes   int64
+	AvailableGB      int64
+}

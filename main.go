@@ -78,7 +78,7 @@ func main() {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		daochi.runLANDiscovery(runtimeContext)
+		Discovery_Run(&daochi.cfg, &daochi.node, runtimeContext, Discovery_Register, Discovery_Shutdown)
 	}()
 	handler := daochi.Routes()
 	server := &http.Server{

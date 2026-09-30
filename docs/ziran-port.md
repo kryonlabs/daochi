@@ -76,7 +76,7 @@ field names, Go storage types, order and reflection tags.
 | `token_assets.go` | Ziran | `token_assets.zi`: native SQL upsert, released asset fields and error propagation |
 | `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
 | `trust_handlers.go` | Go with ported callers | Pairing and namespace HTTP handlers |
-| `trust_store.go` | Go with ported callers | Peer trust, pairing, claims, nonce persistence |
+| `trust_store.go` | Partial Ziran | Atomic nonce consumption/expiry in `node_nonce.zi`; peer trust, pairing and claims remain Go |
 | `types.go` | Ziran | All 77 original records and profile constants in `protocol.zi`, `manifest.zi`, `sync_types.zi` and `types.zi` |
 | `verifier.go` | Go | Signature verifier contract |
 | `verifier_nocgo.go` | Go | Unsupported-build error path |
@@ -86,9 +86,9 @@ field names, Go storage types, order and reflection tags.
 `identity.zi` is a new canonical module extracted from `server.go`. Generated
 `vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go`, `go_types.go`,
 `option.go`, `sync_go.go`, `time_go.go`, `random_go.go`, `text_go.go`,
-`net_go.go`, `http_go.go`, `atomic_go.go`, `context_go.go` and `sql_go.go` come
-from Ziran's standard modules; they do not represent additional completed
-baseline modules.
+`net_go.go`, `http_go.go`, `atomic_go.go`, `context_go.go`, `sql_go.go` and
+`errors_go.go` come from Ziran's standard modules; they do not represent
+additional completed baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Their HTTP/database
 operations still need to move. Manifest normalization and validation preserve
@@ -147,6 +147,12 @@ version with all rewrites. Native deferred rollback preserves cleanup on error
 and panic. Regression fixtures compare every migrated column with the original
 implementation, verify that repeat runs are skipped and force a late failure
 to check rollback of earlier changes and connection reuse.
+
+`node_nonce.zi` owns peer-request nonce persistence. Expiry cleanup and nonce
+insertion commit together, and failed insertion rolls back cleanup. Duplicate
+nonces retain the released replay error, while begin, deletion and commit
+errors retain native identity. Native Go error operations and package-value
+getters preserve SQL/context sentinel errors without handwritten adapters.
 
 ## Compiler work exercised by this port
 

@@ -14,7 +14,7 @@ type TimestampColumn struct {
 	Column string
 }
 
-type TransactionResult struct {
+type zir_ae447d079a37fac2_TransactionResult struct {
 	Value *Transaction
 	Error Error
 }
@@ -39,8 +39,8 @@ type PendingRewrite struct {
 	Value string
 }
 
-func StoreTimestamps_Begin(Database *Database, Context Context, Options *TransactionOptions) TransactionResult {
-	var result TransactionResult
+func StoreTimestamps_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_ae447d079a37fac2_TransactionResult {
+	var result zir_ae447d079a37fac2_TransactionResult
 	result.Value, result.Error = (*sql.DB).BeginTx(Database, Context, Options)
 	return result
 }

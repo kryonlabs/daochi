@@ -70,5 +70,5 @@ func (s *Server) verifyNodeRequest(ctx context.Context, req *http.Request, body 
 	if !ed25519.Verify(publicKey, message, signature) {
 		return errors.New("invalid node signature")
 	}
-	return s.store.ConsumeNodeRequestNonce(ctx, nodeID, nonce, timestamp+windowSeconds)
+	return NodeNonce_Consume(s.store.db, ctx, nodeID, nonce, timestamp+windowSeconds)
 }

@@ -3,8 +3,25 @@ package main
 
 import context "context"
 
+// #import go_types
 type Context = context.Context
+
+func ContextGo_CanceledRaw() Error {
+	return context.Canceled
+}
+
+func ContextGo_DeadlineExceededRaw() Error {
+	return context.DeadlineExceeded
+}
 
 func ContextGo_Background() Context {
 	return context.Background()
+}
+
+func ContextGo_Canceled() Error {
+	return ContextGo_CanceledRaw()
+}
+
+func ContextGo_DeadlineExceeded() Error {
+	return ContextGo_DeadlineExceededRaw()
 }

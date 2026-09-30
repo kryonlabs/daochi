@@ -258,21 +258,6 @@ WHERE node_id=?1 AND revoked_at=''`, nodeID).Scan(&policyJSON)
 	return policy, true, nil
 }
 
-func (s *Store) ConsumeNodeRequestNonce(ctx context.Context, nodeID, nonce string, expiresAt int64) error {
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM node_request_nonces WHERE expires_at<?1`, time.Now().Unix()); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_request_nonces(node_id,nonce,expires_at)
-VALUES(?1,?2,?3)`, nodeID, nonce, expiresAt); err != nil {
-			return errors.New("node request replayed")
-		}
-		return nil
-	})
-}
-
 func (s *Store) ListTrustedPeers(ctx context.Context) ([]TrustedNodePeer, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT node_id,public_key,display_name,addresses_json,space_id,policy_json,trusted_at

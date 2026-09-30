@@ -26,6 +26,14 @@ func SqlGo_NullStringValueRaw(Value NullString) string {
 	return Value.String
 }
 
+func SqlGo_NoRowsRaw() Error {
+	return sql.ErrNoRows
+}
+
+func SqlGo_TransactionDoneRaw() Error {
+	return sql.ErrTxDone
+}
+
 func SqlGo_Next(rows *Rows) bool {
 	return (*sql.Rows).Next(rows)
 }
@@ -52,4 +60,12 @@ func SqlGo_NullStringValid(value NullString) bool {
 
 func SqlGo_NullStringValue(value NullString) string {
 	return SqlGo_NullStringValueRaw(value)
+}
+
+func SqlGo_NoRows() Error {
+	return SqlGo_NoRowsRaw()
+}
+
+func SqlGo_TransactionDone() Error {
+	return SqlGo_TransactionDoneRaw()
 }

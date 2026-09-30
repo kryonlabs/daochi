@@ -1,0 +1,42 @@
+#import "go_types"
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+clock :: #import "time_go";
+errors :: #import "errors_go";
+go_sql :: #system_library "go:database/sql";
+go_time :: #system_library "go:time";
+
+#scope_file
+TransactionResult :: struct {
+    value: *sql.Transaction
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+Unix :: (value: clock.Time) -> s64 #foreign go_time "Time.Unix";
+DeleteExpired :: (transaction: *sql.Transaction, context: ctx.Context, query: string, now: s64) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+Insert :: (transaction: *sql.Transaction, context: ctx.Context, query: string, nodeID: string, nonce: string, expiresAt: s64) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+
+#scope_export
+// Consume a peer nonce and remove strictly expired entries in one transaction.
+Consume :: (database: *sql.Database, context: ctx.Context, nodeID: string, nonce: string, expiresAt: s64) -> Error {
+    begun := Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    deleted := DeleteExpired(transaction, context, "DELETE FROM node_request_nonces WHERE expires_at<?1", Unix(clock.Now()))
+    if deleted.error != null {
+        return deleted.error
+    }
+    inserted := Insert(transaction, context, "INSERT INTO node_request_nonces(node_id,nonce,expires_at) VALUES(?1,?2,?3)", nodeID, nonce, expiresAt)
+    if inserted.error != null {
+        return errors.New("node request replayed")
+    }
+    return sql.Commit(transaction)
+}

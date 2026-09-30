@@ -1,0 +1,375 @@
+#import "std/go_types"
+#import "protocol"
+#import "mesh_types"
+#import "node_identity"
+config :: #import "config";
+auth :: #import "authentication";
+node_auth :: #import "node_auth";
+http_auth :: #import "http_auth";
+http_body :: #import "http_body";
+response :: #import "response";
+apps :: #import "mesh_apps";
+records :: #import "mesh_store";
+trust :: #import "trust_store";
+policy :: #import "mesh_policy";
+cursor :: #import "mesh_cursor";
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+selection :: #import "std/select_go";
+json :: #import "std/json_go";
+errors :: #import "std/errors_go";
+text :: #import "std/text_go";
+constant_time :: #import "std/constant_time";
+go_strings :: #system_library "go:strings";
+go_bytes :: #system_library "go:bytes";
+go_slog :: #system_library "go:log/slog";
+go_format :: #system_library "go:fmt";
+go_io :: #system_library "go:io";
+go_time :: #system_library "go:time";
+builtin :: #system_library "go:builtin";
+
+Mesh :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    identity: *NodeIdentity
+    convertError: auth.ConvertError
+}
+
+#scope_file
+HeaderParts :: struct {
+    before: string
+    after: string
+    found: bool
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+TrimRight :: (value: string, cutset: string) -> string #foreign go_strings;
+TrimBytes :: (value: []u8) -> []u8 #foreign go_bytes "TrimSpace";
+Cut :: (value: string, separator: string) -> HeaderParts #go_results #foreign go_strings;
+EqualFold :: (left: string, right: string) -> bool #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+AllocatePeers :: (count: isize) -> []NodePeer #foreign builtin "make";
+AppendPeer :: (peers: []NodePeer, peer: NodePeer) -> []NodePeer #foreign builtin "append";
+LogError :: (message: string, key: string, error: Error) #foreign go_slog "Error";
+LogWarning :: (message: string, key: string, error: Error) #foreign go_slog "Warn";
+LogPeerWarning :: (message: string, peerKey: string, peer: string, urlKey: string, url: string, errorKey: string, error: Error) #foreign go_slog "Warn";
+LogApplied :: (message: string, peerKey: string, peer: string, urlKey: string, url: string, appsKey: string, apps: isize, recordsKey: string, records: isize, deletionsKey: string, deletions: isize, namesKey: string, names: isize, appliedKey: string, applied: isize) #foreign go_slog "Info";
+CloseAtReturn :: (body: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
+StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
+RemoteFailure :: (format: string, status: string, body: string) -> Error #foreign go_format "Errorf";
+
+#scope_export
+Run :: (mesh: Mesh, context: ctx.Context) {
+    if cast(s64)mesh.configuration.NodeSyncInterval <= 0 {
+        return
+    }
+    ticker := clock.NewTicker(mesh.configuration.NodeSyncInterval)
+    StopAtReturn(ticker)
+    PullPeers(mesh, context)
+    while true {
+        cases: [2]selection.Case
+        cases[0] = selection.Receive(ctx.Done(context))
+        cases[1] = selection.Receive(clock.TickerChannel(ticker))
+        if selection.Select(cases[:]).chosen == cast(isize)0 {
+            return
+        }
+        PullPeers(mesh, context)
+    }
+}
+
+Export :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request) {
+    body := http_body.ReadJSON(writer, request, mesh.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    if !Authorize(mesh, writer, request, body.value) {
+        return
+    }
+    input: NodeMeshExportRequest
+    if TrimBytes(body.value).count > 0 {
+        if json.Unmarshal(body.value, *input) != null {
+            response.Error(writer, cast(isize)400, "invalid mesh export request")
+            return
+        }
+    }
+    if !policy.ValidInbound(input.Policy) {
+        response.Error(writer, cast(isize)400, "explicit mesh policy required")
+        return
+    }
+    if !AuthorizePolicy(mesh, writer, request, input.Policy, "export") {
+        return
+    }
+    context := http.Context(request)
+    exportedApps := apps.Export(mesh.database, context, input.Policy)
+    if exportedApps.error != null {
+        LogError("mesh app registry export", "error", exportedApps.error)
+        response.Error(writer, cast(isize)500, "mesh app registry export failed")
+        return
+    }
+    limit := cursor.BatchLimit(input.Limit, mesh.configuration.NodeSyncBatchLimit)
+    exportedRecords := records.ExportEncryptedRecords(mesh.database, context, input.Policy, input.Cursor, limit)
+    if exportedRecords.error != null {
+        LogError("mesh export", "error", exportedRecords.error)
+        response.Error(writer, cast(isize)500, "mesh export failed")
+        return
+    }
+    exportedNames := trust.ExportMeshNames(mesh.database, context, input.Policy)
+    if exportedNames.error != null {
+        LogError("mesh name export", "error", exportedNames.error)
+        response.Error(writer, cast(isize)500, "mesh name export failed")
+        return
+    }
+    value: NodeMeshExportResponse
+    value.Status = "ok"
+    value.Apps = exportedApps.value
+    value.Records = exportedRecords.records
+    value.Deletions = exportedRecords.deletions
+    value.Spaces = exportedNames.spaces
+    value.Names = exportedNames.names
+    value.NextCursor = exportedRecords.nextCursor
+    value.Truncated = exportedRecords.truncated
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Import :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request) {
+    body := http_body.ReadJSON(writer, request, mesh.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    if !Authorize(mesh, writer, request, body.value) {
+        return
+    }
+    input: NodeMeshImportRequest
+    if json.Unmarshal(body.value, *input) != null {
+        response.Error(writer, cast(isize)400, "invalid mesh import request")
+        return
+    }
+    if !policy.ValidInbound(input.Policy) {
+        response.Error(writer, cast(isize)400, "explicit mesh policy required")
+        return
+    }
+    if !AuthorizePolicy(mesh, writer, request, input.Policy, "import") {
+        return
+    }
+    context := http.Context(request)
+    importedApps := apps.Import(mesh.database, context, mesh.configuration.NodeRegistryPublicKey, input.Policy, input.Apps, mesh.convertError)
+    if importedApps.error != null {
+        LogError("mesh app registry import", "error", importedApps.error)
+        response.Error(writer, cast(isize)400, errors.Message(importedApps.error))
+        return
+    }
+    importedRecords := records.ImportEncryptedBatch(mesh.database, context, input.Policy, input.Records, input.Deletions)
+    if importedRecords.error != null {
+        LogError("mesh import", "error", importedRecords.error)
+        response.Error(writer, cast(isize)400, errors.Message(importedRecords.error))
+        return
+    }
+    importedNames := trust.ImportMeshNames(mesh.database, context, input.Policy, input.Spaces, input.Names)
+    if importedNames.error != null {
+        LogError("mesh name import", "error", importedNames.error)
+        response.Error(writer, cast(isize)400, errors.Message(importedNames.error))
+        return
+    }
+    value: NodeMeshImportResponse
+    value.Status = "ok"
+    value.Records = cast(isize)(input.Apps.count + input.Records.count + input.Deletions.count + input.Names.count)
+    value.Applied = importedApps.value + importedRecords.value + importedNames.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Authorize :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request, body: []u8) -> bool {
+    headers := http.Headers(request)
+    if TrimSpace(http.HeaderValue(headers, "X-Daochi-Node-ID")) != "" {
+        error := node_auth.Verify(mesh.database, http.Context(request), request, body)
+        if error != null {
+            response.Error(writer, cast(isize)401, errors.Message(error))
+            return false
+        }
+        return true
+    }
+    token := TrimSpace(mesh.configuration.NodeSyncToken)
+    if token == "" {
+        response.Error(writer, cast(isize)503, "node sync disabled")
+        return false
+    }
+    names: [2]string = .["X-Daochi-Node-Token", "X-Ksync-Node-Token"]
+    provided := TrimSpace(http_auth.HeaderAlias(request, names[:]))
+    if provided == "" {
+        provided = BearerToken(http.HeaderValue(headers, "Authorization"))
+    }
+    if provided == "" || !constant_time.ConstantTimeTextEqual(provided, token) {
+        response.Error(writer, cast(isize)401, "invalid node token")
+        return false
+    }
+    return true
+}
+
+AuthorizePolicy :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request, requested: NodeSyncPolicy, operation: string) -> bool {
+    nodeID := TrimSpace(http.HeaderValue(http.Headers(request), "X-Daochi-Node-ID"))
+    if nodeID == "" {
+        return true
+    }
+    approved := trust.TrustedPeerPolicy(mesh.database, http.Context(request), nodeID)
+    if approved.error != null {
+        response.Error(writer, cast(isize)500, "peer policy lookup failed")
+        return false
+    }
+    if !approved.found || !policy.AllowsOperation(approved.value, requested, operation) {
+        response.Error(writer, cast(isize)403, "requested mesh policy exceeds paired scope")
+        return false
+    }
+    return true
+}
+
+BearerToken :: (header: string) -> string {
+    cut := Cut(TrimSpace(header), " ")
+    if cut.found && EqualFold(cut.before, "Bearer") {
+        return TrimSpace(cut.after)
+    }
+    return ""
+}
+
+PullPeers :: (mesh: Mesh, context: ctx.Context) {
+    peers := AllocatePeers(cast(isize)mesh.configuration.KnownNodes.count)
+    for peer, index: mesh.configuration.KnownNodes {
+        peers[index] = peer
+    }
+    listed := trust.ListTrustedPeers(mesh.database, context)
+    if listed.error != null {
+        LogWarning("load paired mesh peers", "error", listed.error)
+    }
+    for item: listed.value {
+        if item.Addresses.count > 0 {
+            sync := item.Policy
+            peer: NodePeer
+            peer.Name = item.DisplayName
+            peer.URL = item.Addresses[0]
+            peer.NodeID = item.NodeID
+            peer.Sync = *sync
+            peers = AppendPeer(peers, peer)
+        }
+    }
+    for peer: peers {
+        if !policy.AllowsPull(peer.Sync) {
+            continue
+        }
+        error := PullPeer(mesh, context, peer)
+        if error != null {
+            LogPeerWarning("mesh peer pull failed", "peer", peer.Name, "url", peer.URL, "error", error)
+        }
+    }
+}
+
+PullPeer :: (mesh: Mesh, context: ctx.Context, peer: NodePeer) -> Error {
+    baseURL := TrimRight(TrimSpace(peer.URL), "/")
+    if baseURL == "" {
+        return null
+    }
+    sync: NodeSyncPolicy
+    if peer.Sync != null {
+        sync = <<peer.Sync
+    }
+    peerKey := cursor.PeerKey(baseURL, sync)
+    loaded := records.LoadCursor(mesh.database, context, peerKey)
+    if loaded.error != null {
+        return loaded.error
+    }
+    currentCursor := loaded.value
+    while true {
+        request: NodeMeshExportRequest
+        request.Cursor = currentCursor
+        request.Limit = cursor.BatchLimit(cast(isize)0, mesh.configuration.NodeSyncBatchLimit)
+        request.Policy = sync
+        exported: NodeMeshExportResponse
+        target: [2]string = .[baseURL, "/api/v1/node/mesh/export"]
+        error := PostJSON(mesh, context, peer.NodeID, Join(target[:], ""), request, *exported)
+        if error != null {
+            return error
+        }
+        if exported.Apps.count == 0 && exported.Records.count == 0 && exported.Deletions.count == 0 && exported.Names.count == 0 {
+            return null
+        }
+        importedApps := apps.Import(mesh.database, context, mesh.configuration.NodeRegistryPublicKey, sync, exported.Apps, mesh.convertError)
+        if importedApps.error != null {
+            return importedApps.error
+        }
+        importedRecords := records.ImportEncryptedBatch(mesh.database, context, sync, exported.Records, exported.Deletions)
+        if importedRecords.error != null {
+            return importedRecords.error
+        }
+        importedNames := trust.ImportMeshNames(mesh.database, context, sync, exported.Spaces, exported.Names)
+        if importedNames.error != null {
+            return importedNames.error
+        }
+        LogApplied("mesh peer pull applied changes", "peer", peer.Name, "url", baseURL,
+            "apps", cast(isize)exported.Apps.count, "records", cast(isize)exported.Records.count,
+            "deletions", cast(isize)exported.Deletions.count, "names", cast(isize)exported.Names.count,
+            "applied", importedApps.value + importedRecords.value + importedNames.value)
+        lastCursor := exported.NextCursor
+        if lastCursor == "" {
+            lastSequence: s64 = 0
+            for record: exported.Records {
+                if record.MeshVersion > lastSequence {
+                    lastSequence = record.MeshVersion
+                }
+            }
+            for deletion: exported.Deletions {
+                if deletion.MeshVersion > lastSequence {
+                    lastSequence = deletion.MeshVersion
+                }
+            }
+            value: MeshCursor
+            value.Seq = lastSequence
+            encoded := cursor.Encode(value)
+            if encoded.error != null {
+                return encoded.error
+            }
+            lastCursor = encoded.value
+        }
+        cursorError := records.SaveCursor(mesh.database, context, peerKey, lastCursor)
+        if cursorError != null {
+            return cursorError
+        }
+        if !exported.Truncated || exported.NextCursor == "" {
+            return null
+        }
+        currentCursor = exported.NextCursor
+    }
+    return null
+}
+
+PostJSON :: (mesh: Mesh, context: ctx.Context, peerNodeID: string, target: string, request: Any, reply: Any) -> Error {
+    encoded := json.Marshal(request)
+    if encoded.error != null {
+        return encoded.error
+    }
+    outbound := http.NewRequest(context, "POST", target, io.FromBytes(encoded.value))
+    if outbound.error != null {
+        return outbound.error
+    }
+    headers := http.Headers(outbound.value)
+    http.SetHeader(headers, "Content-Type", "application/json")
+    if peerNodeID != "" {
+        node_auth.Sign(mesh.identity.ID, mesh.identity.PrivateKey, outbound.value, encoded.value)
+    } else {
+        token: [2]string = .["Bearer ", mesh.configuration.NodeSyncToken]
+        http.SetHeader(headers, "Authorization", Join(token[:], ""))
+    }
+    client := http.NewClient(cast(clock.Duration)20000000000)
+    result := http.Do(client, outbound.value)
+    if result.error != null {
+        return result.error
+    }
+    body := http.ResponseBody(result.value)
+    CloseAtReturn(body)
+    status := http.StatusCode(result.value)
+    if status < cast(isize)200 || status >= cast(isize)300 {
+        data := io.ReadAll(io.LimitReader(cast(io.Reader)body, cast(s64)2048))
+        return RemoteFailure("node mesh request failed: %s %s", http.Status(result.value), TrimSpace(text.FromBytes(data.value)))
+    }
+    return json.Decode(json.NewDecoder(cast(io.Reader)body), reply)
+}

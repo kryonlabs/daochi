@@ -120,6 +120,15 @@ func (s *Server) trust() Trust {
 	}
 }
 
+func (s *Server) mesh() Mesh {
+	return Mesh{
+		Database:      s.store.db,
+		Configuration: &s.cfg,
+		Identity:      &s.node,
+		ConvertError:  authenticationError,
+	}
+}
+
 func (s *Server) authenticateToken(r *http.Request) (string, error) {
 	result := HttpAuth_AuthenticateToken(s.store.db, r, s.cfg.TokenSecret)
 	return result.Value, authenticationError(result.Authentication)
@@ -162,8 +171,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/namespaces/resolve", func(w http.ResponseWriter, r *http.Request) {
 		TrustHttp_ResolveName(s.trust(), w, r)
 	})
-	mux.HandleFunc("POST /api/v1/node/mesh/export", s.handleNodeMeshExport)
-	mux.HandleFunc("POST /api/v1/node/mesh/import", s.handleNodeMeshImport)
+	mux.HandleFunc("POST /api/v1/node/mesh/export", func(w http.ResponseWriter, r *http.Request) {
+		Mesh_Export(s.mesh(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/node/mesh/import", func(w http.ResponseWriter, r *http.Request) {
+		Mesh_Import(s.mesh(), w, r)
+	})
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		AppHttp_List(s.appRegistry(), w, r)

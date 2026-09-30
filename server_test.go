@@ -1746,7 +1746,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	target, _, _ := testServer(t)
 	target.cfg.NodeSyncToken = "mesh-secret"
 	target.cfg.NodeSyncBatchLimit = 1
-	err = target.pullNodePeer(context.Background(), NodePeer{
+	err = Mesh_PullPeer(target.mesh(), context.Background(), NodePeer{
 		Name: "source",
 		URL:  peerHTTP.URL,
 		Sync: &NodeSyncPolicy{
@@ -1775,7 +1775,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 		t.Fatalf("mesh pull cursors after first pull = %#v, want empty cursor then pagination cursor", exportCursors)
 	}
 	afterFirstPull := len(exportCursors)
-	if err := target.pullNodePeer(context.Background(), NodePeer{
+	if err := Mesh_PullPeer(target.mesh(), context.Background(), NodePeer{
 		Name: "source",
 		URL:  peerHTTP.URL,
 		Sync: &NodeSyncPolicy{

@@ -72,7 +72,7 @@ field names, Go storage types, order and reflection tags.
 | `inspect.go` | Go with ported callers | Offline database commands and redaction |
 | `log_safety.go` | Ziran | `log_safety.zi`: byte-preserving CR/LF removal |
 | `main.go` | Go | Startup, worker supervision, HTTP lifecycle |
-| `mesh.go` | Partial Ziran | Wire records in `mesh_types.zi`, cursor encoding/decoding, peer-key hashing and limits in `mesh_cursor.zi`, direction and scope predicates in `mesh_policy.zi`; peer requests, retries, HTTP authentication and replication orchestration remain Go |
+| `mesh.go` | Ziran | `mesh.zi`: HTTP export/import, signed/token authentication, approved-scope checks, configured/trusted peer selection, signed outbound requests, pagination, cursor persistence and the cancellable recurring worker; wire records, cursors and scope predicates in `mesh_types.zi`, `mesh_cursor.zi` and `mesh_policy.zi`; native authentication error conversion is supplied by the caller |
 | `mesh_apps.go` | Ziran | `mesh_apps.zi`: scoped signed registry export/import, manifest decoding, signature verification, version queries, downgrade/fork rejection and per-app transactions; native authentication error conversion remains supplied by the Go caller |
 | `mesh_store.go` | Ziran | `mesh_store.zi`: encrypted-record export/import, stable change ordering, account tombstones, conflicts, deletion propagation, cursor persistence and atomic rollback; collection ownership in `collection_scope.zi`, record validation in `encrypted_record.zi` |
 | `metrics.go` | Ziran | `metrics.zi`: concurrent counters, route/reason normalization, escaped labels, sorted maps, aggregate usage and exact Prometheus output |
@@ -290,6 +290,26 @@ malformed stored data, failed writes/commits and connection reuse. The existing
 Go authentication-error converter is a typed callback dependency; that adapter
 and the remaining Go server modules still need porting for the complete goal.
 
+`mesh.zi` completes mesh HTTP handling, peer replication and the recurring
+worker. Bounded request reads still precede authentication. Signed peers take
+precedence over shared-token access and must stay within their approved scopes;
+replayed, expired and malformed signatures retain the released failures.
+Export and import preserve JSON bytes, nil lists and the separate app, record
+and name transaction boundaries. Peer pulls snapshot configured entries, add
+paired peers in stored order, continue after an unavailable peer, and retain
+the first-address policy. Outbound requests preserve exact shared-token bytes,
+node signatures, native contexts, the twenty-second timeout, replayable bodies,
+bounded error reads and response closure during panic unwinding. Pagination
+saves each completed page, resumes after interruption, and retains the legacy
+sequence-cursor fallback and empty-batch behavior. The worker pulls immediately,
+then selects between native ticker delivery and context cancellation; disabled
+intervals touch no dependencies, and deferred ticker cleanup runs on every exit.
+Independent comparisons exercise both handlers, header precedence, denied
+scopes, concurrent replay, cancelled/failed SQL, partial commits, malformed
+responses, signing, body cleanup, reconnects, pagination and worker lifecycle
+through source and saved IR. Maintained routes and startup call generated
+functions directly; no handwritten mesh implementation remains.
+
 `device_keys.zi` owns the device records and storage lifecycle. Canonical
 messages preserve raw bytes, integer limits and trailing newlines; normalization
 retains Unicode handling and key validation retains the exact time window.
@@ -419,6 +439,16 @@ saved-IR regressions verify pointer identity, package assignments and rejected
 signatures. The extended HTTP/I/O/time modules provide native timeout clients,
 outbound requests, response fields, byte readers, bounded streams and deadline
 arithmetic without application-specific adapters.
+
+The JSON module now also exposes native streaming decoders, preserving
+incremental decoder state, partial results, EOF and read-error identity.
+`select_go` supplies receive, send and default cases over boxed native Go
+channels using `reflect.Select`. Channel directions and send-value types are
+validated at runtime. It preserves nil-channel disabling, closed-channel
+results and ready-case selection; context cancellation channels and native
+tickers come from `context_go` and `time_go`. Source and saved-IR regressions
+cover ticker delivery, cancellation wakeups, deferred cleanup, receives, sends,
+defaults and invalid native selections. These primitives are Go-specific.
 
 ## Next dependencies
 

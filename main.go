@@ -73,7 +73,7 @@ func main() {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		daochi.runNodeSync(runtimeContext)
+		Mesh_Run(daochi.mesh(), runtimeContext)
 	}()
 	workers.Add(1)
 	go func() {

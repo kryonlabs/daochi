@@ -25,3 +25,7 @@ func StdContextGo_Canceled() Error {
 func StdContextGo_DeadlineExceeded() Error {
 	return StdContextGo_DeadlineExceededRaw()
 }
+
+func StdContextGo_Done(value Context) Any {
+	return (context.Context).Done(value)
+}

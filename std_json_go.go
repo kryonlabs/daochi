@@ -6,6 +6,8 @@ import json "encoding/json"
 // #import std_go_types
 type Encoder = json.Encoder
 
+type Decoder = json.Decoder
+
 type JSONResult struct {
 	Value []uint8
 	Error Error
@@ -35,4 +37,12 @@ func StdJsonGo_NewEncoder(writer Writer) *Encoder {
 
 func StdJsonGo_Encode(encoder *Encoder, value Any) Error {
 	return (*json.Encoder).Encode(encoder, value)
+}
+
+func StdJsonGo_NewDecoder(reader Reader) *Decoder {
+	return json.NewDecoder(reader)
+}
+
+func StdJsonGo_Decode(decoder *Decoder, value Any) Error {
+	return (*json.Decoder).Decode(decoder, value)
 }

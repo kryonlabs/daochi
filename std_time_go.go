@@ -8,6 +8,8 @@ type Time = time.Time
 
 type Duration = time.Duration
 
+type Ticker = time.Ticker
+
 type ParseResult struct {
 	Value Time
 	Error Error
@@ -17,6 +19,10 @@ func StdTimeGo_ParseRaw(Layout string, Value string) ParseResult {
 	var result ParseResult
 	result.Value, result.Error = time.Parse(Layout, Value)
 	return result
+}
+
+func StdTimeGo_TickerChannelRaw(Ticker *Ticker) Any {
+	return Ticker.C
 }
 
 func StdTimeGo_Now() Time {
@@ -53,4 +59,16 @@ func StdTimeGo_FromUnix(seconds int64, nanos int64) Time {
 
 func StdTimeGo_Until(value Time) Duration {
 	return time.Until(value)
+}
+
+func StdTimeGo_NewTicker(duration Duration) *Ticker {
+	return time.NewTicker(duration)
+}
+
+func StdTimeGo_StopTicker(ticker *Ticker) {
+	(*time.Ticker).Stop(ticker)
+}
+
+func StdTimeGo_TickerChannel(ticker *Ticker) Any {
+	return StdTimeGo_TickerChannelRaw(ticker)
 }

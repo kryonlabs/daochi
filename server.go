@@ -102,6 +102,16 @@ func (s *Server) appRegistry() Registry {
 	}
 }
 
+func (s *Server) devices() Devices {
+	return Devices{
+		Database:      s.store.db,
+		Configuration: &s.cfg,
+		Counters:      s.metrics,
+		Verify:        s.verifier.Verify,
+		ReplayError:   errSignedTxReplay,
+	}
+}
+
 func (s *Server) authenticateToken(r *http.Request) (string, error) {
 	result := HttpAuth_AuthenticateToken(s.store.db, r, s.cfg.TokenSecret)
 	return result.Value, authenticationError(result.Authentication)
@@ -172,9 +182,15 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
 	mux.HandleFunc("POST /api/v1/account/profile-icon", s.handleProfileIcon)
 	mux.HandleFunc("GET /api/v1/account/export", s.handleAccountExport)
-	mux.HandleFunc("GET /api/v1/account/devices", s.handleAccountDevices)
-	mux.HandleFunc("POST /api/v1/account/devices", s.handleAccountDevices)
-	mux.HandleFunc("DELETE /api/v1/account/devices", s.handleAccountDevices)
+	mux.HandleFunc("GET /api/v1/account/devices", func(w http.ResponseWriter, r *http.Request) {
+		DeviceHttp_Route(s.devices(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/account/devices", func(w http.ResponseWriter, r *http.Request) {
+		DeviceHttp_Route(s.devices(), w, r)
+	})
+	mux.HandleFunc("DELETE /api/v1/account/devices", func(w http.ResponseWriter, r *http.Request) {
+		DeviceHttp_Route(s.devices(), w, r)
+	})
 	mux.HandleFunc("GET /api/v1/account/app-grants", func(w http.ResponseWriter, r *http.Request) {
 		AppHttp_Grants(s.appRegistry(), w, r)
 	})

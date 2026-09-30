@@ -52,7 +52,8 @@ field names, Go storage types, order and reflection tags.
 | `challenge.go` | Ziran | `challenge.zi`: random challenges, expiry, locking, replacement, single-use consumption and base64 preview |
 | `codec.go` | Ziran | `codec.zi`: exact hexadecimal/base64 decoding and binary encoding |
 | `config.go` | Ziran | `config.zi`: all fields, environment/file loading, startup settings, strict errors, ephemeral secrets and Ed25519 keys; parsers in `config_values.zi` and `sets.zi` |
-| `device_keys.go` | Partial Ziran | Records, canonical messages, validation, signature verification, atomic registration/revocation, nonce cleanup and key queries in `device_keys.zi`; HTTP handlers remain in `device_handlers.go` |
+| `device_keys.go` | Ziran | Records, canonical messages, validation, signature verification, atomic registration/revocation, nonce cleanup and key queries in `device_keys.zi`; HTTP handling in `device_http.zi` |
+| `device_handlers.go` | Ziran | `device_http.zi`: authenticated device listing, registration and revocation, ordered body/signature validation, replay errors and response serialization |
 | `discovery.go` | Go | LAN discovery and runtime cancellation |
 | `docs.go` | Go | Embedded public API documentation |
 | `inspect.go` | Go with ported callers | Offline database commands and redaction |
@@ -254,7 +255,18 @@ ordering and nil empty results. Baseline fixtures compare record layouts,
 messages, lifecycle state, cancellation, commit failures and concurrent replay
 identity. Registration/revocation signature checks now also live in Ziran and
 preserve the original validation order, native account-key query failures and
-exact signature messages. Their HTTP handlers still need porting.
+exact signature messages. `device_http.zi` now owns their HTTP handlers.
+
+`device_http.zi` owns device listing, registration and revocation at the HTTP
+boundary. It keeps bearer/header authentication before body reads, released
+normalization, exact signature arguments and failure counters, nonce replay
+mapping, transactional writes and the original JSON responses. Independent
+handler comparisons cover all three methods, nil lists and account isolation,
+malformed/oversized/failed body reads, rejected signatures, replayed nonces,
+missing resources, database/cancellation errors and failed writes. A response
+panic retains committed device changes and closes a consumed body exactly as
+the original implementation does. Routes dispatch directly to the generated
+handlers; no handwritten device handler remains.
 
 `signed_tx.zi` completes signed-header decoding, transaction verification,
 device signature verification and replay persistence. Header decoding preserves

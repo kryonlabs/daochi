@@ -1,13 +1,15 @@
 package main
 
+// Original device HTTP handlers retained as an independent migration oracle.
+
 import (
 	"encoding/json"
 	"errors"
 	"net/http"
 )
 
-func (s *Server) handleAccountDevices(w http.ResponseWriter, r *http.Request) {
-	accountID, ok := s.bearerUser(w, r)
+func (s *Server) baselineHandleAccountDevices(w http.ResponseWriter, r *http.Request) {
+	accountID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -22,7 +24,7 @@ func (s *Server) handleAccountDevices(w http.ResponseWriter, r *http.Request) {
 		Response_JSON(w, http.StatusOK, map[string]any{"devices": devices})
 		return
 	case http.MethodDelete:
-		s.handleDeviceRevocation(w, r, accountID)
+		s.baselineHandleDeviceRevocation(w, r, accountID)
 		return
 	}
 	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
@@ -37,7 +39,7 @@ func (s *Server) handleAccountDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	DeviceKeys_NormalizeRegistration(&request)
-	if err := authenticationError(DeviceKeys_VerifyRegistration(s.store.db, r.Context(), accountID, request, s.verifier.Verify)); err != nil {
+	if err := s.baselineVerifyDeviceRegistration(r.Context(), accountID, request); err != nil {
 		s.writeAuthError(w, err)
 		return
 	}
@@ -59,7 +61,7 @@ func (s *Server) handleAccountDevices(w http.ResponseWriter, r *http.Request) {
 	Response_JSON(w, http.StatusOK, device)
 }
 
-func (s *Server) handleDeviceRevocation(w http.ResponseWriter, r *http.Request, accountID string) {
+func (s *Server) baselineHandleDeviceRevocation(w http.ResponseWriter, r *http.Request, accountID string) {
 	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
@@ -72,7 +74,7 @@ func (s *Server) handleDeviceRevocation(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	DeviceKeys_NormalizeRevocation(&request)
-	if err := authenticationError(DeviceKeys_VerifyRevocation(s.store.db, r.Context(), accountID, request, s.verifier.Verify)); err != nil {
+	if err := s.baselineVerifyDeviceRevocation(r.Context(), accountID, request); err != nil {
 		s.writeAuthError(w, err)
 		return
 	}

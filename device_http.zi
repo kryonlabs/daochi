@@ -1,0 +1,119 @@
+#import "go_types"
+#import "device_keys"
+config :: #import "config";
+auth :: #import "authentication";
+http_auth :: #import "http_auth";
+http_body :: #import "http_body";
+response :: #import "response";
+http :: #import "http_go";
+sql :: #import "sql_go";
+keys :: #import "device_keys";
+json :: #import "json_go";
+errors :: #import "errors_go";
+metrics :: #import "metrics";
+
+Devices :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    verify: auth.VerifySignature
+    replayError: Error
+}
+
+#scope_file
+DevicesResponse :: struct {
+    devices: []DeviceKey #go_tag "json:\"devices\""
+}
+DeviceRevocationResponse :: struct {
+    status: string #go_tag "json:\"status\""
+}
+
+#scope_export
+Route :: (devices: Devices, writer: http.ResponseWriter, request: *http.Request) {
+    user := http_auth.BearerUser(devices.database, request, devices.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, devices.counters, user.authentication)
+        return
+    }
+    method := http.Method(request)
+    if method == "GET" {
+        listed := keys.List(devices.database, http.Context(request), user.value)
+        if listed.error != null {
+            response.Error(writer, cast(isize)500, "device list failed")
+            return
+        }
+        value: DevicesResponse
+        value.devices = listed.value
+        response.JSON(writer, cast(isize)200, value)
+        return
+    }
+    if method == "DELETE" {
+        Revoke(devices, writer, request, user.value)
+        return
+    }
+    body := http_body.ReadJSON(writer, request, devices.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    registration: DeviceRegistrationRequest
+    if json.Unmarshal(body.value, *registration) != null {
+        response.Error(writer, cast(isize)400, "invalid device registration")
+        return
+    }
+    keys.NormalizeRegistration(*registration)
+    context := http.Context(request)
+    verified := keys.VerifyRegistration(devices.database, context, user.value, registration, devices.verify)
+    if verified.error != null || verified.status != cast(isize)0 {
+        http_auth.Respond(writer, devices.counters, verified)
+        return
+    }
+    device: DeviceKey
+    device.AccountID = user.value
+    device.AppID = registration.AppID
+    device.KeyID = registration.KeyID
+    device.ClientID = registration.ClientID
+    device.PublicKey = registration.PublicKey
+    error := keys.Register(devices.database, context, device, registration.Nonce, devices.replayError)
+    if error != null {
+        if errors.Is(error, devices.replayError) {
+            response.Error(writer, cast(isize)409, "device registration replay")
+            return
+        }
+        response.Error(writer, cast(isize)500, "device registration failed")
+        return
+    }
+    response.JSON(writer, cast(isize)200, device)
+}
+
+Revoke :: (devices: Devices, writer: http.ResponseWriter, request: *http.Request, accountID: string) {
+    body := http_body.ReadJSON(writer, request, devices.configuration.MaxBodyBytes)
+    if body.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(body.error))
+        return
+    }
+    revocation: DeviceRevocationRequest
+    if json.Unmarshal(body.value, *revocation) != null {
+        response.Error(writer, cast(isize)400, "invalid device revocation")
+        return
+    }
+    keys.NormalizeRevocation(*revocation)
+    context := http.Context(request)
+    verified := keys.VerifyRevocation(devices.database, context, accountID, revocation, devices.verify)
+    if verified.error != null || verified.status != cast(isize)0 {
+        http_auth.Respond(writer, devices.counters, verified)
+        return
+    }
+    error := keys.Revoke(devices.database, context, accountID, revocation, devices.replayError)
+    if error != null {
+        if errors.Is(error, devices.replayError) {
+            response.Error(writer, cast(isize)409, "device revocation replay")
+            return
+        }
+        response.Error(writer, cast(isize)500, "device revocation failed")
+        return
+    }
+    value: DeviceRevocationResponse
+    value.status = "revoked"
+    response.JSON(writer, cast(isize)200, value)
+}

@@ -262,7 +262,7 @@ ON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET
  public_key=excluded.public_key,
  last_used_at=excluded.last_used_at,
  revoked_at=''`, device.AccountID, device.AppID, device.KeyID, device.ClientID,
-		device.PublicKey, canonicalNow())
+		device.PublicKey, Timestamp_CanonicalNow())
 	if err != nil {
 		return err
 	}
@@ -281,7 +281,7 @@ func (s *Store) RevokeDeviceKey(ctx context.Context, accountID string, request D
 	result, err := transaction.ExecContext(ctx, `
 UPDATE server_device_keys SET revoked_at=?4
 WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''`,
-		accountID, request.AppID, request.KeyID, canonicalNow())
+		accountID, request.AppID, request.KeyID, Timestamp_CanonicalNow())
 	if err != nil {
 		return err
 	}
@@ -297,14 +297,14 @@ WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''`,
 
 func recordDeviceNonce(ctx context.Context, transaction *sql.Tx,
 	accountID, nonce string) error {
-	cutoff := canonicalTimestamp(time.Now().Add(-2 * daochiTxMaxFutureSkew))
+	cutoff := Timestamp_CanonicalTimestamp(time.Now().Add(-2 * daochiTxMaxFutureSkew))
 	if _, err := transaction.ExecContext(ctx, `
 DELETE FROM server_device_registration_nonces WHERE created_at<?1`, cutoff); err != nil {
 		return err
 	}
 	_, err := transaction.ExecContext(ctx, `
 INSERT INTO server_device_registration_nonces(account_id,nonce,created_at)
-VALUES(?1,?2,?3)`, accountID, nonce, canonicalNow())
+VALUES(?1,?2,?3)`, accountID, nonce, Timestamp_CanonicalNow())
 	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
 		return errSignedTxReplay
 	}
@@ -330,7 +330,7 @@ func (s *Store) TouchDeviceKey(ctx context.Context, accountID, appID, keyID stri
 	_, err := s.db.ExecContext(ctx, `
 UPDATE server_device_keys SET last_used_at=?4
 WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''`,
-		accountID, appID, keyID, canonicalNow())
+		accountID, appID, keyID, Timestamp_CanonicalNow())
 	return err
 }
 

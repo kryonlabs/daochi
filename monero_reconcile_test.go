@@ -36,7 +36,7 @@ func moneroReconcileTestServer(t *testing.T) (*Server, *Store, *fakeMoneroWallet
 func expireTestMoneroInvoice(t *testing.T, store *Store, handler http.Handler, identity testIdentity, invoice MoneroInvoiceResponse) {
 	t.Helper()
 	if _, err := store.db.Exec(`UPDATE token_payment_intents SET expires_at=?1 WHERE id=?2`,
-		time.Now().UTC().Add(-time.Minute).Format(canonicalTimestampLayout), invoice.ID); err != nil {
+		time.Now().UTC().Add(-time.Minute).Format(CanonicalTimestampLayout), invoice.ID); err != nil {
 		t.Fatal(err)
 	}
 	res := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/invoices/"+invoice.ID, identity.Token, nil)

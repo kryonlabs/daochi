@@ -37,6 +37,9 @@ request counts, single-use challenges and proxy trust against the original
 contracts and Go standard library. Metrics cases also compare exact Prometheus
 bytes and headers, label normalization, counter overflow, concurrent recording
 and cleanup after response-writer panics with the original implementation.
+Timestamp cases compare parsing, UTC formatting, fallback rules, database
+contents, schema-version guards, cancellation and transaction rollback against
+the original implementation.
 A fixture extracted from the baseline protects the ported protocol records'
 field names, Go storage types, order and reflection tags.
 
@@ -66,8 +69,8 @@ field names, Go storage types, order and reflection tags.
 | `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; HTTP handlers remain Go |
 | `signed_tx.go` | Partial Ziran | Record, normalization, canonical bytes in `transaction.zi`; decoding, verification and replay remain Go |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Go with ported callers | Schema, migrations, sync transactions, conflicts, projections |
-| `store_timestamps.go` | Go | One-time timestamp migration |
+| `store.go` | Partial Ziran | Timestamp parsing/normalization in `timestamp.zi`; schema, sync transactions, conflicts and projections remain Go |
+| `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
 | `token_assets.go` | Go | Asset seeding transaction |
@@ -83,8 +86,9 @@ field names, Go storage types, order and reflection tags.
 `identity.zi` is a new canonical module extracted from `server.go`. Generated
 `vec.go`, `constant_time.go`, `hmac_sha256_go.go`, `map_go.go`, `go_types.go`,
 `option.go`, `sync_go.go`, `time_go.go`, `random_go.go`, `text_go.go`,
-`net_go.go`, `http_go.go` and `atomic_go.go` come from Ziran's standard
-modules; they do not represent additional completed baseline modules.
+`net_go.go`, `http_go.go`, `atomic_go.go`, `context_go.go` and `sql_go.go` come
+from Ziran's standard modules; they do not represent additional completed
+baseline modules.
 `manifest.zi` owns app manifest, key, token policy and registry records.
 `transaction.zi` also owns the signed grant record. Their HTTP/database
 operations still need to move. Manifest normalization and validation preserve
@@ -133,6 +137,16 @@ mutex during native panic unwinding as well as ordinary returns; a failing
 response writer cannot leave subsequent recording blocked. The build version
 is passed explicitly until startup/version code moves to Ziran.
 
+`timestamp.zi` owns the original storage timestamp helpers, including RFC 3339
+and SQLite parsing, fixed nanosecond fractions, UTC conversion and malformed
+timestamp ordering. `store_timestamps.zi` owns the complete one-time migration.
+It uses native SQL handles directly, gathers rewrites before updating each
+column, leaves null/blank/unparseable values unchanged and commits the schema
+version with all rewrites. Native deferred rollback preserves cleanup on error
+and panic. Regression fixtures compare every migrated column with the original
+implementation, verify that repeat runs are skipped and force a late failure
+to check rollback of earlier changes and connection reuse.
+
 ## Compiler work exercised by this port
 
 Ziran now accepts explicit `go:` foreign package imports, including standard
@@ -172,6 +186,10 @@ including ownership restrictions on deferred calls.
 Explicit conversions between native Go aliases and slices preserve backing
 storage and keep returned data alive. Typed Go `panic` preserves error
 identity; configuration uses it for the cryptographic-random failure path.
+The `context_go`, `sql_go` and extended `time_go` standard modules provide
+native contexts, SQL iteration/cleanup and timestamp parsing/formatting.
+Imported record fields retain their declared type identity through additional
+modules, including qualified procedure parameters in portable bundles.
 
 ## Next dependencies
 
@@ -180,8 +198,8 @@ and omission rules. Opaque foreign Go type declarations preserve imported
 type identity, interface values, zero values and custom JSON methods in source
 and saved IR. Go primitives now provide method calls, multiple results,
 HTTP field access, error interfaces and mutex synchronization. Network and
-database code still needs broader interface operations, variadic SQL arguments,
-contexts and worker lifecycle support.
+database code still needs broader interface operations, reusable variadic SQL
+arguments, cancellation/deadline operations and worker lifecycle support.
 These are reusable compiler/runtime capabilities to implement upstream in
 Ziran as the corresponding application code moves; wrapping existing Go
 application functions does not complete their port.

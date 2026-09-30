@@ -239,7 +239,7 @@ func applyMeshRecordDeletion(ctx context.Context, tx *sql.Tx, deletion MeshEncry
 		!Identity_ValidEncryptedRecordID(strings.TrimSpace(deletion.ID)) {
 		return 0, fmt.Errorf("invalid mesh deletion target")
 	}
-	deletedAt := normalizeTime(deletion.DeletedAt, "")
+	deletedAt := Timestamp_NormalizeTime(deletion.DeletedAt, "")
 	res, err := tx.ExecContext(ctx, `
 DELETE FROM server_encrypted_records
 WHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4`,
@@ -285,8 +285,8 @@ ON CONFLICT(peer_key) DO UPDATE SET
 }
 
 func upsertMeshUser(ctx context.Context, tx *sql.Tx, item MeshEncryptedRecord, publicKey []byte) error {
-	createdAt := normalizeTime(item.CreatedAt, "")
-	lastSeenAt := normalizeTime(item.LastSeenAt, createdAt)
+	createdAt := Timestamp_NormalizeTime(item.CreatedAt, "")
+	lastSeenAt := Timestamp_NormalizeTime(item.LastSeenAt, createdAt)
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_users(user_id_hash,public_key,created_at,last_seen_at)
 VALUES(?1,?2,?3,?4)
@@ -308,7 +308,7 @@ func meshRecordContentKey(item EncryptedRecord) string {
 }
 
 func upsertMeshEncryptedRecord(ctx context.Context, tx *sql.Tx, userID string, item EncryptedRecord) (int, error) {
-	updatedAt := normalizeTime(item.UpdatedAt, "")
+	updatedAt := Timestamp_NormalizeTime(item.UpdatedAt, "")
 	var existing EncryptedRecord
 	err := tx.QueryRowContext(ctx, `
 SELECT key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
@@ -321,7 +321,7 @@ WHERE user_id_hash=?1 AND collection=?2 AND id=?3`,
 		return 0, err
 	}
 	if err == nil {
-		existingUpdated := normalizeTime(existing.UpdatedAt, "")
+		existingUpdated := Timestamp_NormalizeTime(existing.UpdatedAt, "")
 		if updatedAt < existingUpdated ||
 			(updatedAt == existingUpdated && meshRecordContentKey(item) <= meshRecordContentKey(existing)) {
 			return 0, nil

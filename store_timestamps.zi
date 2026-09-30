@@ -1,0 +1,162 @@
+#import "go_types"
+#import "timestamp"
+ctx :: #import "context_go";
+sql :: #import "sql_go";
+go_sql :: #system_library "go:database/sql";
+go_format :: #system_library "go:fmt";
+go_log :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+// Bump this version when another stored-timestamp rewrite is required.
+TimestampSchemaVersion :: 1;
+
+#scope_file
+TimestampColumn :: struct {
+    table: string
+    column: string
+}
+canonicalTimestampColumns: [14]TimestampColumn = .[
+    TimestampColumn.{table = "server_habits", column = "updated_at"},
+    TimestampColumn.{table = "server_habit_days", column = "updated_at"},
+    TimestampColumn.{table = "server_sessions", column = "updated_at"},
+    TimestampColumn.{table = "server_sessions", column = "started_at"},
+    TimestampColumn.{table = "server_meditation_logs", column = "completed_at"},
+    TimestampColumn.{table = "server_encrypted_records", column = "updated_at"},
+    TimestampColumn.{table = "server_social_snapshots", column = "updated_at"},
+    TimestampColumn.{table = "server_sync_ops", column = "created_at"},
+    TimestampColumn.{table = "server_users", column = "created_at"},
+    TimestampColumn.{table = "server_users", column = "last_seen_at"},
+    TimestampColumn.{table = "server_clients", column = "last_seen_at"},
+    TimestampColumn.{table = "server_clients", column = "last_login_at"},
+    TimestampColumn.{table = "server_clients", column = "last_sync_at"},
+    TimestampColumn.{table = "server_encrypted_payloads", column = "created_at"}
+];
+TransactionResult :: struct {
+    value: *sql.Transaction
+    error: Error
+}
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+ColumnResult :: struct {
+    count: isize
+    error: Error
+}
+PendingRewrite :: struct {
+    rowid: s64
+    value: string
+}
+QueryVersion :: (database: *sql.Database, context: ctx.Context, query: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+ScanVersion :: (row: *sql.Row, value: *isize) -> Error #foreign go_sql "(*Row).Scan";
+Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+QueryRows :: (transaction: *sql.Transaction, context: ctx.Context, query: string) -> RowsResult #go_results #foreign go_sql "(*Tx).QueryContext";
+ScanRow :: (rows: *sql.Rows, rowid: *s64, value: *sql.NullString) -> Error #foreign go_sql "(*Rows).Scan";
+ExecText :: (transaction: *sql.Transaction, context: ctx.Context, query: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+ExecRewrite :: (transaction: *sql.Transaction, context: ctx.Context, query: string, rowid: s64, value: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+FormatQuery :: (format: string, first: string, second: string) -> string #foreign go_format "Sprintf";
+FormatVersion :: (format: string, value: isize) -> string #foreign go_format "Sprintf";
+ColumnError :: (format: string, table: string, column: string, error: Error) -> Error #foreign go_format "Errorf";
+LogRewritten :: (message: string, label: string, count: isize) #foreign go_log "Info";
+AllocatePending :: (count: isize) -> []PendingRewrite #foreign builtin "make";
+AppendPending :: (pending: []PendingRewrite, item: PendingRewrite) -> []PendingRewrite #foreign builtin "append";
+
+CanonicalizeColumn :: (context: ctx.Context, transaction: *sql.Transaction, table: string, column: string) -> ColumnResult {
+    query := FormatQuery("SELECT rowid, %s FROM %s", column, table)
+    queried := QueryRows(transaction, context, query)
+    result: ColumnResult
+    if queried.error != null {
+        result.error = queried.error
+        return result
+    }
+    rows := queried.value
+    pending := AllocatePending(cast(isize)0)
+    while sql.Next(rows) {
+        rowid: s64
+        value: sql.NullString
+        error := ScanRow(rows, *rowid, *value)
+        if error != null {
+            sql.CloseRows(rows)
+            result.error = error
+            return result
+        }
+        text := sql.NullStringValue(value)
+        if !sql.NullStringValid(value) || text == "" {
+            continue
+        }
+        parsed := ParseTimestamp(text)
+        if !parsed.valid {
+            continue
+        }
+        canonical := CanonicalTimestamp(parsed.value)
+        if canonical != text {
+            rewrite: PendingRewrite
+            rewrite.rowid = rowid
+            rewrite.value = canonical
+            pending = AppendPending(pending, rewrite)
+        }
+    }
+    error := sql.RowsError(rows)
+    if error != null {
+        sql.CloseRows(rows)
+        result.error = error
+        return result
+    }
+    sql.CloseRows(rows)
+    for item: pending {
+        query := FormatQuery("UPDATE %s SET %s=?2 WHERE rowid=?1", table, column)
+        updated := ExecRewrite(transaction, context, query, item.rowid, item.value)
+        if updated.error != null {
+            result.error = updated.error
+            return result
+        }
+    }
+    result.count = cast(isize)pending.count
+    return result
+}
+
+#scope_export
+// Rewrite every known column atomically, then advance the stored schema version.
+Canonicalize :: (database: *sql.Database, context: ctx.Context) -> Error {
+    version: isize
+    row := QueryVersion(database, context, "PRAGMA user_version")
+    error := ScanVersion(row, *version)
+    if error != null {
+        return error
+    }
+    if version >= TimestampSchemaVersion {
+        return null
+    }
+    begun := Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    rewritten: isize = 0
+    for target: canonicalTimestampColumns {
+        result := CanonicalizeColumn(context, transaction, target.table, target.column)
+        if result.error != null {
+            return ColumnError("canonicalize %s.%s: %w", target.table, target.column, result.error)
+        }
+        rewritten += result.count
+    }
+    query := FormatVersion("PRAGMA user_version=%d", cast(isize)TimestampSchemaVersion)
+    updated := ExecText(transaction, context, query)
+    if updated.error != null {
+        return updated.error
+    }
+    error = sql.Commit(transaction)
+    if error != null {
+        return error
+    }
+    if rewritten > 0 {
+        LogRewritten("canonicalized stored timestamps", "values_rewritten", rewritten)
+    }
+    return null
+}

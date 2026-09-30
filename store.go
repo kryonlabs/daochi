@@ -244,7 +244,7 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := store.canonicalizeStoredTimestamps(context.Background()); err != nil {
+	if err := StoreTimestamps_Canonicalize(store.db, context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -1042,7 +1042,7 @@ func (s *Store) ApplySyncDetailed(ctx context.Context, req SyncRequest, publicKe
 		res, err := tx.ExecContext(ctx, `
 INSERT INTO server_meditation_logs(user_id_hash,id,session_id,duration_seconds,completed_at,server_version)
 VALUES(?1,?2,?3,?4,?5,?6)
-ON CONFLICT(user_id_hash,id) DO NOTHING`, req.UserIDHash, item.ID, item.SessionID, item.DurationSeconds, normalizeTime(item.CompletedAt, item.Timestamp), version)
+ON CONFLICT(user_id_hash,id) DO NOTHING`, req.UserIDHash, item.ID, item.SessionID, item.DurationSeconds, Timestamp_NormalizeTime(item.CompletedAt, item.Timestamp), version)
 		if err != nil {
 			return SyncResult{}, nil, err
 		}
@@ -1092,7 +1092,7 @@ ON CONFLICT(user_id_hash,id) DO UPDATE SET
 WHERE excluded.updated_at >= server_habits.updated_at`,
 			req.UserIDHash, habit.ID, habit.Name, habit.ColorR, habit.ColorG, habit.ColorB,
 			habit.SyncMode, habit.SyncActivity, habit.CounterEnabled, habit.SortOrder,
-			habit.DeletedAt, normalizeTime(habit.UpdatedAt, ""), version)
+			habit.DeletedAt, Timestamp_NormalizeTime(habit.UpdatedAt, ""), version)
 		if err != nil {
 			return SyncResult{}, nil, err
 		}
@@ -1124,7 +1124,7 @@ ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
 	updated_at=excluded.updated_at,
 	server_version=excluded.server_version
 WHERE excluded.updated_at >= server_habit_days.updated_at`,
-			req.UserIDHash, day.HabitID, day.LocalDate, boolInt(day.Completed), normalizedHabitDayCount(day), normalizeTime(day.UpdatedAt, ""), version)
+			req.UserIDHash, day.HabitID, day.LocalDate, boolInt(day.Completed), normalizedHabitDayCount(day), Timestamp_NormalizeTime(day.UpdatedAt, ""), version)
 		if err != nil {
 			return SyncResult{}, nil, err
 		}
@@ -1196,7 +1196,7 @@ func applySyncOps(ctx context.Context, tx *sql.Tx, userID string, ops []SyncOp, 
 			}
 		}
 		payload := string(op.Payload)
-		createdAt := normalizeTime(op.CreatedAt, "")
+		createdAt := Timestamp_NormalizeTime(op.CreatedAt, "")
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_sync_ops(user_id_hash,op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at,server_version)
 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`,
@@ -1289,7 +1289,7 @@ ON CONFLICT(user_id_hash,id) DO UPDATE SET
 WHERE excluded.updated_at >= server_habits.updated_at`,
 			userID, habit.ID, habit.Name, habit.ColorR, habit.ColorG, habit.ColorB,
 			habit.SyncMode, habit.SyncActivity, habit.CounterEnabled, habit.SortOrder,
-			habit.DeletedAt, normalizeTime(habit.UpdatedAt, ""), version)
+			habit.DeletedAt, Timestamp_NormalizeTime(habit.UpdatedAt, ""), version)
 		if err != nil {
 			return err
 		}
@@ -1327,7 +1327,7 @@ ON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET
 	completed=excluded.completed,count=excluded.count,updated_at=excluded.updated_at,server_version=excluded.server_version
 WHERE excluded.updated_at >= server_habit_days.updated_at`,
 			userID, day.HabitID, day.LocalDate, boolInt(day.Completed),
-			normalizedHabitDayCount(day), normalizeTime(day.UpdatedAt, ""), version)
+			normalizedHabitDayCount(day), Timestamp_NormalizeTime(day.UpdatedAt, ""), version)
 		if err != nil {
 			return err
 		}
@@ -1415,7 +1415,7 @@ func (s *Store) SetAccountAlias(ctx context.Context, userID, alias string) error
 	res, err := s.db.ExecContext(ctx, `
 UPDATE server_users
 SET alias=?2,last_seen_at=?3
-WHERE user_id_hash=?1`, userID, alias, canonicalNow())
+WHERE user_id_hash=?1`, userID, alias, Timestamp_CanonicalNow())
 	if err != nil {
 		return err
 	}
@@ -1441,7 +1441,7 @@ func (s *Store) SetAccountProfileIcon(ctx context.Context, userID string, profil
 	res, err := s.db.ExecContext(ctx, `
 UPDATE server_users
 SET profile_icon=?2,last_seen_at=?3
-WHERE user_id_hash=?1`, userID, profileIcon, canonicalNow())
+WHERE user_id_hash=?1`, userID, profileIcon, Timestamp_CanonicalNow())
 	if err != nil {
 		return err
 	}
@@ -1672,7 +1672,7 @@ func (s *Store) AuthoritativeSocial(ctx context.Context, userID string) ([]Socia
 	if err != nil {
 		return nil, err
 	}
-	now := canonicalNow()
+	now := Timestamp_CanonicalNow()
 	return []SocialSnapshot{
 		{Kind: "friends.list", JSON: friendsJSON, UpdatedAt: now},
 		{Kind: "friends.requests", JSON: requestsJSON, UpdatedAt: now},
@@ -1999,7 +1999,7 @@ INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_login_at)
 VALUES(?1,?2,?3,?3)
 ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
 	last_seen_at=excluded.last_seen_at,
-	last_login_at=excluded.last_login_at`, userID, clientID, canonicalNow())
+	last_login_at=excluded.last_login_at`, userID, clientID, Timestamp_CanonicalNow())
 	return err
 }
 
@@ -2013,7 +2013,7 @@ ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
 	last_since_server_version=excluded.last_since_server_version,
 	last_seen_server_version=excluded.last_seen_server_version,
 	protocol_version=excluded.protocol_version,
-	last_client_clock=excluded.last_client_clock`, userID, clientID, canonicalNow(), sinceVersion, serverVersion, protocolVersion, clientClock)
+	last_client_clock=excluded.last_client_clock`, userID, clientID, Timestamp_CanonicalNow(), sinceVersion, serverVersion, protocolVersion, clientClock)
 	return err
 }
 
@@ -2032,7 +2032,7 @@ func (s *Store) StoreEncryptedPayload(ctx context.Context, userID, clientID stri
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_encrypted_payloads(user_id_hash,client_id,payload_json,server_version,created_at)
-VALUES(?1,?2,?3,?4,?5)`, userID, clientID, string(payload), version, canonicalNow()); err != nil {
+VALUES(?1,?2,?3,?4,?5)`, userID, clientID, string(payload), version, Timestamp_CanonicalNow()); err != nil {
 		return 0, err
 	}
 	return version, tx.Commit()
@@ -2140,7 +2140,7 @@ func (s *Store) PruneEncryptedPayloads(ctx context.Context, userID string, maxAg
 	}
 	defer tx.Rollback()
 	if maxAge > 0 {
-		cutoff := time.Now().UTC().Add(-maxAge).Format(canonicalTimestampLayout)
+		cutoff := time.Now().UTC().Add(-maxAge).Format(CanonicalTimestampLayout)
 		res, err := tx.ExecContext(ctx, `
 DELETE FROM server_encrypted_payloads
 WHERE user_id_hash=?1 AND created_at<?2`, userID, cutoff)
@@ -2269,7 +2269,7 @@ func (s *Store) CompactSyncOps(ctx context.Context, userID string) error {
 		return tx.Commit()
 	}
 
-	cutoff := time.Now().UTC().Add(-syncClientActiveRetention).Format(canonicalTimestampLayout)
+	cutoff := time.Now().UTC().Add(-syncClientActiveRetention).Format(CanonicalTimestampLayout)
 	var floor sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `
 SELECT MIN(last_client_clock)
@@ -2654,7 +2654,7 @@ ORDER BY last_seen_at DESC,client_id`, userID, minProtocol)
 const legacyWriteWindow = 180 * 24 * time.Hour
 
 func (s *Store) LegacyWritePolicy(ctx context.Context, userID string) (bool, int64, error) {
-	cutoff := canonicalTimestamp(time.Now().Add(-legacyWriteWindow))
+	cutoff := Timestamp_CanonicalTimestamp(time.Now().Add(-legacyWriteWindow))
 	var latest sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 SELECT MAX(last_sync_at)
@@ -2667,7 +2667,7 @@ WHERE user_id_hash=?1 AND protocol_version<?2 AND last_sync_at>=?3`,
 	if !latest.Valid || latest.String == "" {
 		return false, 0, nil
 	}
-	lastSync, err := time.Parse(canonicalTimestampLayout, latest.String)
+	lastSync, err := time.Parse(CanonicalTimestampLayout, latest.String)
 	if err != nil {
 		return false, 0, err
 	}
@@ -3069,7 +3069,7 @@ ORDER BY hd.habit_id`, userID)
 
 	changed := false
 	for index, habit := range habits {
-		updatedAt := normalizeTime(habit.updatedAt, "")
+		updatedAt := Timestamp_NormalizeTime(habit.updatedAt, "")
 		if updatedAt == "" {
 			updatedAt = time.Now().UTC().Format(time.RFC3339)
 		}
@@ -3618,7 +3618,7 @@ func upsertUser(ctx context.Context, tx *sql.Tx, userID string, publicKey []byte
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_users(user_id_hash,public_key)
 VALUES(?1,?2)
-ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=?3`, userID, publicKey, canonicalNow()); err != nil {
+ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=?3`, userID, publicKey, Timestamp_CanonicalNow()); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
@@ -3631,7 +3631,7 @@ func touchUser(ctx context.Context, tx *sql.Tx, userID string) error {
 	res, err := tx.ExecContext(ctx, `
 UPDATE server_users
 SET last_seen_at=?2
-WHERE user_id_hash=?1`, userID, canonicalNow())
+WHERE user_id_hash=?1`, userID, Timestamp_CanonicalNow())
 	if err != nil {
 		return err
 	}
@@ -3689,10 +3689,10 @@ func upsertSession(ctx context.Context, tx *sql.Tx, userID string, session Sessi
 		updated_at=excluded.updated_at,
 		server_version=excluded.server_version
 	WHERE excluded.updated_at >= server_sessions.updated_at`,
-		userID, session.ID, normalizeTime(session.StartedAt, ""), session.LocalDate, session.Topic,
+		userID, session.ID, Timestamp_NormalizeTime(session.StartedAt, ""), session.LocalDate, session.Topic,
 		session.Activity, session.Source, session.RoundsHash, session.MoodBefore,
 		session.MoodAfter, session.Energy, session.Stress, session.Note, session.Tags,
-		session.DeletedAt, normalizeTime(session.UpdatedAt, ""), version)
+		session.DeletedAt, Timestamp_NormalizeTime(session.UpdatedAt, ""), version)
 	if err != nil {
 		return 0, err
 	}
@@ -3748,7 +3748,7 @@ ON CONFLICT(user_id_hash,kind) DO UPDATE SET
 	updated_at=excluded.updated_at,
 	server_version=excluded.server_version
 WHERE excluded.json != server_social_snapshots.json`,
-		userID, kind, string(payload), normalizeTime(item.UpdatedAt, ""), version)
+		userID, kind, string(payload), Timestamp_NormalizeTime(item.UpdatedAt, ""), version)
 	if err != nil {
 		return 0, err
 	}
@@ -3794,7 +3794,7 @@ ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
 	server_version=excluded.server_version
 WHERE excluded.updated_at >= server_encrypted_records.updated_at`,
 		userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
-		normalizeTime(item.UpdatedAt, ""), item.DeletedAt, item.ContentHash,
+		Timestamp_NormalizeTime(item.UpdatedAt, ""), item.DeletedAt, item.ContentHash,
 		item.SchemaVersion, item.ParentID, version)
 	if err != nil {
 		return 0, err
@@ -3803,7 +3803,7 @@ WHERE excluded.updated_at >= server_encrypted_records.updated_at`,
 }
 
 func deleteHabit(ctx context.Context, tx *sql.Tx, userID string, habit Habit) (int, error) {
-	updatedAt := normalizeTime(habit.UpdatedAt, "")
+	updatedAt := Timestamp_NormalizeTime(habit.UpdatedAt, "")
 	res, err := tx.ExecContext(ctx, `
 DELETE FROM server_habits
 WHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3`, userID, habit.ID, updatedAt)
@@ -3828,7 +3828,7 @@ WHERE user_id_hash=?1 AND habit_id=?2`, userID, habit.ID)
 }
 
 func deleteHabitDay(ctx context.Context, tx *sql.Tx, userID string, day HabitDay) (int, error) {
-	updatedAt := normalizeTime(day.UpdatedAt, "")
+	updatedAt := Timestamp_NormalizeTime(day.UpdatedAt, "")
 	res, err := tx.ExecContext(ctx, `
 DELETE FROM server_habit_days
 WHERE user_id_hash=?1 AND habit_id=?2 AND local_date=?3 AND updated_at<=?4`,
@@ -3847,7 +3847,7 @@ WHERE user_id_hash=?1 AND habit_id=?2 AND local_date=?3 AND updated_at<=?4`,
 }
 
 func deleteSession(ctx context.Context, tx *sql.Tx, userID string, session Session) (int, error) {
-	updatedAt := normalizeTime(session.UpdatedAt, session.StartedAt)
+	updatedAt := Timestamp_NormalizeTime(session.UpdatedAt, session.StartedAt)
 	res, err := tx.ExecContext(ctx, `
 DELETE FROM server_sessions
 WHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3`, userID, session.ID, updatedAt)
@@ -4228,52 +4228,6 @@ func rowsAffected(res sql.Result) int {
 		return 0
 	}
 	return int(n)
-}
-
-// canonicalTimestampLayout is RFC 3339 with a fixed-width nanosecond
-// fraction and UTC offset: every canonical timestamp has the same length,
-// so lexicographic string order equals chronological order. Stored
-// timestamps must use this layout — time.RFC3339Nano trims trailing
-// fraction zeros, which makes "…:00.5Z" sort before "…:00Z".
-const canonicalTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
-
-// minCanonicalTimestamp is the smallest canonical timestamp. Values that
-// cannot be parsed are mapped to it so they deterministically lose
-// last-write-wins comparisons instead of comparing unpredictably.
-const minCanonicalTimestamp = "0001-01-01T00:00:00.000000000Z"
-
-func canonicalNow() string {
-	return time.Now().UTC().Format(canonicalTimestampLayout)
-}
-
-func canonicalTimestamp(t time.Time) string {
-	return t.UTC().Format(canonicalTimestampLayout)
-}
-
-// parseTimestamp accepts RFC 3339 timestamps plus the space-separated
-// format SQLite's CURRENT_TIMESTAMP produces.
-func parseTimestamp(value string) (time.Time, bool) {
-	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return t, true
-	}
-	if t, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
-		return t, true
-	}
-	return time.Time{}, false
-}
-
-func normalizeTime(primary, fallback string) string {
-	value := primary
-	if value == "" {
-		value = fallback
-	}
-	if value == "" {
-		return canonicalNow()
-	}
-	if t, ok := parseTimestamp(value); ok {
-		return canonicalTimestamp(t)
-	}
-	return minCanonicalTimestamp
 }
 
 func normalizedHabitDayCount(day HabitDay) int {

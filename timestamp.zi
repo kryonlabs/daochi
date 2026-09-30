@@ -1,0 +1,52 @@
+clock :: #import "time_go";
+
+// Fixed-width UTC fractions keep stored timestamps in chronological string order.
+CanonicalTimestampLayout :: "2006-01-02T15:04:05.000000000Z07:00";
+MinCanonicalTimestamp :: "0001-01-01T00:00:00.000000000Z";
+
+TimestampResult :: struct {
+    value: clock.Time
+    valid: bool
+}
+
+CanonicalNow :: () -> string {
+    return CanonicalTimestamp(clock.Now())
+}
+
+CanonicalTimestamp :: (value: clock.Time) -> string {
+    return clock.Format(clock.UTC(value), CanonicalTimestampLayout)
+}
+
+ParseTimestamp :: (value: string) -> TimestampResult {
+    parsed := clock.Parse("2006-01-02T15:04:05.999999999Z07:00", value)
+    if parsed.error == null {
+        result: TimestampResult
+        result.value = parsed.value
+        result.valid = true
+        return result
+    }
+    parsed = clock.Parse("2006-01-02 15:04:05", value)
+    if parsed.error == null {
+        result: TimestampResult
+        result.value = parsed.value
+        result.valid = true
+        return result
+    }
+    result: TimestampResult
+    return result
+}
+
+NormalizeTime :: (primary: string, fallback: string) -> string {
+    value := primary
+    if value == "" {
+        value = fallback
+    }
+    if value == "" {
+        return CanonicalNow()
+    }
+    parsed := ParseTimestamp(value)
+    if parsed.valid {
+        return CanonicalTimestamp(parsed.value)
+    }
+    return MinCanonicalTimestamp
+}

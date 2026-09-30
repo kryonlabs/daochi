@@ -20,20 +20,20 @@ func TestNormalizeTimeCanonicalFormat(t *testing.T) {
 		{"nine digit fraction", "2026-01-02T10:00:00.123456789Z", "", "2026-01-02T10:00:00.123456789Z"},
 		{"offset converts to UTC", "2026-01-02T12:00:00+02:00", "", "2026-01-02T10:00:00.000000000Z"},
 		{"sqlite CURRENT_TIMESTAMP format", "2026-01-02 10:00:00", "", "2026-01-02T10:00:00.000000000Z"},
-		{"garbage is oldest", "not-a-timestamp", "", minCanonicalTimestamp},
+		{"garbage is oldest", "not-a-timestamp", "", MinCanonicalTimestamp},
 		{"empty falls back", "", "2026-01-02T10:00:00Z", "2026-01-02T10:00:00.000000000Z"},
-		{"empty with garbage fallback", "", "garbage", minCanonicalTimestamp},
+		{"empty with garbage fallback", "", "garbage", MinCanonicalTimestamp},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := normalizeTime(tc.primary, tc.fallback)
+			got := Timestamp_NormalizeTime(tc.primary, tc.fallback)
 			if got != tc.want {
-				t.Fatalf("normalizeTime(%q, %q) = %q, want %q", tc.primary, tc.fallback, got, tc.want)
+				t.Fatalf("Timestamp_NormalizeTime(%q, %q) = %q, want %q", tc.primary, tc.fallback, got, tc.want)
 			}
 		})
 	}
-	if got := normalizeTime("", ""); !strings.HasSuffix(got, "Z") || len(got) != len(minCanonicalTimestamp) {
-		t.Fatalf("normalizeTime empty/empty = %q, want canonical now", got)
+	if got := Timestamp_NormalizeTime("", ""); !strings.HasSuffix(got, "Z") || len(got) != len(MinCanonicalTimestamp) {
+		t.Fatalf("Timestamp_NormalizeTime empty/empty = %q, want canonical now", got)
 	}
 }
 
@@ -53,12 +53,12 @@ func TestCanonicalTimestampOrdering(t *testing.T) {
 		{"2026-01-02 10:00:00", "2026-01-02T10:00:00.000000001Z"},
 	}
 	for _, pair := range pairs {
-		a, b := normalizeTime(pair.earlier, ""), normalizeTime(pair.later, "")
+		a, b := Timestamp_NormalizeTime(pair.earlier, ""), Timestamp_NormalizeTime(pair.later, "")
 		if a >= b {
 			t.Fatalf("canonical(%q)=%q not before canonical(%q)=%q", pair.earlier, a, pair.later, b)
 		}
 	}
-	if a, b := normalizeTime("2026-01-02T12:00:00+02:00", ""), normalizeTime("2026-01-02T10:00:00Z", ""); a != b {
+	if a, b := Timestamp_NormalizeTime("2026-01-02T12:00:00+02:00", ""), Timestamp_NormalizeTime("2026-01-02T10:00:00Z", ""); a != b {
 		t.Fatalf("same instant canonicalized differently: %q vs %q", a, b)
 	}
 }
@@ -173,7 +173,7 @@ func TestCompactSyncOpsUsesRecentClientFloor(t *testing.T) {
 	if _, err := store.db.ExecContext(ctx, `
 INSERT INTO server_sync_ops(user_id_hash,op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at,server_version)
 VALUES(?1,'op-1','client-1',1,'habit','habit-1',0,'upsert','{}',?2,1)`,
-		userID, canonicalNow()); err != nil {
+		userID, Timestamp_CanonicalNow()); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CompactSyncOps(ctx, userID); err != nil {
@@ -255,12 +255,12 @@ func TestCanonicalizeStoredTimestampsMigration(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != timestampSchemaVersion {
-		t.Fatalf("user_version = %d, want %d", version, timestampSchemaVersion)
+	if version != TimestampSchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, TimestampSchemaVersion)
 	}
 
 	// Reopening must not rewrite again (guard works).
-	if err := store.canonicalizeStoredTimestamps(ctx); err != nil {
+	if err := StoreTimestamps_Canonicalize(store.db, ctx); err != nil {
 		t.Fatal(err)
 	}
 }

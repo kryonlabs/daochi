@@ -90,7 +90,7 @@ func (s *Store) TrustPeer(ctx context.Context, invite PairingInvite, publicKey e
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO consumed_pairing_invites(invite_id,consumed_at) VALUES(?1,?2)`,
-			invite.InviteID, canonicalNow()); err != nil {
+			invite.InviteID, Timestamp_CanonicalNow()); err != nil {
 			return err
 		}
 		return upsertTrustedPeerTx(ctx, tx, invite, publicKey)
@@ -123,14 +123,14 @@ ON CONFLICT(node_id) DO UPDATE SET
     policy_json=excluded.policy_json,
     trusted_at=excluded.trusted_at,
     revoked_at=''`, invite.NodeID, []byte(publicKey), invite.DisplayName,
-		string(addresses), invite.SpaceID, string(policy), canonicalNow())
+		string(addresses), invite.SpaceID, string(policy), Timestamp_CanonicalNow())
 	return err
 }
 
 func (s *Store) RecordIssuedPairingInvite(ctx context.Context, invite PairingInvite) error {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO issued_pairing_invites(invite_id,signature,expires_at,created_at)
-VALUES(?1,?2,?3,?4)`, invite.InviteID, invite.Signature, invite.ExpiresAt, canonicalNow())
+VALUES(?1,?2,?3,?4)`, invite.InviteID, invite.Signature, invite.ExpiresAt, Timestamp_CanonicalNow())
 	return err
 }
 
@@ -317,7 +317,7 @@ func (s *Store) CreateTrustSpace(ctx context.Context, displayName string) (strin
 INSERT INTO trust_spaces(
     space_id,display_name,authority_public_key,authority_private_key,created_at
 ) VALUES(?1,?2,?3,?4,?5)`, spaceID, displayName, []byte(publicKey),
-		[]byte(privateKey), canonicalNow())
+		[]byte(privateKey), Timestamp_CanonicalNow())
 	return spaceID, err
 }
 
@@ -358,7 +358,7 @@ ON CONFLICT(space_id,name) DO UPDATE SET
     services_json=excluded.services_json,
     signature=excluded.signature,
     updated_at=excluded.updated_at`, claim.SpaceID, claim.Name, claim.NodeID,
-		claim.Sequence, claim.ExpiresAt, string(services), claim.Signature, canonicalNow())
+		claim.Sequence, claim.ExpiresAt, string(services), claim.Signature, Timestamp_CanonicalNow())
 	return claim, err
 }
 
@@ -526,7 +526,7 @@ WHERE space_id=?1`, space.SpaceID).Scan(&existing)
 INSERT OR IGNORE INTO trust_spaces(
     space_id,display_name,authority_public_key,authority_private_key,created_at
 ) VALUES(?1,?2,?3,'',?4)`, space.SpaceID, space.DisplayName,
-		[]byte(publicKey), canonicalNow())
+		[]byte(publicKey), Timestamp_CanonicalNow())
 	return err
 }
 
@@ -586,7 +586,7 @@ ON CONFLICT(space_id,name) DO UPDATE SET
     services_json=excluded.services_json,
     signature=excluded.signature,
     updated_at=excluded.updated_at`, claim.SpaceID, claim.Name, claim.NodeID,
-		claim.Sequence, claim.ExpiresAt, string(servicesJSON), claim.Signature, canonicalNow())
+		claim.Sequence, claim.ExpiresAt, string(servicesJSON), claim.Signature, Timestamp_CanonicalNow())
 	if err != nil {
 		return 0, err
 	}

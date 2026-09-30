@@ -3,9 +3,21 @@ package main
 
 import time "time"
 
+// #import go_types
 type Time = time.Time
 
 type Duration = time.Duration
+
+type ParseResult struct {
+	Value Time
+	Error Error
+}
+
+func TimeGo_ParseRaw(Layout string, Value string) ParseResult {
+	var result ParseResult
+	result.Value, result.Error = time.Parse(Layout, Value)
+	return result
+}
 
 func TimeGo_Now() Time {
 	return time.Now()
@@ -17,4 +29,16 @@ func TimeGo_After(value Time, other Time) bool {
 
 func TimeGo_Add(value Time, duration Duration) Time {
 	return (time.Time).Add(value, duration)
+}
+
+func TimeGo_Parse(layout string, value string) ParseResult {
+	return TimeGo_ParseRaw(layout, value)
+}
+
+func TimeGo_UTC(value Time) Time {
+	return (time.Time).UTC(value)
+}
+
+func TimeGo_Format(value Time, layout string) string {
+	return (time.Time).Format(value, layout)
 }

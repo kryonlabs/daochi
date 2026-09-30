@@ -212,7 +212,7 @@ INSERT INTO monero_wallet_state(wallet_id,last_height,updated_at)
 VALUES('default',?1,?2)
 ON CONFLICT(wallet_id) DO UPDATE SET
 	last_height=MAX(monero_wallet_state.last_height,excluded.last_height),
-	updated_at=excluded.updated_at`, height, canonicalNow())
+	updated_at=excluded.updated_at`, height, Timestamp_CanonicalNow())
 	return err
 }
 

@@ -1469,7 +1469,7 @@ func (s *Store) CreateMoneroInvoice(ctx context.Context, accountID, appID string
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}
-	expiresAt := time.Now().UTC().Add(45 * time.Minute).Format(canonicalTimestampLayout)
+	expiresAt := time.Now().UTC().Add(45 * time.Minute).Format(CanonicalTimestampLayout)
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO token_payment_intents(id,provider,account_id,app_id,product_id,asset_id,token_units,
 	provider_amount,provider_address,provider_ref,status,expires_at)
@@ -1594,7 +1594,7 @@ func (s *Store) ExpiredMoneroInvoices(ctx context.Context, limit int) ([]moneroI
 	if limit <= 0 {
 		limit = 50
 	}
-	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(canonicalTimestampLayout)
+	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(CanonicalTimestampLayout)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,
 	provider_address,provider_ref,provider_payment_id,expires_at,receipt_id

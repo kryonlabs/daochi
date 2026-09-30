@@ -14,6 +14,11 @@ type TombstoneResult struct {
 	Error Error
 }
 
+type VersionResult struct {
+	Value int64
+	Error Error
+}
+
 func AccountState_UpdateSeen(Transaction *Transaction, Context Context, Query string, UserID string, Seen string) zir_2688387c33a72186_ExecResult {
 	var result zir_2688387c33a72186_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID, Seen)
@@ -24,6 +29,35 @@ func AccountState_EnsureSync(Transaction *Transaction, Context Context, Query st
 	var result zir_2688387c33a72186_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID)
 	return result
+}
+
+func AccountState_NextVersion(transaction *Transaction, context Context, userID string) VersionResult {
+	var result VersionResult = VersionResult{}
+	var value_0 zir_2688387c33a72186_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
+	inserted := value_0
+	result.Error = inserted.Error
+	if result.Error != nil {
+		return result
+	}
+	var value_1 zir_2688387c33a72186_ExecResult = AccountState_EnsureSync(transaction, context, "UPDATE server_sync_state SET server_version=server_version+1 WHERE user_id_hash=?1", userID)
+	updated := value_1
+	result.Error = updated.Error
+	if result.Error != nil {
+		return result
+	}
+	var value_2 *Row = (*sql.Tx).QueryRowContext(transaction, context, "SELECT server_version FROM server_sync_state WHERE user_id_hash=?1", userID)
+	row := value_2
+	var value_3 Error = (*sql.Row).Scan(row, &(result.Value))
+	result.Error = value_3
+	return result
+}
+
+func AccountState_Affected(value Result) int {
+	affected := StdSqlGo_RowsAffected(value)
+	if affected.Error != nil {
+		return int(0)
+	}
+	return int(affected.Value)
 }
 
 func AccountState_Tombstoned(database *Database, context Context, userID string) TombstoneResult {

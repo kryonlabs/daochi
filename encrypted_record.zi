@@ -1,0 +1,61 @@
+#import "std/go_types"
+#import "protocol"
+identity :: #import "identity";
+signing :: #import "signing";
+errors :: #import "std/errors_go";
+go_strings :: #system_library "go:strings";
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+
+#scope_export
+ValidateAccountKey :: (userID: string, publicKey: []u8) -> Error {
+    if userID != signing.SHA256Hex(publicKey) {
+        return errors.New("public key hash mismatch")
+    }
+    return null
+}
+
+ValidMetadata :: (item: EncryptedRecord) -> bool {
+    hash := TrimSpace(item.ContentHash)
+    parent := TrimSpace(item.ParentID)
+    if hash != "" && !identity.ValidUserID(hash) {
+        return false
+    }
+    if parent != "" && !identity.ValidEncryptedRecordID(parent) {
+        return false
+    }
+    return item.SchemaVersion >= cast(isize)0 && item.SchemaVersion <= cast(isize)65535
+}
+
+Valid :: (item: EncryptedRecord) -> bool {
+    if !identity.ValidNamespace(TrimSpace(item.Collection)) ||
+        !identity.ValidEncryptedRecordID(TrimSpace(item.ID)) {
+        return false
+    }
+    if TrimSpace(item.UpdatedAt) == "" {
+        return false
+    }
+    if item.DeletedAt == 0 && TrimSpace(item.Ciphertext) == "" {
+        return false
+    }
+    return item.Ciphertext.count <= 262144 && item.Nonce.count <= 256 &&
+        item.KeyID.count <= 128 && ValidMetadata(item)
+}
+
+ValidForProtocol :: (item: EncryptedRecord, version: isize) -> bool {
+    if !Valid(item) {
+        return false
+    }
+    if version >= cast(isize)5 {
+        return identity.ValidEncryptedHierarchyCollection(item.Collection) ||
+            identity.ValidLegacyEncryptedCollection(item.Collection)
+    }
+    return true
+}
+
+ContentKey :: (item: EncryptedRecord) -> string {
+    parts: [3]string = .[item.ContentHash, "\x00", item.Ciphertext]
+    return Join(parts[:], "")
+}

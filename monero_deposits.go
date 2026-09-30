@@ -419,7 +419,7 @@ WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND receipt_id=''`, txI
 	if err != nil {
 		return TokenReceipt{}, false, err
 	}
-	if rowsAffected(result) != 1 {
+	if AccountState_Affected(result) != 1 {
 		return TokenReceipt{}, false, errors.New("monero deposit settlement race")
 	}
 	return receipt, created, tx.Commit()

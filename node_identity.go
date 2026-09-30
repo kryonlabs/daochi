@@ -81,13 +81,13 @@ type MeshTrustSpace struct {
 	AuthorityPublicKey string "json:\"authority_public_key\""
 }
 
-type HexResult struct {
+type zir_91a8a532591b3577_HexResult struct {
 	Value []uint8
 	Error Error
 }
 
-func NodeIdentity_DecodeHex(Value string) HexResult {
-	var result HexResult
+func NodeIdentity_DecodeHex(Value string) zir_91a8a532591b3577_HexResult {
+	var result zir_91a8a532591b3577_HexResult
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }

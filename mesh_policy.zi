@@ -1,10 +1,16 @@
 #import "protocol"
 config :: #import "config_values";
+scope :: #import "collection_scope";
+#import "std/map_go"
 go_strings :: #system_library "go:strings";
 
 #scope_file
 TrimSpace :: (value: string) -> string #foreign go_strings;
 EqualFold :: (left: string, right: string) -> bool #foreign go_strings;
+Lower :: (value: string) -> string #foreign go_strings "ToLower";
+HasSuffix :: (value: string, suffix: string) -> bool #foreign go_strings;
+HasPrefix :: (value: string, prefix: string) -> bool #foreign go_strings;
+TrimSuffix :: (value: string, suffix: string) -> string #foreign go_strings;
 
 #scope_export
 IncludesData :: (policy: *NodeSyncPolicy, dataType: string) -> bool {
@@ -40,4 +46,83 @@ ValidInbound :: (policy: NodeSyncPolicy) -> bool {
     hasNames := IncludesData(*policy, "names") && policy.Spaces.count > 0
     hasAppRegistry := IncludesData(*policy, "app_registry") && policy.Apps.count > 0
     return hasRecords || hasNames || hasAppRegistry
+}
+
+AllowsPull :: (policy: *NodeSyncPolicy) -> bool {
+    if policy == null {
+        return false
+    }
+    direction := Lower(TrimSpace(policy.Direction))
+    if direction != "pull" && direction != "bidirectional" {
+        return false
+    }
+    return IncludesData(policy, "encrypted_records") || IncludesData(policy, "names") ||
+        IncludesData(policy, "app_registry")
+}
+
+Contains :: (approved: []string, requested: []string) -> bool {
+    if requested.count == 0 {
+        return true
+    }
+    allowed: Map(string, bool)
+    for value: approved {
+        MapSet(allowed, Lower(TrimSpace(value)), true)
+    }
+    for value: requested {
+        if !MapGet(allowed, Lower(TrimSpace(value))) {
+            return false
+        }
+    }
+    return true
+}
+
+AllowsOperation :: (approved: NodeSyncPolicy, requested: NodeSyncPolicy, operation: string) -> bool {
+    direction := Lower(TrimSpace(approved.Direction))
+    if operation == "export" && direction != "push" && direction != "bidirectional" {
+        return false
+    }
+    if operation == "import" && direction != "pull" && direction != "bidirectional" {
+        return false
+    }
+    return Contains(approved.Apps, requested.Apps) &&
+        Contains(approved.Collections, requested.Collections) &&
+        Contains(approved.Spaces, requested.Spaces) && Contains(approved.Data, requested.Data)
+}
+
+CollectionAllowed :: (allowed: []string, collection: string) -> bool {
+    for pattern: allowed {
+        pattern = TrimSpace(pattern)
+        if pattern == "" {
+            continue
+        }
+        if HasSuffix(pattern, ".*") {
+            if HasPrefix(collection, TrimSuffix(pattern, "*")) {
+                return true
+            }
+            continue
+        }
+        if collection == pattern {
+            return true
+        }
+    }
+    return false
+}
+
+AllowsRecord :: (policy: NodeSyncPolicy, matchers: []scope.CollectionMatcher, collection: string) -> bool {
+    if policy.Collections.count > 0 && !CollectionAllowed(policy.Collections, collection) {
+        return false
+    }
+    if policy.Apps.count == 0 {
+        return true
+    }
+    matcher := scope.Best(collection, matchers)
+    if matcher == null {
+        return false
+    }
+    for app: policy.Apps {
+        if EqualFold(TrimSpace(app), matcher.AppID) {
+            return true
+        }
+    }
+    return false
 }

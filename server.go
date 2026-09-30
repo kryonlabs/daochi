@@ -1189,7 +1189,7 @@ func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
 	if len(publicKey) != mlDSA44PublicKeySize {
 		return nil, errors.New("wrong public_key size")
 	}
-	if err := validateUserIDForPublicKey(req.UserIDHash, publicKey); err != nil {
+	if err := EncryptedRecord_ValidateAccountKey(req.UserIDHash, publicKey); err != nil {
 		return nil, errors.New("public_key does not match user_id_hash")
 	}
 	return publicKey, nil
@@ -1230,7 +1230,7 @@ func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error
 		return errors.New("app_id required")
 	}
 	for _, item := range req.EncryptedRecords {
-		if !validEncryptedRecordForProtocol(item, req.ProtocolVersion) {
+		if !EncryptedRecord_ValidForProtocol(item, req.ProtocolVersion) {
 			return errors.New("invalid encrypted record")
 		}
 		if req.AppID != "" {
@@ -1294,46 +1294,6 @@ func normalizeAlias(alias string) string {
 
 func validProfileIcon(profileIcon int) bool {
 	return profileIcon >= ProfileIconNone && profileIcon <= ProfileIconTree5
-}
-
-func validEncryptedRecord(item EncryptedRecord) bool {
-	if !Identity_ValidNamespace(strings.TrimSpace(item.Collection)) ||
-		!Identity_ValidEncryptedRecordID(strings.TrimSpace(item.ID)) {
-		return false
-	}
-	if strings.TrimSpace(item.UpdatedAt) == "" {
-		return false
-	}
-	if item.DeletedAt == 0 && strings.TrimSpace(item.Ciphertext) == "" {
-		return false
-	}
-	return len(item.Ciphertext) <= 262144 &&
-		len(item.Nonce) <= 256 &&
-		len(item.KeyID) <= 128 &&
-		validEncryptedRecordMetadata(item)
-}
-
-func validEncryptedRecordForProtocol(item EncryptedRecord, protocolVersion int) bool {
-	if !validEncryptedRecord(item) {
-		return false
-	}
-	if protocolVersion >= 5 {
-		return Identity_ValidEncryptedHierarchyCollection(item.Collection) ||
-			Identity_ValidLegacyEncryptedCollection(item.Collection)
-	}
-	return true
-}
-
-func validEncryptedRecordMetadata(item EncryptedRecord) bool {
-	contentHash := strings.TrimSpace(item.ContentHash)
-	parentID := strings.TrimSpace(item.ParentID)
-	if contentHash != "" && !Identity_ValidUserID(contentHash) {
-		return false
-	}
-	if parentID != "" && !Identity_ValidEncryptedRecordID(parentID) {
-		return false
-	}
-	return item.SchemaVersion >= 0 && item.SchemaVersion <= 65535
 }
 
 func validLeaderboardMetric(practice, metric string) bool {
@@ -1515,7 +1475,7 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 		if len(publicKey) != mlDSA44PublicKeySize {
 			return nil, authError{status: http.StatusBadRequest, message: "wrong public_key size"}
 		}
-		if err := validateUserIDForPublicKey(userID, publicKey); err != nil {
+		if err := EncryptedRecord_ValidateAccountKey(userID, publicKey); err != nil {
 			return nil, authError{status: http.StatusBadRequest, message: "public_key does not match user_id_hash"}
 		}
 	} else if publicKeyText != "" {

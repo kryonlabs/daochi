@@ -51,12 +51,13 @@ func TestMeshDeletePropagationConverges(t *testing.T) {
 		return exists != 0
 	}
 	syncPeers := func() {
-		records, deletions, _, _, err := storeA.ExportMeshEncryptedRecords(ctx, policy, "", 100)
+		exported := MeshStore_ExportEncryptedRecords(storeA.db, ctx, policy, "", 100)
+		records, deletions, err := exported.Records, exported.Deletions, exported.Error
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := storeB.ImportMeshEncryptedBatch(ctx, policy, records, deletions); err != nil {
-			t.Fatal(err)
+		if imported := MeshStore_ImportEncryptedBatch(storeB.db, ctx, policy, records, deletions); imported.Error != nil {
+			t.Fatal(imported.Error)
 		}
 	}
 

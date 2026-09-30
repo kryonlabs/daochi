@@ -4,6 +4,7 @@ package main
 import strings "strings"
 
 // #import protocol
+// #import std_map_go
 func MeshPolicy_IncludesData(policy *NodeSyncPolicy, dataType string) bool {
 	if policy == nil || int64(len(policy.Data)) == 0 {
 		return true
@@ -53,4 +54,137 @@ func MeshPolicy_ValidInbound(policy NodeSyncPolicy) bool {
 	var value_2 bool = MeshPolicy_IncludesData(&(policy), "app_registry")
 	hasAppRegistry := value_2 && int64(len(policy.Apps)) > 0
 	return hasRecords || hasNames || hasAppRegistry
+}
+
+func MeshPolicy_AllowsPull(policy *NodeSyncPolicy) bool {
+	if policy == nil {
+		return false
+	}
+	direction := strings.ToLower(strings.TrimSpace(policy.Direction))
+	if direction != "pull" && direction != "bidirectional" {
+		return false
+	}
+	var value_0 bool = MeshPolicy_IncludesData(policy, "encrypted_records")
+	var value_1 bool = value_0
+	if !value_1 {
+		var value_2 bool = MeshPolicy_IncludesData(policy, "names")
+		value_1 = value_2
+	}
+	var value_3 bool = value_1
+	if !value_3 {
+		var value_4 bool = MeshPolicy_IncludesData(policy, "app_registry")
+		value_3 = value_4
+	}
+	return value_3
+}
+
+func MeshPolicy_Contains(approved []string, requested []string) bool {
+	if int64(len(requested)) == 0 {
+		return true
+	}
+	var allowed __type_c922d3f56b74fd5a = *new(__type_c922d3f56b74fd5a)
+	for _, value := range approved {
+		var value_0 *__type_c922d3f56b74fd5a = &(allowed)
+		var value_2 string = strings.ToLower(strings.TrimSpace(value))
+		var value_1 string = value_2
+		var value_3 bool = true
+		if (*value_0) == nil {
+			(*value_0) = make(__type_c922d3f56b74fd5a)
+		}
+		(*value_0)[value_1] = value_3
+	}
+	for _, value := range requested {
+		var value_4 __type_c922d3f56b74fd5a = allowed
+		var value_6 string = strings.ToLower(strings.TrimSpace(value))
+		var value_5 string = value_6
+		var value_7 bool = value_4[value_5]
+		if !value_7 {
+			return false
+		}
+	}
+	return true
+}
+
+func MeshPolicy_AllowsOperation(approved NodeSyncPolicy, requested NodeSyncPolicy, operation string) bool {
+	direction := strings.ToLower(strings.TrimSpace(approved.Direction))
+	if operation == "export" && direction != "push" && direction != "bidirectional" {
+		return false
+	}
+	if operation == "import" && direction != "pull" && direction != "bidirectional" {
+		return false
+	}
+	var value_0 bool = MeshPolicy_Contains(approved.Apps, requested.Apps)
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = MeshPolicy_Contains(approved.Collections, requested.Collections)
+		value_1 = value_2
+	}
+	var value_3 bool = value_1
+	if value_3 {
+		var value_4 bool = MeshPolicy_Contains(approved.Spaces, requested.Spaces)
+		value_3 = value_4
+	}
+	var value_5 bool = value_3
+	if value_5 {
+		var value_6 bool = MeshPolicy_Contains(approved.Data, requested.Data)
+		value_5 = value_6
+	}
+	return value_5
+}
+
+func MeshPolicy_CollectionAllowed(allowed []string, collection string) bool {
+	for _, pattern := range allowed {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if strings.HasSuffix(pattern, ".*") {
+			if strings.HasPrefix(collection, strings.TrimSuffix(pattern, "*")) {
+				return true
+			}
+			continue
+		}
+		if collection == pattern {
+			return true
+		}
+	}
+	return false
+}
+
+func MeshPolicy_AllowsRecord(policy NodeSyncPolicy, matchers []CollectionMatcher, collection string) bool {
+	var value_0 bool = int64(len(policy.Collections)) > 0
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = MeshPolicy_CollectionAllowed(policy.Collections, collection)
+		value_1 = !value_2
+	}
+	if value_1 {
+		return false
+	}
+	if int64(len(policy.Apps)) == 0 {
+		return true
+	}
+	matcher := CollectionScope_Best(collection, matchers)
+	if matcher == nil {
+		return false
+	}
+	{
+		value_3 := policy.Apps[:]
+		if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
+			panic("slice range out of bounds")
+		}
+		loop_view_10 := value_3[0:int64(len(value_3)):int64(len(value_3))]
+		loop_count_10 := int64(len(loop_view_10))
+		var loop_cursor_10 int64 = 0
+		for loop_cursor_10 < loop_count_10 {
+			loop_index_10 := loop_cursor_10
+			app := loop_view_10[loop_index_10]
+			var value_4 string = strings.TrimSpace(app)
+			if strings.EqualFold(value_4, matcher.AppID) {
+				return true
+			}
+			loop_cursor_10++
+		}
+	}
+	return false
 }

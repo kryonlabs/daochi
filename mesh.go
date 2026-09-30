@@ -3,12 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,71 +12,6 @@ import (
 	"strings"
 	"time"
 )
-
-const (
-	defaultNodeSyncBatchLimit = 500
-	maxNodeSyncBatchLimit     = 2000
-)
-
-type MeshEncryptedRecord struct {
-	UserIDHash  string `json:"user_id_hash"`
-	PublicKey   string `json:"public_key"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	LastSeenAt  string `json:"last_seen_at,omitempty"`
-	MeshVersion int64  `json:"mesh_version,omitempty"`
-	Record      EncryptedRecord
-}
-
-// MeshEncryptedRecordDeletion is a tombstone for a record removed on a
-// peer node. It rides in a separate payload field so older nodes that do
-// not understand deletions keep working unchanged.
-type MeshEncryptedRecordDeletion struct {
-	UserIDHash  string `json:"user_id_hash"`
-	Collection  string `json:"collection"`
-	ID          string `json:"id"`
-	DeletedAt   string `json:"deleted_at"`
-	MeshVersion int64  `json:"mesh_version,omitempty"`
-}
-
-type NodeMeshExportRequest struct {
-	Cursor string         `json:"cursor,omitempty"`
-	Limit  int            `json:"limit,omitempty"`
-	Policy NodeSyncPolicy `json:"policy,omitempty"`
-}
-
-type NodeMeshExportResponse struct {
-	Status     string                         `json:"status"`
-	Apps       []SignedAppRegistrationRequest `json:"apps,omitempty"`
-	Records    []MeshEncryptedRecord          `json:"records"`
-	Deletions  []MeshEncryptedRecordDeletion  `json:"deletions,omitempty"`
-	Spaces     []MeshTrustSpace               `json:"spaces,omitempty"`
-	Names      []NameClaim                    `json:"names,omitempty"`
-	NextCursor string                         `json:"next_cursor,omitempty"`
-	Truncated  bool                           `json:"truncated,omitempty"`
-}
-
-type NodeMeshImportRequest struct {
-	Apps      []SignedAppRegistrationRequest `json:"apps,omitempty"`
-	Records   []MeshEncryptedRecord          `json:"records"`
-	Deletions []MeshEncryptedRecordDeletion  `json:"deletions,omitempty"`
-	Spaces    []MeshTrustSpace               `json:"spaces,omitempty"`
-	Names     []NameClaim                    `json:"names,omitempty"`
-	Policy    NodeSyncPolicy                 `json:"policy,omitempty"`
-}
-
-type NodeMeshImportResponse struct {
-	Status  string `json:"status"`
-	Records int    `json:"records"`
-	Applied int    `json:"applied"`
-}
-
-type meshCursor struct {
-	Seq        int64  `json:"seq,omitempty"`
-	UpdatedAt  string `json:"updated_at"`
-	UserIDHash string `json:"user_id_hash"`
-	Collection string `json:"collection"`
-	ID         string `json:"id"`
-}
 
 func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
@@ -112,8 +43,9 @@ func (s *Server) handleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
 		Response_Error(w, http.StatusInternalServerError, "mesh app registry export failed")
 		return
 	}
-	limit := meshBatchLimit(req.Limit, s.cfg.NodeSyncBatchLimit)
-	records, deletions, nextCursor, truncated, err := s.store.ExportMeshEncryptedRecords(r.Context(), req.Policy, req.Cursor, limit)
+	limit := MeshCursor_BatchLimit(req.Limit, s.cfg.NodeSyncBatchLimit)
+	exportedRecords := MeshStore_ExportEncryptedRecords(s.store.db, r.Context(), req.Policy, req.Cursor, limit)
+	records, deletions, nextCursor, truncated, err := exportedRecords.Records, exportedRecords.Deletions, exportedRecords.NextCursor, exportedRecords.Truncated, exportedRecords.Error
 	if err != nil {
 		slog.Error("mesh export", "error", err)
 		Response_Error(w, http.StatusInternalServerError, "mesh export failed")
@@ -166,7 +98,8 @@ func (s *Server) handleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	applied, err := s.store.ImportMeshEncryptedBatch(r.Context(), req.Policy, req.Records, req.Deletions)
+	importedRecords := MeshStore_ImportEncryptedBatch(s.store.db, r.Context(), req.Policy, req.Records, req.Deletions)
+	applied, err := importedRecords.Value, importedRecords.Error
 	if err != nil {
 		slog.Error("mesh import", "error", err)
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -226,39 +159,9 @@ func (s *Server) authorizeRequestedPolicy(
 		Response_Error(w, http.StatusInternalServerError, "peer policy lookup failed")
 		return false
 	}
-	if !found || !policyAllowsOperation(approved, requested, operation) {
+	if !found || !MeshPolicy_AllowsOperation(approved, requested, operation) {
 		Response_Error(w, http.StatusForbidden, "requested mesh policy exceeds paired scope")
 		return false
-	}
-	return true
-}
-
-func policyAllowsOperation(approved, requested NodeSyncPolicy, operation string) bool {
-	direction := strings.ToLower(strings.TrimSpace(approved.Direction))
-	if operation == "export" && direction != "push" && direction != "bidirectional" {
-		return false
-	}
-	if operation == "import" && direction != "pull" && direction != "bidirectional" {
-		return false
-	}
-	return stringSetContains(approved.Apps, requested.Apps) &&
-		stringSetContains(approved.Collections, requested.Collections) &&
-		stringSetContains(approved.Spaces, requested.Spaces) &&
-		stringSetContains(approved.Data, requested.Data)
-}
-
-func stringSetContains(approved, requested []string) bool {
-	if len(requested) == 0 {
-		return true
-	}
-	allowed := make(map[string]bool, len(approved))
-	for _, value := range approved {
-		allowed[strings.ToLower(strings.TrimSpace(value))] = true
-	}
-	for _, value := range requested {
-		if !allowed[strings.ToLower(strings.TrimSpace(value))] {
-			return false
-		}
 	}
 	return true
 }
@@ -268,20 +171,6 @@ func bearerToken(header string) string {
 		return strings.TrimSpace(after)
 	}
 	return ""
-}
-
-func meshBatchLimit(requested, configured int) int {
-	limit := configured
-	if limit <= 0 {
-		limit = defaultNodeSyncBatchLimit
-	}
-	if requested > 0 && requested < limit {
-		limit = requested
-	}
-	if limit > maxNodeSyncBatchLimit {
-		return maxNodeSyncBatchLimit
-	}
-	return limit
 }
 
 func (s *Server) runNodeSync(ctx context.Context) {
@@ -320,7 +209,7 @@ func (s *Server) pullConfiguredNodePeers(ctx context.Context) {
 		}
 	}
 	for _, peer := range peers {
-		if !nodePolicyAllowsPull(peer.Sync) {
+		if !MeshPolicy_AllowsPull(peer.Sync) {
 			continue
 		}
 		if err := s.pullNodePeer(ctx, peer); err != nil {
@@ -335,15 +224,16 @@ func (s *Server) pullNodePeer(ctx context.Context, peer NodePeer) error {
 		return nil
 	}
 	policy := effectiveNodeSyncPolicy(peer.Sync)
-	peerKey := meshPeerCursorKey(baseURL, policy)
-	cursor, err := s.store.LoadNodeSyncCursor(ctx, peerKey)
+	peerKey := MeshCursor_PeerKey(baseURL, policy)
+	loadedCursor := MeshStore_LoadCursor(s.store.db, ctx, peerKey)
+	cursor, err := loadedCursor.Value, loadedCursor.Error
 	if err != nil {
 		return err
 	}
 	for {
 		req := NodeMeshExportRequest{
 			Cursor: cursor,
-			Limit:  meshBatchLimit(0, s.cfg.NodeSyncBatchLimit),
+			Limit:  MeshCursor_BatchLimit(0, s.cfg.NodeSyncBatchLimit),
 			Policy: policy,
 		}
 		var exported NodeMeshExportResponse
@@ -358,7 +248,8 @@ func (s *Server) pullNodePeer(ctx context.Context, peer NodePeer) error {
 		if err != nil {
 			return err
 		}
-		applied, err := s.store.ImportMeshEncryptedBatch(ctx, policy, exported.Records, exported.Deletions)
+		importedRecords := MeshStore_ImportEncryptedBatch(s.store.db, ctx, policy, exported.Records, exported.Deletions)
+		applied, err := importedRecords.Value, importedRecords.Error
 		if err != nil {
 			return err
 		}
@@ -384,12 +275,13 @@ func (s *Server) pullNodePeer(ctx context.Context, peer NodePeer) error {
 					lastSeq = deletion.MeshVersion
 				}
 			}
-			lastCursor, err = encodeMeshCursor(meshCursor{Seq: lastSeq})
+			encodedCursor := MeshCursor_Encode(MeshCursor{Seq: lastSeq})
+			lastCursor, err = encodedCursor.Value, encodedCursor.Error
 			if err != nil {
 				return err
 			}
 		}
-		if err := s.store.SaveNodeSyncCursor(ctx, peerKey, lastCursor); err != nil {
+		if err := MeshStore_SaveCursor(s.store.db, ctx, peerKey, lastCursor); err != nil {
 			return err
 		}
 		if !exported.Truncated || exported.NextCursor == "" {
@@ -430,53 +322,9 @@ func (s *Server) postNodeMeshJSON(ctx context.Context, peerNodeID, target string
 	return nil
 }
 
-func nodePolicyAllowsPull(policy *NodeSyncPolicy) bool {
-	if policy == nil {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(policy.Direction)) {
-	case "pull", "bidirectional":
-		return MeshPolicy_IncludesData(policy, "encrypted_records") ||
-			MeshPolicy_IncludesData(policy, "names") ||
-			MeshPolicy_IncludesData(policy, "app_registry")
-	default:
-		return false
-	}
-}
-
 func effectiveNodeSyncPolicy(policy *NodeSyncPolicy) NodeSyncPolicy {
 	if policy == nil {
 		return NodeSyncPolicy{}
 	}
 	return *policy
-}
-
-func meshPeerCursorKey(baseURL string, policy NodeSyncPolicy) string {
-	body, _ := json.Marshal(policy)
-	sum := sha256.Sum256([]byte(strings.TrimRight(baseURL, "/") + "\x00" + string(body)))
-	return hex.EncodeToString(sum[:])
-}
-
-func encodeMeshCursor(cursor meshCursor) (string, error) {
-	data, err := json.Marshal(cursor)
-	if err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(data), nil
-}
-
-func decodeMeshCursor(raw string) (meshCursor, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return meshCursor{}, nil
-	}
-	data, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return meshCursor{}, errors.New("invalid mesh cursor")
-	}
-	var cursor meshCursor
-	if err := json.Unmarshal(data, &cursor); err != nil {
-		return meshCursor{}, errors.New("invalid mesh cursor")
-	}
-	return cursor, nil
 }

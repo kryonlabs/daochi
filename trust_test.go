@@ -134,22 +134,22 @@ func TestPairedPolicyCannotBeExpanded(t *testing.T) {
 		Collections: []string{"private.inbe.v1.*"},
 		Data:        []string{"encrypted_records"},
 	}
-	if !policyAllowsOperation(approved, approved, "export") {
+	if !MeshPolicy_AllowsOperation(approved, approved, "export") {
 		t.Fatal("approved policy was rejected")
 	}
 	expanded := approved
 	expanded.Apps = []string{"inbe", "other"}
-	if policyAllowsOperation(approved, expanded, "export") {
+	if MeshPolicy_AllowsOperation(approved, expanded, "export") {
 		t.Fatal("expanded app scope was accepted")
 	}
 	expanded = approved
 	expanded.Collections = []string{"public.other.v1.*"}
-	if policyAllowsOperation(approved, expanded, "import") {
+	if MeshPolicy_AllowsOperation(approved, expanded, "import") {
 		t.Fatal("expanded collection scope was accepted")
 	}
 	pullOnly := approved
 	pullOnly.Direction = "pull"
-	if policyAllowsOperation(pullOnly, approved, "export") {
+	if MeshPolicy_AllowsOperation(pullOnly, approved, "export") {
 		t.Fatal("pull-only peer was allowed to export data")
 	}
 	if MeshPolicy_Inverse(pullOnly).Direction != "push" {
@@ -325,11 +325,12 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 	if applied != 1 {
 		t.Fatalf("applied apps = %d, want 1", applied)
 	}
-	matchers, err := targetStore.appCollectionMatchers(t.Context())
+	loadedMatchers := CollectionScope_Load(targetStore.db, t.Context())
+	matchers, err := loadedMatchers.Value, loadedMatchers.Error
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !meshPolicyAllowsRecord(policy, matchers, "private.notes.v1.page") {
+	if !MeshPolicy_AllowsRecord(policy, matchers, "private.notes.v1.page") {
 		t.Fatal("replicated app registry does not authorize its collection")
 	}
 

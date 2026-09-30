@@ -72,18 +72,18 @@ field names, Go storage types, order and reflection tags.
 | `inspect.go` | Go with ported callers | Offline database commands and redaction |
 | `log_safety.go` | Ziran | `log_safety.zi`: byte-preserving CR/LF removal |
 | `main.go` | Go | Startup, worker supervision, HTTP lifecycle |
-| `mesh.go` | Go | Peer requests, retries, authentication, replication |
+| `mesh.go` | Partial Ziran | Wire records in `mesh_types.zi`, cursor encoding/decoding, peer-key hashing and limits in `mesh_cursor.zi`, direction and scope predicates in `mesh_policy.zi`; peer requests, retries, HTTP authentication and replication orchestration remain Go |
 | `mesh_apps.go` | Partial Ziran | Normalized app sets in `sets.zi`; registry replication and app projections remain Go |
-| `mesh_store.go` | Go with ported callers | Mesh export/import and scope enforcement |
+| `mesh_store.go` | Ziran | `mesh_store.zi`: encrypted-record export/import, stable change ordering, account tombstones, conflicts, deletion propagation, cursor persistence and atomic rollback; collection ownership in `collection_scope.zi`, record validation in `encrypted_record.zi` |
 | `metrics.go` | Ziran | `metrics.zi`: concurrent counters, route/reason normalization, escaped labels, sorted maps, aggregate usage and exact Prometheus output |
 | `monero_deposits.go` | Go with ported callers | Deposit reconciliation and credit transactions |
 | `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
 | `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
-| `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; remaining HTTP handlers and lifecycle remain Go |
+| `server.go` | Partial Ziran | Identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; remaining HTTP handlers and lifecycle remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch and tombstone queries in `account_state.zi`; schema, sync transactions, conflicts and projections remain Go |
+| `store.go` | Partial Ziran | Timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, sync transactions, conflicts and projections remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Go with ported callers | Authenticated WebSocket framing and connection lifecycle |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -258,6 +258,25 @@ export never includes authority private keys. Baseline comparisons cover stored
 state, malformed JSON, cancellation and entropy errors, failed commits,
 connection reuse, concurrent invite consumers and record reflection tags.
 `mesh_policy.zi` owns the shared data-scope and reciprocal-direction helpers.
+
+`mesh_store.zi` completes encrypted mesh storage. Export walks sequence-ordered
+changes, retains deletion tombstones and skips upserts whose record or account
+is gone. Scope matching preserves the longest registered prefix and original
+tie order. Import stably merges record and deletion sequences, validates account
+key hashes and record metadata, filters explicit scopes and prevents deleted
+accounts from being resurrected. User, sync-version, record and change-log writes
+commit together; failed writes, validation or commits roll back the whole batch.
+Conflict decisions preserve canonical timestamps and deterministic content ties.
+Cursor persistence retains exact stored bytes, blank-write behavior and native
+SQL/context errors. Maintained HTTP and peer consumers use the generated surface.
+Independent baseline comparisons cover pagination, nil/empty results, excluded
+data types, malformed cursors and records, denied scopes, cancelled operations,
+query/scan failures, rollback, connection reuse and delete/recreate convergence.
+`mesh_types.zi` preserves the original wire-field layouts; `mesh_cursor.zi`
+preserves base64/JSON bytes, partial-decode rejection, integer bounds, batch limits
+and URL/policy cursor keys. The native SQL scan found a Go backend truncation bug;
+Ziran now uses the complete checked parameter list for procedure signatures and
+foreign calls, with source and saved-IR regressions through 64 parameters.
 
 `device_keys.zi` owns the device records and storage lifecycle. Canonical
 messages preserve raw bytes, integer limits and trailing newlines; normalization

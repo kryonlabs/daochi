@@ -1015,7 +1015,7 @@ func (s *Store) ApplySyncDetailed(ctx context.Context, req SyncRequest, publicKe
 		return SyncResult{}, nil, fmt.Errorf("social_cache is server-owned")
 	}
 	for _, item := range req.EncryptedRecords {
-		if !validEncryptedRecordForProtocol(item, req.ProtocolVersion) {
+		if !EncryptedRecord_ValidForProtocol(item, req.ProtocolVersion) {
 			return SyncResult{}, nil, fmt.Errorf("invalid encrypted record")
 		}
 	}
@@ -1034,7 +1034,7 @@ ON CONFLICT(user_id_hash,id) DO NOTHING`, req.UserIDHash, item.ID, item.SessionI
 		if err != nil {
 			return SyncResult{}, nil, err
 		}
-		result.MeditationLogs += rowsAffected(res)
+		result.MeditationLogs += AccountState_Affected(res)
 	}
 	for _, habit := range req.Habits {
 		originalID := habit.ID
@@ -1084,7 +1084,7 @@ WHERE excluded.updated_at >= server_habits.updated_at`,
 		if err != nil {
 			return SyncResult{}, nil, err
 		}
-		result.Habits += rowsAffected(res)
+		result.Habits += AccountState_Affected(res)
 	}
 	for _, day := range req.HabitDays {
 		originalID := day.HabitID
@@ -1116,7 +1116,7 @@ WHERE excluded.updated_at >= server_habit_days.updated_at`,
 		if err != nil {
 			return SyncResult{}, nil, err
 		}
-		result.HabitDays += rowsAffected(res)
+		result.HabitDays += AccountState_Affected(res)
 	}
 	for _, session := range req.Sessions {
 		if req.Bootstrap && session.DeletedAt > 0 {
@@ -1281,7 +1281,7 @@ WHERE excluded.updated_at >= server_habits.updated_at`,
 		if err != nil {
 			return err
 		}
-		result.Habits += rowsAffected(res)
+		result.Habits += AccountState_Affected(res)
 	case "habit_day":
 		var day HabitDay
 		if len(op.Payload) == 0 {
@@ -1319,7 +1319,7 @@ WHERE excluded.updated_at >= server_habit_days.updated_at`,
 		if err != nil {
 			return err
 		}
-		result.HabitDays += rowsAffected(res)
+		result.HabitDays += AccountState_Affected(res)
 	case "session":
 		var session Session
 		if len(op.Payload) == 0 {
@@ -1407,7 +1407,7 @@ WHERE user_id_hash=?1`, userID, alias, Timestamp_CanonicalNow())
 	if err != nil {
 		return err
 	}
-	if rowsAffected(res) == 0 {
+	if AccountState_Affected(res) == 0 {
 		return ErrSyncUserNotFound
 	}
 	return nil
@@ -1433,7 +1433,7 @@ WHERE user_id_hash=?1`, userID, profileIcon, Timestamp_CanonicalNow())
 	if err != nil {
 		return err
 	}
-	if rowsAffected(res) == 0 {
+	if AccountState_Affected(res) == 0 {
 		return ErrSyncUserNotFound
 	}
 	return nil
@@ -1712,7 +1712,7 @@ WHERE excluded.value != server_profile_stats.value
 		if err != nil {
 			return 0, err
 		}
-		applied += rowsAffected(res)
+		applied += AccountState_Affected(res)
 	}
 	return applied, tx.Commit()
 }
@@ -2695,7 +2695,7 @@ WHERE user_id_hash=?1
 	if err != nil {
 		return false, err
 	}
-	return rowsAffected(res) > 0, nil
+	return AccountState_Affected(res) > 0, nil
 }
 
 func canonicalHabitIDForWrite(ctx context.Context, tx *sql.Tx, userID, id, source string) (string, bool, error) {
@@ -2932,7 +2932,7 @@ WHERE user_id_hash=?1 AND op_id=?2`, userID, item.opID, canonicalID, string(payl
 		if err != nil {
 			return false, err
 		}
-		changed = changed || rowsAffected(res) > 0
+		changed = changed || AccountState_Affected(res) > 0
 	}
 	return changed, nil
 }
@@ -3066,7 +3066,7 @@ ON CONFLICT(user_id_hash,id) DO NOTHING`,
 		if err != nil {
 			return false, err
 		}
-		changed = changed || rowsAffected(res) > 0
+		changed = changed || AccountState_Affected(res) > 0
 		if err := mergeHabitRows(ctx, tx, userID, canonicalID, habit.id); err != nil {
 			return false, err
 		}
@@ -3660,7 +3660,7 @@ func upsertSession(ctx context.Context, tx *sql.Tx, userID string, session Sessi
 	if err != nil {
 		return 0, err
 	}
-	applied := rowsAffected(res)
+	applied := AccountState_Affected(res)
 	if applied == 0 || len(session.Rounds) == 0 {
 		return applied, nil
 	}
@@ -3716,7 +3716,7 @@ WHERE excluded.json != server_social_snapshots.json`,
 	if err != nil {
 		return 0, err
 	}
-	return rowsAffected(res), nil
+	return AccountState_Affected(res), nil
 }
 
 func (s *Store) SetSocialCacheJSON(ctx context.Context, userID, kind string, payload []byte) (int, error) {
@@ -3763,7 +3763,7 @@ WHERE excluded.updated_at >= server_encrypted_records.updated_at`,
 	if err != nil {
 		return 0, err
 	}
-	return rowsAffected(res), nil
+	return AccountState_Affected(res), nil
 }
 
 func deleteHabit(ctx context.Context, tx *sql.Tx, userID string, habit Habit) (int, error) {
@@ -3774,7 +3774,7 @@ WHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3`, userID, habit.ID, updatedAt
 	if err != nil {
 		return 0, err
 	}
-	applied := rowsAffected(res)
+	applied := AccountState_Affected(res)
 	if applied == 0 {
 		return 0, nil
 	}
@@ -3784,7 +3784,7 @@ WHERE user_id_hash=?1 AND habit_id=?2`, userID, habit.ID)
 	if err != nil {
 		return 0, err
 	}
-	applied += rowsAffected(res)
+	applied += AccountState_Affected(res)
 	if _, err := nextUserVersion(ctx, tx, userID); err != nil {
 		return 0, err
 	}
@@ -3800,7 +3800,7 @@ WHERE user_id_hash=?1 AND habit_id=?2 AND local_date=?3 AND updated_at<=?4`,
 	if err != nil {
 		return 0, err
 	}
-	applied := rowsAffected(res)
+	applied := AccountState_Affected(res)
 	if applied == 0 {
 		return 0, nil
 	}
@@ -3818,7 +3818,7 @@ WHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3`, userID, session.ID, updated
 	if err != nil {
 		return 0, err
 	}
-	applied := rowsAffected(res)
+	applied := AccountState_Affected(res)
 	if applied == 0 {
 		return 0, nil
 	}
@@ -3828,7 +3828,7 @@ WHERE user_id_hash=?1 AND session_id=?2`, userID, session.ID)
 	if err != nil {
 		return 0, err
 	}
-	applied += rowsAffected(res)
+	applied += AccountState_Affected(res)
 	if _, err := nextUserVersion(ctx, tx, userID); err != nil {
 		return 0, err
 	}
@@ -3836,23 +3836,8 @@ WHERE user_id_hash=?1 AND session_id=?2`, userID, session.ID)
 }
 
 func nextUserVersion(ctx context.Context, tx *sql.Tx, userID string) (int64, error) {
-	if _, err := tx.ExecContext(ctx, `
-INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)
-VALUES(?1,0)`, userID); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE server_sync_state
-SET server_version=server_version+1
-WHERE user_id_hash=?1`, userID); err != nil {
-		return 0, err
-	}
-	var version int64
-	err := tx.QueryRowContext(ctx, `
-SELECT server_version
-FROM server_sync_state
-WHERE user_id_hash=?1`, userID).Scan(&version)
-	return version, err
+	advanced := AccountState_NextVersion(tx, ctx, userID)
+	return advanced.Value, advanced.Error
 }
 
 func (s *Store) currentUserVersion(ctx context.Context, userID string) (int64, error) {
@@ -3952,15 +3937,6 @@ FROM server_encrypted_payloads`).Scan(&payloadCount, &usage.EncryptedPayloadByte
 	return usage, nil
 }
 
-type appCollectionMatcher struct {
-	AppID       string
-	DisplayName string
-	Prefix      string
-	MatchPrefix string
-	Wildcard    bool
-	Specificity int
-}
-
 type collectionStorageRow struct {
 	Collection string
 	Count      int
@@ -3968,7 +3944,8 @@ type collectionStorageRow struct {
 }
 
 func (s *Store) appStorageUsage(ctx context.Context) ([]AppStorageUsage, error) {
-	matchers, err := s.appCollectionMatchers(ctx)
+	loadedMatchers := CollectionScope_Load(s.db, ctx)
+	matchers, err := loadedMatchers.Value, loadedMatchers.Error
 	if err != nil {
 		return nil, err
 	}
@@ -3999,7 +3976,7 @@ ORDER BY collection`)
 		if err := rows.Scan(&row.Collection, &row.Count, &row.Bytes); err != nil {
 			return nil, err
 		}
-		matcher := bestCollectionMatcher(row.Collection, matchers)
+		matcher := CollectionScope_Best(row.Collection, matchers)
 		appID := "unregistered"
 		displayName := "Unregistered collections"
 		collectionPrefix := ""
@@ -4046,54 +4023,6 @@ ORDER BY collection`)
 		return apps[i].AppID < apps[j].AppID
 	})
 	return apps, nil
-}
-
-func (s *Store) appCollectionMatchers(ctx context.Context) ([]appCollectionMatcher, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT a.app_id,a.display_name,c.collection_prefix
-FROM server_apps a
-JOIN server_app_collections c ON c.app_id=a.app_id
-ORDER BY a.app_id,c.collection_prefix`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var matchers []appCollectionMatcher
-	for rows.Next() {
-		var matcher appCollectionMatcher
-		if err := rows.Scan(&matcher.AppID, &matcher.DisplayName, &matcher.Prefix); err != nil {
-			return nil, err
-		}
-		matcher.MatchPrefix = strings.TrimSuffix(matcher.Prefix, "*")
-		matcher.Wildcard = matcher.MatchPrefix != matcher.Prefix
-		matcher.Specificity = len(matcher.MatchPrefix)
-		matchers = append(matchers, matcher)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return matchers, nil
-}
-
-func bestCollectionMatcher(collection string, matchers []appCollectionMatcher) *appCollectionMatcher {
-	var best *appCollectionMatcher
-	for i := range matchers {
-		matcher := &matchers[i]
-		matches := false
-		if matcher.Wildcard {
-			matches = strings.HasPrefix(collection, matcher.MatchPrefix)
-		} else {
-			matches = collection == matcher.MatchPrefix
-		}
-		if !matches {
-			continue
-		}
-		if best == nil || matcher.Specificity > best.Specificity {
-			best = matcher
-		}
-	}
-	return best
 }
 
 func fileSizeOrZero(path string) int64 {
@@ -4175,23 +4104,6 @@ func (s *Store) accountTableCounts(ctx context.Context, userID string) (map[stri
 		counts[table] = n
 	}
 	return counts, nil
-}
-
-func validateUserIDForPublicKey(userID string, publicKey []byte) error {
-	sum := sha256.Sum256(publicKey)
-	actual := hex.EncodeToString(sum[:])
-	if userID != actual {
-		return fmt.Errorf("public key hash mismatch")
-	}
-	return nil
-}
-
-func rowsAffected(res sql.Result) int {
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0
-	}
-	return int(n)
 }
 
 func normalizedHabitDayCount(day HabitDay) int {

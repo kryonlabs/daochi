@@ -614,7 +614,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 		t.Fatalf("deleted account bootstrap status = %d body=%s", bootstrapRes.Code, bootstrapRes.Body.String())
 	}
 
-	applied, err := store.ImportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
+	importedRecords := MeshStore_ImportEncryptedRecords(store.db, context.Background(), NodeSyncPolicy{
 		Apps: []string{"inbe"}, Data: []string{"encrypted_records"},
 	}, []MeshEncryptedRecord{{
 		UserIDHash: userID,
@@ -624,6 +624,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 			Nonce: "n1", Ciphertext: "ciphertext", UpdatedAt: "2026-09-04T12:00:00Z",
 		},
 	}})
+	applied, err := importedRecords.Value, importedRecords.Error
 	if err != nil || applied != 0 {
 		t.Fatalf("deleted account mesh import applied=%d err=%v", applied, err)
 	}
@@ -1758,11 +1759,12 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull node peer: %v", err)
 	}
-	imported, _, _, _, err := target.store.ExportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
+	exportedRecords := MeshStore_ExportEncryptedRecords(target.store.db, context.Background(), NodeSyncPolicy{
 		Apps:        []string{"inbe"},
 		Collections: []string{"inbe.*"},
 		Data:        []string{"encrypted_records"},
 	}, "", 10)
+	imported, err := exportedRecords.Records, exportedRecords.Error
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1788,11 +1790,12 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	if len(exportCursors) != afterFirstPull+1 || exportCursors[len(exportCursors)-1] == "" {
 		t.Fatalf("mesh pull did not resume from persisted cursor: %#v", exportCursors)
 	}
-	appliedAgain, err := target.store.ImportMeshEncryptedRecords(context.Background(), NodeSyncPolicy{
+	reimported := MeshStore_ImportEncryptedRecords(target.store.db, context.Background(), NodeSyncPolicy{
 		Apps:        []string{"inbe"},
 		Collections: []string{"inbe.*"},
 		Data:        []string{"encrypted_records"},
 	}, imported)
+	appliedAgain, err := reimported.Value, reimported.Error
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1811,14 +1814,16 @@ func TestMeshCursorDoesNotSkipLateOlderTimestamp(t *testing.T) {
 
 	firstBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"mesh-order-client","encrypted_records":[{"collection":"inbe.habits","id":"newer","key_id":"main","nonce":"n1","ciphertext":"newer","updated_at":"2026-09-04T12:00:00Z"}]}`)
 	syncWithBody(t, handler, "", identity.UserID, identity.Token, firstBody)
-	first, _, cursor, truncated, err := store.ExportMeshEncryptedRecords(context.Background(), policy, "", 1)
+	firstPage := MeshStore_ExportEncryptedRecords(store.db, context.Background(), policy, "", 1)
+	first, cursor, truncated, err := firstPage.Records, firstPage.NextCursor, firstPage.Truncated, firstPage.Error
 	if err != nil || len(first) != 1 || !truncated || cursor == "" {
 		t.Fatalf("first mesh page records=%#v cursor=%q truncated=%v err=%v", first, cursor, truncated, err)
 	}
 
 	lateBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"mesh-order-client","encrypted_records":[{"collection":"inbe.habits","id":"late-older","key_id":"main","nonce":"n2","ciphertext":"late","updated_at":"2020-01-01T00:00:00Z"}]}`)
 	syncWithBody(t, handler, "", identity.UserID, identity.Token, lateBody)
-	late, _, _, _, err := store.ExportMeshEncryptedRecords(context.Background(), policy, cursor, 10)
+	latePage := MeshStore_ExportEncryptedRecords(store.db, context.Background(), policy, cursor, 10)
+	late, err := latePage.Records, latePage.Error
 	if err != nil || len(late) != 1 || late[0].Record.ID != "late-older" {
 		t.Fatalf("late mesh page records=%#v err=%v", late, err)
 	}

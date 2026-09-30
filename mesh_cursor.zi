@@ -1,0 +1,83 @@
+#import "std/go_types"
+#import "protocol"
+#import "mesh_types"
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+signing :: #import "signing";
+errors :: #import "std/errors_go";
+go_strings :: #system_library "go:strings";
+go_base64 :: #system_library "go:encoding/base64";
+
+CursorResult :: struct {
+    value: MeshCursor
+    error: Error
+}
+CursorTextResult :: struct {
+    value: string
+    error: Error
+}
+
+#scope_file
+Encoding :: #type #foreign go_base64 "Encoding";
+BytesResult :: struct {
+    value: []u8
+    error: Error
+}
+RawURL :: () -> *Encoding #go_field #foreign go_base64 "RawURLEncoding";
+EncodeRaw :: (encoding: *Encoding, value: []u8) -> string #foreign go_base64 "(*Encoding).EncodeToString";
+DecodeRaw :: (encoding: *Encoding, value: string) -> BytesResult #go_results #foreign go_base64 "(*Encoding).DecodeString";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+TrimRight :: (value: string, cutset: string) -> string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+
+#scope_export
+Encode :: (cursor: MeshCursor) -> CursorTextResult {
+    result: CursorTextResult
+    encoded := json.Marshal(cursor)
+    result.error = encoded.error
+    if result.error != null {
+        return result
+    }
+    result.value = EncodeRaw(RawURL(), encoded.value)
+    return result
+}
+
+Decode :: (raw: string) -> CursorResult {
+    result: CursorResult
+    raw = TrimSpace(raw)
+    if raw == "" {
+        return result
+    }
+    decoded := DecodeRaw(RawURL(), raw)
+    if decoded.error != null {
+        result.error = errors.New("invalid mesh cursor")
+        return result
+    }
+    cursor: MeshCursor
+    if json.Unmarshal(decoded.value, *cursor) != null {
+        result.error = errors.New("invalid mesh cursor")
+        return result
+    }
+    result.value = cursor
+    return result
+}
+
+PeerKey :: (baseURL: string, policy: NodeSyncPolicy) -> string {
+    encoded := json.Marshal(policy)
+    parts: [3]string = .[TrimRight(baseURL, "/"), "\x00", text.FromBytes(encoded.value)]
+    return signing.SHA256Hex(text.ToBytes(Join(parts[:], "")))
+}
+
+BatchLimit :: (requested: isize, configured: isize) -> isize {
+    limit := configured
+    if limit <= cast(isize)0 {
+        limit = cast(isize)DefaultNodeSyncBatchLimit
+    }
+    if requested > cast(isize)0 && requested < limit {
+        limit = requested
+    }
+    if limit > cast(isize)MaxNodeSyncBatchLimit {
+        return cast(isize)MaxNodeSyncBatchLimit
+    }
+    return limit
+}

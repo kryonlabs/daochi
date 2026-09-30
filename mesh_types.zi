@@ -1,0 +1,57 @@
+#import "protocol"
+#import "manifest"
+#import "node_identity"
+
+DefaultNodeSyncBatchLimit :: 500;
+MaxNodeSyncBatchLimit :: 2000;
+
+MeshEncryptedRecord :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    PublicKey: string #go_tag "json:\"public_key\""
+    CreatedAt: string #go_tag "json:\"created_at,omitempty\""
+    LastSeenAt: string #go_tag "json:\"last_seen_at,omitempty\""
+    MeshVersion: s64 #go_tag "json:\"mesh_version,omitempty\""
+    Record: EncryptedRecord
+}
+MeshEncryptedRecordDeletion :: struct {
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    Collection: string #go_tag "json:\"collection\""
+    ID: string #go_tag "json:\"id\""
+    DeletedAt: string #go_tag "json:\"deleted_at\""
+    MeshVersion: s64 #go_tag "json:\"mesh_version,omitempty\""
+}
+NodeMeshExportRequest :: struct {
+    Cursor: string #go_tag "json:\"cursor,omitempty\""
+    Limit: isize #go_tag "json:\"limit,omitempty\""
+    Policy: NodeSyncPolicy #go_tag "json:\"policy,omitempty\""
+}
+NodeMeshExportResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    Apps: []SignedAppRegistrationRequest #go_tag "json:\"apps,omitempty\""
+    Records: []MeshEncryptedRecord #go_tag "json:\"records\""
+    Deletions: []MeshEncryptedRecordDeletion #go_tag "json:\"deletions,omitempty\""
+    Spaces: []MeshTrustSpace #go_tag "json:\"spaces,omitempty\""
+    Names: []NameClaim #go_tag "json:\"names,omitempty\""
+    NextCursor: string #go_tag "json:\"next_cursor,omitempty\""
+    Truncated: bool #go_tag "json:\"truncated,omitempty\""
+}
+NodeMeshImportRequest :: struct {
+    Apps: []SignedAppRegistrationRequest #go_tag "json:\"apps,omitempty\""
+    Records: []MeshEncryptedRecord #go_tag "json:\"records\""
+    Deletions: []MeshEncryptedRecordDeletion #go_tag "json:\"deletions,omitempty\""
+    Spaces: []MeshTrustSpace #go_tag "json:\"spaces,omitempty\""
+    Names: []NameClaim #go_tag "json:\"names,omitempty\""
+    Policy: NodeSyncPolicy #go_tag "json:\"policy,omitempty\""
+}
+NodeMeshImportResponse :: struct {
+    Status: string #go_tag "json:\"status\""
+    Records: isize #go_tag "json:\"records\""
+    Applied: isize #go_tag "json:\"applied\""
+}
+MeshCursor :: struct {
+    Seq: s64 #go_tag "json:\"seq,omitempty\""
+    UpdatedAt: string #go_tag "json:\"updated_at\""
+    UserIDHash: string #go_tag "json:\"user_id_hash\""
+    Collection: string #go_tag "json:\"collection\""
+    ID: string #go_tag "json:\"id\""
+}

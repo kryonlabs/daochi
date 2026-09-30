@@ -1,0 +1,514 @@
+#import "std/go_types"
+#import "protocol"
+#import "mesh_types"
+#import "std/map_go"
+#import "std/option"
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+cursor :: #import "mesh_cursor";
+scope :: #import "collection_scope";
+policy :: #import "mesh_policy";
+record :: #import "encrypted_record";
+account :: #import "account_state";
+identity :: #import "identity";
+timestamp :: #import "timestamp";
+errors :: #import "std/errors_go";
+go_sql :: #system_library "go:database/sql";
+go_hex :: #system_library "go:encoding/hex";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+MeshExportResult :: struct {
+    records: []MeshEncryptedRecord
+    deletions: []MeshEncryptedRecordDeletion
+    nextCursor: string
+    truncated: bool
+    error: Error
+}
+MeshImportResult :: struct {
+    value: isize
+    error: Error
+}
+
+#scope_file
+TransactionResult :: struct {
+    value: *sql.Transaction
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+HexResult :: struct {
+    value: []u8
+    error: Error
+}
+NullInteger :: #type #foreign go_sql "NullInt64";
+IntegerValue :: (value: NullInteger) -> s64 #go_field #foreign go_sql "NullInt64.Int64";
+Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+QueryExport :: (database: *sql.Database, context: ctx.Context, query: string, sequence: s64) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+ScanExport :: (rows: *sql.Rows, sequence: *s64, operation: *string, userID: *string, collection: *string, id: *string, deleted: *string, recordID: *sql.NullString, keyID: *sql.NullString, nonce: *sql.NullString, ciphertext: *sql.NullString, updated: *sql.NullString, recordDeleted: *NullInteger, hash: *sql.NullString, schema: *NullInteger, parent: *sql.NullString, publicKey: *[]u8, created: *sql.NullString, seen: *sql.NullString) -> Error #foreign go_sql "(*Rows).Scan";
+QueryTombstone :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
+ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
+QueryRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
+ScanRecord :: (row: *sql.Row, keyID: *string, nonce: *string, ciphertext: *string, updated: *string, deleted: *s64, hash: *string, schema: *isize, parent: *string) -> Error #foreign go_sql "(*Row).Scan";
+DeleteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, deleted: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+WriteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, keyID: string, nonce: string, ciphertext: string, updated: string, deleted: s64, hash: string, schema: isize, parent: string, version: s64) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+WriteUser :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, publicKey: []u8, created: string, seen: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+EnsureSync :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+QueryCursor :: (database: *sql.Database, context: ctx.Context, query: string, peerKey: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+ScanCursor :: (row: *sql.Row, value: *string) -> Error #foreign go_sql "(*Row).Scan";
+WriteCursor :: (database: *sql.Database, context: ctx.Context, query: string, peerKey: string, value: string) -> ExecResult #go_results #foreign go_sql "(*DB).ExecContext";
+DecodeHex :: (value: string) -> HexResult #go_results #foreign go_hex "DecodeString";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Compare :: (left: string, right: string) -> isize #foreign go_strings;
+AllocateRecords :: (count: isize, capacity: isize) -> []MeshEncryptedRecord #foreign builtin "make";
+AllocateDeletions :: (count: isize) -> []MeshEncryptedRecordDeletion #foreign builtin "make";
+AppendRecord :: (values: []MeshEncryptedRecord, value: MeshEncryptedRecord) -> []MeshEncryptedRecord #foreign builtin "append";
+AppendDeletion :: (values: []MeshEncryptedRecordDeletion, value: MeshEncryptedRecordDeletion) -> []MeshEncryptedRecordDeletion #foreign builtin "append";
+
+MeshChange :: struct {
+    sequence: s64
+    record: *MeshEncryptedRecord
+    deletion: *MeshEncryptedRecordDeletion
+}
+AllocateChanges :: (count: isize, capacity: isize) -> []MeshChange #foreign builtin "make";
+AppendChange :: (values: []MeshChange, value: MeshChange) -> []MeshChange #foreign builtin "append";
+
+// A stable merge preserves the original upsert-before-deletion order for
+// equal peer sequences without an application callback in another language.
+OrderedChanges :: (records: []MeshEncryptedRecord, deletions: []MeshEncryptedRecordDeletion) -> []MeshChange {
+    count := records.count + deletions.count
+    changes := AllocateChanges(0, cast(isize)count)
+    index: s64 = 0
+    while index < records.count {
+        changes = AppendChange(changes, MeshChange.{sequence = records[index].MeshVersion, record = *records[index]})
+        index += 1
+    }
+    index = 0
+    while index < deletions.count {
+        changes = AppendChange(changes, MeshChange.{sequence = deletions[index].MeshVersion, deletion = *deletions[index]})
+        index += 1
+    }
+    if count < 2 {
+        return changes
+    }
+    scratch := AllocateChanges(cast(isize)count, cast(isize)count)
+    width: s64 = 1
+    while width < count {
+        start: s64 = 0
+        while start < count {
+            middle := start + width
+            if middle > count {
+                middle = count
+            }
+            end := middle + width
+            if end > count {
+                end = count
+            }
+            left := start
+            right := middle
+            destination := start
+            while destination < end {
+                if left < middle && (right >= end || changes[left].sequence <= changes[right].sequence) {
+                    scratch[destination] = changes[left]
+                    left += 1
+                } else {
+                    scratch[destination] = changes[right]
+                    right += 1
+                }
+                destination += 1
+            }
+            start = end
+        }
+        saved := changes
+        changes = scratch
+        scratch = saved
+        if width >= count - width {
+            break
+        }
+        width *= 2
+    }
+    return changes
+}
+
+Tombstoned :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, cache: *Map(string, bool)) -> account.TombstoneResult {
+    result: account.TombstoneResult
+    cached := MapLookup(<<cache, userID)
+    if cached.has_value {
+        result.value = cached.value
+        return result
+    }
+    deleted: isize = 0
+    row := QueryTombstone(transaction, context, TombstoneSQL, userID)
+    result.error = ScanCount(row, *deleted)
+    if result.error != null {
+        return result
+    }
+    result.value = deleted != cast(isize)0
+    MapSet(<<cache, userID, result.value)
+    return result
+}
+
+#scope_export
+ExportEncryptedRecords :: (database: *sql.Database, context: ctx.Context, meshPolicy: NodeSyncPolicy, rawCursor: string, limit: isize) -> MeshExportResult {
+    result: MeshExportResult
+    decoded := cursor.Decode(rawCursor)
+    result.error = decoded.error
+    if result.error != null {
+        return result
+    }
+    if !policy.IncludesData(*meshPolicy, "encrypted_records") {
+        result.records = AllocateRecords(0, 0)
+        return result
+    }
+    matchers := scope.Load(database, context)
+    result.error = matchers.error
+    if result.error != null {
+        return result
+    }
+    queried := QueryExport(database, context, ExportSQL, decoded.value.Seq)
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    limit = cursor.BatchLimit(limit, limit)
+    records := AllocateRecords(0, limit)
+    deletions := AllocateDeletions(0)
+    lastSequence: s64 = 0
+    emitted: isize = 0
+    while sql.Next(rows) {
+        sequence: s64 = 0
+        operation: string
+        userID: string
+        collection: string
+        id: string
+        deleted: string
+        recordID: sql.NullString
+        keyID: sql.NullString
+        nonce: sql.NullString
+        ciphertext: sql.NullString
+        updated: sql.NullString
+        recordDeleted: NullInteger
+        hash: sql.NullString
+        schema: NullInteger
+        parent: sql.NullString
+        publicKey: []u8
+        created: sql.NullString
+        seen: sql.NullString
+        result.error = ScanExport(rows, *sequence, *operation, *userID, *collection,
+            *id, *deleted, *recordID, *keyID, *nonce, *ciphertext, *updated,
+            *recordDeleted, *hash, *schema, *parent, *publicKey, *created, *seen)
+        if result.error != null {
+            return result
+        }
+        if !policy.AllowsRecord(meshPolicy, matchers.value, collection) {
+            continue
+        }
+        if operation == "delete" {
+            deletions = AppendDeletion(deletions, MeshEncryptedRecordDeletion.{
+                UserIDHash = userID, Collection = collection, ID = id,
+                DeletedAt = deleted, MeshVersion = sequence})
+            lastSequence = sequence
+            emitted += 1
+            if emitted == limit {
+                break
+            }
+            continue
+        }
+        if !sql.NullStringValid(recordID) || !sql.NullStringValid(created) {
+            continue
+        }
+        item: MeshEncryptedRecord
+        item.UserIDHash = userID
+        item.CreatedAt = sql.NullStringValue(created)
+        item.LastSeenAt = sql.NullStringValue(seen)
+        item.MeshVersion = sequence
+        item.Record.Collection = collection
+        item.Record.ID = id
+        item.Record.KeyID = sql.NullStringValue(keyID)
+        item.Record.Nonce = sql.NullStringValue(nonce)
+        item.Record.Ciphertext = sql.NullStringValue(ciphertext)
+        item.Record.UpdatedAt = sql.NullStringValue(updated)
+        item.Record.DeletedAt = IntegerValue(recordDeleted)
+        item.Record.ContentHash = sql.NullStringValue(hash)
+        item.Record.SchemaVersion = cast(isize)IntegerValue(schema)
+        item.Record.ParentID = sql.NullStringValue(parent)
+        item.PublicKey = EncodeHex(publicKey)
+        records = AppendRecord(records, item)
+        lastSequence = sequence
+        emitted += 1
+        if emitted == limit {
+            break
+        }
+    }
+    result.error = sql.RowsError(rows)
+    if result.error != null {
+        return result
+    }
+    if emitted >= limit {
+        next := cursor.Encode(MeshCursor.{Seq = lastSequence})
+        result.error = next.error
+        if result.error != null {
+            return result
+        }
+        result.nextCursor = next.value
+        result.truncated = true
+    }
+    result.records = records
+    result.deletions = deletions
+    return result
+}
+
+ImportEncryptedRecords :: (database: *sql.Database, context: ctx.Context, meshPolicy: NodeSyncPolicy, records: []MeshEncryptedRecord) -> MeshImportResult {
+    deletions: []MeshEncryptedRecordDeletion
+    return ImportEncryptedBatch(database, context, meshPolicy, records, deletions)
+}
+
+ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPolicy: NodeSyncPolicy, records: []MeshEncryptedRecord, deletions: []MeshEncryptedRecordDeletion) -> MeshImportResult {
+    result: MeshImportResult
+    if !policy.IncludesData(*meshPolicy, "encrypted_records") {
+        return result
+    }
+    matchers := scope.Load(database, context)
+    result.error = matchers.error
+    if result.error != null {
+        return result
+    }
+    changes := OrderedChanges(records, deletions)
+    begun := Begin(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    tombstones: Map(string, bool)
+    applied: isize = 0
+    for change: changes {
+        if change.deletion != null {
+            if !identity.ValidUserID(change.deletion.UserIDHash) {
+                result.error = errors.New("invalid mesh deletion user_id_hash")
+                return result
+            }
+            if !policy.AllowsRecord(meshPolicy, matchers.value, change.deletion.Collection) {
+                continue
+            }
+            deleted := Tombstoned(transaction, context, change.deletion.UserIDHash, *tombstones)
+            result.error = deleted.error
+            if result.error != null {
+                return result
+            }
+            if deleted.value {
+                continue
+            }
+            changed := ApplyDeletion(transaction, context, <<change.deletion)
+            result.error = changed.error
+            if result.error != null {
+                return result
+            }
+            applied += changed.value
+            continue
+        }
+        item := <<change.record
+        if !identity.ValidUserID(item.UserIDHash) {
+            result.error = errors.New("invalid mesh user_id_hash")
+            return result
+        }
+        key := DecodeHex(TrimSpace(item.PublicKey))
+        if key.error != null || key.value.count == 0 {
+            result.error = errors.New("invalid mesh public_key")
+            return result
+        }
+        result.error = record.ValidateAccountKey(item.UserIDHash, key.value)
+        if result.error != null {
+            return result
+        }
+        if !record.ValidForProtocol(item.Record, 5) {
+            result.error = errors.New("invalid mesh encrypted record")
+            return result
+        }
+        if !policy.AllowsRecord(meshPolicy, matchers.value, item.Record.Collection) {
+            continue
+        }
+        deleted := Tombstoned(transaction, context, item.UserIDHash, *tombstones)
+        result.error = deleted.error
+        if result.error != null {
+            return result
+        }
+        if deleted.value {
+            continue
+        }
+        result.error = UpsertUser(transaction, context, item, key.value)
+        if result.error != null {
+            return result
+        }
+        changed := UpsertRecord(transaction, context, item.UserIDHash, item.Record)
+        result.error = changed.error
+        if result.error != null {
+            return result
+        }
+        applied += changed.value
+    }
+    result.error = sql.Commit(transaction)
+    if result.error == null {
+        result.value = applied
+    }
+    return result
+}
+
+ApplyDeletion :: (transaction: *sql.Transaction, context: ctx.Context, deletion: MeshEncryptedRecordDeletion) -> MeshImportResult {
+    result: MeshImportResult
+    if !identity.ValidNamespace(TrimSpace(deletion.Collection)) ||
+        !identity.ValidEncryptedRecordID(TrimSpace(deletion.ID)) {
+        result.error = errors.New("invalid mesh deletion target")
+        return result
+    }
+    deleted := timestamp.NormalizeTime(deletion.DeletedAt, "")
+    written := DeleteRecord(transaction, context, DeleteSQL, deletion.UserIDHash,
+        deletion.Collection, deletion.ID, deleted)
+    result.error = written.error
+    if result.error != null {
+        return result
+    }
+    affected := account.Affected(written.value)
+    if affected > cast(isize)0 {
+        version := account.NextVersion(transaction, context, deletion.UserIDHash)
+        result.error = version.error
+        if result.error != null {
+            return result
+        }
+    }
+    result.value = affected
+    return result
+}
+
+LoadCursor :: (database: *sql.Database, context: ctx.Context, peerKey: string) -> cursor.CursorTextResult {
+    result: cursor.CursorTextResult
+    value: string
+    row := QueryCursor(database, context, CursorSQL, peerKey)
+    error := ScanCursor(row, *value)
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    result.error = error
+    if error == null {
+        result.value = value
+    }
+    return result
+}
+
+SaveCursor :: (database: *sql.Database, context: ctx.Context, peerKey: string, value: string) -> Error {
+    if TrimSpace(value) == "" {
+        return null
+    }
+    written := WriteCursor(database, context, SaveCursorSQL, peerKey, value)
+    return written.error
+}
+
+UpsertUser :: (transaction: *sql.Transaction, context: ctx.Context, item: MeshEncryptedRecord, publicKey: []u8) -> Error {
+    created := timestamp.NormalizeTime(item.CreatedAt, "")
+    seen := timestamp.NormalizeTime(item.LastSeenAt, created)
+    written := WriteUser(transaction, context, UserSQL, item.UserIDHash, publicKey, created, seen)
+    if written.error != null {
+        return written.error
+    }
+    synced := EnsureSync(transaction, context, SyncSQL, item.UserIDHash)
+    return synced.error
+}
+
+UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, item: EncryptedRecord) -> MeshImportResult {
+    result: MeshImportResult
+    updated := timestamp.NormalizeTime(item.UpdatedAt, "")
+    existing: EncryptedRecord
+    row := QueryRecord(transaction, context, RecordSQL, userID, item.Collection, item.ID)
+    error := ScanRecord(row, *existing.KeyID, *existing.Nonce, *existing.Ciphertext,
+        *existing.UpdatedAt, *existing.DeletedAt, *existing.ContentHash,
+        *existing.SchemaVersion, *existing.ParentID)
+    if error != null && !errors.Is(error, sql.NoRows()) {
+        result.error = error
+        return result
+    }
+    if error == null {
+        existingUpdated := timestamp.NormalizeTime(existing.UpdatedAt, "")
+        if Compare(updated, existingUpdated) < cast(isize)0 ||
+            (updated == existingUpdated && Compare(record.ContentKey(item), record.ContentKey(existing)) <= cast(isize)0) {
+            return result
+        }
+    }
+    version := account.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error != null {
+        return result
+    }
+    written := WriteRecord(transaction, context, RecordUpsertSQL, userID, item.Collection,
+        item.ID, item.KeyID, item.Nonce, item.Ciphertext, updated, item.DeletedAt,
+        item.ContentHash, item.SchemaVersion, item.ParentID, version.value)
+    result.error = written.error
+    if result.error == null {
+        result.value = account.Affected(written.value)
+    }
+    return result
+}
+
+#scope_file
+ExportSQL :: #string SQL_END
+SELECT e.seq,e.op,e.user_id_hash,e.collection,e.record_id,e.deleted_at,
+       r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,
+       r.content_hash,r.schema_version,r.parent_id,u.public_key,u.created_at,u.last_seen_at
+FROM server_mesh_changes e
+LEFT JOIN server_encrypted_records r
+  ON e.op!='delete' AND r.user_id_hash=e.user_id_hash AND r.collection=e.collection AND r.id=e.record_id
+LEFT JOIN server_users u ON u.user_id_hash=e.user_id_hash
+WHERE e.seq>?1
+ORDER BY e.seq
+SQL_END;
+TombstoneSQL :: "SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)";
+DeleteSQL :: #string SQL_END
+DELETE FROM server_encrypted_records
+WHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4
+SQL_END;
+CursorSQL :: "SELECT cursor FROM node_sync_cursors WHERE peer_key=?1";
+SaveCursorSQL :: #string SQL_END
+INSERT INTO node_sync_cursors(peer_key,cursor,updated_at)
+VALUES(?1,?2,CURRENT_TIMESTAMP)
+ON CONFLICT(peer_key) DO UPDATE SET
+    cursor=excluded.cursor,
+    updated_at=CURRENT_TIMESTAMP
+SQL_END;
+UserSQL :: #string SQL_END
+INSERT INTO server_users(user_id_hash,public_key,created_at,last_seen_at)
+VALUES(?1,?2,?3,?4)
+ON CONFLICT(user_id_hash) DO UPDATE SET
+    last_seen_at=max(server_users.last_seen_at,excluded.last_seen_at)
+SQL_END;
+SyncSQL :: "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)";
+RecordSQL :: #string SQL_END
+SELECT key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
+FROM server_encrypted_records
+WHERE user_id_hash=?1 AND collection=?2 AND id=?3
+SQL_END;
+RecordUpsertSQL :: #string SQL_END
+INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
+    key_id=excluded.key_id,
+    nonce=excluded.nonce,
+    ciphertext=excluded.ciphertext,
+    updated_at=excluded.updated_at,
+    deleted_at=excluded.deleted_at,
+    content_hash=excluded.content_hash,
+    schema_version=excluded.schema_version,
+    parent_id=excluded.parent_id,
+    server_version=excluded.server_version
+WHERE excluded.updated_at >= server_encrypted_records.updated_at
+SQL_END;

@@ -13,11 +13,45 @@ UpdateSeen :: (transaction: *sql.Transaction, context: ctx.Context, query: strin
 EnsureSync :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
 QueryTombstone :: (database: *sql.Database, context: ctx.Context, query: string, userID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
 ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
+QueryVersion :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
+ScanVersion :: (row: *sql.Row, version: *s64) -> Error #foreign go_sql "(*Row).Scan";
 
 #scope_export
 TombstoneResult :: struct {
     value: bool
     error: Error
+}
+VersionResult :: struct {
+    value: s64
+    error: Error
+}
+
+NextVersion :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> VersionResult {
+    result: VersionResult
+    inserted := EnsureSync(transaction, context,
+        "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
+    result.error = inserted.error
+    if result.error != null {
+        return result
+    }
+    updated := EnsureSync(transaction, context,
+        "UPDATE server_sync_state SET server_version=server_version+1 WHERE user_id_hash=?1", userID)
+    result.error = updated.error
+    if result.error != null {
+        return result
+    }
+    row := QueryVersion(transaction, context,
+        "SELECT server_version FROM server_sync_state WHERE user_id_hash=?1", userID)
+    result.error = ScanVersion(row, *result.value)
+    return result
+}
+
+Affected :: (value: sql.Result) -> isize {
+    affected := sql.RowsAffected(value)
+    if affected.error != null {
+        return cast(isize)0
+    }
+    return cast(isize)affected.value
 }
 
 Tombstoned :: (database: *sql.Database, context: ctx.Context, userID: string) -> TombstoneResult {

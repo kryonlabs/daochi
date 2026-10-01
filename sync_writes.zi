@@ -178,3 +178,102 @@ DeleteSession :: (transaction: *sql.Transaction, context: ctx.Context, userID: s
     }
     return result
 }
+
+CompletedValue :: (completed: bool) -> isize {
+    if completed {
+        return cast(isize)1
+    }
+    return cast(isize)0
+}
+
+NormalizedDayCount :: (day: HabitDay) -> isize {
+    if !day.Completed {
+        return cast(isize)0
+    }
+    if day.Count > cast(isize)0 {
+        return day.Count
+    }
+    return cast(isize)1
+}
+
+UpsertMeditation :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    item: MeditationLog) -> SyncWriteResult {
+    result: SyncWriteResult
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error != null {
+        return result
+    }
+    arguments: [6]Any = .[userID, item.ID, item.SessionID, item.DurationSeconds,
+        timestamp.NormalizeTime(item.CompletedAt, item.Timestamp), version.value]
+    written := sql.ExecTx(transaction, context,
+        "\nINSERT INTO server_meditation_logs(user_id_hash,id,session_id,duration_seconds,completed_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6)\nON CONFLICT(user_id_hash,id) DO NOTHING", arguments[:])
+    result.error = written.error
+    if result.error == null {
+        result.applied = state.Affected(written.value)
+    }
+    return result
+}
+
+#scope_file
+WriteHabit :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    habit: Habit, query: string) -> SyncWriteResult {
+    result: SyncWriteResult
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error != null {
+        return result
+    }
+    arguments: [13]Any = .[userID, habit.ID, habit.Name, habit.ColorR, habit.ColorG,
+        habit.ColorB, habit.SyncMode, habit.SyncActivity, habit.CounterEnabled,
+        habit.SortOrder, habit.DeletedAt, timestamp.NormalizeTime(habit.UpdatedAt, ""), version.value]
+    written := sql.ExecTx(transaction, context, query, arguments[:])
+    result.error = written.error
+    if result.error == null {
+        result.applied = state.Affected(written.value)
+    }
+    return result
+}
+
+WriteDay :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    day: HabitDay, query: string) -> SyncWriteResult {
+    result: SyncWriteResult
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error != null {
+        return result
+    }
+    arguments: [7]Any = .[userID, day.HabitID, day.LocalDate, CompletedValue(day.Completed),
+        NormalizedDayCount(day), timestamp.NormalizeTime(day.UpdatedAt, ""), version.value]
+    written := sql.ExecTx(transaction, context, query, arguments[:])
+    result.error = written.error
+    if result.error == null {
+        result.applied = state.Affected(written.value)
+    }
+    return result
+}
+
+#scope_export
+UpsertHabit :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    habit: Habit) -> SyncWriteResult {
+    return WriteHabit(transaction, context, userID, habit,
+        "\nINSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(user_id_hash,id) DO UPDATE SET\n\tname=excluded.name,\n\tcolor_r=excluded.color_r,\n\tcolor_g=excluded.color_g,\n\tcolor_b=excluded.color_b,\n\tsync_mode=excluded.sync_mode,\n\tsync_activity=excluded.sync_activity,\n\tcounter_enabled=excluded.counter_enabled,\n\tsort_order=excluded.sort_order,\n\tdeleted_at=excluded.deleted_at,\n\tupdated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_habits.updated_at")
+}
+
+UpsertHabitOp :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    habit: Habit) -> SyncWriteResult {
+    return WriteHabit(transaction, context, userID, habit,
+        "\nINSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(user_id_hash,id) DO UPDATE SET\n\tname=excluded.name,color_r=excluded.color_r,color_g=excluded.color_g,color_b=excluded.color_b,\n\tsync_mode=excluded.sync_mode,sync_activity=excluded.sync_activity,counter_enabled=excluded.counter_enabled,\n\tsort_order=excluded.sort_order,deleted_at=excluded.deleted_at,updated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_habits.updated_at")
+}
+
+UpsertDay :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    day: HabitDay) -> SyncWriteResult {
+    return WriteDay(transaction, context, userID, day,
+        "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7)\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=excluded.completed,\n\tcount=excluded.count,\n\tupdated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_habit_days.updated_at")
+}
+
+UpsertDayOp :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    day: HabitDay) -> SyncWriteResult {
+    return WriteDay(transaction, context, userID, day,
+        "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7)\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=excluded.completed,count=excluded.count,updated_at=excluded.updated_at,server_version=excluded.server_version\nWHERE excluded.updated_at >= server_habit_days.updated_at")
+}

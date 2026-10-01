@@ -1,0 +1,337 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "protocol"
+#import "sync_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+clock :: #import "std/time_go";
+state :: #import "account_state";
+identifiers :: #import "habit_id";
+writes :: #import "sync_writes";
+records :: #import "encrypted_record";
+timestamp :: #import "timestamp";
+native :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+SyncApplicationResult :: struct {
+    value: SyncResult
+    accepted: []string
+    error: Error
+}
+OperationsWriteResult :: struct {
+    value: []string
+    error: Error
+}
+OperationExistsResult :: struct {
+    value: bool
+    error: Error
+}
+
+#scope_file
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+AppendString :: (values: []string, value: string) -> []string #foreign builtin "append";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+
+#scope_export
+OperationExists :: (transaction: *sql.Transaction, context: ctx.Context,
+    userID: string, operationID: string) -> OperationExistsResult {
+    result: OperationExistsResult
+    exists: isize
+    arguments: [2]Any = .[userID, operationID]
+    destinations: [1]Any = .[*exists]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT EXISTS(SELECT 1 FROM server_sync_ops WHERE user_id_hash=?1 AND op_id=?2)", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    result.value = exists != cast(isize)0
+    return result
+}
+
+MaterializeOperation :: (transaction: *sql.Transaction, context: ctx.Context,
+    userID: string, operation: SyncOp, result: *SyncResult) -> Error {
+    bytes := cast([]u8)operation.Payload
+    if operation.EntityType == "habit" {
+        if bytes.count == 0 {
+            return errors.New("habit op missing payload")
+        }
+        habit: Habit
+        error := json.Unmarshal(bytes, *habit)
+        if error != null {
+            return error
+        }
+        if habit.ID == "" {
+            habit.ID = operation.EntityID
+        }
+        if operation.OpType == "delete" && habit.DeletedAt <= 0 {
+            habit.DeletedAt = clock.Unix(clock.Now())
+        }
+        if habit.DeletedAt > 0 || operation.OpType == "delete" {
+            deleted := writes.DeleteHabit(transaction, context, userID, habit)
+            if deleted.error != null {
+                return deleted.error
+            }
+            result.Habits += deleted.applied
+            return null
+        }
+        written := writes.UpsertHabitOp(transaction, context, userID, habit)
+        if written.error != null {
+            return written.error
+        }
+        result.Habits += written.applied
+    } else if operation.EntityType == "habit_day" {
+        if bytes.count == 0 {
+            return errors.New("habit_day op missing payload")
+        }
+        day: HabitDay
+        error := json.Unmarshal(bytes, *day)
+        if error != null {
+            return error
+        }
+        if day.HabitID == "" {
+            day.HabitID = operation.EntityID
+        }
+        if day.LocalDate == cast(isize)0 {
+            day.LocalDate = operation.LocalDate
+        }
+        if operation.OpType == "delete" {
+            deleted := writes.DeleteHabitDay(transaction, context, userID, day)
+            if deleted.error != null {
+                return deleted.error
+            }
+            result.HabitDays += deleted.applied
+            return null
+        }
+        written := writes.UpsertDayOp(transaction, context, userID, day)
+        if written.error != null {
+            return written.error
+        }
+        result.HabitDays += written.applied
+    } else if operation.EntityType == "session" {
+        if bytes.count == 0 {
+            return errors.New("session op missing payload")
+        }
+        session: Session
+        error := json.Unmarshal(bytes, *session)
+        if error != null {
+            return error
+        }
+        if session.ID == "" {
+            session.ID = operation.EntityID
+        }
+        if operation.OpType == "delete" && session.DeletedAt <= 0 {
+            session.DeletedAt = clock.Unix(clock.Now())
+        }
+        if session.DeletedAt > 0 || operation.OpType == "delete" {
+            deleted := writes.DeleteSession(transaction, context, userID, session)
+            if deleted.error != null {
+                return deleted.error
+            }
+            result.Sessions += deleted.applied
+            return null
+        }
+        written := writes.UpsertSession(transaction, context, userID, session)
+        if written.error != null {
+            return written.error
+        }
+        result.Sessions += written.applied
+    } else if operation.EntityType == "social_snapshots" {
+        return errors.New("social_cache is server-owned")
+    } else {
+        version := state.NextVersion(transaction, context, userID)
+        return version.error
+    }
+    return null
+}
+
+ApplyOperations :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    operations: []SyncOp, applied: *SyncResult) -> OperationsWriteResult {
+    result: OperationsWriteResult
+    accepted := AllocateStrings(cast(isize)0)
+    for operation: operations {
+        if operation.OpID == "" || operation.ClientID == "" || operation.Seq <= 0 {
+            result.error = errors.New("invalid sync op identity")
+            return result
+        }
+        exists := OperationExists(transaction, context, userID, operation.OpID)
+        result.error = exists.error
+        if result.error != null {
+            return result
+        }
+        if exists.value {
+            accepted = AppendString(accepted, operation.OpID)
+            continue
+        }
+        result.error = identifiers.CanonicalizeOperation(transaction, context, userID, *operation)
+        if result.error != null {
+            return result
+        }
+        result.error = MaterializeOperation(transaction, context, userID, operation, applied)
+        if result.error != null {
+            return result
+        }
+        version := state.CurrentVersionTx(transaction, context, userID)
+        result.error = version.error
+        if result.error != null {
+            return result
+        }
+        if version.value <= 0 {
+            version = state.NextVersion(transaction, context, userID)
+            result.error = version.error
+            if result.error != null {
+                return result
+            }
+        }
+        payload := text.FromBytes(cast([]u8)operation.Payload)
+        createdAt := timestamp.NormalizeTime(operation.CreatedAt, "")
+        arguments: [11]Any = .[userID, operation.OpID, operation.ClientID, operation.Seq,
+            operation.EntityType, operation.EntityID, operation.LocalDate, operation.OpType,
+            payload, createdAt, version.value]
+        inserted := sql.ExecTx(transaction, context,
+            "\nINSERT INTO server_sync_ops(user_id_hash,op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", arguments[:])
+        result.error = inserted.error
+        if result.error != null {
+            return result
+        }
+        accepted = AppendString(accepted, operation.OpID)
+    }
+    result.value = accepted
+    return result
+}
+
+Apply :: (database: *sql.Database, context: ctx.Context, request: SyncRequest,
+    publicKey: []u8, missingUser: Error) -> SyncApplicationResult {
+    result: SyncApplicationResult
+    started := sql.Begin(database, context, null)
+    result.error = started.error
+    if result.error != null {
+        return result
+    }
+    transaction := started.value
+    RollbackAtReturn(transaction)
+    if !text.IsNil(publicKey) {
+        result.error = state.Upsert(transaction, context, request.UserIDHash, publicKey)
+    } else {
+        result.error = state.Touch(transaction, context, request.UserIDHash, missingUser)
+    }
+    if result.error != null {
+        return result
+    }
+    if request.FullSyncRequested {
+        result.error = writes.ReplaceData(transaction, context, request.UserIDHash)
+        if result.error != null {
+            return result
+        }
+    }
+    if request.SocialCache.count > 0 {
+        result.error = errors.New("social_cache is server-owned")
+        return result
+    }
+    for item: request.EncryptedRecords {
+        if !records.ValidForProtocol(item, request.ProtocolVersion) {
+            result.error = errors.New("invalid encrypted record")
+            return result
+        }
+    }
+    applied: SyncResult
+    deletedHabits: Map(string, bool)
+    for item: request.MeditationLogs {
+        written := writes.UpsertMeditation(transaction, context, request.UserIDHash, item)
+        result.error = written.error
+        if result.error != null {
+            return result
+        }
+        applied.MeditationLogs += written.applied
+    }
+    for habit: request.Habits {
+        originalID := habit.ID
+        canonical := identifiers.ForWrite(transaction, context, request.UserIDHash, habit.ID, "legacy-write")
+        result.error = canonical.error
+        if result.error != null {
+            return result
+        }
+        habit.ID = canonical.value
+        if request.Bootstrap && habit.DeletedAt > 0 {
+            MapSet(deletedHabits, habit.ID, true)
+            MapSet(deletedHabits, originalID, true)
+            continue
+        }
+        if habit.DeletedAt > 0 {
+            MapSet(deletedHabits, habit.ID, true)
+            MapSet(deletedHabits, originalID, true)
+            deleted := writes.DeleteHabit(transaction, context, request.UserIDHash, habit)
+            result.error = deleted.error
+            if result.error != null {
+                return result
+            }
+            applied.Habits += deleted.applied
+            continue
+        }
+        written := writes.UpsertHabit(transaction, context, request.UserIDHash, habit)
+        result.error = written.error
+        if result.error != null {
+            return result
+        }
+        applied.Habits += written.applied
+    }
+    for day: request.HabitDays {
+        if MapGet(deletedHabits, day.HabitID) {
+            continue
+        }
+        canonical := identifiers.ForWrite(transaction, context, request.UserIDHash, day.HabitID, "legacy-day-write")
+        result.error = canonical.error
+        if result.error != null {
+            return result
+        }
+        day.HabitID = canonical.value
+        if MapGet(deletedHabits, day.HabitID) {
+            continue
+        }
+        written := writes.UpsertDay(transaction, context, request.UserIDHash, day)
+        result.error = written.error
+        if result.error != null {
+            return result
+        }
+        applied.HabitDays += written.applied
+    }
+    for session: request.Sessions {
+        if request.Bootstrap && session.DeletedAt > 0 {
+            continue
+        }
+        if session.DeletedAt > 0 {
+            deleted := writes.DeleteSession(transaction, context, request.UserIDHash, session)
+            result.error = deleted.error
+            if result.error != null {
+                return result
+            }
+            applied.Sessions += deleted.applied
+            continue
+        }
+        written := writes.UpsertSession(transaction, context, request.UserIDHash, session)
+        result.error = written.error
+        if result.error != null {
+            return result
+        }
+        applied.Sessions += written.applied
+    }
+    for item: request.EncryptedRecords {
+        written := writes.UpsertRecord(transaction, context, request.UserIDHash, item)
+        result.error = written.error
+        if result.error != null {
+            return result
+        }
+        applied.EncryptedRecords += written.applied
+    }
+    operations := ApplyOperations(transaction, context, request.UserIDHash, request.Ops, *applied)
+    result.error = operations.error
+    if result.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    if result.error == null {
+        result.value = applied
+        result.accepted = operations.value
+    }
+    return result
+}

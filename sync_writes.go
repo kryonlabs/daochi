@@ -259,3 +259,129 @@ func SyncWrites_DeleteSession(transaction *Transaction, context Context, userID 
 	}
 	return result
 }
+
+func SyncWrites_CompletedValue(completed bool) int {
+	if completed {
+		return int(1)
+	}
+	return int(0)
+}
+
+func SyncWrites_NormalizedDayCount(day HabitDay) int {
+	if !day.Completed {
+		return int(0)
+	}
+	if day.Count > int(0) {
+		return day.Count
+	}
+	return int(1)
+}
+
+func SyncWrites_UpsertMeditation(transaction *Transaction, context Context, userID string, item MeditationLog) SyncWriteResult {
+	var result SyncWriteResult = SyncWriteResult{}
+	version := AccountState_NextVersion(transaction, context, userID)
+	result.Error = version.Error
+	if result.Error != nil {
+		return result
+	}
+	var value_0 [6]Any
+	value_0[0] = userID
+	value_0[1] = item.ID
+	value_0[2] = item.SessionID
+	value_0[3] = item.DurationSeconds
+	var value_1 string = Timestamp_NormalizeTime(item.CompletedAt, item.Timestamp)
+	value_0[4] = value_1
+	value_0[5] = version.Value
+	arguments := value_0
+	_ = arguments
+	var value_2 string = "\nINSERT INTO server_meditation_logs(user_id_hash,id,session_id,duration_seconds,completed_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6)\nON CONFLICT(user_id_hash,id) DO NOTHING"
+	written := StdSqlGo_ExecTx(transaction, context, value_2, arguments[0:6:6])
+	result.Error = written.Error
+	if result.Error == nil {
+		var value_3 int = AccountState_Affected(written.Value)
+		result.Applied = value_3
+	}
+	return result
+}
+
+func SyncWrites_WriteHabit(transaction *Transaction, context Context, userID string, habit Habit, query string) SyncWriteResult {
+	var result SyncWriteResult = SyncWriteResult{}
+	version := AccountState_NextVersion(transaction, context, userID)
+	result.Error = version.Error
+	if result.Error != nil {
+		return result
+	}
+	var value_0 [13]Any
+	value_0[0] = userID
+	value_0[1] = habit.ID
+	value_0[2] = habit.Name
+	value_0[3] = habit.ColorR
+	value_0[4] = habit.ColorG
+	value_0[5] = habit.ColorB
+	value_0[6] = habit.SyncMode
+	value_0[7] = habit.SyncActivity
+	value_0[8] = habit.CounterEnabled
+	value_0[9] = habit.SortOrder
+	value_0[10] = habit.DeletedAt
+	var value_1 string = Timestamp_NormalizeTime(habit.UpdatedAt, "")
+	value_0[11] = value_1
+	value_0[12] = version.Value
+	arguments := value_0
+	_ = arguments
+	written := StdSqlGo_ExecTx(transaction, context, query, arguments[0:13:13])
+	result.Error = written.Error
+	if result.Error == nil {
+		var value_2 int = AccountState_Affected(written.Value)
+		result.Applied = value_2
+	}
+	return result
+}
+
+func SyncWrites_WriteDay(transaction *Transaction, context Context, userID string, day HabitDay, query string) SyncWriteResult {
+	var result SyncWriteResult = SyncWriteResult{}
+	version := AccountState_NextVersion(transaction, context, userID)
+	result.Error = version.Error
+	if result.Error != nil {
+		return result
+	}
+	var value_0 [7]Any
+	value_0[0] = userID
+	value_0[1] = day.HabitID
+	value_0[2] = day.LocalDate
+	var value_1 int = SyncWrites_CompletedValue(day.Completed)
+	value_0[3] = value_1
+	var value_2 int = SyncWrites_NormalizedDayCount(day)
+	value_0[4] = value_2
+	var value_3 string = Timestamp_NormalizeTime(day.UpdatedAt, "")
+	value_0[5] = value_3
+	value_0[6] = version.Value
+	arguments := value_0
+	_ = arguments
+	written := StdSqlGo_ExecTx(transaction, context, query, arguments[0:7:7])
+	result.Error = written.Error
+	if result.Error == nil {
+		var value_4 int = AccountState_Affected(written.Value)
+		result.Applied = value_4
+	}
+	return result
+}
+
+func SyncWrites_UpsertHabit(transaction *Transaction, context Context, userID string, habit Habit) SyncWriteResult {
+	var value_0 string = "\nINSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(user_id_hash,id) DO UPDATE SET\n\tname=excluded.name,\n\tcolor_r=excluded.color_r,\n\tcolor_g=excluded.color_g,\n\tcolor_b=excluded.color_b,\n\tsync_mode=excluded.sync_mode,\n\tsync_activity=excluded.sync_activity,\n\tcounter_enabled=excluded.counter_enabled,\n\tsort_order=excluded.sort_order,\n\tdeleted_at=excluded.deleted_at,\n\tupdated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_habits.updated_at"
+	return SyncWrites_WriteHabit(transaction, context, userID, habit, value_0)
+}
+
+func SyncWrites_UpsertHabitOp(transaction *Transaction, context Context, userID string, habit Habit) SyncWriteResult {
+	var value_0 string = "\nINSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(user_id_hash,id) DO UPDATE SET\n\tname=excluded.name,color_r=excluded.color_r,color_g=excluded.color_g,color_b=excluded.color_b,\n\tsync_mode=excluded.sync_mode,sync_activity=excluded.sync_activity,counter_enabled=excluded.counter_enabled,\n\tsort_order=excluded.sort_order,deleted_at=excluded.deleted_at,updated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_habits.updated_at"
+	return SyncWrites_WriteHabit(transaction, context, userID, habit, value_0)
+}
+
+func SyncWrites_UpsertDay(transaction *Transaction, context Context, userID string, day HabitDay) SyncWriteResult {
+	var value_0 string = "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7)\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=excluded.completed,\n\tcount=excluded.count,\n\tupdated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_habit_days.updated_at"
+	return SyncWrites_WriteDay(transaction, context, userID, day, value_0)
+}
+
+func SyncWrites_UpsertDayOp(transaction *Transaction, context Context, userID string, day HabitDay) SyncWriteResult {
+	var value_0 string = "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7)\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=excluded.completed,count=excluded.count,updated_at=excluded.updated_at,server_version=excluded.server_version\nWHERE excluded.updated_at >= server_habit_days.updated_at"
+	return SyncWrites_WriteDay(transaction, context, userID, day, value_0)
+}

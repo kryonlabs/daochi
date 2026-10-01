@@ -463,3 +463,11 @@ WHERE user_id_hash=?1`, userID).Scan(&version)
 	}
 	return version, err
 }
+
+// Retained from the original Go storage implementation for its independent oracle.
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}

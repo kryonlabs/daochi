@@ -1,0 +1,195 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "std/option"
+#import "sync_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+random :: #import "std/random_go";
+strings :: #system_library "go:strings";
+format :: #system_library "go:fmt";
+
+HabitIDResult :: struct {
+    value: string
+    mapped: bool
+    error: Error
+}
+
+#scope_file
+PayloadIDs :: struct {
+    ID: string #go_tag "json:\"id\""
+    HabitID: string #go_tag "json:\"habit_id\""
+}
+TrimSpace :: (value: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+FormatUUID :: (pattern: string, first: []u8, second: []u8, third: []u8,
+    fourth: []u8, fifth: []u8) -> string #foreign format "Sprintf";
+
+Mapping :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, id: string) -> HabitIDResult {
+    result: HabitIDResult
+    arguments: [2]Any = .[userID, id]
+    destinations: [1]Any = .[*result.value]
+    row := sql.QueryRowTx(transaction, context,
+        "\nSELECT new_id\nFROM server_habit_id_migrations\nWHERE user_id_hash=?1 AND old_id=?2", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    return result
+}
+
+#scope_export
+IsCanonical :: (id: string) -> bool {
+    if id.count != 36 {
+        return false
+    }
+    index: s64 = 0
+    while index < id.count {
+        byte := id[index]
+        if index == 8 || index == 13 || index == 18 || index == 23 {
+            if byte != cast(u8)(#char "-") {
+                return false
+            }
+        } else if !((byte >= cast(u8)(#char "0") && byte <= cast(u8)(#char "9")) ||
+            (byte >= cast(u8)(#char "a") && byte <= cast(u8)(#char "f")) ||
+            (byte >= cast(u8)(#char "A") && byte <= cast(u8)(#char "F"))) {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+New :: () -> HabitIDResult {
+    result: HabitIDResult
+    bytes: [16]u8
+    filled := random.Fill(bytes[:])
+    result.error = filled.error
+    if result.error != null {
+        return result
+    }
+    bytes[6] = (bytes[6] & cast(u8)0x0f) | cast(u8)0x40
+    bytes[8] = (bytes[8] & cast(u8)0x3f) | cast(u8)0x80
+    result.value = FormatUUID("%08x-%04x-%04x-%04x-%012x",
+        bytes[0:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:16])
+    return result
+}
+
+ForWrite :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    id: string, source: string) -> HabitIDResult {
+    result: HabitIDResult
+    normalized := TrimSpace(id)
+    if normalized == "" {
+        result.error = errors.New("empty habit id")
+        return result
+    }
+    if IsCanonical(normalized) {
+        result.value = ToLower(normalized)
+        return result
+    }
+    mapped := Mapping(transaction, context, userID, normalized)
+    if mapped.error == null && mapped.value != "" {
+        result.value = mapped.value
+        result.mapped = true
+        return result
+    }
+    if mapped.error != null && !errors.Is(mapped.error, sql.NoRows()) {
+        result.error = mapped.error
+        return result
+    }
+    generated := New()
+    result.error = generated.error
+    if result.error != null {
+        return result
+    }
+    arguments: [4]Any = .[userID, normalized, generated.value, source]
+    written := sql.ExecTx(transaction, context,
+        "\nINSERT OR REPLACE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,?4)", arguments[:])
+    result.error = written.error
+    if result.error == null {
+        result.value = generated.value
+        result.mapped = true
+    }
+    return result
+}
+
+ForRead :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, id: string) -> HabitIDResult {
+    result: HabitIDResult
+    normalized := TrimSpace(id)
+    if normalized == "" || IsCanonical(normalized) {
+        result.value = ToLower(normalized)
+        return result
+    }
+    mapped := Mapping(transaction, context, userID, normalized)
+    if errors.Is(mapped.error, sql.NoRows()) {
+        result.value = normalized
+        return result
+    }
+    result.error = mapped.error
+    if result.error == null {
+        result.value = mapped.value
+        result.mapped = mapped.value != normalized
+    }
+    return result
+}
+
+RewritePayload :: (payload: RawMessage, canonicalID: string) -> RawMessage {
+    bytes := cast([]u8)payload
+    if bytes.count == 0 || canonicalID == "" {
+        return payload
+    }
+    object: Map(string, Any)
+    if json.Unmarshal(bytes, *object) != null {
+        return payload
+    }
+    changed := false
+    id := MapLookup(object, "id")
+    if id.has_value {
+        MapSet(object, "id", canonicalID)
+        changed = true
+    }
+    habitID := MapLookup(object, "habit_id")
+    if habitID.has_value {
+        MapSet(object, "habit_id", canonicalID)
+        changed = true
+    }
+    if !changed {
+        return payload
+    }
+    encoded := json.Marshal(object)
+    if encoded.error != null {
+        return payload
+    }
+    return cast(RawMessage)encoded.value
+}
+
+CanonicalizeOperation :: (transaction: *sql.Transaction, context: ctx.Context,
+    userID: string, operation: *SyncOp) -> Error {
+    if operation == null {
+        return null
+    }
+    if operation.EntityType != "habit" && operation.EntityType != "habit_day" {
+        return null
+    }
+    id := TrimSpace(operation.EntityID)
+    bytes := cast([]u8)operation.Payload
+    if id == "" && bytes.count > 0 {
+        fields: PayloadIDs
+        if json.Unmarshal(bytes, *fields) == null {
+            if fields.HabitID != "" {
+                id = fields.HabitID
+            } else {
+                id = fields.ID
+            }
+        }
+    }
+    if id == "" {
+        return errors.New("habit op missing id")
+    }
+    canonical := ForWrite(transaction, context, userID, id, "legacy-op")
+    if canonical.error != null {
+        return canonical.error
+    }
+    operation.EntityID = canonical.value
+    operation.Payload = RewritePayload(operation.Payload, canonical.value)
+    return null
+}

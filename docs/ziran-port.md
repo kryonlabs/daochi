@@ -89,7 +89,7 @@ field names, Go storage types, order and reflection tags.
 | `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion request decoding, signature/user header selection, exported account-key parsing and transition helpers in `sync_request.zi`; sync/login/deletion orchestration, operational handlers, middleware and server construction remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; incremental snapshots, clean projections and operation reads in `sync_views.zi`; exact state hashing in `state_hash.zi`; transactional session/round and encrypted-record writes, timestamp-guarded deletions and data replacement in `sync_writes.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, operational statistics, sync transaction orchestration, habit/day/meditation upserts, operation materialization and legacy migrations remain Go |
+| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; incremental snapshots, clean projections and operation reads in `sync_views.zi`; exact state hashing in `state_hash.zi`; transactional session/round, habit/day, meditation and encrypted-record writes, timestamp-guarded deletions and data replacement in `sync_writes.zi`; sync transaction orchestration, operation materialization and idempotent operation logging in `sync_application.zi`; canonical UUID creation, legacy identifier mappings and payload rewriting in `habit_id.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, operational statistics and legacy account migrations remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Ziran | `sync_ws.zi`: authenticated upgrades, account and IP limits, reader worker, event/ping selection, deadlines and cancellation; `websocket.zi`: native handshakes and exact frame encoding/validation; `sync_hub.zi`: scoped subscriptions, bounded event delivery, counts and disconnect cleanup |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -536,7 +536,7 @@ account isolation, legacy-client ordering and concurrent version allocation.
 Scripted native SQL drivers compare query bytes, argument types, scan failures,
 late row/close errors, error and panic identity, rollback/close calls and
 connection reuse. Source and saved-IR verification run the same server suite.
-Core sync application, schema migration and operational statistics remain
+Schema migration, legacy account migrations and operational statistics remain
 unfinished.
 
 `sync_views.zi` owns all incremental snapshots, operation reads, clean data
@@ -582,8 +582,33 @@ argument types, zero/negative/failed affected-row results, failures and panics a
 each write step, commits, rollbacks and row cleanup. Failed nested writes and
 mid-replacement failures restore all data and account versions when the caller
 rolls back. Source and saved-IR server suites exercise the generated code with
-race detection. Core sync transaction orchestration and operation materialization
-remain Go and are not counted as complete.
+race detection.
+
+`sync_application.zi` now owns the full sync transaction: account registration
+or lookup, full replacement, server-owned social rejection, record validation,
+typed writes, bootstrap tombstones, operation materialization, idempotent
+operation acceptance, version assignment and commit. Failures return zero counts
+and nil accepted operations and roll back all tentative data, mappings and
+versions. An allocated empty public key retains its registration behavior; a
+nil key selects the existing-account path. Native deferred rollback runs on
+returns and panic unwinding. The Store entry point is a forwarding adapter.
+
+`habit_id.zi` owns version-4 UUID generation, exact canonical identifier grammar,
+Unicode trimming/lowercasing, per-account legacy mappings, operation identifier
+selection and native JSON payload rewriting. Existing mappings remain stable;
+new mappings participate in the caller transaction. Malformed JSON preserves
+the original bytes, and original `id`/`habit_id` fields retain their rewrite
+semantics. Legacy bulk migrations still remain Go.
+
+Independent comparisons preserve the removed implementation at `2c6bd4d`.
+Real SQLite tests cover account isolation, nil/empty keys, replacement,
+bootstrap/deletion behavior, operation replay, invalid inputs, cancellation,
+write failures and deferred commit failures. Native drivers compare exact
+queries and arguments, affected-row failures, query/scan/close failures, error
+and panic identity, commit/rollback and connection reuse. UUID and payload
+cases cover malformed inputs, arbitrary string bytes, stable lookups and new
+UUID version/variant bits. Source and saved-IR verification run the complete
+server suite with race detection.
 
 ## Compiler work exercised by this port
 
@@ -674,6 +699,13 @@ results and ready-case selection; context cancellation channels and native
 tickers come from `context_go` and `time_go`. Source and saved-IR regressions
 cover ticker delivery, cancellation wakeups, deferred cleanup, receives, sends,
 defaults and invalid native selections. These primitives are Go-specific.
+
+Native Go slice nil checks now preserve the distinction between nil and
+allocated empty byte slices through `text_go.IsNil`. The checker requires a
+concrete native slice, a boolean result and no owned elements. Source and
+saved-IR regressions cover byte/integer/record slices, empty views, invalid
+foreign signatures and portable reachability pruning. Daochi uses this
+primitive to preserve existing-account versus registration behavior.
 
 ## Next dependencies
 

@@ -1,0 +1,69 @@
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+schema :: #import "store_schema";
+trust :: #import "trust_store";
+timestamps :: #import "store_timestamps";
+habits :: #import "habit_migration";
+tokens :: #import "token_assets";
+apps :: #import "app_store";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+
+StoreOpenResult :: struct {
+    value: *sql.Database
+    error: Error
+}
+
+#scope_file
+OpenRaw :: (driver: string, source: string) -> StoreOpenResult #go_results #foreign native "Open";
+SetMaxOpenConnections :: (database: *sql.Database, count: isize) #foreign native "(*DB).SetMaxOpenConns";
+CloseRaw :: (database: *sql.Database) -> Error #foreign native "(*DB).Close";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+
+Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
+    error := schema.Ensure(database, context)
+    if error != null {
+        return error
+    }
+    error = trust.EnsureSchema(database, context)
+    if error != null {
+        return error
+    }
+    error = timestamps.Canonicalize(database, context)
+    if error != null {
+        return error
+    }
+    error = habits.AllAccounts(database, context)
+    if error != null {
+        return error
+    }
+    error = tokens.Seed(database, context)
+    if error != null {
+        return error
+    }
+    return apps.SeedBuiltin(database, context)
+}
+
+#scope_export
+Open :: (path: string) -> StoreOpenResult {
+    parts: [2]string = .[path, "?_busy_timeout=5000&_foreign_keys=on"]
+    opened := OpenRaw("sqlite3", Join(parts[:], ""))
+    if opened.error != null {
+        return opened
+    }
+    database := opened.value
+    SetMaxOpenConnections(database, cast(isize)1)
+    error := Initialize(database, ctx.Background())
+    if error != null {
+        CloseRaw(database)
+        result: StoreOpenResult
+        result.error = error
+        return result
+    }
+    return opened
+}
+
+Close :: (database: *sql.Database) -> Error {
+    return CloseRaw(database)
+}

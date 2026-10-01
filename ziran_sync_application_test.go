@@ -36,7 +36,7 @@ func applicationSnapshot(t *testing.T, store *Store) map[string]any {
 	value["server_habit_id_migrations"] = rows.Value
 	for _, table := range []string{"server_users", "server_meditation_logs", "server_habit_id_migrations"} {
 		for _, row := range value[table].([]map[string]any) {
-			for _, column := range []string{"created_at", "last_seen_at"} {
+			for _, column := range []string{"created_at", "last_seen_at", "migrated_at"} {
 				if stamp, ok := row[column].(string); ok && stamp != "" {
 					if _, err := time.Parse(CanonicalTimestampLayout, stamp); err != nil {
 						if _, err := time.Parse("2006-01-02 15:04:05", stamp); err != nil {
@@ -82,8 +82,11 @@ func compareApplication(t *testing.T, actual, expected *Store, ctx context.Conte
 	if got.Value != value || !reflect.DeepEqual(got.Accepted, accepted) || !sameIdentityError(got.Error, err) {
 		t.Fatalf("sync result changed: %#v; original %#v/%#v/%v", got, value, accepted, err)
 	}
-	if !reflect.DeepEqual(applicationSnapshot(t, actual), applicationSnapshot(t, expected)) {
-		t.Fatal("sync changed stored data, accepted operations, versions, mappings or account isolation")
+	actualState, expectedState := applicationSnapshot(t, actual), applicationSnapshot(t, expected)
+	for table, rows := range actualState {
+		if !reflect.DeepEqual(rows, expectedState[table]) {
+			t.Fatalf("sync changed table %s: %#v; original %#v", table, rows, expectedState[table])
+		}
 	}
 	viewsConnectionReleased(t, actual)
 	viewsConnectionReleased(t, expected)

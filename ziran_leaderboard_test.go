@@ -20,11 +20,11 @@ func seedLeaderboard(t *testing.T, store *Store, users []string) {
 			for day := 0; day < 4-index; day++ {
 				id := fmt.Sprintf("session-%d-%d-%d", index, activity, day)
 				date := time.Now().UTC().AddDate(0, 0, -day).Format("20060102")
-				if _, err := store.db.Exec("INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,rounds_hash,updated_at) VALUES(?,?,?,?,'0',?,'test','rounds','2026-01-01T00:00:00Z')", user, id, "2026-01-01T00:00:00Z", date, activity); err != nil {
+				if _, err := store.Database.Exec("INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,rounds_hash,updated_at) VALUES(?,?,?,?,'0',?,'test','rounds','2026-01-01T00:00:00Z')", user, id, "2026-01-01T00:00:00Z", date, activity); err != nil {
 					t.Fatal(err)
 				}
 				for round, hold := range []int{0, -1, 80 + index*100, 81 + index*100} {
-					if _, err := store.db.Exec("INSERT INTO server_session_rounds VALUES(?,?,?,?,?)", user, id, round, 30, hold); err != nil {
+					if _, err := store.Database.Exec("INSERT INTO server_session_rounds VALUES(?,?,?,?,?)", user, id, round, 30, hold); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -33,7 +33,7 @@ func seedLeaderboard(t *testing.T, store *Store, users []string) {
 		for index, duration := range []int{0, -2, 900, 1200} {
 			id := fmt.Sprintf("log-%s-%d", user[:1], index)
 			completed := time.Now().UTC().AddDate(0, 0, -index).Format(time.RFC3339)
-			if _, err := store.db.Exec("INSERT INTO server_meditation_logs(id,user_id_hash,session_id,duration_seconds,completed_at) VALUES(?,?,?,?,?)", id, user, id, duration, completed); err != nil {
+			if _, err := store.Database.Exec("INSERT INTO server_meditation_logs(id,user_id_hash,session_id,duration_seconds,completed_at) VALUES(?,?,?,?,?)", id, user, id, duration, completed); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -42,12 +42,12 @@ func seedLeaderboard(t *testing.T, store *Store, users []string) {
 
 func compareLeaderboard(t *testing.T, actual, expected *Store, context context.Context, user, practice, metric string) {
 	t.Helper()
-	got := Leaderboard_Friends(actual.db, context, user, "inbe", practice, metric)
+	got := Leaderboard_Friends(actual.Database, context, user, "inbe", practice, metric)
 	want, err := expected.baselineLeaderboardFriendStats(context, user, "inbe", practice, metric)
 	if !reflect.DeepEqual(got.Value, want) || !sameIdentityError(got.Error, err) {
 		t.Fatalf("leaderboard %s/%s differs:\ngot %#v\nwant %#v, %v", practice, metric, got, want, err)
 	}
-	if err := actual.db.Ping(); err != nil {
+	if err := actual.Database.Ping(); err != nil {
 		t.Fatal("leaderboard retained its SQL connection", err)
 	}
 }
@@ -73,7 +73,7 @@ func TestZiranLeaderboardAgainstBaseline(t *testing.T) {
 		"UPDATE server_sessions SET deleted_at=1",
 	} {
 		for _, store := range []*Store{actual.store, expected.store} {
-			if _, err := store.db.Exec(query); err != nil {
+			if _, err := store.Database.Exec(query); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -84,7 +84,7 @@ func TestZiranLeaderboardAgainstBaseline(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	compareLeaderboard(t, actual.store, expected.store, cancelled, users[0], "whm", "streak")
-	if result := Leaderboard_Friends(actual.store.db, cancelled, users[0], "inbe", "whm", "streak"); !errors.Is(result.Error, context.Canceled) {
+	if result := Leaderboard_Friends(actual.store.Database, cancelled, users[0], "inbe", "whm", "streak"); !errors.Is(result.Error, context.Canceled) {
 		t.Fatal("cancelled leaderboard lost native context error")
 	}
 }
@@ -102,7 +102,7 @@ func TestZiranLeaderboardFailureBoundaries(t *testing.T) {
 			actual, users := socialHTTPFixture(t)
 			expected, _ := socialHTTPFixture(t)
 			for _, store := range []*Store{actual.store, expected.store} {
-				if _, err := store.db.Exec(query); err != nil {
+				if _, err := store.Database.Exec(query); err != nil {
 					t.Fatal(err)
 				}
 			}

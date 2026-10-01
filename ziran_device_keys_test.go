@@ -46,7 +46,7 @@ CREATE TABLE server_device_registration_nonces (
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Store{db: database}
+	return &Store{Database: database}
 }
 
 func deviceSnapshot(t *testing.T, store *Store) map[string][][]string {
@@ -56,7 +56,7 @@ func deviceSnapshot(t *testing.T, store *Store) map[string][][]string {
 		"devices": "SELECT account_id,app_id,device_key_id,client_id,public_key,revoked_at<>'' FROM server_device_keys ORDER BY account_id,app_id,device_key_id",
 		"nonces":  "SELECT account_id,nonce FROM server_device_registration_nonces ORDER BY account_id,nonce",
 	} {
-		rows, err := store.db.Query(query)
+		rows, err := store.Database.Query(query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func compareDeviceQueries(t *testing.T, actual, expected *Store) {
 	if got, want := deviceSnapshot(t, actual), deviceSnapshot(t, expected); !reflect.DeepEqual(got, want) {
 		t.Fatalf("device state = %#v, baseline = %#v", got, want)
 	}
-	listed := DeviceKeys_List(actual.db, t.Context(), "account")
+	listed := DeviceKeys_List(actual.Database, t.Context(), "account")
 	want, err := expected.baselineListDeviceKeys(t.Context(), "account")
 	for index := range listed.Value {
 		listed.Value[index] = withoutDeviceClock(listed.Value[index])
@@ -110,7 +110,7 @@ func compareDeviceQueries(t *testing.T, actual, expected *Store) {
 	if !sameIdentityError(listed.Error, err) || !reflect.DeepEqual(listed.Value, want) {
 		t.Fatalf("device list = %#v, baseline = %#v, %v", listed, want, err)
 	}
-	active := DeviceKeys_Active(actual.db, t.Context(), "account", "inbe", "key")
+	active := DeviceKeys_Active(actual.Database, t.Context(), "account", "inbe", "key")
 	device, found, err := expected.baselineActiveDeviceKey(t.Context(), "account", "inbe", "key")
 	if !sameIdentityError(active.Error, err) || active.Found != found ||
 		!reflect.DeepEqual(withoutDeviceClock(active.Value), withoutDeviceClock(device)) {
@@ -178,7 +178,7 @@ func TestZiranDeviceStorageLifecycleAgainstBaseline(t *testing.T) {
 	device := DeviceKey{AccountID: "account", AppID: "inbe", KeyID: "key", ClientID: "client", PublicKey: "public"}
 	compareDeviceQueries(t, actual, expected)
 	for _, nonce := range []string{"first", "first", "replace"} {
-		got := DeviceKeys_Register(actual.db, t.Context(), device, nonce, errSignedTxReplay)
+		got := DeviceKeys_Register(actual.Database, t.Context(), device, nonce, errSignedTxReplay)
 		want := expected.baselineRegisterDeviceKey(t.Context(), device, nonce)
 		if !sameIdentityError(got, want) {
 			t.Fatalf("registration = %v, baseline = %v", got, want)
@@ -189,28 +189,28 @@ func TestZiranDeviceStorageLifecycleAgainstBaseline(t *testing.T) {
 	}
 	for _, nonce := range []string{"revoke", "revoke", "missing"} {
 		request := DeviceRevocationRequest{AppID: "inbe", KeyID: "key", Nonce: nonce}
-		got := DeviceKeys_Revoke(actual.db, t.Context(), "account", request, errSignedTxReplay)
+		got := DeviceKeys_Revoke(actual.Database, t.Context(), "account", request, errSignedTxReplay)
 		want := expected.baselineRevokeDeviceKey(t.Context(), "account", request)
 		if !sameIdentityError(got, want) {
 			t.Fatalf("revocation = %v, baseline = %v", got, want)
 		}
 		compareDeviceQueries(t, actual, expected)
 	}
-	if err := DeviceKeys_Register(actual.db, t.Context(), device, "missing", errSignedTxReplay); err != nil {
+	if err := DeviceKeys_Register(actual.Database, t.Context(), device, "missing", errSignedTxReplay); err != nil {
 		t.Fatal("missing-device revocation consumed its nonce", err)
 	}
 	if err := expected.baselineRegisterDeviceKey(t.Context(), device, "missing"); err != nil {
 		t.Fatal(err)
 	}
 	for _, store := range []*Store{actual, expected} {
-		if _, err := store.db.Exec("UPDATE server_device_keys SET created_at='2000-01-01T00:00:00.000000000Z',last_used_at=created_at"); err != nil {
+		if _, err := store.Database.Exec("UPDATE server_device_keys SET created_at='2000-01-01T00:00:00.000000000Z',last_used_at=created_at"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got, want := DeviceKeys_Touch(actual.db, t.Context(), "account", "inbe", "key"), expected.baselineTouchDeviceKey(t.Context(), "account", "inbe", "key"); !sameIdentityError(got, want) {
+	if got, want := DeviceKeys_Touch(actual.Database, t.Context(), "account", "inbe", "key"), expected.baselineTouchDeviceKey(t.Context(), "account", "inbe", "key"); !sameIdentityError(got, want) {
 		t.Fatalf("device touch = %v, baseline = %v", got, want)
 	}
-	active := DeviceKeys_Active(actual.db, t.Context(), "account", "inbe", "key")
+	active := DeviceKeys_Active(actual.Database, t.Context(), "account", "inbe", "key")
 	if active.Value.CreatedAt != "2000-01-01T00:00:00.000000000Z" || active.Value.LastUsedAt == active.Value.CreatedAt {
 		t.Fatal("touch changed creation time or did not update last use")
 	}
@@ -233,20 +233,20 @@ CREATE TABLE pending(id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFER
 CREATE TRIGGER reject_device AFTER INSERT ON server_device_keys BEGIN INSERT INTO pending VALUES(99); END`
 			}
 			for _, store := range []*Store{actual, expected} {
-				if _, err := store.db.Exec("INSERT INTO server_device_registration_nonces VALUES('account','expired','2000-01-01T00:00:00.000000000Z');" + query); err != nil {
+				if _, err := store.Database.Exec("INSERT INTO server_device_registration_nonces VALUES('account','expired','2000-01-01T00:00:00.000000000Z');" + query); err != nil {
 					t.Fatal(err)
 				}
 			}
 			before := deviceSnapshot(t, actual)
-			got := DeviceKeys_Register(actual.db, t.Context(), device, "new", errSignedTxReplay)
+			got := DeviceKeys_Register(actual.Database, t.Context(), device, "new", errSignedTxReplay)
 			want := expected.baselineRegisterDeviceKey(t.Context(), device, "new")
 			if got == nil || !sameIdentityError(got, want) || !reflect.DeepEqual(deviceSnapshot(t, actual), before) {
 				t.Fatalf("failed registration = %v, baseline = %v; writes or expiry cleanup leaked", got, want)
 			}
-			if _, err := actual.db.Exec("DROP TRIGGER reject_device"); err != nil {
+			if _, err := actual.Database.Exec("DROP TRIGGER reject_device"); err != nil {
 				t.Fatal(err)
 			}
-			if err := DeviceKeys_Register(actual.db, t.Context(), device, "new", errSignedTxReplay); err != nil {
+			if err := DeviceKeys_Register(actual.Database, t.Context(), device, "new", errSignedTxReplay); err != nil {
 				t.Fatal("rollback left connection or nonce unusable", err)
 			}
 		})
@@ -258,7 +258,7 @@ CREATE TRIGGER reject_device AFTER INSERT ON server_device_keys BEGIN INSERT INT
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			results <- DeviceKeys_Register(store.db, context.Background(), device, "shared", errSignedTxReplay)
+			results <- DeviceKeys_Register(store.Database, context.Background(), device, "shared", errSignedTxReplay)
 		}()
 	}
 	workers.Wait()
@@ -276,13 +276,13 @@ CREATE TRIGGER reject_device AFTER INSERT ON server_device_keys BEGIN INSERT INT
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := DeviceKeys_Register(store.db, ctx, device, "canceled", errSignedTxReplay); err != context.Canceled {
+	if err := DeviceKeys_Register(store.Database, ctx, device, "canceled", errSignedTxReplay); err != context.Canceled {
 		t.Fatal("registration lost cancellation identity", err)
 	}
-	if got := DeviceKeys_Active(store.db, ctx, "account", "inbe", "key"); got.Error != context.Canceled || got.Found {
+	if got := DeviceKeys_Active(store.Database, ctx, "account", "inbe", "key"); got.Error != context.Canceled || got.Found {
 		t.Fatalf("canceled lookup = %#v", got)
 	}
-	if got := DeviceKeys_List(store.db, ctx, "account"); got.Error != context.Canceled || got.Value != nil {
+	if got := DeviceKeys_List(store.Database, ctx, "account"); got.Error != context.Canceled || got.Value != nil {
 		t.Fatalf("canceled list = %#v", got)
 	}
 }

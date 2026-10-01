@@ -13,16 +13,16 @@ func baselineSchemaOpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db, path: path}
+	store := &Store{Database: db, Path: path}
 	if err := store.baselineSchemaMigrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := TrustStore_EnsureSchema(store.db, context.Background()); err != nil {
+	if err := TrustStore_EnsureSchema(store.Database, context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := StoreTimestamps_Canonicalize(store.db, context.Background()); err != nil {
+	if err := StoreTimestamps_Canonicalize(store.Database, context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -30,11 +30,11 @@ func baselineSchemaOpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := TokenAssets_Seed(store.db, context.Background()); err != nil {
+	if err := TokenAssets_Seed(store.Database, context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := AppStore_SeedBuiltin(store.db, context.Background()); err != nil {
+	if err := AppStore_SeedBuiltin(store.Database, context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -42,14 +42,14 @@ func baselineSchemaOpenStore(path string) (*Store, error) {
 }
 
 func (s *Store) baselineSchemaMigrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.Database.ExecContext(ctx, `
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 `); err != nil {
 		return err
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS server_users (
 	user_id_hash TEXT PRIMARY KEY,
 	public_key BLOB NOT NULL,
@@ -566,7 +566,7 @@ CREATE TABLE IF NOT EXISTS node_sync_cursors (
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.Database.ExecContext(ctx, `
 INSERT INTO server_mesh_changes(user_id_hash,collection,record_id)
 SELECT r.user_id_hash,r.collection,r.id
 FROM server_encrypted_records r
@@ -619,11 +619,11 @@ WHERE NOT EXISTS (
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0`,
 	} {
-		if _, err := s.db.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		if _, err := s.Database.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.Database.ExecContext(ctx, `
 CREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique
 ON server_users(alias)
 WHERE alias IS NOT NULL AND alias<>''`); err != nil {
@@ -649,7 +649,7 @@ WHERE alias IS NOT NULL AND alias<>''`); err != nil {
 		`CREATE INDEX IF NOT EXISTS monero_deposits_account ON monero_deposits(account_id,first_seen_at)`,
 		`CREATE INDEX IF NOT EXISTS monero_deposits_status ON monero_deposits(status,confirmations,updated_at)`,
 	} {
-		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+		if _, err := s.Database.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
 	}
@@ -659,7 +659,7 @@ WHERE alias IS NOT NULL AND alias<>''`); err != nil {
 func (s *Store) baselineSchemaMigrateMeditationLogPrimaryKey(ctx context.Context) error {
 	var userIDPK int
 	var idPK int
-	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(server_meditation_logs)`)
+	rows, err := s.Database.QueryContext(ctx, `PRAGMA table_info(server_meditation_logs)`)
 	if err != nil {
 		return err
 	}
@@ -686,7 +686,7 @@ func (s *Store) baselineSchemaMigrateMeditationLogPrimaryKey(ctx context.Context
 	if userIDPK == 1 && idPK == 2 {
 		return nil
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.Database.ExecContext(ctx, `
 PRAGMA foreign_keys=OFF;
 BEGIN;
 CREATE TABLE IF NOT EXISTS server_meditation_logs_new (
@@ -707,7 +707,7 @@ ALTER TABLE server_meditation_logs_new RENAME TO server_meditation_logs;
 COMMIT;
 PRAGMA foreign_keys=ON;`)
 	if err != nil {
-		_, _ = s.db.ExecContext(ctx, `ROLLBACK; PRAGMA foreign_keys=ON;`)
+		_, _ = s.Database.ExecContext(ctx, `ROLLBACK; PRAGMA foreign_keys=ON;`)
 		return err
 	}
 	return nil
@@ -726,7 +726,7 @@ func (s *Store) baselineSchemaEnsureMeshChangeColumns(ctx context.Context) error
 }
 
 func (s *Store) baselineSchemaAddColumnIfMissing(ctx context.Context, table, column, ddl string) error {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.Database.QueryContext(ctx,
 		`SELECT 1 FROM pragma_table_info(?1) WHERE name=?2`, table, column)
 	if err != nil {
 		return err
@@ -738,13 +738,13 @@ func (s *Store) baselineSchemaAddColumnIfMissing(ctx context.Context, table, col
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, ddl)
+	_, err = s.Database.ExecContext(ctx, ddl)
 	return err
 }
 
 func (s *Store) baselineSchemaMigrateSocialCacheTable(ctx context.Context) error {
 	var exists int
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.Database.QueryRowContext(ctx, `
 SELECT EXISTS(
 	SELECT 1 FROM sqlite_master
 	WHERE type='table' AND name='server_social_cache'
@@ -754,7 +754,7 @@ SELECT EXISTS(
 	if exists == 0 {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 INSERT OR REPLACE INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)
 SELECT user_id_hash,kind,json,updated_at,server_version
 FROM server_social_cache;

@@ -15,7 +15,7 @@ func (s *Server) baselineHandleAccountDevices(w http.ResponseWriter, r *http.Req
 	}
 	switch r.Method {
 	case http.MethodGet:
-		listed := DeviceKeys_List(s.store.db, r.Context(), accountID)
+		listed := DeviceKeys_List(s.store.Database, r.Context(), accountID)
 		devices, err := listed.Value, listed.Error
 		if err != nil {
 			Response_Error(w, http.StatusInternalServerError, "device list failed")
@@ -50,7 +50,7 @@ func (s *Server) baselineHandleAccountDevices(w http.ResponseWriter, r *http.Req
 		ClientID:  request.ClientID,
 		PublicKey: request.PublicKey,
 	}
-	if err := DeviceKeys_Register(s.store.db, r.Context(), device, request.Nonce, errSignedTxReplay); err != nil {
+	if err := DeviceKeys_Register(s.store.Database, r.Context(), device, request.Nonce, errSignedTxReplay); err != nil {
 		if errors.Is(err, errSignedTxReplay) {
 			Response_Error(w, http.StatusConflict, "device registration replay")
 			return
@@ -78,7 +78,7 @@ func (s *Server) baselineHandleDeviceRevocation(w http.ResponseWriter, r *http.R
 		s.writeAuthError(w, err)
 		return
 	}
-	if err := DeviceKeys_Revoke(s.store.db, r.Context(), accountID, request, errSignedTxReplay); err != nil {
+	if err := DeviceKeys_Revoke(s.store.Database, r.Context(), accountID, request, errSignedTxReplay); err != nil {
 		if errors.Is(err, errSignedTxReplay) {
 			Response_Error(w, http.StatusConflict, "device revocation replay")
 			return

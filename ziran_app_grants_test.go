@@ -17,7 +17,7 @@ import (
 func grantStoreFixture(t *testing.T) *Store {
 	t.Helper()
 	store := appStoreFixture(t)
-	if _, err := store.db.Exec(`
+	if _, err := store.Database.Exec(`
 CREATE TABLE IF NOT EXISTS server_users (
 	user_id_hash TEXT PRIMARY KEY,
 	public_key BLOB NOT NULL,
@@ -101,7 +101,7 @@ func grantSnapshot(t *testing.T, store *Store) map[string][][]string {
 		"audit":  "SELECT grant_id,user_id_hash,action,payload_json FROM server_app_grant_audit ORDER BY id",
 	}
 	for name, query := range queries {
-		rows, err := store.db.Query(query)
+		rows, err := store.Database.Query(query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +144,7 @@ func compareGrantCreate(t *testing.T, actual, expected *Store, ctx context.Conte
 	original := rand.Reader
 	defer func() { rand.Reader = original }()
 	rand.Reader = bytes.NewReader(bytes.Repeat([]byte{seed}, 16))
-	got := AppGrants_Create(actual.db, ctx, user, request, ErrSyncUserNotFound)
+	got := AppGrants_Create(actual.Database, ctx, user, request, ErrSyncUserNotFound)
 	rand.Reader = bytes.NewReader(bytes.Repeat([]byte{seed}, 16))
 	want, err := expected.baselineCreateAppGrant(ctx, user, request)
 	if !sameIdentityError(got.Error, err) || !reflect.DeepEqual(withoutGrantClocks(got.Value), withoutGrantClocks(want)) {
@@ -159,7 +159,7 @@ func compareGrantState(t *testing.T, actual, expected *Store) {
 		t.Fatalf("grant state = %#v, baseline = %#v", got, want)
 	}
 	for _, user := range []string{"account", "other", "missing"} {
-		got := AppGrants_List(actual.db, t.Context(), user)
+		got := AppGrants_List(actual.Database, t.Context(), user)
 		want, err := expected.baselineListAppGrants(t.Context(), user)
 		for index := range got.Value {
 			got.Value[index] = withoutGrantClocks(got.Value[index])
@@ -175,7 +175,7 @@ func compareGrantState(t *testing.T, actual, expected *Store) {
 
 func compareGrantedRecords(t *testing.T, actual, expected *Store, ctx context.Context, user, source, target, prefix string) GrantedRecordsResult {
 	t.Helper()
-	got := AppGrants_AuthorizedRecords(actual.db, ctx, user, source, target, prefix, errAppScopeNotOwned, ErrSyncUserNotFound)
+	got := AppGrants_AuthorizedRecords(actual.Database, ctx, user, source, target, prefix, errAppScopeNotOwned, ErrSyncUserNotFound)
 	want, err := expected.baselineAuthorizedAppRecords(ctx, user, source, target, prefix)
 	if !sameIdentityError(got.Error, err) || !reflect.DeepEqual(got.Value, want) {
 		t.Fatalf("record access %q, %q, %q, %q = %#v, baseline = %#v, %v", user, source, target, prefix, got, want, err)
@@ -196,7 +196,7 @@ func TestZiranAppGrantLifecycleAgainstBaseline(t *testing.T) {
 		t.Fatal("valid grant failed", created)
 	}
 	for _, user := range []string{"account", "other", "missing"} {
-		got := AppGrants_ByID(actual.db, t.Context(), user, created.Value.ID)
+		got := AppGrants_ByID(actual.Database, t.Context(), user, created.Value.ID)
 		want, err := expected.baselineAppGrantByID(t.Context(), user, created.Value.ID)
 		if !sameIdentityError(got.Error, err) || !reflect.DeepEqual(withoutGrantClocks(got.Value), withoutGrantClocks(want)) {
 			t.Fatalf("grant detail %q = %#v, baseline = %#v, %v", user, got, want, err)
@@ -208,7 +208,7 @@ func TestZiranAppGrantLifecycleAgainstBaseline(t *testing.T) {
 	}
 	compareGrantedRecords(t, actual, expected, t.Context(), "other", "source", "target", "shared.source.v1.*")
 	for _, user := range []string{"other", "account", "account"} {
-		got := AppGrants_Revoke(actual.db, t.Context(), user, created.Value.ID)
+		got := AppGrants_Revoke(actual.Database, t.Context(), user, created.Value.ID)
 		want := expected.baselineRevokeAppGrant(t.Context(), user, created.Value.ID)
 		if !sameIdentityError(got, want) {
 			t.Fatalf("grant revocation %q = %v, baseline = %v", user, got, want)
@@ -226,7 +226,7 @@ func TestZiranAppGrantLifecycleAgainstBaseline(t *testing.T) {
 		}
 	}
 	for _, prefix := range []string{"shared.source.v1.*", "shared.source.v1.exact", "nothing.*", "shared.source_a.v1.*", "shared.source%.v1.*", "shared.source\\.v1.*", ""} {
-		got := AppGrants_Records(actual.db, t.Context(), "account", prefix)
+		got := AppGrants_Records(actual.Database, t.Context(), "account", prefix)
 		want, err := expected.baselineSnapshotEncryptedRecordsByCollectionPrefix(t.Context(), "account", prefix)
 		if !sameIdentityError(got.Error, err) || !reflect.DeepEqual(got.Value, want) {
 			t.Fatalf("snapshot %q = %#v, baseline = %#v, %v", prefix, got, want, err)
@@ -268,7 +268,7 @@ func TestZiranAppGrantValidationOrderAgainstBaseline(t *testing.T) {
 			}
 			if query != "" {
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec(query); err != nil {
+					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -309,7 +309,7 @@ CREATE TRIGGER reject_grant AFTER INSERT ON server_app_grant_audit BEGIN INSERT 
 				query = "CREATE TRIGGER reject_grant AFTER INSERT ON server_app_grant_audit BEGIN UPDATE server_app_grants SET user_id_hash='other' WHERE id=NEW.grant_id; END"
 			}
 			for _, store := range []*Store{actual, expected} {
-				if _, err := store.db.Exec(query); err != nil {
+				if _, err := store.Database.Exec(query); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -323,13 +323,13 @@ CREATE TRIGGER reject_grant AFTER INSERT ON server_app_grant_audit BEGIN INSERT 
 				t.Fatal("failed grant left partial account, sync, grant or audit changes")
 			}
 			compareGrantState(t, actual, expected)
-			if _, err := actual.db.Exec("DROP TRIGGER reject_grant"); err != nil {
+			if _, err := actual.Database.Exec("DROP TRIGGER reject_grant"); err != nil {
 				t.Fatal(err)
 			}
 			original := rand.Reader
 			rand.Reader = bytes.NewReader(bytes.Repeat([]byte{0x43}, 16))
 			defer func() { rand.Reader = original }()
-			if created := AppGrants_Create(actual.db, t.Context(), "account", request, ErrSyncUserNotFound); created.Error != nil {
+			if created := AppGrants_Create(actual.Database, t.Context(), "account", request, ErrSyncUserNotFound); created.Error != nil {
 				t.Fatal("failed transaction left connection unusable", created)
 			}
 		})
@@ -349,21 +349,21 @@ CREATE TABLE pending(id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFER
 CREATE TRIGGER reject_grant AFTER INSERT ON server_app_grant_audit BEGIN INSERT INTO pending VALUES(99); END`
 			}
 			for _, store := range []*Store{actual, expected} {
-				if _, err := store.db.Exec(query); err != nil {
+				if _, err := store.Database.Exec(query); err != nil {
 					t.Fatal(err)
 				}
 			}
 			before := grantSnapshot(t, actual)
-			got := AppGrants_Revoke(actual.db, t.Context(), "account", created.Value.ID)
+			got := AppGrants_Revoke(actual.Database, t.Context(), "account", created.Value.ID)
 			want := expected.baselineRevokeAppGrant(t.Context(), "account", created.Value.ID)
 			if got == nil || !sameIdentityError(got, want) || !reflect.DeepEqual(grantSnapshot(t, actual), before) {
 				t.Fatal("failed revoke changed grant or audit state", got, want)
 			}
 			compareGrantState(t, actual, expected)
-			if _, err := actual.db.Exec("DROP TRIGGER reject_grant"); err != nil {
+			if _, err := actual.Database.Exec("DROP TRIGGER reject_grant"); err != nil {
 				t.Fatal(err)
 			}
-			if err := AppGrants_Revoke(actual.db, t.Context(), "account", created.Value.ID); err != nil {
+			if err := AppGrants_Revoke(actual.Database, t.Context(), "account", created.Value.ID); err != nil {
 				t.Fatal("failed revocation left connection unusable", err)
 			}
 		})
@@ -384,28 +384,28 @@ func TestZiranAppGrantQueryErrorsAgainstBaseline(t *testing.T) {
 			}
 			for _, store := range []*Store{actual, expected} {
 				if mode == "closed" {
-					if err := store.db.Close(); err != nil {
+					if err := store.Database.Close(); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "grant scan" {
-					if _, err := store.db.Exec(`ALTER TABLE server_app_grants RENAME TO grants;
+					if _, err := store.Database.Exec(`ALTER TABLE server_app_grants RENAME TO grants;
 CREATE VIEW server_app_grants AS SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,NULL AS status,created_at,updated_at,revoked_at FROM grants`); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "record scan" {
-					if _, err := store.db.Exec("UPDATE server_encrypted_records SET schema_version='broken' WHERE id='b'"); err != nil {
+					if _, err := store.Database.Exec("UPDATE server_encrypted_records SET schema_version='broken' WHERE id='b'"); err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
-			got := AppGrants_ByID(actual.db, ctx, "account", created.Value.ID)
+			got := AppGrants_ByID(actual.Database, ctx, "account", created.Value.ID)
 			want, err := expected.baselineAppGrantByID(ctx, "account", created.Value.ID)
 			if !sameIdentityError(got.Error, err) || !reflect.DeepEqual(withoutGrantClocks(got.Value), withoutGrantClocks(want)) {
 				t.Fatal("grant detail error or partial record changed", got, want, err)
 			}
-			listed := AppGrants_List(actual.db, ctx, "account")
+			listed := AppGrants_List(actual.Database, ctx, "account")
 			grants, err := expected.baselineListAppGrants(ctx, "account")
 			for index := range listed.Value {
 				listed.Value[index] = withoutGrantClocks(listed.Value[index])
@@ -438,11 +438,11 @@ func TestZiranResourceIDsAndAccountTouchAgainstBaseline(t *testing.T) {
 	}
 	actual, expected := grantStoreFixture(t), grantStoreFixture(t)
 	for _, user := range []string{"missing", "account", "account"} {
-		transaction, err := actual.db.BeginTx(t.Context(), nil)
+		transaction, err := actual.Database.BeginTx(t.Context(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		baseline, err := expected.db.BeginTx(t.Context(), nil)
+		baseline, err := expected.Database.BeginTx(t.Context(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -464,10 +464,10 @@ func TestZiranResourceIDsAndAccountTouchAgainstBaseline(t *testing.T) {
 		}
 		compareGrantState(t, actual, expected)
 	}
-	if _, err := actual.db.Exec("INSERT OR IGNORE INTO server_sync_state VALUES('account',99)"); err != nil {
+	if _, err := actual.Database.Exec("INSERT OR IGNORE INTO server_sync_state VALUES('account',99)"); err != nil {
 		t.Fatal(err)
 	}
-	if missing := AppGrants_ByID(actual.db, t.Context(), "account", strings.Repeat("0", 32)); !errors.Is(missing.Error, sql.ErrNoRows) {
+	if missing := AppGrants_ByID(actual.Database, t.Context(), "account", strings.Repeat("0", 32)); !errors.Is(missing.Error, sql.ErrNoRows) {
 		t.Fatal("missing grant sentinel changed", missing)
 	}
 }

@@ -204,7 +204,7 @@ func trustHTTPPayload(t *testing.T, server *Server, handler, mode string, now ti
 	t.Helper()
 	privateKey, authority, spaceID := trustKeyFixture()
 	if handler == "claim" || handler == "resolve" {
-		if _, err := server.store.db.Exec(`INSERT INTO trust_spaces(space_id,display_name,authority_public_key,authority_private_key,created_at)
+		if _, err := server.store.Database.Exec(`INSERT INTO trust_spaces(space_id,display_name,authority_public_key,authority_private_key,created_at)
 VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), Timestamp_CanonicalNow()); err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +234,7 @@ VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), 
 		NodeIdentity_SignAcceptance(remote, invite, &acceptance)
 	}
 	if handler == "complete" && mode != "unissued" {
-		if err := TrustStore_RecordIssuedPairingInvite(server.store.db, t.Context(), invite); err != nil {
+		if err := TrustStore_RecordIssuedPairingInvite(server.store.Database, t.Context(), invite); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -276,23 +276,23 @@ VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), 
 	case "accept":
 		value = invite
 		if mode == "replay" {
-			if err := TrustStore_TrustPeer(server.store.db, t.Context(), invite, inviter.PublicKey); err != nil {
+			if err := TrustStore_TrustPeer(server.store.Database, t.Context(), invite, inviter.PublicKey); err != nil {
 				t.Fatal(err)
 			}
 		}
 	case "complete":
 		value = completePairingRequest{Invite: invite, Acceptance: acceptance}
 		if mode == "replay" {
-			if err := TrustStore_CompleteIssuedPairing(server.store.db, t.Context(), invite, acceptance, remote.PublicKey); err != nil {
+			if err := TrustStore_CompleteIssuedPairing(server.store.Database, t.Context(), invite, acceptance, remote.PublicKey); err != nil {
 				t.Fatal(err)
 			}
 		}
 	case "peers":
 		if mode == "populated" {
-			if err := TrustStore_TrustPeer(server.store.db, t.Context(), invite, inviter.PublicKey); err != nil {
+			if err := TrustStore_TrustPeer(server.store.Database, t.Context(), invite, inviter.PublicKey); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := server.store.db.Exec("UPDATE trusted_node_peers SET trusted_at=?1", Timestamp_CanonicalTimestamp(now)); err != nil {
+			if _, err := server.store.Database.Exec("UPDATE trusted_node_peers SET trusted_at=?1", Timestamp_CanonicalTimestamp(now)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -306,7 +306,7 @@ VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), 
 	case "resolve":
 		claim.Name = "home"
 		if mode != "missing" {
-			if result := TrustStore_SignAndStoreNameClaim(server.store.db, t.Context(), claim); result.Error != nil {
+			if result := TrustStore_SignAndStoreNameClaim(server.store.Database, t.Context(), claim); result.Error != nil {
 				t.Fatal(result.Error)
 			}
 		}
@@ -371,7 +371,7 @@ func TestZiranTrustHTTPAgainstBaseline(t *testing.T) {
 							"complete": "trusted_node_peers", "space": "trust_spaces", "claim": "name_claims",
 						}[handler.name]
 						query := "CREATE TRIGGER reject_trust_http BEFORE INSERT ON " + table + " BEGIN SELECT RAISE(ABORT,'trust write failed'); END"
-						if _, err := server.store.db.Exec(query); err != nil {
+						if _, err := server.store.Database.Exec(query); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -401,7 +401,7 @@ func TestZiranTrustHTTPAgainstBaseline(t *testing.T) {
 						server.cfg.BaseURL = ""
 					}
 					if mode == "closed" {
-						_ = server.store.db.Close()
+						_ = server.store.Database.Close()
 					}
 					if mode == "cancelled" {
 						ctx, cancel := context.WithCancel(t.Context())
@@ -459,7 +459,7 @@ func TestZiranTrustHTTPAgainstBaseline(t *testing.T) {
 						server := []*Server{actual, expected}[index]
 						var signature string
 						var expiry int64
-						if err := server.store.db.QueryRow("SELECT signature,expires_at FROM issued_pairing_invites WHERE invite_id=?1", invites[index].InviteID).Scan(&signature, &expiry); err != nil {
+						if err := server.store.Database.QueryRow("SELECT signature,expires_at FROM issued_pairing_invites WHERE invite_id=?1", invites[index].InviteID).Scan(&signature, &expiry); err != nil {
 							t.Fatal(err)
 						}
 						if signature != invites[index].Signature || expiry != invites[index].ExpiresAt {

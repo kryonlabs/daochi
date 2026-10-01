@@ -53,7 +53,7 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 
 func (s *Server) access() AccountAccess {
 	return AccountAccess{
-		Database:      s.store.db,
+		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Challenges:    s.challenges,
 		Limiter:       s.limiter,
@@ -67,8 +67,8 @@ func (s *Server) access() AccountAccess {
 
 func (s *Server) operations() Operations {
 	return Operations{
-		Database:          s.store.db,
-		Path:              s.store.path,
+		Database:          s.store.Database,
+		Path:              s.store.Path,
 		Configuration:     &s.cfg,
 		Identity:          &s.node,
 		Notifications:     s.syncHub,
@@ -79,7 +79,7 @@ func (s *Server) operations() Operations {
 
 func (s *Server) tokens() Tokens {
 	return Tokens{
-		Database:          s.store.db,
+		Database:          s.store.Database,
 		Configuration:     &s.cfg,
 		Counters:          s.metrics,
 		Limiter:           s.limiter,
@@ -91,7 +91,7 @@ func (s *Server) tokens() Tokens {
 
 func (s *Server) monero() Monero {
 	return Monero{
-		Database:          s.store.db,
+		Database:          s.store.Database,
 		Configuration:     &s.cfg,
 		Counters:          s.metrics,
 		Limiter:           s.limiter,
@@ -107,7 +107,7 @@ func (s *Server) monero() Monero {
 
 func (s *Server) accounts() Accounts {
 	return Accounts{
-		Database:      s.store.db,
+		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Counters:      s.metrics,
 		MissingUser:   ErrSyncUserNotFound,
@@ -120,7 +120,7 @@ func (s *Server) social() Social {
 
 func (s *Server) appRegistry() Registry {
 	return Registry{
-		Database:      s.store.db,
+		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Counters:      s.metrics,
 		Verify:        s.verifier.Verify,
@@ -132,7 +132,7 @@ func (s *Server) appRegistry() Registry {
 
 func (s *Server) devices() Devices {
 	return Devices{
-		Database:      s.store.db,
+		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Counters:      s.metrics,
 		Verify:        s.verifier.Verify,
@@ -142,7 +142,7 @@ func (s *Server) devices() Devices {
 
 func (s *Server) trust() Trust {
 	return Trust{
-		Database:      s.store.db,
+		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Identity:      s.node,
 	}
@@ -150,7 +150,7 @@ func (s *Server) trust() Trust {
 
 func (s *Server) mesh() Mesh {
 	return Mesh{
-		Database:      s.store.db,
+		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Identity:      &s.node,
 		ConvertError:  authenticationError,
@@ -158,12 +158,12 @@ func (s *Server) mesh() Mesh {
 }
 
 func (s *Server) authenticateToken(r *http.Request) (string, error) {
-	result := HttpAuth_AuthenticateToken(s.store.db, r, s.cfg.TokenSecret)
+	result := HttpAuth_AuthenticateToken(s.store.Database, r, s.cfg.TokenSecret)
 	return result.Value, authenticationError(result.Authentication)
 }
 
 func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, bool) {
-	result := HttpAuth_BearerUser(s.store.db, r, s.cfg.TokenSecret)
+	result := HttpAuth_BearerUser(s.store.Database, r, s.cfg.TokenSecret)
 	if result.Authentication.Error != nil || result.Authentication.Status != 0 {
 		HttpAuth_Respond(w, s.metrics, result.Authentication)
 		return "", false
@@ -364,7 +364,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) synchronization() Synchronization {
 	return Synchronization{
-		Database:      s.store.db,
+		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Counters:      s.metrics,
 		Notifications: s.syncHub,
@@ -393,7 +393,7 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyText, signatureText, signatureContext, method, path string, signedPayload []byte) ([]byte, error) {
-	result := AccountSignature_Authenticate(s.store.db, s.challenges, s.access().Verify, ctx, userID, publicKeyText, signatureText, signatureContext, method, path, signedPayload)
+	result := AccountSignature_Authenticate(s.store.Database, s.challenges, s.access().Verify, ctx, userID, publicKeyText, signatureText, signatureContext, method, path, signedPayload)
 	return result.Value, authenticationError(result.Authentication)
 }
 
@@ -428,7 +428,7 @@ func (s *Server) allowRequest(r *http.Request, key string, limit int, window tim
 
 func (s *Server) syncSocket() SyncSocket {
 	return SyncSocket{
-		Database:      s.store.db,
+		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Counters:      s.metrics,
 		Limiter:       s.limiter,

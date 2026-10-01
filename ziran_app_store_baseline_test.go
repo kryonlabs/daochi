@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Store) baselineUpsertSignedAppManifest(ctx context.Context, manifest AppManifest, manifestBytes []byte, manifestHash, manifestSignature, approvalSignature string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ VALUES(?1,?2,?3,?4,?5)`,
 
 func (s *Store) baselineActiveAppKey(ctx context.Context, appID, keyID string) (AppKey, bool, error) {
 	var key AppKey
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT key_id,algorithm,public_key,purpose,status,expires_at,created_at
 FROM server_app_keys
 WHERE app_id=?1 AND key_id=?2 AND status='active'`, appID, keyID).Scan(
@@ -181,7 +181,7 @@ WHERE app_id=?1 AND key_id=?2 AND status='active'`, appID, keyID).Scan(
 
 func (s *Store) baselineHydrateAppManifestFields(ctx context.Context, app *AppRegistration) error {
 	var manifestJSON string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at
 FROM server_app_manifests
 WHERE app_id=?1 AND status='active'`, app.AppID).Scan(
@@ -216,7 +216,7 @@ WHERE app_id=?1 AND status='active'`, app.AppID).Scan(
 }
 
 func (s *Store) baselineAppKeys(ctx context.Context, appID string) ([]AppKey, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT key_id,algorithm,public_key,purpose,status,expires_at,created_at
 FROM server_app_keys
 WHERE app_id=?1
@@ -238,7 +238,7 @@ ORDER BY key_id`, appID)
 }
 
 func (s *Store) baselineTokenPolicies(ctx context.Context, appID string) ([]TokenPolicy, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT asset_id,permission,status,legacy_unsigned_until
 FROM token_app_permissions
 WHERE app_id=?1
@@ -260,7 +260,7 @@ ORDER BY asset_id,permission`, appID)
 
 func (s *Store) baselineAppTokenPermission(ctx context.Context, appID, assetID, permission string) (TokenPolicy, bool, error) {
 	var policy TokenPolicy
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT asset_id,permission,status,legacy_unsigned_until
 FROM token_app_permissions
 WHERE app_id=?1 AND asset_id=?2 AND permission=?3 AND status='active'`, appID, assetID, permission).Scan(
@@ -273,7 +273,7 @@ WHERE app_id=?1 AND asset_id=?2 AND permission=?3 AND status='active'`, appID, a
 
 func (s *Store) baselineHasTokenPolicy(ctx context.Context, appID string) (bool, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM token_app_permissions WHERE app_id=?1`, appID).Scan(&count)
+	err := s.Database.QueryRowContext(ctx, `SELECT COUNT(*) FROM token_app_permissions WHERE app_id=?1`, appID).Scan(&count)
 	return count > 0, err
 }
 
@@ -317,7 +317,7 @@ func (s *Store) baselineSeedBuiltinApps(ctx context.Context) error {
 		},
 	}
 	var signedManifest int
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.Database.QueryRowContext(ctx, `
 SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status='active')`).Scan(&signedManifest); err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status=
 }
 
 func (s *Store) baselineUpsertApp(ctx context.Context, app AppRegistration) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -340,7 +340,7 @@ func (s *Store) baselineUpsertApp(ctx context.Context, app AppRegistration) erro
 }
 
 func (s *Store) baselineListApps(ctx context.Context) ([]AppRegistration, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,
        app_schema_version,min_supported_client_version,current_client_version,
        compatibility_until,features_json,legacy_protocols_json,created_at,updated_at
@@ -388,7 +388,7 @@ ORDER BY app_id`)
 
 func (s *Store) baselineAppByID(ctx context.Context, appID string) (AppRegistration, bool, error) {
 	var app AppRegistration
-	row := s.db.QueryRowContext(ctx, `
+	row := s.Database.QueryRowContext(ctx, `
 SELECT app_id,display_name,description,homepage_url,source_url,public_key,status,
        app_schema_version,min_supported_client_version,current_client_version,
        compatibility_until,features_json,legacy_protocols_json,created_at,updated_at
@@ -441,7 +441,7 @@ func baselineDecodeAppMetadata(featuresJSON, legacyProtocolsJSON string, app *Ap
 
 func (s *Store) baselineAppExists(ctx context.Context, appID string) (bool, error) {
 	var exists int
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_apps WHERE app_id=?1 AND status='active')`, appID).Scan(&exists)
+	err := s.Database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_apps WHERE app_id=?1 AND status='active')`, appID).Scan(&exists)
 	return exists != 0, err
 }
 
@@ -469,7 +469,7 @@ func (s *Store) baselineAppAllowsLegacyProtocol(ctx context.Context, appID strin
 }
 
 func (s *Store) baselineAppCollections(ctx context.Context, appID string) ([]AppCollection, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT app_id,collection_prefix,visibility,schema_version,description,created_at
 FROM server_app_collections
 WHERE app_id=?1
@@ -492,7 +492,7 @@ ORDER BY collection_prefix`, appID)
 }
 
 func (s *Store) baselineAppCapabilities(ctx context.Context, appID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT capability
 FROM server_app_capabilities
 WHERE app_id=?1

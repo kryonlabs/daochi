@@ -18,7 +18,7 @@ func (s *Store) baselineExportAccount(ctx context.Context, userID string) (Accou
 		UserIDHash: userID,
 		Tables:     make(map[string][]map[string]any),
 	}
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.Database.QueryRowContext(ctx, `
 SELECT alias,profile_icon
 FROM server_users
 WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
@@ -126,7 +126,7 @@ WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
 }
 
 func (s *Store) baselineQueryAccountRows(ctx context.Context, query string, userID string, jsonFields map[string]bool) ([]map[string]any, error) {
-	rows, err := s.db.QueryContext(ctx, query, userID)
+	rows, err := s.Database.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}

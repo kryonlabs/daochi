@@ -68,49 +68,49 @@ type viewsReadCase struct {
 func viewsReadCases() []viewsReadCase {
 	return []viewsReadCase{
 		{"habits", func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
-			r := SyncViews_HabitsSince(s.db, ctx, user, since)
+			r := SyncViews_HabitsSince(s.Database, ctx, user, since)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
 			v, err := s.baselineViewsSnapshotHabits(ctx, user, since)
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"days", func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
-			r := SyncViews_HabitDaysSince(s.db, ctx, user, since)
+			r := SyncViews_HabitDaysSince(s.Database, ctx, user, since)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
 			v, err := s.baselineViewsSnapshotHabitDays(ctx, user, since)
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"sessions", func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
-			r := SyncViews_SessionsSince(s.db, ctx, user, since)
+			r := SyncViews_SessionsSince(s.Database, ctx, user, since)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
 			v, err := s.baselineViewsSnapshotSessions(ctx, user, since)
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"rounds", func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
-			r := SyncViews_SessionRounds(s.db, ctx, user, "z-last")
+			r := SyncViews_SessionRounds(s.Database, ctx, user, "z-last")
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
 			v, err := s.baselineViewsSnapshotSessionRounds(ctx, user, "z-last")
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"meditations", func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
-			r := SyncViews_MeditationsSince(s.db, ctx, user, since)
+			r := SyncViews_MeditationsSince(s.Database, ctx, user, since)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
 			v, err := s.baselineViewsSnapshotMeditationLogs(ctx, user, since)
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"social", func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
-			r := SyncViews_SocialSince(s.db, ctx, user, since)
+			r := SyncViews_SocialSince(s.Database, ctx, user, since)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
 			v, err := s.baselineViewsSnapshotSocialCache(ctx, user, since)
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"records", func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
-			r := SyncViews_RecordsSince(s.db, ctx, user, since)
+			r := SyncViews_RecordsSince(s.Database, ctx, user, since)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, since int64) lifecycleReadResult {
 			v, err := s.baselineViewsSnapshotEncryptedRecords(ctx, user, since)
@@ -124,28 +124,28 @@ func viewsReadCases() []viewsReadCase {
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"clean habits", func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
-			r := SyncViews_CleanHabits(s.db, ctx, user)
+			r := SyncViews_CleanHabits(s.Database, ctx, user)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
 			v, err := s.baselineViewsCleanHabits(ctx, user)
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"clean days", func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
-			r := SyncViews_CleanHabitDays(s.db, ctx, user)
+			r := SyncViews_CleanHabitDays(s.Database, ctx, user)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
 			v, err := s.baselineViewsCleanHabitDays(ctx, user)
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"clean sessions", func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
-			r := SyncViews_CleanSessions(s.db, ctx, user)
+			r := SyncViews_CleanSessions(s.Database, ctx, user)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
 			v, err := s.baselineViewsCleanSessions(ctx, user)
 			return lifecycleReadResult{v, nil, err}
 		}},
 		{"clean meditations", func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
-			r := SyncViews_CleanMeditations(s.db, ctx, user)
+			r := SyncViews_CleanMeditations(s.Database, ctx, user)
 			return lifecycleReadResult{r.Value, nil, r.Error}
 		}, func(s *Store, ctx context.Context, user string, _ int64) lifecycleReadResult {
 			v, err := s.baselineViewsCleanMeditationLogs(ctx, user)
@@ -190,7 +190,7 @@ func TestZiranSyncViewsAgainstBaseline(t *testing.T) {
 					got := test.actual(store, ctx, user, since)
 					want := test.baseline(store, ctx, user, since)
 					compareViewsRead(t, got, want)
-					if err := store.db.PingContext(ctx); err != nil {
+					if err := store.Database.PingContext(ctx); err != nil {
 						t.Fatal("read retained the database connection", err)
 					}
 					cancel()

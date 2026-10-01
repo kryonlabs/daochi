@@ -75,7 +75,7 @@ func signedTransactionFixture(t *testing.T) (*Store, *http.Request, SignedTxEnve
 	store := deviceStoreFixture(t)
 	accountID := strings.Repeat("a", 64)
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
-	_, err := store.db.Exec(`
+	_, err := store.Database.Exec(`
 ALTER TABLE server_users ADD COLUMN public_key BLOB;
 CREATE TABLE server_signed_transactions (
  account_id TEXT NOT NULL, tx_id TEXT NOT NULL, app_id TEXT NOT NULL,
@@ -86,7 +86,7 @@ CREATE TABLE server_signed_transactions (
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec("UPDATE server_users SET user_id_hash=?1,public_key=?2", accountID, []byte{0, 1, 255}); err != nil {
+	if _, err := store.Database.Exec("UPDATE server_users SET user_id_hash=?1,public_key=?2", accountID, []byte{0, 1, 255}); err != nil {
 		t.Fatal(err)
 	}
 	device := DeviceKey{AccountID: accountID, AppID: "inbe", KeyID: "device-key", ClientID: "client-test",
@@ -110,7 +110,7 @@ func signDeviceTransaction(tx *SignedTxEnvelope, key ed25519.PrivateKey) {
 
 func signedTransactionRows(t *testing.T, store *Store) []SignedTxEnvelope {
 	t.Helper()
-	rows, err := store.db.Query("SELECT account_id,tx_id,app_id,nonce,expires_at FROM server_signed_transactions ORDER BY account_id,tx_id")
+	rows, err := store.Database.Query("SELECT account_id,tx_id,app_id,nonce,expires_at FROM server_signed_transactions ORDER BY account_id,tx_id")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestZiranSignedTransactionVerificationAgainstBaseline(t *testing.T) {
 			}
 			if query != "" {
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec(query); err != nil {
+					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -228,7 +228,7 @@ func TestZiranSignedTransactionVerificationAgainstBaseline(t *testing.T) {
 				ctx = canceled
 			}
 			accountID := "\u2003" + strings.ToUpper(strings.Repeat("a", 64)) + "\t"
-			got := authenticationError(SignedTx_Verify(actual.db, ctx, request, body, tx, accountID, " inbe ", gotVerifier.Verify, errSignedTxReplay))
+			got := authenticationError(SignedTx_Verify(actual.Database, ctx, request, body, tx, accountID, " inbe ", gotVerifier.Verify, errSignedTxReplay))
 			server := &Server{store: expected, verifier: wantVerifier}
 			want := server.baselineVerifySignedTx(ctx, request, body, tx, accountID, " inbe ")
 			if !equalAuthenticationError(got, want) || !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls) {
@@ -263,7 +263,7 @@ func TestZiranSignedTransactionConcurrentVerificationIsSingleUse(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			results <- SignedTx_Verify(store.db, context.Background(), request, body, tx, tx.AccountID, tx.AppID, verify, errSignedTxReplay)
+			results <- SignedTx_Verify(store.Database, context.Background(), request, body, tx, tx.AccountID, tx.AppID, verify, errSignedTxReplay)
 		}()
 	}
 	workers.Wait()
@@ -285,7 +285,7 @@ func TestZiranSignedTransactionRecordAndForgetAgainstBaseline(t *testing.T) {
 	actual, _, tx, _, _ := signedTransactionFixture(t)
 	expected, _, _, _, _ := signedTransactionFixture(t)
 	for _, item := range []SignedTxEnvelope{tx, tx, {AccountID: tx.AccountID, AppID: tx.AppID, TxID: "other", Nonce: tx.Nonce, ExpiresAt: tx.ExpiresAt}} {
-		got := SignedTx_Record(actual.db, t.Context(), item, errSignedTxReplay)
+		got := SignedTx_Record(actual.Database, t.Context(), item, errSignedTxReplay)
 		want := expected.baselineRecordSignedTx(t.Context(), item)
 		if got != want && !sameIdentityError(got, want) {
 			t.Fatalf("replay recording = %v, baseline = %v", got, want)
@@ -297,7 +297,7 @@ func TestZiranSignedTransactionRecordAndForgetAgainstBaseline(t *testing.T) {
 	wrong := tx
 	wrong.Nonce = "different"
 	for _, item := range []SignedTxEnvelope{wrong, tx, tx} {
-		SignedTx_Forget(actual.db, t.Context(), item)
+		SignedTx_Forget(actual.Database, t.Context(), item)
 		expected.baselineForgetSignedTx(t.Context(), item)
 		if !reflect.DeepEqual(signedTransactionRows(t, actual), signedTransactionRows(t, expected)) {
 			t.Fatal("forget removed a mismatched transaction")
@@ -310,7 +310,7 @@ func TestZiranSignedTransactionRecordAndForgetAgainstBaseline(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			results <- SignedTx_Record(actual.db, context.Background(), tx, errSignedTxReplay)
+			results <- SignedTx_Record(actual.Database, context.Background(), tx, errSignedTxReplay)
 		}()
 	}
 	workers.Wait()
@@ -332,11 +332,11 @@ func TestZiranAccountPublicKeyPreservesNativeSQLResults(t *testing.T) {
 	actual, _, tx, _, _ := signedTransactionFixture(t)
 	for _, query := range []string{"", "UPDATE server_users SET public_key=x''", "DELETE FROM server_users", "DROP TABLE server_users"} {
 		if query != "" {
-			if _, err := actual.db.Exec(query); err != nil {
+			if _, err := actual.Database.Exec(query); err != nil {
 				t.Fatal(err)
 			}
 		}
-		got := AccountKeys_PublicKey(actual.db, t.Context(), tx.AccountID)
+		got := AccountKeys_PublicKey(actual.Database, t.Context(), tx.AccountID)
 		want, found, err := actual.baselineAccountPublicKey(t.Context(), tx.AccountID)
 		if !reflect.DeepEqual(got.Value, want) || got.Found != found || !sameIdentityError(got.Error, err) {
 			t.Fatalf("account key = %#v, baseline = %v, %v, %v", got, want, found, err)
@@ -391,7 +391,7 @@ func TestZiranDeviceSignatureValidationAgainstBaseline(t *testing.T) {
 			}
 			if query != "" {
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec(query); err != nil {
+					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -403,7 +403,7 @@ func TestZiranDeviceSignatureValidationAgainstBaseline(t *testing.T) {
 				ctx = canceled
 			}
 			server := &Server{store: expected, verifier: wantVerifier}
-			got := authenticationError(DeviceKeys_VerifyRegistration(actual.db, ctx, tx.AccountID, registration, gotVerifier.Verify))
+			got := authenticationError(DeviceKeys_VerifyRegistration(actual.Database, ctx, tx.AccountID, registration, gotVerifier.Verify))
 			want := server.baselineVerifyDeviceRegistration(ctx, tx.AccountID, registration)
 			if !equalAuthenticationError(got, want) || !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls) {
 				t.Fatalf("registration verification = %v, baseline = %v; signature arguments differ = %v", got, want, !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls))
@@ -414,7 +414,7 @@ func TestZiranDeviceSignatureValidationAgainstBaseline(t *testing.T) {
 			gotVerifier.calls, wantVerifier.calls = nil, nil
 			revocation := DeviceRevocationRequest{AppID: registration.AppID, KeyID: registration.KeyID,
 				Nonce: registration.Nonce, ExpiresAt: registration.ExpiresAt, Signature: registration.Signature}
-			got = authenticationError(DeviceKeys_VerifyRevocation(actual.db, ctx, tx.AccountID, revocation, gotVerifier.Verify))
+			got = authenticationError(DeviceKeys_VerifyRevocation(actual.Database, ctx, tx.AccountID, revocation, gotVerifier.Verify))
 			want = server.baselineVerifyDeviceRevocation(ctx, tx.AccountID, revocation)
 			if !equalAuthenticationError(got, want) || !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls) {
 				t.Fatalf("revocation verification = %v, baseline = %v; signature arguments differ = %v", got, want, !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls))

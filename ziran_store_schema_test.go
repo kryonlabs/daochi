@@ -27,7 +27,7 @@ func schemaFixture(t *testing.T, setup string) *Store {
 	}
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
-	store := &Store{db: database, path: path}
+	store := &Store{Database: database, Path: path}
 	if setup != "" {
 		lifecycleExecute(t, store, setup)
 	}
@@ -36,7 +36,7 @@ func schemaFixture(t *testing.T, setup string) *Store {
 
 func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 	t.Helper()
-	result := AccountExport_QueryRows(store.db, t.Context(), "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE ?1='' ORDER BY type,name", "", nil)
+	result := AccountExport_QueryRows(store.Database, t.Context(), "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE ?1='' ORDER BY type,name", "", nil)
 	if result.Error != nil {
 		t.Fatal(result.Error)
 	}
@@ -53,7 +53,7 @@ func schemaData(t *testing.T, store *Store) map[string]any {
 		name := entry["name"].(string)
 		// Catalog names come from SQLite; quote even unusual legacy identifiers.
 		query := `SELECT * FROM "` + strings.ReplaceAll(name, `"`, `""`) + `" WHERE ?1='' ORDER BY rowid`
-		result := AccountExport_QueryRows(store.db, t.Context(), query, "", nil)
+		result := AccountExport_QueryRows(store.Database, t.Context(), query, "", nil)
 		if result.Error != nil {
 			t.Fatal(result.Error)
 		}
@@ -73,7 +73,7 @@ func schemaCompare(t *testing.T, actual, expected *Store) {
 	for _, store := range []*Store{actual, expected} {
 		viewsConnectionReleased(t, store)
 		var foreignKeys int
-		if err := store.db.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil || foreignKeys != 1 {
+		if err := store.Database.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil || foreignKeys != 1 {
 			t.Fatal("schema migration left foreign keys disabled", foreignKeys, err)
 		}
 	}
@@ -103,7 +103,7 @@ INSERT INTO server_mesh_changes(user_id_hash,collection,record_id,created_at) VA
 		t.Run(fixture.name, func(t *testing.T) {
 			actual, expected := schemaFixture(t, fixture.setup), schemaFixture(t, fixture.setup)
 			for repetition := 0; repetition < 2; repetition++ {
-				got := StoreSchema_Ensure(actual.db, t.Context())
+				got := StoreSchema_Ensure(actual.Database, t.Context())
 				want := expected.baselineSchemaMigrate(t.Context())
 				if got != nil || want != nil {
 					t.Fatal("schema upgrade failed", got, want)
@@ -121,7 +121,7 @@ INSERT INTO server_meditation_logs VALUES('id','user','session',7,'fixed',9,'fix
 CREATE TABLE server_meditation_logs_new(unrelated TEXT);`
 	actual, expected := schemaFixture(t, setup), schemaFixture(t, setup)
 	before := schemaData(t, actual)
-	got := StoreSchema_MeditationKey(actual.db, t.Context())
+	got := StoreSchema_MeditationKey(actual.Database, t.Context())
 	want := expected.baselineSchemaMigrateMeditationLogPrimaryKey(t.Context())
 	if got == nil || !sameIdentityError(got, want) {
 		t.Fatal("meditation migration failure changed", got, want)
@@ -136,14 +136,14 @@ func TestZiranStoreSchemaCancellationAndBoundColumnNames(t *testing.T) {
 	actual, expected := schemaFixture(t, ""), schemaFixture(t, "")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	got, want := StoreSchema_Ensure(actual.db, ctx), expected.baselineSchemaMigrate(ctx)
+	got, want := StoreSchema_Ensure(actual.Database, ctx), expected.baselineSchemaMigrate(ctx)
 	if got != context.Canceled || got != want || !reflect.DeepEqual(schemaCatalog(t, actual), schemaCatalog(t, expected)) {
 		t.Fatal("cancelled schema migration changed failure identity or created objects", got, want)
 	}
 	lifecycleExecute(t, actual, "CREATE TABLE target(id INTEGER)")
 	lifecycleExecute(t, expected, "CREATE TABLE target(id INTEGER)")
 	for _, name := range []string{"target", "target'); DROP TABLE target; --", "missing", "\x00\xff"} {
-		got = StoreSchema_AddColumn(actual.db, t.Context(), name, "id", "ALTER TABLE target ADD COLUMN added INTEGER")
+		got = StoreSchema_AddColumn(actual.Database, t.Context(), name, "id", "ALTER TABLE target ADD COLUMN added INTEGER")
 		want = expected.baselineSchemaAddColumnIfMissing(t.Context(), name, "id", "ALTER TABLE target ADD COLUMN added INTEGER")
 		if !sameIdentityError(got, want) || !reflect.DeepEqual(schemaCatalog(t, actual), schemaCatalog(t, expected)) {
 			t.Fatal("column lookup changed bound-name behavior", name, got, want)
@@ -166,7 +166,7 @@ func TestZiranStoreOpenAgainstBaseline(t *testing.T) {
 			case "read only":
 				store := schemaFixture(t, "")
 				lifecycleExecute(t, store, "CREATE TABLE preserved(value TEXT)")
-				path = "file:" + store.path + "?mode=ro&unused="
+				path = "file:" + store.Path + "?mode=ro&unused="
 				baselinePath = path
 			}
 			got := StoreOpen_Open(path)
@@ -182,7 +182,7 @@ func TestZiranStoreOpenAgainstBaseline(t *testing.T) {
 			if got.Value.Stats().MaxOpenConnections != 1 {
 				t.Fatal("startup changed connection limit")
 			}
-			actual := &Store{db: got.Value}
+			actual := &Store{Database: got.Value}
 			if !reflect.DeepEqual(schemaCatalog(t, actual), schemaCatalog(t, want)) || !reflect.DeepEqual(schemaOpenSnapshot(t, actual), schemaOpenSnapshot(t, want)) {
 				t.Fatal("startup changed initialized schema or seeded data")
 			}
@@ -268,7 +268,7 @@ func schemaDriverStore(t *testing.T, plan *lifecycleDriverPlan, composite, dupli
 	}
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
-	return &Store{db: database}
+	return &Store{Database: database}
 }
 
 func TestZiranStoreSchemaNativeTraceAndFailures(t *testing.T) {
@@ -300,7 +300,7 @@ func TestZiranStoreSchemaNativeTraceAndFailures(t *testing.T) {
 					store := schemaDriverStore(t, plan, composite, mode == "duplicate column")
 					panics[index] = boundaryRecover(func() {
 						if index == 0 {
-							failures[index] = StoreSchema_Ensure(store.db, t.Context())
+							failures[index] = StoreSchema_Ensure(store.Database, t.Context())
 						} else {
 							failures[index] = store.baselineSchemaMigrate(t.Context())
 						}
@@ -319,7 +319,7 @@ func TestZiranStoreSchemaClosesMeditationRowsOnPanic(t *testing.T) {
 	panicValue := errors.New("schema row panic")
 	plan := &lifecycleDriverPlan{rowsPanic: panicValue}
 	store := schemaDriverStore(t, plan, true, false)
-	got := boundaryRecover(func() { _ = StoreSchema_MeditationKey(store.db, t.Context()) })
+	got := boundaryRecover(func() { _ = StoreSchema_MeditationKey(store.Database, t.Context()) })
 	if got != panicValue || plan.closed != 1 {
 		t.Fatal("schema row panic changed identity or retained its cursor", got, plan)
 	}

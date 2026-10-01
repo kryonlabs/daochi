@@ -121,7 +121,7 @@ func baselineValidDeviceRegistration(request DeviceRegistrationRequest) bool {
 }
 
 func (s *Store) baselineRegisterDeviceKey(ctx context.Context, device DeviceKey, nonce string) error {
-	transaction, err := s.db.BeginTx(ctx, nil)
+	transaction, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ ON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET
 }
 
 func (s *Store) baselineRevokeDeviceKey(ctx context.Context, accountID string, request DeviceRevocationRequest) error {
-	transaction, err := s.db.BeginTx(ctx, nil)
+	transaction, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ VALUES(?1,?2,?3)`, accountID, nonce, Timestamp_CanonicalNow())
 
 func (s *Store) baselineActiveDeviceKey(ctx context.Context, accountID, appID, keyID string) (DeviceKey, bool, error) {
 	var device DeviceKey
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at
 FROM server_device_keys
 WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''`,
@@ -202,7 +202,7 @@ WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''`,
 }
 
 func (s *Store) baselineTouchDeviceKey(ctx context.Context, accountID, appID, keyID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 UPDATE server_device_keys SET last_used_at=?4
 WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''`,
 		accountID, appID, keyID, Timestamp_CanonicalNow())
@@ -210,7 +210,7 @@ WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''`,
 }
 
 func (s *Store) baselineListDeviceKeys(ctx context.Context, accountID string) ([]DeviceKey, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at
 FROM server_device_keys WHERE account_id=?1 ORDER BY app_id,device_key_id`, accountID)
 	if err != nil {

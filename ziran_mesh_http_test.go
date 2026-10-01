@@ -21,7 +21,7 @@ import (
 func meshHTTPFixture(t *testing.T) *Server {
 	t.Helper()
 	store := meshPortFixture(t)
-	if err := TrustStore_EnsureSchema(store.db, t.Context()); err != nil {
+	if err := TrustStore_EnsureSchema(store.Database, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	identity := NodeIdentity_New(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x41}, ed25519.SeedSize)))
@@ -53,7 +53,7 @@ func meshHTTPPeer(t *testing.T, server *Server, identity NodeIdentity, approved 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.store.db.Exec(`INSERT INTO trusted_node_peers(node_id,public_key,display_name,addresses_json,policy_json,trusted_at)
+	if _, err := server.store.Database.Exec(`INSERT INTO trusted_node_peers(node_id,public_key,display_name,addresses_json,policy_json,trusted_at)
 VALUES(?1,?2,'peer','[]',?3,'fixture')`, identity.ID, identity.PublicKey, string(encoded)); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 						meshHTTPPeer(t, server, identity, approved)
 					}
 					if mode == "replayed" {
-						if err := NodeAuth_Verify(server.store.db, t.Context(), request, encoded); err != nil {
+						if err := NodeAuth_Verify(server.store.Database, t.Context(), request, encoded); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -192,7 +192,7 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 						query = "CREATE TRIGGER reject_mesh_http BEFORE INSERT ON server_encrypted_records BEGIN SELECT RAISE(ABORT,'record rejected'); END"
 					}
 					if query != "" {
-						if _, err := server.store.db.Exec(query); err != nil {
+						if _, err := server.store.Database.Exec(query); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -208,7 +208,7 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 						local = local.WithContext(cancelled)
 					}
 					if mode == "closed" {
-						server.store.db.Close()
+						server.store.Database.Close()
 					}
 					writer := httptest.NewRecorder()
 					var destination http.ResponseWriter = writer

@@ -71,7 +71,7 @@ func writesCases(updated string, rounds []SessionRound) []writesCase {
 }
 
 func writesInTransaction(store *Store, ctx context.Context, user string, call writesCall) SyncWriteResult {
-	transaction, err := store.db.BeginTx(ctx, nil)
+	transaction, err := store.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return SyncWriteResult{Error: err}
 	}
@@ -103,7 +103,7 @@ func writesSnapshot(t *testing.T, store *Store) map[string]any {
 		"server_sessions", "server_session_rounds", "server_meditation_logs", "server_social_snapshots",
 		"server_encrypted_records", "server_encrypted_payloads", "server_sync_ops", "server_sync_audit",
 	} {
-		rows := AccountExport_QueryRows(store.db, t.Context(), "SELECT * FROM "+table+" WHERE ?1='' ORDER BY rowid", "", nil)
+		rows := AccountExport_QueryRows(store.Database, t.Context(), "SELECT * FROM "+table+" WHERE ?1='' ORDER BY rowid", "", nil)
 		if rows.Error != nil {
 			t.Fatal(rows.Error)
 		}
@@ -170,7 +170,7 @@ func TestZiranSyncWriteRollbackAgainstBaseline(t *testing.T) {
 func TestZiranSyncWriteVersionsAndOmittedRounds(t *testing.T) {
 	store := writesFixture(t)
 	user := lifecycleAccounts[0]
-	originalRounds := SyncViews_SessionRounds(store.db, t.Context(), user, "z-last")
+	originalRounds := SyncViews_SessionRounds(store.Database, t.Context(), user, "z-last")
 	if originalRounds.Error != nil || len(originalRounds.Value) != 2 {
 		t.Fatal("invalid round fixture", originalRounds)
 	}
@@ -180,7 +180,7 @@ func TestZiranSyncWriteVersionsAndOmittedRounds(t *testing.T) {
 			t.Fatal("stale upsert should be rejected", result)
 		}
 	}
-	version := AccountState_CurrentVersion(store.db, t.Context(), user)
+	version := AccountState_CurrentVersion(store.Database, t.Context(), user)
 	if version.Error != nil || version.Value != 22 {
 		t.Fatal("rejected upserts must retain released version allocation", version)
 	}
@@ -190,7 +190,7 @@ func TestZiranSyncWriteVersionsAndOmittedRounds(t *testing.T) {
 			t.Fatal("stale delete should be rejected", result)
 		}
 	}
-	version = AccountState_CurrentVersion(store.db, t.Context(), user)
+	version = AccountState_CurrentVersion(store.Database, t.Context(), user)
 	if version.Error != nil || version.Value != 22 {
 		t.Fatal("rejected deletions must not advance the version", version)
 	}
@@ -198,7 +198,7 @@ func TestZiranSyncWriteVersionsAndOmittedRounds(t *testing.T) {
 	if result.Error != nil || result.Applied != 1 {
 		t.Fatal("equal timestamp should update the session", result)
 	}
-	rounds := SyncViews_SessionRounds(store.db, t.Context(), user, "z-last")
+	rounds := SyncViews_SessionRounds(store.Database, t.Context(), user, "z-last")
 	if rounds.Error != nil || !reflect.DeepEqual(rounds.Value, originalRounds.Value) {
 		t.Fatal("omitting rounds must preserve stored rounds", rounds)
 	}
@@ -212,7 +212,7 @@ func TestZiranSyncWritesCancelledInsideTransaction(t *testing.T) {
 	for _, test := range writesCases(lifecycleFixtureTime, []SessionRound{{RoundIndex: 1}}) {
 		t.Run(test.name, func(t *testing.T) {
 			for _, call := range []writesCall{test.actual, test.baseline} {
-				transaction, err := store.db.BeginTx(t.Context(), nil)
+				transaction, err := store.Database.BeginTx(t.Context(), nil)
 				if err != nil {
 					t.Fatal(err)
 				}

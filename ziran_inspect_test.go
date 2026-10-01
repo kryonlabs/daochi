@@ -36,18 +36,18 @@ func inspectFixture(t *testing.T) (string, string) {
 		{"INSERT INTO server_encrypted_payloads(user_id_hash,payload_json) VALUES(?,?)", []any{userID, `{"nonce":"secret","ciphertext":"private"}`}},
 	}
 	for _, statement := range statements {
-		if _, err := store.db.Exec(statement.query, statement.args...); err != nil {
+		if _, err := store.Database.Exec(statement.query, statement.args...); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for index := 0; index < 55; index++ {
-		if _, err := store.db.Exec(`INSERT INTO server_habits(user_id_hash,id,name,sync_mode,sync_activity,sort_order,deleted_at,updated_at)
+		if _, err := store.Database.Exec(`INSERT INTO server_habits(user_id_hash,id,name,sync_mode,sync_activity,sort_order,deleted_at,updated_at)
 VALUES(?,?,?,?,?,?,?,?)`, userID, fmt.Sprintf("habit-%02d", index), "Meditate\n\"日本語\"\\\x00", index%3, index%4, 54-index, index%2, "2026-09-30T00:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for index := 0; index < 28; index++ {
-		if _, err := store.db.Exec(`INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,deleted_at,updated_at)
+		if _, err := store.Database.Exec(`INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,deleted_at,updated_at)
 VALUES(?,?,?,?,?,?,?,?)`, userID, fmt.Sprintf("session-%02d", index), fmt.Sprintf("2026-09-%02d", index+1), 20260901+index, "topic=日本語", index%3, index%2, "2026-09-30"); err != nil {
 			t.Fatal(err)
 		}
@@ -60,7 +60,7 @@ VALUES(?,?,?,?,?,?,?,?)`, userID, fmt.Sprintf("session-%02d", index), fmt.Sprint
 		} else if index%3 == 2 {
 			login, synced = "2026-09-29", "2026-09-30"
 		}
-		if _, err := store.db.Exec(`INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_login_at,last_sync_at,protocol_version,last_seen_server_version,last_client_clock)
+		if _, err := store.Database.Exec(`INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_login_at,last_sync_at,protocol_version,last_seen_server_version,last_client_clock)
 VALUES(?,?,?,?,?,?,?,?)`, userID, fmt.Sprintf("client-%02d", index), "2026-09-30", login, synced, index, int64(index), -int64(index)); err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ VALUES(?,?,?,?,?,?,?,?)`, userID, fmt.Sprintf("client-%02d", index), "2026-09-30
 		if index%2 != 0 {
 			reason = "changed"
 		}
-		if _, err := store.db.Exec(`INSERT INTO server_sync_audit(user_id_hash,client_id,protocol_version,server_version,remote_ops,full_snapshot_required,snapshot_reason,encrypted_payload,encrypted_payload_bytes,created_at)
+		if _, err := store.Database.Exec(`INSERT INTO server_sync_audit(user_id_hash,client_id,protocol_version,server_version,remote_ops,full_snapshot_required,snapshot_reason,encrypted_payload,encrypted_payload_bytes,created_at)
 VALUES(?,?,?,?,?,?,?,?,?,?)`, userID, fmt.Sprintf("audit-%02d", index), index, int64(index), index+1, index%2, reason, index%2, int64(index*10), "2026-09-30"); err != nil {
 			t.Fatal(err)
 		}

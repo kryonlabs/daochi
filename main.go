@@ -42,7 +42,8 @@ func main() {
 		return
 	}
 
-	store, err := OpenStore(cfg.DBPath)
+	opened := Store_Open(cfg.DBPath)
+	store, err := opened.Value, opened.Error
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}

@@ -125,7 +125,7 @@ func registryHTTPFixture(t *testing.T) (*Server, string, ed25519.PrivateKey) {
 	server, store, _ := testServer(t)
 	server.cfg.AdminToken = "registry-admin"
 	user := strings.Repeat("a", 64)
-	if _, err := store.db.Exec("INSERT INTO server_users(user_id_hash,public_key) VALUES(?1,?2)", user, bytes.Repeat([]byte{0x35}, mlDSA44PublicKeySize)); err != nil {
+	if _, err := store.Database.Exec("INSERT INTO server_users(user_id_hash,public_key) VALUES(?1,?2)", user, bytes.Repeat([]byte{0x35}, mlDSA44PublicKeySize)); err != nil {
 		t.Fatal(err)
 	}
 	for _, app := range []AppRegistration{
@@ -135,16 +135,16 @@ func registryHTTPFixture(t *testing.T) (*Server, string, ed25519.PrivateKey) {
 		}},
 		{AppID: "target", DisplayName: "Target"},
 	} {
-		if err := AppStore_Upsert(store.db, t.Context(), app); err != nil {
+		if err := AppStore_Upsert(store.Database, t.Context(), app); err != nil {
 			t.Fatal(err)
 		}
 	}
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{42}, ed25519.SeedSize))
 	device := DeviceKey{AccountID: user, AppID: "target", KeyID: "device-key", ClientID: "client-test", PublicKey: hex.EncodeToString(key.Public().(ed25519.PublicKey))}
-	if err := DeviceKeys_Register(store.db, t.Context(), device, "registered-device", errSignedTxReplay); err != nil {
+	if err := DeviceKeys_Register(store.Database, t.Context(), device, "registered-device", errSignedTxReplay); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`
+	if _, err := store.Database.Exec(`
 UPDATE server_apps SET created_at='fixture',updated_at='fixture';
 UPDATE server_app_collections SET created_at='fixture';
 CREATE TRIGGER collection_clock_insert AFTER INSERT ON server_app_collections BEGIN
@@ -167,11 +167,11 @@ CREATE TRIGGER grant_clock_update AFTER UPDATE ON server_app_grants BEGIN
 END;`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO server_app_grants(id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status)
+	if _, err := store.Database.Exec(`INSERT INTO server_app_grants(id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status)
  VALUES('seed-grant',?1,'source','target','shared.source.v1.*','read','active')`, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO server_encrypted_records(user_id_hash,collection,id,updated_at,ciphertext)
+	if _, err := store.Database.Exec(`INSERT INTO server_encrypted_records(user_id_hash,collection,id,updated_at,ciphertext)
  VALUES(?1,'shared.source.v1.items','record','2026-09-30T00:00:00Z','encrypted')`, user); err != nil {
 		t.Fatal(err)
 	}
@@ -204,19 +204,19 @@ func TestZiranHTTPAuthenticationAgainstBaseline(t *testing.T) {
 				request.Header.Set("X-Daochi-User", user)
 				request.Header.Set("X-Ksync-User", strings.Repeat("b", 64))
 			case "missing account", "bootstrap", "deleted bootstrap":
-				if _, err := server.store.db.Exec("DELETE FROM server_users WHERE user_id_hash=?1", user); err != nil {
+				if _, err := server.store.Database.Exec("DELETE FROM server_users WHERE user_id_hash=?1", user); err != nil {
 					t.Fatal(err)
 				}
 				if mode != "missing account" {
 					request.URL.Path = "/api/v1/sync"
 				}
 				if mode == "deleted bootstrap" {
-					if _, err := server.store.db.Exec("INSERT INTO server_account_tombstones(user_id_hash) VALUES(?1)", user); err != nil {
+					if _, err := server.store.Database.Exec("INSERT INTO server_account_tombstones(user_id_hash) VALUES(?1)", user); err != nil {
 						t.Fatal(err)
 					}
 				}
 			case "query error":
-				if err := server.store.db.Close(); err != nil {
+				if err := server.store.Database.Close(); err != nil {
 					t.Fatal(err)
 				}
 			case "cancelled":
@@ -224,7 +224,7 @@ func TestZiranHTTPAuthenticationAgainstBaseline(t *testing.T) {
 				cancel()
 				request = request.WithContext(ctx)
 			}
-			got := HttpAuth_AuthenticateToken(server.store.db, request, server.cfg.TokenSecret)
+			got := HttpAuth_AuthenticateToken(server.store.Database, request, server.cfg.TokenSecret)
 			want, err := server.baselineAuthenticateToken(request)
 			if got.Value != want || !equalAuthenticationError(authenticationError(got.Authentication), err) {
 				t.Fatalf("token authentication = %#v, baseline = %q, %v", got, want, err)
@@ -278,7 +278,7 @@ func TestZiranRegistryHTTPAgainstBaseline(t *testing.T) {
 			defer func() { rand.Reader = original }()
 			for index, server := range []*Server{actual, expected} {
 				if test.name == "create grant" {
-					if _, err := server.store.db.Exec("DELETE FROM server_app_grants"); err != nil {
+					if _, err := server.store.Database.Exec("DELETE FROM server_app_grants"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -294,7 +294,7 @@ func TestZiranRegistryHTTPAgainstBaseline(t *testing.T) {
 				case "body limit":
 					server.cfg.MaxBodyBytes = 1
 				case "closed":
-					_ = server.store.db.Close()
+					_ = server.store.Database.Close()
 				case "cancelled":
 					ctx, cancel := context.WithCancel(t.Context())
 					cancel()
@@ -389,11 +389,11 @@ func TestZiranRegistrySignedRegistrationAgainstBaseline(t *testing.T) {
 				case "body limit":
 					server.cfg.MaxBodyBytes = 1
 				case "failed write":
-					if _, err := server.store.db.Exec("CREATE TRIGGER reject_http_manifest BEFORE INSERT ON server_app_manifests BEGIN SELECT RAISE(ABORT,'manifest rejected'); END"); err != nil {
+					if _, err := server.store.Database.Exec("CREATE TRIGGER reject_http_manifest BEFORE INSERT ON server_app_manifests BEGIN SELECT RAISE(ABORT,'manifest rejected'); END"); err != nil {
 						t.Fatal(err)
 					}
 				case "closed":
-					if err := server.store.db.Close(); err != nil {
+					if err := server.store.Database.Close(); err != nil {
 						t.Fatal(err)
 					}
 				case "cancelled":
@@ -418,7 +418,7 @@ func TestZiranRegistrySignedRegistrationAgainstBaseline(t *testing.T) {
 			}
 			if mode != "closed" {
 				compareAppStores(t, actual.store, expected.store, registration.Manifest.AppID)
-				stored := AppStore_Exists(actual.store.db, t.Context(), registration.Manifest.AppID)
+				stored := AppStore_Exists(actual.store.Database, t.Context(), registration.Manifest.AppID)
 				if stored.Error != nil || stored.Value != (mode == "valid") {
 					t.Fatal("signed registration persistence or rollback changed", stored)
 				}
@@ -497,7 +497,7 @@ func TestZiranRegistrySignedRequestCleanupAgainstBaseline(t *testing.T) {
 			var responses []*httptest.ResponseRecorder
 			for index, server := range []*Server{actual, expected} {
 				if !records {
-					if _, err := server.store.db.Exec("DELETE FROM server_app_grants"); err != nil {
+					if _, err := server.store.Database.Exec("DELETE FROM server_app_grants"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -511,7 +511,7 @@ func TestZiranRegistrySignedRequestCleanupAgainstBaseline(t *testing.T) {
 					query = "UPDATE server_encrypted_records SET schema_version='broken'"
 				}
 				if query != "" {
-					if _, err := server.store.db.Exec(query); err != nil {
+					if _, err := server.store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}

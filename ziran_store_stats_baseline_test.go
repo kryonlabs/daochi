@@ -20,7 +20,7 @@ type baselineStatsCollectionRow struct {
 
 func (s *Store) baselineStatsPublicStats(ctx context.Context, dbPath string) (PublicStats, error) {
 	var stats PublicStats
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_users`).Scan(&stats.UserCount); err != nil {
+	if err := s.Database.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_users`).Scan(&stats.UserCount); err != nil {
 		return PublicStats{}, err
 	}
 	used, err := baselineStatsSqliteFileSetSize(dbPath)
@@ -43,18 +43,18 @@ func (s *Store) baselineStatsPublicStats(ctx context.Context, dbPath string) (Pu
 }
 
 func (s *Store) baselineStatsHealth(ctx context.Context) error {
-	if err := s.db.PingContext(ctx); err != nil {
+	if err := s.Database.PingContext(ctx); err != nil {
 		return err
 	}
 	var ok string
-	if err := s.db.QueryRowContext(ctx, `PRAGMA quick_check`).Scan(&ok); err != nil {
+	if err := s.Database.QueryRowContext(ctx, `PRAGMA quick_check`).Scan(&ok); err != nil {
 		return err
 	}
 	if ok != "ok" {
 		return fmt.Errorf("sqlite quick_check: %s", ok)
 	}
 	var exists int
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.Database.QueryRowContext(ctx, `
 SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='server_users')`).Scan(&exists); err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func (s *Store) baselineStatsNodeUsage(ctx context.Context, now time.Time) (Node
 		{&usage.ActiveClients30d, `SELECT COUNT(*) FROM server_clients WHERE last_seen_at>=?1`, []any{cutoff}},
 	}
 	for _, item := range queries {
-		if err := s.db.QueryRowContext(ctx, item.query, item.args...).Scan(item.target); err != nil {
+		if err := s.Database.QueryRowContext(ctx, item.query, item.args...).Scan(item.target); err != nil {
 			return NodeUsage{}, err
 		}
 	}
@@ -88,13 +88,13 @@ func (s *Store) baselineStatsNodeUsage(ctx context.Context, now time.Time) (Node
 func (s *Store) baselineStatsNodeStorageUsage(ctx context.Context) (NodeStorageUsage, error) {
 	usage := NodeStorageUsage{}
 
-	if s.path != "" && s.path != ":memory:" {
-		usage.DatabaseFileBytes = baselineStatsFileSizeOrZero(s.path)
-		usage.DatabaseWALBytes = baselineStatsFileSizeOrZero(s.path + "-wal")
-		usage.DatabaseSHMBytes = baselineStatsFileSizeOrZero(s.path + "-shm")
+	if s.Path != "" && s.Path != ":memory:" {
+		usage.DatabaseFileBytes = baselineStatsFileSizeOrZero(s.Path)
+		usage.DatabaseWALBytes = baselineStatsFileSizeOrZero(s.Path + "-wal")
+		usage.DatabaseSHMBytes = baselineStatsFileSizeOrZero(s.Path + "-shm")
 		usage.DatabaseTotalBytes = usage.DatabaseFileBytes + usage.DatabaseWALBytes + usage.DatabaseSHMBytes
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&usage.SQLitePageBytes); err != nil {
+	if err := s.Database.QueryRowContext(ctx, `SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&usage.SQLitePageBytes); err != nil {
 		return NodeStorageUsage{}, err
 	}
 
@@ -112,7 +112,7 @@ func (s *Store) baselineStatsNodeStorageUsage(ctx context.Context) (NodeStorageU
 	}
 
 	var payloadCount int
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.Database.QueryRowContext(ctx, `
 SELECT COUNT(*), COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)
 FROM server_encrypted_payloads`).Scan(&payloadCount, &usage.EncryptedPayloadBytes); err != nil {
 		return NodeStorageUsage{}, err
@@ -128,12 +128,12 @@ FROM server_encrypted_payloads`).Scan(&payloadCount, &usage.EncryptedPayloadByte
 }
 
 func (s *Store) baselineStatsAppStorageUsage(ctx context.Context) ([]AppStorageUsage, error) {
-	loadedMatchers := CollectionScope_Load(s.db, ctx)
+	loadedMatchers := CollectionScope_Load(s.Database, ctx)
 	matchers, err := loadedMatchers.Value, loadedMatchers.Error
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT collection,
        COUNT(*),
        COALESCE(SUM(LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)),0)
@@ -282,7 +282,7 @@ func (s *Store) baselineStatsAccountTableCounts(ctx context.Context, userID stri
 	counts := make(map[string]int, len(tables))
 	for _, table := range tables {
 		var n int
-		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE user_id_hash=?1", userID).Scan(&n); err != nil {
+		if err := s.Database.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE user_id_hash=?1", userID).Scan(&n); err != nil {
 			return nil, err
 		}
 		counts[table] = n

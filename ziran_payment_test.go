@@ -191,7 +191,7 @@ func TestZiranPaymentReadHandlersMatchBaseline(t *testing.T) {
 				query = "?app_id=bad%2Fapp&since=bad"
 			}
 			var receiptID string
-			if err := baseline.store.db.QueryRow("SELECT receipt_id FROM token_ledger ORDER BY ledger_seq LIMIT 1").Scan(&receiptID); err != nil && mode != "closed database" {
+			if err := baseline.store.Database.QueryRow("SELECT receipt_id FROM token_ledger ORDER BY ledger_seq LIMIT 1").Scan(&receiptID); err != nil && mode != "closed database" {
 				t.Fatal(err)
 			}
 			if mode == "closed database" {
@@ -285,17 +285,17 @@ func TestZiranPaymentAuthorizationAndReplayMatchBaseline(t *testing.T) {
 					if mode == "legacy" {
 						until = time.Now().Add(time.Hour).Unix()
 					}
-					if _, err := server.store.db.Exec("INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until) VALUES('target',?1,?2,'active',?3)", AssetID, allowedPermission, until); err != nil {
+					if _, err := server.store.Database.Exec("INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until) VALUES('target',?1,?2,'active',?3)", AssetID, allowedPermission, until); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "query failure" {
-					if _, err := server.store.db.Exec("DROP TABLE token_app_permissions"); err != nil {
+					if _, err := server.store.Database.Exec("DROP TABLE token_app_permissions"); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "replay" {
-					if err := SignedTx_Record(server.store.db, t.Context(), transaction, errSignedTxReplay); err != nil {
+					if err := SignedTx_Record(server.store.Database, t.Context(), transaction, errSignedTxReplay); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -314,7 +314,7 @@ func TestZiranPaymentAuthorizationAndReplayMatchBaseline(t *testing.T) {
 					requests[index] = request.WithContext(ctx)
 				}
 			}
-			got := TokenPolicy_Authorize(actual.store.db, requests[0].Context(), requests[0], body, account, "target", AssetID, permission, actual.verifier.Verify, errSignedTxReplay)
+			got := TokenPolicy_Authorize(actual.store.Database, requests[0].Context(), requests[0], body, account, "target", AssetID, permission, actual.verifier.Verify, errSignedTxReplay)
 			want, signed, wantError := baseline.baselinePaymentAuthorizeTokenApp(requests[1].Context(), requests[1], body, account, "target", AssetID, permission)
 			if got.Signed != signed || !reflect.DeepEqual(got.Value, want) || !equalAuthenticationError(authenticationError(got.Authentication), wantError) {
 				t.Fatalf("authorization %s changed: %#v; baseline %#v/%t/%v", mode, got, want, signed, wantError)
@@ -353,12 +353,12 @@ func TestZiranPaymentSpendFailureCleanupMatchesBaseline(t *testing.T) {
 			responses := []*httptest.ResponseRecorder{httptest.NewRecorder(), httptest.NewRecorder()}
 			for index, server := range []*Server{actual, baseline} {
 				if mode == "denied" {
-					if _, err := server.store.db.Exec("INSERT INTO token_app_permissions(app_id,asset_id,permission,status) VALUES('target',?1,'purchase','active')", AssetID); err != nil {
+					if _, err := server.store.Database.Exec("INSERT INTO token_app_permissions(app_id,asset_id,permission,status) VALUES('target',?1,'purchase','active')", AssetID); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "write failure" || mode == "log panic" || mode == "error response panic" {
-					if _, err := server.store.db.Exec("CREATE TRIGGER reject_payment BEFORE INSERT ON token_ledger BEGIN SELECT RAISE(ABORT,'payment write rejected'); END"); err != nil {
+					if _, err := server.store.Database.Exec("CREATE TRIGGER reject_payment BEFORE INSERT ON token_ledger BEGIN SELECT RAISE(ABORT,'payment write rejected'); END"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -398,8 +398,8 @@ func TestZiranPaymentSpendFailureCleanupMatchesBaseline(t *testing.T) {
 			if !reflect.DeepEqual(got, want) || (len(got) == 1) != (mode == "success response panic") {
 				t.Fatalf("payment replay cleanup changed: %#v / %#v", got, want)
 			}
-			actualBalance := TokenLedger_Balance(actual.store.db, t.Context(), account, AssetID)
-			baselineBalance := TokenLedger_Balance(baseline.store.db, t.Context(), account, AssetID)
+			actualBalance := TokenLedger_Balance(actual.store.Database, t.Context(), account, AssetID)
+			baselineBalance := TokenLedger_Balance(baseline.store.Database, t.Context(), account, AssetID)
 			if actualBalance.Error != nil || baselineBalance.Error != nil || actualBalance.Value != baselineBalance.Value {
 				t.Fatal("payment balance changed")
 			}
@@ -449,7 +449,7 @@ func TestZiranPaymentAdminHandlersMatchBaseline(t *testing.T) {
 				case "closed database":
 					_ = server.store.Close()
 				case "write failure":
-					if _, err := server.store.db.Exec(`CREATE TRIGGER reject_admin_payment BEFORE INSERT ON token_ledger BEGIN SELECT RAISE(ABORT,'admin payment rejected'); END;
+					if _, err := server.store.Database.Exec(`CREATE TRIGGER reject_admin_payment BEFORE INSERT ON token_ledger BEGIN SELECT RAISE(ABORT,'admin payment rejected'); END;
 CREATE TRIGGER reject_admin_checkpoint BEFORE INSERT ON token_checkpoints BEGIN SELECT RAISE(ABORT,'admin checkpoint rejected'); END;`); err != nil {
 						t.Fatal(err)
 					}
@@ -505,7 +505,7 @@ CREATE TRIGGER reject_admin_checkpoint BEFORE INSERT ON token_checkpoints BEGIN 
 					// value, so compare each checkpoint with its persisted result.
 					for index, value := range []TokenCheckpoint{got, want} {
 						store := []*Store{actual.store, baseline.store}[index]
-						stored := TokenCheckpoint_Latest(store.db, t.Context())
+						stored := TokenCheckpoint_Latest(store.Database, t.Context())
 						if stored.Error != nil || !stored.Found || value != stored.Value || value.LedgerSeq != got.LedgerSeq || value.IssuerID != want.IssuerID || value.AssetID != want.AssetID {
 							t.Fatal("admin checkpoint response changed")
 						}

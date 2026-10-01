@@ -50,7 +50,7 @@ type baselineMoneroInvoiceRecord struct {
 }
 
 func (s *Store) baselineTokenAssets(ctx context.Context) ([]TokenAsset, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT issuer_id,asset_id,display_name,decimals,status
 FROM token_assets
 ORDER BY issuer_id,asset_id`)
@@ -71,7 +71,7 @@ ORDER BY issuer_id,asset_id`)
 
 func (s *Store) baselineTokenBalance(ctx context.Context, accountID, assetID string) (int64, error) {
 	var balance sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT SUM(amount_delta)
 FROM token_ledger
 WHERE account_id=?1 AND asset_id=?2`, accountID, assetID).Scan(&balance)
@@ -86,7 +86,7 @@ WHERE account_id=?1 AND asset_id=?2`, accountID, assetID).Scan(&balance)
 
 func (s *Store) baselineTokenAppBalance(ctx context.Context, accountID, assetID, appID string) (int64, error) {
 	var balance sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT SUM(amount_delta)
 FROM token_ledger
 WHERE account_id=?1 AND asset_id=?2 AND app_id=?3`, accountID, assetID, appID).Scan(&balance)
@@ -100,7 +100,7 @@ WHERE account_id=?1 AND asset_id=?2 AND app_id=?3`, accountID, assetID, appID).S
 }
 
 func (s *Store) baselineTokenLedger(ctx context.Context, accountID, assetID string, since int64) ([]baselineTokenReceipt, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
 	previous_hash,event_hash,created_at,source_type,source_ref,signature
 FROM token_ledger
@@ -122,7 +122,7 @@ ORDER BY ledger_seq`, accountID, assetID, since)
 }
 
 func (s *Store) baselineTokenAppLedger(ctx context.Context, accountID, assetID, appID string, since int64) ([]baselineTokenReceipt, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
 	previous_hash,event_hash,created_at,source_type,source_ref,signature
 FROM token_ledger
@@ -144,7 +144,7 @@ ORDER BY ledger_seq`, accountID, assetID, appID, since)
 }
 
 func (s *Store) baselineTokenReceipt(ctx context.Context, receiptID string) (baselineTokenReceipt, bool, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.Database.QueryRowContext(ctx, `
 SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
 	previous_hash,event_hash,created_at,source_type,source_ref,signature
 FROM token_ledger
@@ -176,7 +176,7 @@ func (s *Store) baselineCreditTokenPayment(ctx context.Context, signer ed25519.P
 	if provider == "" || providerPaymentID == "" {
 		return baselineTokenReceipt{}, false, errors.New("provider payment id required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return baselineTokenReceipt{}, false, err
 	}
@@ -237,7 +237,7 @@ func (s *Store) baselineSpendTokens(ctx context.Context, signer ed25519.PrivateK
 	if input.AmountDelta >= 0 {
 		return baselineTokenReceipt{}, 0, false, errors.New("spend amount must be negative")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return baselineTokenReceipt{}, 0, false, err
 	}
@@ -471,7 +471,7 @@ func (s *Store) baselineCreateTokenCheckpoint(ctx context.Context, signer ed2551
 	if len(signer) != ed25519.PrivateKeySize {
 		return TokenCheckpoint{}, errTokenIssuerReadOnly
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT ledger_seq,event_hash
 FROM token_ledger
 WHERE issuer_id=?1 AND asset_id=?2
@@ -498,7 +498,7 @@ ORDER BY ledger_seq`, IssuerID, AssetID)
 	message := []byte(fmt.Sprintf("ksync-token-checkpoint-v1\n%s\n%s\n%d\n%s\n",
 		IssuerID, AssetID, seq, ledgerRoot))
 	signature := hex.EncodeToString(ed25519.Sign(signer, message))
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.Database.ExecContext(ctx, `
 INSERT INTO token_checkpoints(ledger_seq,issuer_id,asset_id,ledger_root,signature)
 VALUES(?1,?2,?3,?4,?5)
 ON CONFLICT(ledger_seq) DO UPDATE SET
@@ -517,7 +517,7 @@ ON CONFLICT(ledger_seq) DO UPDATE SET
 
 func (s *Store) baselineLatestTokenCheckpoint(ctx context.Context) (TokenCheckpoint, bool, error) {
 	var out TokenCheckpoint
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT ledger_seq,issuer_id,asset_id,ledger_root,signature,created_at
 FROM token_checkpoints
 ORDER BY ledger_seq DESC

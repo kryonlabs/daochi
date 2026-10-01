@@ -139,7 +139,7 @@ func (s *Server) baselineAccessHandleDeleteAccountWithKey(w http.ResponseWriter,
 		Response_Error(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
-	account := AccountKeys_PublicKey(s.store.db, r.Context(), req.UserIDHash)
+	account := AccountKeys_PublicKey(s.store.Database, r.Context(), req.UserIDHash)
 	publicKey, found, err := account.Value, account.Found, account.Error
 	if err != nil {
 		slog.Error("load account key", "user", LogSafety_LogText(req.UserIDHash), "error", err)
@@ -184,7 +184,7 @@ func (s *Server) baselineAccessAuthenticateSignature(ctx context.Context, userID
 	if !ok {
 		return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
 	}
-	account := AccountKeys_PublicKey(s.store.db, ctx, userID)
+	account := AccountKeys_PublicKey(s.store.Database, ctx, userID)
 	publicKey, found, err := account.Value, account.Found, account.Error
 	if err != nil {
 		return nil, err

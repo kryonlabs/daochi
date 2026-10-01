@@ -43,7 +43,7 @@ func TestMeshDeletePropagationConverges(t *testing.T) {
 	}
 	rowAt := func(store *Store, id string) bool {
 		var exists int
-		if err := store.db.QueryRowContext(ctx,
+		if err := store.Database.QueryRowContext(ctx,
 			`SELECT EXISTS(SELECT 1 FROM server_encrypted_records WHERE user_id_hash=?1 AND id=?2)`,
 			userID, id).Scan(&exists); err != nil {
 			t.Fatal(err)
@@ -51,12 +51,12 @@ func TestMeshDeletePropagationConverges(t *testing.T) {
 		return exists != 0
 	}
 	syncPeers := func() {
-		exported := MeshStore_ExportEncryptedRecords(storeA.db, ctx, policy, "", 100)
+		exported := MeshStore_ExportEncryptedRecords(storeA.Database, ctx, policy, "", 100)
 		records, deletions, err := exported.Records, exported.Deletions, exported.Error
 		if err != nil {
 			t.Fatal(err)
 		}
-		if imported := MeshStore_ImportEncryptedBatch(storeB.db, ctx, policy, records, deletions); imported.Error != nil {
+		if imported := MeshStore_ImportEncryptedBatch(storeB.Database, ctx, policy, records, deletions); imported.Error != nil {
 			t.Fatal(imported.Error)
 		}
 	}
@@ -82,7 +82,7 @@ func TestMeshDeletePropagationConverges(t *testing.T) {
 	if !rowAt(storeB, "r2") {
 		t.Fatal("r2 missing on peer before delete")
 	}
-	if _, err := storeA.db.ExecContext(ctx,
+	if _, err := storeA.Database.ExecContext(ctx,
 		`DELETE FROM server_encrypted_records WHERE user_id_hash=?1 AND id='r2'`, userID); err != nil {
 		t.Fatal(err)
 	}
@@ -93,14 +93,14 @@ func TestMeshDeletePropagationConverges(t *testing.T) {
 
 	// 4. Delete-then-recreate in one batch converges to the recreated row.
 	syncA(SyncRequest{EncryptedRecords: []EncryptedRecord{record("r4", "2026-09-04T15:00:00Z")}})
-	if _, err := storeA.db.ExecContext(ctx,
+	if _, err := storeA.Database.ExecContext(ctx,
 		`DELETE FROM server_encrypted_records WHERE user_id_hash=?1 AND id='r4'`, userID); err != nil {
 		t.Fatal(err)
 	}
 	syncA(SyncRequest{EncryptedRecords: []EncryptedRecord{record("r4", "2026-09-04T16:00:00Z")}})
 	syncPeers()
 	var ciphertext string
-	if err := storeB.db.QueryRowContext(ctx,
+	if err := storeB.Database.QueryRowContext(ctx,
 		`SELECT ciphertext FROM server_encrypted_records WHERE user_id_hash=?1 AND id='r4'`,
 		userID).Scan(&ciphertext); err != nil {
 		t.Fatal(err)

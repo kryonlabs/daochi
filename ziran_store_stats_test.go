@@ -51,20 +51,20 @@ func TestZiranStoreStatisticsAgainstBaseline(t *testing.T) {
 		{}, time.Date(2026, 10, 1, 23, 4, 5, 999, time.FixedZone("fixture", -3*60*60)),
 		time.Date(2026, 11, 1, 2, 4, 5, 0, time.UTC),
 	} {
-		got := StoreStats_Usage(store.db, t.Context(), now)
+		got := StoreStats_Usage(store.Database, t.Context(), now)
 		want, err := store.baselineStatsNodeUsage(t.Context(), now)
 		if got.Value != want || !sameIdentityError(got.Error, err) {
 			t.Fatal("recent account/client counts or time window changed", got, want, err)
 		}
 	}
-	apps := StoreStats_Apps(store.db, t.Context())
+	apps := StoreStats_Apps(store.Database, t.Context())
 	wantApps, err := store.baselineStatsAppStorageUsage(t.Context())
 	if !reflect.DeepEqual(apps.Value, wantApps) || !sameIdentityError(apps.Error, err) {
 		t.Fatal("app attribution, counts, names, bytes or ordering changed", apps, wantApps, err)
 	}
-	for _, path := range []string{store.path, "", ":memory:", filepath.Join(t.TempDir(), "missing"), strings.Repeat("x", 4096)} {
-		store.path = path
-		got := StoreStats_Storage(store.db, t.Context(), path)
+	for _, path := range []string{store.Path, "", ":memory:", filepath.Join(t.TempDir(), "missing"), strings.Repeat("x", 4096)} {
+		store.Path = path
+		got := StoreStats_Storage(store.Database, t.Context(), path)
 		want, err := store.baselineStatsNodeStorageUsage(t.Context())
 		if !reflect.DeepEqual(got.Value, want) || !sameIdentityError(got.Error, err) {
 			t.Fatal("file/page totals or unassigned payload/record accounting changed", path, got, want, err)
@@ -75,11 +75,11 @@ func TestZiranStoreStatisticsAgainstBaseline(t *testing.T) {
 			t.Fatal("storage wire shape changed", string(gotJSON), string(wantJSON))
 		}
 	}
-	if got, want := StoreDiagnostics_Health(store.db, t.Context()), store.baselineStatsHealth(t.Context()); !sameIdentityError(got, want) {
+	if got, want := StoreDiagnostics_Health(store.Database, t.Context()), store.baselineStatsHealth(t.Context()); !sameIdentityError(got, want) {
 		t.Fatal("database health changed", got, want)
 	}
 	for _, user := range []string{lifecycleAccounts[0], lifecycleAccounts[1], "missing", "' OR 1=1 --", "\x00\xff"} {
-		got := StoreDiagnostics_Report(store.db, t.Context(), user)
+		got := StoreDiagnostics_Report(store.Database, t.Context(), user)
 		want, err := store.baselineStatsSyncDiagnosticReport(t.Context(), user)
 		if !reflect.DeepEqual(got.Value, want) || !sameIdentityError(got.Error, err) {
 			t.Fatal("diagnostic report changed account scope, counts, limits or data", user, got, want, err)
@@ -96,7 +96,7 @@ func TestZiranStoreStatisticsAgainstBaseline(t *testing.T) {
 func TestZiranStoreStatisticsEmptyAndCancelled(t *testing.T) {
 	_, store, _ := testServer(t)
 	lifecycleExecute(t, store, "DELETE FROM server_app_collections")
-	apps := StoreStats_Apps(store.db, t.Context())
+	apps := StoreStats_Apps(store.Database, t.Context())
 	want, err := store.baselineStatsAppStorageUsage(t.Context())
 	if apps.Error != nil || err != nil || apps.Value == nil || !reflect.DeepEqual(apps.Value, want) {
 		t.Fatal("empty app storage lost its allocated list", apps, want, err)
@@ -165,7 +165,7 @@ func TestZiranStoreFileStatisticsAgainstBaseline(t *testing.T) {
 	}
 	_, store, _ := testServer(t)
 	before, _ := baselineStatsDiskAvailableBytes(path)
-	got := StoreStats_Public(store.db, t.Context(), path)
+	got := StoreStats_Public(store.Database, t.Context(), path)
 	after, _ := baselineStatsDiskAvailableBytes(path)
 	want, err := store.baselineStatsPublicStats(t.Context(), path)
 	if got.Error != nil || err != nil {
@@ -180,7 +180,7 @@ func TestZiranStoreFileStatisticsAgainstBaseline(t *testing.T) {
 		t.Fatal("public counts, file bytes or GB display changed", got, want)
 	}
 	for _, value := range []string{loop, filepath.Join(path, "invalid"), filepath.Join(directory, "missing", "db")} {
-		got := StoreStats_Public(store.db, t.Context(), value)
+		got := StoreStats_Public(store.Database, t.Context(), value)
 		want, err := store.baselineStatsPublicStats(t.Context(), value)
 		if got.Value != want || !sameIdentityError(got.Error, err) || got.Value != (PublicStats{}) || err == nil {
 			t.Fatal("failed public statistics returned partial data or changed error", value, got, want, err)
@@ -207,42 +207,42 @@ func statsReadCases() []statsReadCase {
 	now := time.Date(2026, 10, 1, 4, 5, 6, 7, time.FixedZone("fixture", 4*60*60))
 	return []statsReadCase{
 		{"usage", func(s *Store, ctx context.Context) lifecycleReadResult {
-			r := StoreStats_Usage(s.db, ctx, now)
+			r := StoreStats_Usage(s.Database, ctx, now)
 			return lifecycleReadResult{Value: r.Value, Error: r.Error}
 		}, func(s *Store, ctx context.Context) lifecycleReadResult {
 			v, err := s.baselineStatsNodeUsage(ctx, now)
 			return lifecycleReadResult{Value: v, Error: err}
 		}},
 		{"apps", func(s *Store, ctx context.Context) lifecycleReadResult {
-			r := StoreStats_Apps(s.db, ctx)
+			r := StoreStats_Apps(s.Database, ctx)
 			return lifecycleReadResult{Value: r.Value, Error: r.Error}
 		}, func(s *Store, ctx context.Context) lifecycleReadResult {
 			v, err := s.baselineStatsAppStorageUsage(ctx)
 			return lifecycleReadResult{Value: v, Error: err}
 		}},
 		{"storage", func(s *Store, ctx context.Context) lifecycleReadResult {
-			r := StoreStats_Storage(s.db, ctx, s.path)
+			r := StoreStats_Storage(s.Database, ctx, s.Path)
 			return lifecycleReadResult{Value: r.Value, Error: r.Error}
 		}, func(s *Store, ctx context.Context) lifecycleReadResult {
 			v, err := s.baselineStatsNodeStorageUsage(ctx)
 			return lifecycleReadResult{Value: v, Error: err}
 		}},
 		{"counts", func(s *Store, ctx context.Context) lifecycleReadResult {
-			r := StoreDiagnostics_TableCounts(s.db, ctx, "user\x00\xff")
+			r := StoreDiagnostics_TableCounts(s.Database, ctx, "user\x00\xff")
 			return lifecycleReadResult{Value: r.Value, Error: r.Error}
 		}, func(s *Store, ctx context.Context) lifecycleReadResult {
 			v, err := s.baselineStatsAccountTableCounts(ctx, "user\x00\xff")
 			return lifecycleReadResult{Value: v, Error: err}
 		}},
 		{"report", func(s *Store, ctx context.Context) lifecycleReadResult {
-			r := StoreDiagnostics_Report(s.db, ctx, "user\x00\xff")
+			r := StoreDiagnostics_Report(s.Database, ctx, "user\x00\xff")
 			return lifecycleReadResult{Value: r.Value, Error: r.Error}
 		}, func(s *Store, ctx context.Context) lifecycleReadResult {
 			v, err := s.baselineStatsSyncDiagnosticReport(ctx, "user\x00\xff")
 			return lifecycleReadResult{Value: v, Error: err}
 		}},
 		{"health", func(s *Store, ctx context.Context) lifecycleReadResult {
-			return lifecycleReadResult{Error: StoreDiagnostics_Health(s.db, ctx)}
+			return lifecycleReadResult{Error: StoreDiagnostics_Health(s.Database, ctx)}
 		}, func(s *Store, ctx context.Context) lifecycleReadResult {
 			return lifecycleReadResult{Error: s.baselineStatsHealth(ctx)}
 		}},
@@ -343,7 +343,7 @@ func statsDriverStore(t *testing.T, plan *statsDriverPlan) *Store {
 	}
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
-	return &Store{db: db}
+	return &Store{Database: db}
 }
 
 func TestZiranStoreStatisticsNativeTraceAndFailures(t *testing.T) {
@@ -387,7 +387,7 @@ func TestZiranStoreStatisticsNativeTraceAndFailures(t *testing.T) {
 								results[index] = test.baseline(store, t.Context())
 							}
 						})
-						inUse[index] = store.db.Stats().InUse
+						inUse[index] = store.Database.Stats().InUse
 						// A driver panic inside QueryContext or Ping occurs before the
 						// application receives a row handle. database/sql itself retains
 						// that connection in the original and generated implementations.
@@ -408,13 +408,13 @@ func TestZiranStoreHealthAndEmptyNativeApps(t *testing.T) {
 	for _, status := range []string{"ok", "corrupt\n日本語\x00\xff", ""} {
 		for _, exists := range []int64{0, 1, -1} {
 			store := statsDriverStore(t, &statsDriverPlan{quickCheck: status, schemaExists: exists})
-			if got, want := StoreDiagnostics_Health(store.db, t.Context()), store.baselineStatsHealth(t.Context()); !sameIdentityError(got, want) {
+			if got, want := StoreDiagnostics_Health(store.Database, t.Context()), store.baselineStatsHealth(t.Context()); !sameIdentityError(got, want) {
 				t.Fatal("health status or schema-presence error changed", status, exists, got, want)
 			}
 		}
 	}
 	store := statsDriverStore(t, &statsDriverPlan{emptyApps: true})
-	got := StoreStats_Apps(store.db, t.Context())
+	got := StoreStats_Apps(store.Database, t.Context())
 	want, err := store.baselineStatsAppStorageUsage(t.Context())
 	if got.Error != nil || err != nil || got.Value == nil || !reflect.DeepEqual(got.Value, want) {
 		t.Fatal("empty native app list changed", got, want, err)

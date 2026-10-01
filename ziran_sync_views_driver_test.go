@@ -54,7 +54,7 @@ func viewsDriverStore(t *testing.T, plan *lifecycleDriverPlan) *Store {
 	}
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
-	return &Store{db: database}
+	return &Store{Database: database}
 }
 
 func viewsFailurePlan(columns []string, values []driver.Value, mode string, sentinel error, panicValue any) *lifecycleDriverPlan {
@@ -86,7 +86,7 @@ func viewsConnectionReleased(t *testing.T, store *Store) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	if err := store.db.PingContext(ctx); err != nil {
+	if err := store.Database.PingContext(ctx); err != nil {
 		t.Fatal("operation retained the database connection", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestZiranStateHashNativeBytesAgainstBaseline(t *testing.T) {
 	cases := []hashCase{
 		{"habits", []driver.Value{"id", "name", int64(-1), int64(2), int64(3), int64(4), int64(5), int64(6), int64(-7), int64(-8), "updated"},
 			func(s *Store, writer io.Writer) error {
-				return StateHash_Habits(s.db, context.Background(), writer, "account")
+				return StateHash_Habits(s.Database, context.Background(), writer, "account")
 			},
 			func(s *Store, writer io.Writer) error {
 				return s.baselineViewsHashHabits(context.Background(), writer, "account")
@@ -180,7 +180,7 @@ func TestZiranStateHashNativeBytesAgainstBaseline(t *testing.T) {
 		},
 		{"days", []driver.Value{"habit", int64(20261001), int64(-2), int64(-3), "updated"},
 			func(s *Store, writer io.Writer) error {
-				return StateHash_HabitDays(s.db, context.Background(), writer, "account")
+				return StateHash_HabitDays(s.Database, context.Background(), writer, "account")
 			},
 			func(s *Store, writer io.Writer) error {
 				return s.baselineViewsHashHabitDays(context.Background(), writer, "account")
@@ -188,7 +188,7 @@ func TestZiranStateHashNativeBytesAgainstBaseline(t *testing.T) {
 		},
 		{"sessions", []driver.Value{"session", "started", int64(20261001), "topic", int64(-1), "source", "hash", int64(-2), int64(3), int64(4), int64(5), "note\t\n\x00\xff", "tags", int64(-6), "updated"},
 			func(s *Store, writer io.Writer) error {
-				return StateHash_Sessions(s.db, context.Background(), writer, "account")
+				return StateHash_Sessions(s.Database, context.Background(), writer, "account")
 			},
 			func(s *Store, writer io.Writer) error {
 				return s.baselineViewsHashSessions(context.Background(), writer, "account")
@@ -196,7 +196,7 @@ func TestZiranStateHashNativeBytesAgainstBaseline(t *testing.T) {
 		},
 		{"rounds", []driver.Value{int64(2), int64(7), int64(-3)},
 			func(s *Store, writer io.Writer) error {
-				return StateHash_Rounds(s.db, context.Background(), writer, "account", "session")
+				return StateHash_Rounds(s.Database, context.Background(), writer, "account", "session")
 			},
 			func(s *Store, writer io.Writer) error {
 				return s.baselineViewsHashSessionRounds(context.Background(), writer, "account", "session")
@@ -204,7 +204,7 @@ func TestZiranStateHashNativeBytesAgainstBaseline(t *testing.T) {
 		},
 		{"meditations", []driver.Value{"log", "session", int64(-3), "completed"},
 			func(s *Store, writer io.Writer) error {
-				return StateHash_Meditations(s.db, context.Background(), writer, "account")
+				return StateHash_Meditations(s.Database, context.Background(), writer, "account")
 			},
 			func(s *Store, writer io.Writer) error {
 				return s.baselineViewsHashMeditationLogs(context.Background(), writer, "account")
@@ -212,7 +212,7 @@ func TestZiranStateHashNativeBytesAgainstBaseline(t *testing.T) {
 		},
 		{"social", []driver.Value{"kind", "arbitrary\x00\xff", "updated"},
 			func(s *Store, writer io.Writer) error {
-				return StateHash_Social(s.db, context.Background(), writer, "account")
+				return StateHash_Social(s.Database, context.Background(), writer, "account")
 			},
 			func(s *Store, writer io.Writer) error {
 				return s.baselineViewsHashSocialCache(context.Background(), writer, "account")
@@ -220,7 +220,7 @@ func TestZiranStateHashNativeBytesAgainstBaseline(t *testing.T) {
 		},
 		{"records", []driver.Value{"collection", "id", "key", "nonce", "cipher\x00\xff", "updated", int64(-3), "hash", int64(-4), "parent"},
 			func(s *Store, writer io.Writer) error {
-				return StateHash_Records(s.db, context.Background(), writer, "account")
+				return StateHash_Records(s.Database, context.Background(), writer, "account")
 			},
 			func(s *Store, writer io.Writer) error {
 				return s.baselineViewsHashEncryptedRecords(context.Background(), writer, "account")

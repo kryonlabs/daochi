@@ -45,7 +45,7 @@ func (s *Store) baselineCreateAppGrant(ctx context.Context, userID string, req A
 		return AppGrant{}, fmt.Errorf("private collections cannot be granted across apps")
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return AppGrant{}, err
 	}
@@ -72,7 +72,7 @@ VALUES(?1,?2,'create',?3)`, id, userID, baselineAuditJSON(req)); err != nil {
 
 func (s *Store) baselineAppGrantByID(ctx context.Context, userID, id string) (AppGrant, error) {
 	var grant AppGrant
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status,created_at,updated_at,revoked_at
 FROM server_app_grants
 WHERE user_id_hash=?1 AND id=?2`, userID, id).Scan(&grant.ID, &grant.UserIDHash,
@@ -82,7 +82,7 @@ WHERE user_id_hash=?1 AND id=?2`, userID, id).Scan(&grant.ID, &grant.UserIDHash,
 }
 
 func (s *Store) baselineListAppGrants(ctx context.Context, userID string) ([]AppGrant, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status,created_at,updated_at,revoked_at
 FROM server_app_grants
 WHERE user_id_hash=?1
@@ -106,7 +106,7 @@ ORDER BY updated_at DESC,id`, userID)
 }
 
 func (s *Store) baselineRevokeAppGrant(ctx context.Context, userID, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (s *Store) baselineAuthorizedAppRecords(ctx context.Context, userID, source
 	}
 	if sourceAppID != targetAppID {
 		var exists int
-		err := s.db.QueryRowContext(ctx, `
+		err := s.Database.QueryRowContext(ctx, `
 SELECT EXISTS(
 	SELECT 1 FROM server_app_grants
 	WHERE user_id_hash=?1 AND source_app_id=?2 AND target_app_id=?3
@@ -167,7 +167,7 @@ SELECT EXISTS(
 
 func (s *Store) baselineAppCollectionVisibility(ctx context.Context, appID, collectionPrefix string) (string, bool, error) {
 	var visibility string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT visibility
 FROM server_app_collections
 WHERE app_id=?1 AND collection_prefix=?2`, appID, collectionPrefix).Scan(&visibility)
@@ -195,7 +195,7 @@ WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\'
 ORDER BY collection,id`
 		args[1] = Scope_LikePatternForCollectionPrefix(collectionPrefix)
 	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.Database.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

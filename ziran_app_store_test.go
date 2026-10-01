@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS token_app_permissions (
 `); err != nil {
 		t.Fatal(err)
 	}
-	return &Store{db: db}
+	return &Store{Database: db}
 }
 
 func withoutAppClocks(app AppRegistration) AppRegistration {
@@ -121,7 +121,7 @@ func appStoreSnapshot(t *testing.T, store *Store) map[string][][]string {
 		"policies":     "SELECT app_id,asset_id,permission,status,legacy_unsigned_until FROM token_app_permissions ORDER BY app_id,asset_id,permission",
 	}
 	for name, query := range queries {
-		rows, err := store.db.Query(query)
+		rows, err := store.Database.Query(query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -155,7 +155,7 @@ func compareAppStores(t *testing.T, actual, expected *Store, ids ...string) {
 	if got, want := appStoreSnapshot(t, actual), appStoreSnapshot(t, expected); !reflect.DeepEqual(got, want) {
 		t.Fatalf("registry state = %#v, baseline = %#v", got, want)
 	}
-	listed := AppStore_List(actual.db, t.Context())
+	listed := AppStore_List(actual.Database, t.Context())
 	want, err := expected.baselineListApps(t.Context())
 	for index := range listed.Value {
 		listed.Value[index] = withoutAppClocks(listed.Value[index])
@@ -167,25 +167,25 @@ func compareAppStores(t *testing.T, actual, expected *Store, ids ...string) {
 		t.Fatalf("app list = %#v, baseline = %#v, %v", listed, want, err)
 	}
 	for _, id := range ids {
-		loaded := AppStore_ByID(actual.db, t.Context(), id)
+		loaded := AppStore_ByID(actual.Database, t.Context(), id)
 		app, found, err := expected.baselineAppByID(t.Context(), id)
 		if !sameIdentityError(loaded.Error, err) || loaded.Found != found || !reflect.DeepEqual(withoutAppClocks(loaded.Value), withoutAppClocks(app)) {
 			t.Fatalf("app %q = %#v, baseline = %#v, %v, %v", id, loaded, app, found, err)
 		}
-		gotExists := AppStore_Exists(actual.db, t.Context(), id)
+		gotExists := AppStore_Exists(actual.Database, t.Context(), id)
 		exists, err := expected.baselineAppExists(t.Context(), id)
 		if !sameIdentityError(gotExists.Error, err) || gotExists.Value != exists {
 			t.Fatalf("existence %q = %#v, baseline = %v, %v", id, gotExists, exists, err)
 		}
 		for _, version := range []int{-1, 0, 5, 6, 100} {
-			got := AppStore_AllowsLegacyProtocol(actual.db, t.Context(), id, version)
+			got := AppStore_AllowsLegacyProtocol(actual.Database, t.Context(), id, version)
 			allowed, err := expected.baselineAppAllowsLegacyProtocol(t.Context(), id, version)
 			if !sameIdentityError(got.Error, err) || got.Value != allowed {
 				t.Fatalf("legacy %q version %d = %#v, baseline = %v, %v", id, version, got, allowed, err)
 			}
 		}
 		for _, collection := range []string{"", "inbe.habits", "shared.demo.v1.item", "shared.demo.v1", "other.item"} {
-			got := AppStore_OwnsCollection(actual.db, t.Context(), id, collection)
+			got := AppStore_OwnsCollection(actual.Database, t.Context(), id, collection)
 			owns, err := expected.baselineAppOwnsCollection(t.Context(), id, collection)
 			if !sameIdentityError(got.Error, err) || got.Value != owns {
 				t.Fatalf("ownership %q, %q = %#v, baseline = %v, %v", id, collection, got, owns, err)
@@ -221,7 +221,7 @@ func writeAppManifestPair(t *testing.T, actual, expected *Store, manifest AppMan
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := AppStore_UpsertSignedManifest(actual.db, t.Context(), manifest, data, hash, "manifest-sig", "approval-sig")
+	got := AppStore_UpsertSignedManifest(actual.Database, t.Context(), manifest, data, hash, "manifest-sig", "approval-sig")
 	want := expected.baselineUpsertSignedAppManifest(t.Context(), manifest, data, hash, "manifest-sig", "approval-sig")
 	if !sameIdentityError(got, want) || got != nil {
 		t.Fatalf("signed manifest write = %v, baseline = %v", got, want)
@@ -236,7 +236,7 @@ func TestZiranAppRegistryLifecycleAgainstBaseline(t *testing.T) {
 		{AppID: "a", DisplayName: "A", Features: []AppFeature{}, LegacyProtocols: []LegacyProtocol{}},
 		{AppID: "s", DisplayName: "S", Status: "suspended"},
 	} {
-		got := AppStore_Upsert(actual.db, t.Context(), app)
+		got := AppStore_Upsert(actual.Database, t.Context(), app)
 		want := expected.baselineUpsertApp(t.Context(), app)
 		if !sameIdentityError(got, want) || got != nil {
 			t.Fatalf("app write = %v, baseline = %v", got, want)
@@ -246,7 +246,7 @@ func TestZiranAppRegistryLifecycleAgainstBaseline(t *testing.T) {
 	writeAppManifestPair(t, actual, expected, manifest, "hash-1")
 	compareAppStores(t, actual, expected, "demo", "z", "a", "s", "missing")
 	for _, keyID := range []string{"a", "s", "z", "missing"} {
-		got := AppStore_ActiveKey(actual.db, t.Context(), "demo", keyID)
+		got := AppStore_ActiveKey(actual.Database, t.Context(), "demo", keyID)
 		key, found, err := expected.baselineActiveAppKey(t.Context(), "demo", keyID)
 		got.Value.CreatedAt, key.CreatedAt = "", ""
 		if !sameIdentityError(got.Error, err) || got.Found != found || !reflect.DeepEqual(got.Value, key) {
@@ -254,13 +254,13 @@ func TestZiranAppRegistryLifecycleAgainstBaseline(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"demo", "missing"} {
-		got := AppStore_HasPolicy(actual.db, t.Context(), id)
+		got := AppStore_HasPolicy(actual.Database, t.Context(), id)
 		found, err := expected.baselineHasTokenPolicy(t.Context(), id)
 		if got.Value != found || !sameIdentityError(got.Error, err) {
 			t.Fatalf("policy existence = %#v, baseline = %v, %v", got, found, err)
 		}
 		for _, permission := range []string{"spend", "purchase", "missing"} {
-			got := AppStore_Permission(actual.db, t.Context(), id, AssetID, permission)
+			got := AppStore_Permission(actual.Database, t.Context(), id, AssetID, permission)
 			policy, found, err := expected.baselineAppTokenPermission(t.Context(), id, AssetID, permission)
 			if got.Found != found || got.Value != policy || !sameIdentityError(got.Error, err) {
 				t.Fatalf("permission = %#v, baseline = %#v, %v, %v", got, policy, found, err)
@@ -284,7 +284,7 @@ func TestZiranAppRegistryLifecycleAgainstBaseline(t *testing.T) {
 func TestZiranAppSeedingAgainstBaseline(t *testing.T) {
 	actual, expected := appStoreFixture(t), appStoreFixture(t)
 	for round := 0; round < 2; round++ {
-		got := AppStore_SeedBuiltin(actual.db, t.Context())
+		got := AppStore_SeedBuiltin(actual.Database, t.Context())
 		want := expected.baselineSeedBuiltinApps(t.Context())
 		if !sameIdentityError(got, want) || got != nil {
 			t.Fatalf("seed = %v, baseline = %v", got, want)
@@ -295,7 +295,7 @@ func TestZiranAppSeedingAgainstBaseline(t *testing.T) {
 	manifest.AppID = "inbe"
 	manifest.DisplayName = "Signed Inbe"
 	writeAppManifestPair(t, actual, expected, manifest, "signed-inbe")
-	got := AppStore_SeedBuiltin(actual.db, t.Context())
+	got := AppStore_SeedBuiltin(actual.Database, t.Context())
 	want := expected.baselineSeedBuiltinApps(t.Context())
 	if !sameIdentityError(got, want) || got != nil {
 		t.Fatalf("signed seed = %v, baseline = %v", got, want)
@@ -325,7 +325,7 @@ CREATE TRIGGER reject_app AFTER INSERT ON server_app_keys BEGIN INSERT INTO pend
 				query = "CREATE TRIGGER reject_app BEFORE INSERT ON " + tables[mode] + " BEGIN SELECT RAISE(ABORT,'write rejected'); END"
 			}
 			for _, store := range []*Store{actual, expected} {
-				if _, err := store.db.Exec(query); err != nil {
+				if _, err := store.Database.Exec(query); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -335,18 +335,18 @@ CREATE TRIGGER reject_app AFTER INSERT ON server_app_keys BEGIN INSERT INTO pend
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := AppStore_UpsertSignedManifest(actual.db, t.Context(), manifest, data, "after", "new-sig", "new-approval")
+			got := AppStore_UpsertSignedManifest(actual.Database, t.Context(), manifest, data, "after", "new-sig", "new-approval")
 			want := expected.baselineUpsertSignedAppManifest(t.Context(), manifest, data, "after", "new-sig", "new-approval")
 			if got == nil || !sameIdentityError(got, want) || !reflect.DeepEqual(appStoreSnapshot(t, actual), before) {
 				t.Fatalf("failed %s write = %v, baseline = %v; partial changes escaped rollback", mode, got, want)
 			}
 			compareAppStores(t, actual, expected, "demo")
 			if query != "" {
-				if _, err := actual.db.Exec("DROP TRIGGER reject_app"); err != nil {
+				if _, err := actual.Database.Exec("DROP TRIGGER reject_app"); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err := AppStore_Upsert(actual.db, t.Context(), AppRegistration{AppID: "usable", DisplayName: "Usable"}); err != nil {
+			if err := AppStore_Upsert(actual.Database, t.Context(), AppRegistration{AppID: "usable", DisplayName: "Usable"}); err != nil {
 				t.Fatal("rollback left the connection unusable", err)
 			}
 		})
@@ -367,12 +367,12 @@ func TestZiranAppQueriesAndNativeErrorsAgainstBaseline(t *testing.T) {
 			}
 			for _, store := range []*Store{actual, expected} {
 				if query := queries[mode]; query != "" {
-					if _, err := store.db.Exec(query); err != nil {
+					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "closed" {
-					if err := store.db.Close(); err != nil {
+					if err := store.Database.Close(); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -383,23 +383,23 @@ func TestZiranAppQueriesAndNativeErrorsAgainstBaseline(t *testing.T) {
 				cancel()
 				ctx = cancelled
 			}
-			got := AppStore_ByID(actual.db, ctx, "demo")
+			got := AppStore_ByID(actual.Database, ctx, "demo")
 			want, found, err := expected.baselineAppByID(ctx, "demo")
 			if !sameIdentityError(got.Error, err) || got.Found != found || !reflect.DeepEqual(got.Value, want) {
 				t.Fatalf("app error = %#v, baseline = %#v, %v, %v", got, want, found, err)
 			}
-			listed := AppStore_List(actual.db, ctx)
+			listed := AppStore_List(actual.Database, ctx)
 			apps, err := expected.baselineListApps(ctx)
 			if !sameIdentityError(listed.Error, err) || !reflect.DeepEqual(listed.Value, apps) {
 				t.Fatalf("list error = %#v, baseline = %#v, %v", listed, apps, err)
 			}
-			key := AppStore_ActiveKey(actual.db, ctx, "demo", "z")
+			key := AppStore_ActiveKey(actual.Database, ctx, "demo", "z")
 			wantKey, found, err := expected.baselineActiveAppKey(ctx, "demo", "z")
 			key.Value.CreatedAt, wantKey.CreatedAt = "", ""
 			if !sameIdentityError(key.Error, err) || key.Found != found || key.Value != wantKey {
 				t.Fatalf("key error = %#v, baseline = %#v, %v, %v", key, wantKey, found, err)
 			}
-			policy := AppStore_Permission(actual.db, ctx, "demo", AssetID, "spend")
+			policy := AppStore_Permission(actual.Database, ctx, "demo", AssetID, "spend")
 			wantPolicy, found, err := expected.baselineAppTokenPermission(ctx, "demo", AssetID, "spend")
 			if !sameIdentityError(policy.Error, err) || policy.Found != found || policy.Value != wantPolicy {
 				t.Fatalf("policy error = %#v, baseline = %#v, %v, %v", policy, wantPolicy, found, err)
@@ -408,7 +408,7 @@ func TestZiranAppQueriesAndNativeErrorsAgainstBaseline(t *testing.T) {
 				if !errors.Is(got.Error, context.Canceled) {
 					t.Fatal("native cancellation identity lost", got.Error)
 				}
-				if err := AppStore_Upsert(actual.db, ctx, AppRegistration{}); !errors.Is(err, context.Canceled) {
+				if err := AppStore_Upsert(actual.Database, ctx, AppRegistration{}); !errors.Is(err, context.Canceled) {
 					t.Fatal("transaction cancellation identity lost", err)
 				}
 			}
@@ -421,7 +421,7 @@ func TestZiranAppLegacyDateBoundariesAgainstBaseline(t *testing.T) {
 	today := time.Now().UTC().Format("2006-01-02")
 	for _, date := range []string{"", "0000-01-01", today, "9999-12-31", "not-a-date"} {
 		app := AppRegistration{AppID: "boundary", DisplayName: "Boundary", LegacyProtocols: []LegacyProtocol{{Name: "legacy", Version: 5, Status: "compatibility", ValidUntil: date}}}
-		if err := AppStore_Upsert(actual.db, t.Context(), app); err != nil {
+		if err := AppStore_Upsert(actual.Database, t.Context(), app); err != nil {
 			t.Fatal(err)
 		}
 		if err := expected.baselineUpsertApp(t.Context(), app); err != nil {

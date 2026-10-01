@@ -37,7 +37,7 @@ func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *h
 		Response_Error(w, http.StatusBadRequest, "unknown monero product_id")
 		return
 	}
-	existence := AppStore_Exists(s.store.db, r.Context(), req.AppID)
+	existence := AppStore_Exists(s.store.Database, r.Context(), req.AppID)
 	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("monero invoice app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "monero invoice failed")
@@ -46,11 +46,11 @@ func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *h
 		Response_Error(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
-	authorization := TokenPolicy_Authorize(s.store.db, r.Context(), r, body, userID, req.AppID, AssetID, "purchase", s.verifier.Verify, errSignedTxReplay)
+	authorization := TokenPolicy_Authorize(s.store.Database, r.Context(), r, body, userID, req.AppID, AssetID, "purchase", s.verifier.Verify, errSignedTxReplay)
 	signedTx, hasSignedTx, err := authorization.Value, authorization.Signed, authenticationError(authorization.Authentication)
 	if err != nil {
 		if hasSignedTx {
-			SignedTx_Forget(s.store.db, r.Context(), signedTx)
+			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
 		}
 		s.writeAuthError(w, err)
 		return
@@ -58,7 +58,7 @@ func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *h
 	completed := false
 	defer func() {
 		if hasSignedTx && !completed {
-			SignedTx_Forget(s.store.db, r.Context(), signedTx)
+			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
 		}
 	}()
 	invoice, err := s.store.baselineInvoiceCreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.cfg)
@@ -115,7 +115,7 @@ func (s *Server) baselineInvoiceTrySettleOrExpireMoneroInvoice(ctx context.Conte
 	// A fully-covered invoice settles even after expiry: funds arriving
 	// late must never disappear into an expired row.
 	if payment.ConfirmedAtomic >= invoice.AtomicAmount {
-		paymentResult := TokenLedger_CreditPayment(s.store.db, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
+		paymentResult := TokenLedger_CreditPayment(s.store.Database, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
 			AccountID:   userID,
 			AppID:       invoice.AppID,
 			EventType:   "credit",
@@ -171,7 +171,7 @@ func (s *Server) baselineInvoiceReconcileMoneroExpiredInvoices(ctx context.Conte
 			continue
 		}
 		if payment.ConfirmedAtomic >= item.Invoice.AtomicAmount {
-			paymentResult := TokenLedger_CreditPayment(s.store.db, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
+			paymentResult := TokenLedger_CreditPayment(s.store.Database, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
 				AccountID:   item.AccountID,
 				AppID:       item.Invoice.AppID,
 				EventType:   "credit",
@@ -267,7 +267,7 @@ func (s *Store) baselineInvoiceCreateMoneroInvoice(ctx context.Context, accountI
 		return MoneroInvoiceResponse{}, err
 	}
 	expiresAt := time.Now().UTC().Add(45 * time.Minute).Format(CanonicalTimestampLayout)
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.Database.ExecContext(ctx, `
 INSERT INTO token_payment_intents(id,provider,account_id,app_id,product_id,asset_id,token_units,
 	provider_amount,provider_address,provider_ref,status,expires_at)
 VALUES(?1,'monero',?2,?3,?4,?5,?6,?7,?8,?9,'pending',?10)`,
@@ -293,7 +293,7 @@ VALUES(?1,'monero',?2,?3,?4,?5,?6,?7,?8,?9,'pending',?10)`,
 func (s *Store) baselineInvoiceMoneroInvoice(ctx context.Context, accountID, id string) (MoneroInvoiceResponse, bool, error) {
 	var out MoneroInvoiceResponse
 	var receiptID string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT id,app_id,status,product_id,asset_id,token_units,provider_amount,provider_address,provider_ref,provider_payment_id,expires_at,receipt_id
 FROM token_payment_intents
 WHERE account_id=?1 AND id=?2 AND provider='monero'`, accountID, id).Scan(
@@ -306,7 +306,7 @@ WHERE account_id=?1 AND id=?2 AND provider='monero'`, accountID, id).Scan(
 		return MoneroInvoiceResponse{}, false, err
 	}
 	if receiptID != "" {
-		receiptResult := TokenLedger_ByID(s.db, ctx, receiptID)
+		receiptResult := TokenLedger_ByID(s.Database, ctx, receiptID)
 		receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 		if err != nil {
 			return MoneroInvoiceResponse{}, false, err
@@ -322,7 +322,7 @@ func (s *Store) baselineInvoicePendingMoneroInvoices(ctx context.Context, limit 
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,
 	provider_address,provider_ref,provider_payment_id,expires_at,receipt_id
 FROM token_payment_intents
@@ -345,7 +345,7 @@ LIMIT ?1`, limit)
 			return nil, err
 		}
 		if receiptID != "" {
-			receiptResult := TokenLedger_ByID(s.db, ctx, receiptID)
+			receiptResult := TokenLedger_ByID(s.Database, ctx, receiptID)
 			receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 			if err != nil {
 				return nil, err
@@ -360,7 +360,7 @@ LIMIT ?1`, limit)
 }
 
 func (s *Store) baselineInvoiceMarkMoneroInvoicePaid(ctx context.Context, accountID, id, receiptID, paymentRef string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.Database.ExecContext(ctx, `
 UPDATE token_payment_intents
 SET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP
 WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='pending'`,
@@ -379,7 +379,7 @@ WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='pending'`,
 }
 
 func (s *Store) baselineInvoiceMarkMoneroInvoiceExpired(ctx context.Context, accountID, id string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 UPDATE token_payment_intents
 SET status='expired', updated_at=CURRENT_TIMESTAMP
 WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='pending'`,
@@ -394,7 +394,7 @@ func (s *Store) baselineInvoiceExpiredMoneroInvoices(ctx context.Context, limit 
 		limit = 50
 	}
 	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(CanonicalTimestampLayout)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,
 	provider_address,provider_ref,provider_payment_id,expires_at,receipt_id
 FROM token_payment_intents
@@ -424,7 +424,7 @@ LIMIT ?2`, cutoff, limit)
 // baselineInvoiceSettleExpiredMoneroInvoice transitions an expired invoice to paid after
 // a late payment was credited by the sweep.
 func (s *Store) baselineInvoiceSettleExpiredMoneroInvoice(ctx context.Context, accountID, id, receiptID, paymentRef string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.Database.ExecContext(ctx, `
 UPDATE token_payment_intents
 SET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP
 WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='expired' AND receipt_id=''`,

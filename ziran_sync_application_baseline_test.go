@@ -13,7 +13,7 @@ import (
 )
 
 func (s *Store) baselineApplicationApplySyncDetailed(ctx context.Context, req SyncRequest, publicKey []byte) (SyncResult, []string, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return SyncResult{}, nil, err
 	}

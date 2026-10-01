@@ -22,7 +22,7 @@ func tokenLedgerStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	store.db.SetMaxOpenConns(1)
+	store.Database.SetMaxOpenConns(1)
 	return store
 }
 
@@ -117,7 +117,7 @@ func seedMatchingTokenLedgers(t *testing.T, actual, baseline *Store) {
 		if amount < 0 {
 			input.EventType = "debit"
 		}
-		tx, err := baseline.db.BeginTx(context, nil)
+		tx, err := baseline.Database.BeginTx(context, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func seedMatchingTokenLedgers(t *testing.T, actual, baseline *Store) {
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
-		_, err = actual.db.Exec(`INSERT INTO token_ledger(receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,previous_hash,event_hash,signature,created_at,source_type,source_ref)
+		_, err = actual.Database.Exec(`INSERT INTO token_ledger(receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,previous_hash,event_hash,signature,created_at,source_type,source_ref)
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, receipt.ReceiptID, receipt.IssuerID, receipt.AssetID, receipt.AccountID, receipt.AppID, receipt.EventType, receipt.AmountDelta, receipt.LedgerSeq, receipt.PreviousHash, receipt.EventHash, receipt.Signature, receipt.CreatedAt, receipt.SourceType, receipt.SourceRef)
 		if err != nil {
 			t.Fatal(err)
@@ -147,31 +147,31 @@ func TestZiranTokenLedgerReadsAndCheckpointsMatchBaseline(t *testing.T) {
 		return value
 	}()} {
 		assets, err := baseline.baselineTokenAssets(context)
-		got := TokenAssets_List(actual.db, context)
+		got := TokenAssets_List(actual.Database, context)
 		if !reflect.DeepEqual(got.Value, assets) || websocketErrorText(got.Error) != websocketErrorText(err) {
 			t.Fatal("asset list or errors changed")
 		}
 		for _, account := range []string{strings.Repeat("a", 64), strings.Repeat("b", 64), "missing"} {
 			for _, asset := range []string{"waozi:token", "missing"} {
 				balance, err := baseline.baselineTokenBalance(context, account, asset)
-				got := TokenLedger_Balance(actual.db, context, account, asset)
+				got := TokenLedger_Balance(actual.Database, context, account, asset)
 				if got.Value != balance || websocketErrorText(got.Error) != websocketErrorText(err) {
 					t.Fatal("balance changed")
 				}
 				for _, since := range []int64{math.MinInt64, 0, 1, 3, math.MaxInt64} {
 					items, err := baseline.baselineTokenLedger(context, account, asset, since)
-					got := TokenLedger_List(actual.db, context, account, asset, since)
+					got := TokenLedger_List(actual.Database, context, account, asset, since)
 					if !reflect.DeepEqual(got.Value, items) || websocketErrorText(got.Error) != websocketErrorText(err) {
 						t.Fatal("ledger ordering, filtering, nil results or errors changed")
 					}
 					for _, app := range []string{"", "inbe", "missing"} {
 						items, err := baseline.baselineTokenAppLedger(context, account, asset, app, since)
-						got := TokenLedger_AppList(actual.db, context, account, asset, app, since)
+						got := TokenLedger_AppList(actual.Database, context, account, asset, app, since)
 						if !reflect.DeepEqual(got.Value, items) || websocketErrorText(got.Error) != websocketErrorText(err) {
 							t.Fatal("app ledger changed")
 						}
 						balance, err := baseline.baselineTokenAppBalance(context, account, asset, app)
-						appBalance := TokenLedger_AppBalance(actual.db, context, account, asset, app)
+						appBalance := TokenLedger_AppBalance(actual.Database, context, account, asset, app)
 						if appBalance.Value != balance || websocketErrorText(appBalance.Error) != websocketErrorText(err) {
 							t.Fatal("app balance changed")
 						}
@@ -186,13 +186,13 @@ func TestZiranTokenLedgerReadsAndCheckpointsMatchBaseline(t *testing.T) {
 	}
 	for _, id := range []string{items[0].ReceiptID, "missing"} {
 		want, found, err := baseline.baselineTokenReceipt(background, id)
-		got := TokenLedger_ByID(actual.db, background, id)
+		got := TokenLedger_ByID(actual.Database, background, id)
 		if got.Value != want || got.Found != found || websocketErrorText(got.Error) != websocketErrorText(err) {
 			t.Fatal("receipt lookup changed")
 		}
 	}
 	oldCheckpoint, err := baseline.baselineCreateTokenCheckpoint(background, tokenLedgerSigner())
-	checkpoint := TokenCheckpoint_Create(actual.db, background, tokenLedgerSigner(), errTokenIssuerReadOnly)
+	checkpoint := TokenCheckpoint_Create(actual.Database, background, tokenLedgerSigner(), errTokenIssuerReadOnly)
 	if checkpoint.Error != err || !checkpoint.Found {
 		t.Fatal("checkpoint creation failed")
 	}
@@ -200,20 +200,20 @@ func TestZiranTokenLedgerReadsAndCheckpointsMatchBaseline(t *testing.T) {
 	if checkpoint.Value != oldCheckpoint {
 		t.Fatal("checkpoint root, sequence or signature changed")
 	}
-	if got := TokenCheckpoint_Create(actual.db, background, nil, errTokenIssuerReadOnly); got.Error != errTokenIssuerReadOnly || got.Value != (TokenCheckpoint{}) {
+	if got := TokenCheckpoint_Create(actual.Database, background, nil, errTokenIssuerReadOnly); got.Error != errTokenIssuerReadOnly || got.Value != (TokenCheckpoint{}) {
 		t.Fatal("read-only issuer error identity changed")
 	}
 	for _, store := range []*Store{actual, baseline} {
-		if _, err := store.db.Exec("UPDATE token_ledger SET amount_delta='bad' WHERE ledger_seq=3"); err != nil {
+		if _, err := store.Database.Exec("UPDATE token_ledger SET amount_delta='bad' WHERE ledger_seq=3"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	want, err := baseline.baselineTokenLedger(background, strings.Repeat("a", 64), "waozi:token", 0)
-	got := TokenLedger_List(actual.db, background, strings.Repeat("a", 64), "waozi:token", 0)
+	got := TokenLedger_List(actual.Database, background, strings.Repeat("a", 64), "waozi:token", 0)
 	if !reflect.DeepEqual(got.Value, want) || websocketErrorText(got.Error) != websocketErrorText(err) || got.Value != nil {
 		t.Fatal("partial row scan failure changed")
 	}
-	if actual.db.Stats().InUse != 0 || baseline.db.Stats().InUse != 0 {
+	if actual.Database.Stats().InUse != 0 || baseline.Database.Stats().InUse != 0 {
 		t.Fatal("row scan error leaked a connection")
 	}
 }
@@ -253,7 +253,7 @@ func TestZiranTokenPaymentsAndSpendingMatchBaseline(t *testing.T) {
 				id = "invalid"
 			}
 			want, balance, created, err := baseline.baselineSpendTokens(background, key, baselineTokenEventInput(current), id)
-			got := TokenLedger_Spend(actual.db, background, key, current, id, errTokenIssuerReadOnly)
+			got := TokenLedger_Spend(actual.Database, background, key, current, id, errTokenIssuerReadOnly)
 			if receiptWithoutGeneratedFields(got.Value) != receiptWithoutGeneratedFields(want) || got.Balance != balance || got.Created != created || websocketErrorText(got.Error) != websocketErrorText(err) {
 				t.Fatalf("spend %s changed: %+v, %v", action, got, err)
 			}
@@ -263,7 +263,7 @@ func TestZiranTokenPaymentsAndSpendingMatchBaseline(t *testing.T) {
 				signer, id = nil, "invalid-signer"
 			}
 			want, created, err := baseline.baselineCreditTokenPayment(background, signer, "fixture", id, baselineTokenEventInput(current))
-			got := TokenLedger_CreditPayment(actual.db, background, signer, "fixture", id, current, errTokenIssuerReadOnly)
+			got := TokenLedger_CreditPayment(actual.Database, background, signer, "fixture", id, current, errTokenIssuerReadOnly)
 			if receiptWithoutGeneratedFields(got.Value) != receiptWithoutGeneratedFields(want) || got.Created != created || websocketErrorText(got.Error) != websocketErrorText(err) {
 				t.Fatalf("credit %s changed: %+v, %v", action, got, err)
 			}
@@ -272,11 +272,11 @@ func TestZiranTokenPaymentsAndSpendingMatchBaseline(t *testing.T) {
 			}
 		}
 		want, err := baseline.baselineTokenBalance(background, input.AccountID, "waozi:token")
-		balance := TokenLedger_Balance(actual.db, background, input.AccountID, "waozi:token")
+		balance := TokenLedger_Balance(actual.Database, background, input.AccountID, "waozi:token")
 		if balance.Value != want || websocketErrorText(balance.Error) != websocketErrorText(err) {
 			t.Fatalf("balance after %s changed", action)
 		}
-		items := TokenLedger_List(actual.db, background, input.AccountID, "waozi:token", 0)
+		items := TokenLedger_List(actual.Database, background, input.AccountID, "waozi:token", 0)
 		for index, receipt := range items.Value {
 			if !baselineValidTokenReceiptSignature(key.Public().(ed25519.PublicKey), receipt) {
 				t.Fatal("generated ledger receipt has invalid canonical signature")
@@ -285,7 +285,7 @@ func TestZiranTokenPaymentsAndSpendingMatchBaseline(t *testing.T) {
 				t.Fatal("ledger hash chain broken")
 			}
 		}
-		if actual.db.Stats().InUse != 0 || baseline.db.Stats().InUse != 0 {
+		if actual.Database.Stats().InUse != 0 || baseline.Database.Stats().InUse != 0 {
 			t.Fatal("transaction leaked a connection")
 		}
 	}
@@ -309,7 +309,7 @@ func TestZiranTokenLedgerWriteFailuresRollback(t *testing.T) {
 				if stage == "commit" {
 					query = "CREATE TABLE commit_parent(id INTEGER PRIMARY KEY); CREATE TABLE commit_child(parent INTEGER REFERENCES commit_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TRIGGER fail_commit AFTER INSERT ON token_ledger BEGIN INSERT INTO commit_child VALUES(1); END"
 				}
-				if _, err := store.db.Exec(query); err != nil {
+				if _, err := store.Database.Exec(query); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -319,14 +319,14 @@ func TestZiranTokenLedgerWriteFailuresRollback(t *testing.T) {
 			if stage == "nonce" {
 				input.EventType, input.AmountDelta = "debit", -10
 				want, balance, created, err := baseline.baselineSpendTokens(background, tokenLedgerSigner(), baselineTokenEventInput(input), "failed")
-				got := TokenLedger_Spend(actual.db, background, tokenLedgerSigner(), input, "failed", errTokenIssuerReadOnly)
+				got := TokenLedger_Spend(actual.Database, background, tokenLedgerSigner(), input, "failed", errTokenIssuerReadOnly)
 				actualError, baselineError = got.Error, err
 				if receiptWithoutGeneratedFields(got.Value) != receiptWithoutGeneratedFields(want) || got.Balance != balance || got.Created != created {
 					t.Fatal("failed nonce write retained receipt or balance")
 				}
 			} else {
 				want, created, err := baseline.baselineCreditTokenPayment(background, tokenLedgerSigner(), "fixture", "failed", baselineTokenEventInput(input))
-				got := TokenLedger_CreditPayment(actual.db, background, tokenLedgerSigner(), "fixture", "failed", input, errTokenIssuerReadOnly)
+				got := TokenLedger_CreditPayment(actual.Database, background, tokenLedgerSigner(), "fixture", "failed", input, errTokenIssuerReadOnly)
 				actualError, baselineError = got.Error, err
 				if receiptWithoutGeneratedFields(got.Value) != receiptWithoutGeneratedFields(want) || got.Created != created {
 					t.Fatal("failed credit result changed")
@@ -337,17 +337,17 @@ func TestZiranTokenLedgerWriteFailuresRollback(t *testing.T) {
 			}
 			for _, table := range []string{"token_ledger", "token_processed_payments", "token_spend_nonces"} {
 				var got, want int
-				if err := actual.db.QueryRow("SELECT count(*) FROM " + table).Scan(&got); err != nil {
+				if err := actual.Database.QueryRow("SELECT count(*) FROM " + table).Scan(&got); err != nil {
 					t.Fatal(err)
 				}
-				if err := baseline.db.QueryRow("SELECT count(*) FROM " + table).Scan(&want); err != nil {
+				if err := baseline.Database.QueryRow("SELECT count(*) FROM " + table).Scan(&want); err != nil {
 					t.Fatal(err)
 				}
 				if got != want || (stage != "nonce" && got != 0) {
 					t.Fatalf("failed transaction retained %s rows: %d/%d", table, got, want)
 				}
 			}
-			if actual.db.Stats().InUse != 0 || baseline.db.Stats().InUse != 0 {
+			if actual.Database.Stats().InUse != 0 || baseline.Database.Stats().InUse != 0 {
 				t.Fatal("failed transaction retained a connection")
 			}
 		})
@@ -358,18 +358,18 @@ func TestZiranTokenLedgerWriteFailuresRollback(t *testing.T) {
 func TestZiranTokenLedgerCancellationAndEmptyResults(t *testing.T) {
 	store := tokenLedgerStore(t)
 	background := context.Background()
-	if result := TokenLedger_ByID(store.db, background, "missing"); result.Found || result.Error != nil || result.Value != (TokenReceipt{}) {
+	if result := TokenLedger_ByID(store.Database, background, "missing"); result.Found || result.Error != nil || result.Value != (TokenReceipt{}) {
 		t.Fatal("missing receipt changed")
 	}
-	if result := TokenCheckpoint_Latest(store.db, background); result.Found || result.Error != nil || result.Value != (TokenCheckpoint{}) {
+	if result := TokenCheckpoint_Latest(store.Database, background); result.Found || result.Error != nil || result.Value != (TokenCheckpoint{}) {
 		t.Fatal("missing checkpoint changed")
 	}
 	cancelled, cancel := context.WithCancel(background)
 	cancel()
-	if result := TokenLedger_CreditPayment(store.db, cancelled, tokenLedgerSigner(), "fixture", "cancelled", tokenLedgerInput(), errTokenIssuerReadOnly); !errors.Is(result.Error, context.Canceled) || result.Created || result.Value != (TokenReceipt{}) {
+	if result := TokenLedger_CreditPayment(store.Database, cancelled, tokenLedgerSigner(), "fixture", "cancelled", tokenLedgerInput(), errTokenIssuerReadOnly); !errors.Is(result.Error, context.Canceled) || result.Created || result.Value != (TokenReceipt{}) {
 		t.Fatal("cancelled transaction changed")
 	}
-	tx, err := store.db.BeginTx(background, nil)
+	tx, err := store.Database.BeginTx(background, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

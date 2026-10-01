@@ -336,7 +336,7 @@ func TestMoneroInvoiceExpiresWithoutPayment(t *testing.T) {
 	identity := newTestIdentity(t, handler, 0x73)
 	invoice := createTestMoneroInvoice(t, handler, identity.Token, []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`))
 
-	_, err = store.db.Exec(`UPDATE token_payment_intents SET expires_at=?1 WHERE id=?2`,
+	_, err = store.Database.Exec(`UPDATE token_payment_intents SET expires_at=?1 WHERE id=?2`,
 		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339), invoice.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +431,7 @@ func TestPermanentMoneroAddressPurchaseAndGift(t *testing.T) {
 	if giftAddress.Address != ownAddress.Address || giftAddress.AccountID != recipient.UserID {
 		t.Fatalf("gift address differs from permanent address: own=%#v gift=%#v", ownAddress, giftAddress)
 	}
-	addressResult := MoneroDepositStore_AccountAddress(store.db, context.Background(), recipient.UserID)
+	addressResult := MoneroDepositStore_AccountAddress(store.Database, context.Background(), recipient.UserID)
 	mapping, found, err := addressResult.Value, addressResult.Found, addressResult.Error
 	if err != nil || !found {
 		t.Fatalf("address mapping found=%v err=%v", found, err)
@@ -447,7 +447,7 @@ func TestPermanentMoneroAddressPurchaseAndGift(t *testing.T) {
 	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, AssetID)
+	balanceResult := TokenLedger_Balance(store.Database, context.Background(), recipient.UserID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 10000000 {
 		t.Fatalf("gift balance=%d err=%v, want 10000000", balance, err)
@@ -478,7 +478,7 @@ func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
 	if address.Code != http.StatusOK {
 		t.Fatalf("address status=%d body=%s", address.Code, address.Body.String())
 	}
-	mapping := MoneroDepositStore_AccountAddress(store.db, context.Background(), recipient.UserID).Value
+	mapping := MoneroDepositStore_AccountAddress(store.Database, context.Background(), recipient.UserID).Value
 	wallet.setTransfer(moneroTransfer{
 		TxID: "locked-payment", Amount: 1000000000000, Confirmations: 10,
 		Major: mapping.AccountIndex, Minor: mapping.AddressIndex, Locked: true,
@@ -486,7 +486,7 @@ func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
 	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, AssetID)
+	balanceResult := TokenLedger_Balance(store.Database, context.Background(), recipient.UserID, AssetID)
 	balance, _ := balanceResult.Value, balanceResult.Error
 	if balance != 0 {
 		t.Fatalf("locked deposit credited balance=%d", balance)
@@ -498,7 +498,7 @@ func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
 	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult2 := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, AssetID)
+	balanceResult2 := TokenLedger_Balance(store.Database, context.Background(), recipient.UserID, AssetID)
 	balance, _ = balanceResult2.Value, balanceResult2.Error
 	if balance != 5000000 {
 		t.Fatalf("unlocked deposit balance=%d, want 5000000", balance)
@@ -513,7 +513,7 @@ func TestProcessedPaymentCollisionRejected(t *testing.T) {
 	}
 	first := strings.Repeat("a", 64)
 	second := strings.Repeat("b", 64)
-	paymentResult := TokenLedger_CreditPayment(store.db, context.Background(), privateKey, "monero", "tx:0:7", TokenEventInput{
+	paymentResult := TokenLedger_CreditPayment(store.Database, context.Background(), privateKey, "monero", "tx:0:7", TokenEventInput{
 		AccountID:   first,
 		AppID:       "inbe",
 		EventType:   "credit",
@@ -525,7 +525,7 @@ func TestProcessedPaymentCollisionRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paymentResult2 := TokenLedger_CreditPayment(store.db, context.Background(), privateKey, "monero", "tx:0:7", TokenEventInput{
+	paymentResult2 := TokenLedger_CreditPayment(store.Database, context.Background(), privateKey, "monero", "tx:0:7", TokenEventInput{
 		AccountID:   second,
 		AppID:       "inbe",
 		EventType:   "credit",
@@ -620,7 +620,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 		t.Fatalf("deleted account bootstrap status = %d body=%s", bootstrapRes.Code, bootstrapRes.Body.String())
 	}
 
-	importedRecords := MeshStore_ImportEncryptedRecords(store.db, context.Background(), NodeSyncPolicy{
+	importedRecords := MeshStore_ImportEncryptedRecords(store.Database, context.Background(), NodeSyncPolicy{
 		Apps: []string{"inbe"}, Data: []string{"encrypted_records"},
 	}, []MeshEncryptedRecord{{
 		UserIDHash: userID,
@@ -739,7 +739,7 @@ func TestSessionCheckinFieldsSyncRoundTrip(t *testing.T) {
 		note       string
 		tags       string
 	}
-	if err := store.db.QueryRow(`
+	if err := store.Database.QueryRow(`
 	SELECT mood_before,mood_after,energy,stress,note,tags
 	FROM server_sessions
 	WHERE user_id_hash=?1 AND id='session-mood-1'`, identity.UserID).Scan(
@@ -788,7 +788,7 @@ func TestSessionCheckinFieldsSyncRoundTrip(t *testing.T) {
 		t.Fatalf("v3 session checkin fields = %#v", got)
 	}
 
-	exported := AccountExport_Export(store.db, t.Context(), identity.UserID)
+	exported := AccountExport_Export(store.Database, t.Context(), identity.UserID)
 	if exported.Error != nil {
 		t.Fatal(exported.Error)
 	}
@@ -1102,7 +1102,7 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 		registered.AppSchemaVersion != 0 {
 		t.Fatalf("registered app missing manifest fields: %#v", registered)
 	}
-	if err := DeviceKeys_Register(store.db, context.Background(), DeviceKey{
+	if err := DeviceKeys_Register(store.Database, context.Background(), DeviceKey{
 		AccountID: identity.UserID,
 		AppID:     "testapp",
 		KeyID:     "key-main1",
@@ -1258,7 +1258,7 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 
 func TestSeedBuiltinAppsPreservesAppOwnedRegistrations(t *testing.T) {
 	_, store, _ := testServer(t)
-	if err := AppStore_Upsert(store.db, context.Background(), AppRegistration{
+	if err := AppStore_Upsert(store.Database, context.Background(), AppRegistration{
 		AppID:       "ukuvota",
 		DisplayName: "Ukuvota",
 		Status:      appStatusActive,
@@ -1269,10 +1269,10 @@ func TestSeedBuiltinAppsPreservesAppOwnedRegistrations(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := AppStore_SeedBuiltin(store.db, context.Background()); err != nil {
+	if err := AppStore_SeedBuiltin(store.Database, context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	appResult := AppStore_ByID(store.db, context.Background(), "ukuvota")
+	appResult := AppStore_ByID(store.Database, context.Background(), "ukuvota")
 	app, found, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil || !found || len(app.Collections) != 1 {
 		t.Fatalf("app-owned registration changed during seed, app=%#v found=%v err=%v", app, found, err)
@@ -1281,7 +1281,7 @@ func TestSeedBuiltinAppsPreservesAppOwnedRegistrations(t *testing.T) {
 
 func TestSeedBuiltinAppsPreservesSignedInbeManifest(t *testing.T) {
 	_, store, _ := testServer(t)
-	if err := AppStore_Upsert(store.db, context.Background(), AppRegistration{
+	if err := AppStore_Upsert(store.Database, context.Background(), AppRegistration{
 		AppID:       "inbe",
 		DisplayName: "Inner Breeze",
 		Status:      appStatusActive,
@@ -1292,15 +1292,15 @@ func TestSeedBuiltinAppsPreservesSignedInbeManifest(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`
+	if _, err := store.Database.Exec(`
 INSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,status)
 VALUES('inbe',1,'{}','signed-inbe-test','signature','approval','active')`); err != nil {
 		t.Fatal(err)
 	}
-	if err := AppStore_SeedBuiltin(store.db, context.Background()); err != nil {
+	if err := AppStore_SeedBuiltin(store.Database, context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	appResult := AppStore_ByID(store.db, context.Background(), "inbe")
+	appResult := AppStore_ByID(store.Database, context.Background(), "inbe")
 	app, found, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil || !found || len(app.Collections) != 1 ||
 		app.Collections[0].CollectionPrefix != "private.inbe.v2.records.*" {
@@ -1399,7 +1399,7 @@ func TestAppGrantsGateCrossAppEncryptedRecords(t *testing.T) {
 	if registerRes.Code != http.StatusOK {
 		t.Fatalf("register app status = %d body=%s", registerRes.Code, registerRes.Body.String())
 	}
-	if err := DeviceKeys_Register(store.db, context.Background(), DeviceKey{
+	if err := DeviceKeys_Register(store.Database, context.Background(), DeviceKey{
 		AccountID: identity.UserID,
 		AppID:     "ukuvota",
 		KeyID:     "main-key",
@@ -1765,7 +1765,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull node peer: %v", err)
 	}
-	exportedRecords := MeshStore_ExportEncryptedRecords(target.store.db, context.Background(), NodeSyncPolicy{
+	exportedRecords := MeshStore_ExportEncryptedRecords(target.store.Database, context.Background(), NodeSyncPolicy{
 		Apps:        []string{"inbe"},
 		Collections: []string{"inbe.*"},
 		Data:        []string{"encrypted_records"},
@@ -1796,7 +1796,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	if len(exportCursors) != afterFirstPull+1 || exportCursors[len(exportCursors)-1] == "" {
 		t.Fatalf("mesh pull did not resume from persisted cursor: %#v", exportCursors)
 	}
-	reimported := MeshStore_ImportEncryptedRecords(target.store.db, context.Background(), NodeSyncPolicy{
+	reimported := MeshStore_ImportEncryptedRecords(target.store.Database, context.Background(), NodeSyncPolicy{
 		Apps:        []string{"inbe"},
 		Collections: []string{"inbe.*"},
 		Data:        []string{"encrypted_records"},
@@ -1820,7 +1820,7 @@ func TestMeshCursorDoesNotSkipLateOlderTimestamp(t *testing.T) {
 
 	firstBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"mesh-order-client","encrypted_records":[{"collection":"inbe.habits","id":"newer","key_id":"main","nonce":"n1","ciphertext":"newer","updated_at":"2026-09-04T12:00:00Z"}]}`)
 	syncWithBody(t, handler, "", identity.UserID, identity.Token, firstBody)
-	firstPage := MeshStore_ExportEncryptedRecords(store.db, context.Background(), policy, "", 1)
+	firstPage := MeshStore_ExportEncryptedRecords(store.Database, context.Background(), policy, "", 1)
 	first, cursor, truncated, err := firstPage.Records, firstPage.NextCursor, firstPage.Truncated, firstPage.Error
 	if err != nil || len(first) != 1 || !truncated || cursor == "" {
 		t.Fatalf("first mesh page records=%#v cursor=%q truncated=%v err=%v", first, cursor, truncated, err)
@@ -1828,7 +1828,7 @@ func TestMeshCursorDoesNotSkipLateOlderTimestamp(t *testing.T) {
 
 	lateBody := []byte(`{"protocol_version":5,"app_id":"inbe","user_id_hash":"` + identity.UserID + `","client_id":"mesh-order-client","encrypted_records":[{"collection":"inbe.habits","id":"late-older","key_id":"main","nonce":"n2","ciphertext":"late","updated_at":"2020-01-01T00:00:00Z"}]}`)
 	syncWithBody(t, handler, "", identity.UserID, identity.Token, lateBody)
-	latePage := MeshStore_ExportEncryptedRecords(store.db, context.Background(), policy, cursor, 10)
+	latePage := MeshStore_ExportEncryptedRecords(store.Database, context.Background(), policy, cursor, 10)
 	late, err := latePage.Records, latePage.Error
 	if err != nil || len(late) != 1 || late[0].Record.ID != "late-older" {
 		t.Fatalf("late mesh page records=%#v err=%v", late, err)
@@ -2039,7 +2039,7 @@ func TestAccountExportReturnsOnlyAuthenticatedAccountData(t *testing.T) {
 	if res := syncWithBody(t, handler, "", alice.UserID, alice.Token, aliceBody); res.Code != http.StatusOK {
 		t.Fatalf("alice sync status = %d body=%s", res.Code, res.Body.String())
 	}
-	if _, err := store.db.Exec(`INSERT INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version) VALUES(?1,'friends.list','{"friends":[]}','2026-06-24T10:00:00Z',99)`, alice.UserID); err != nil {
+	if _, err := store.Database.Exec(`INSERT INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version) VALUES(?1,'friends.list','{"friends":[]}','2026-06-24T10:00:00Z',99)`, alice.UserID); err != nil {
 		t.Fatal(err)
 	}
 	bobBody := []byte(`{"user_id_hash":"` + bob.UserID + `","client_id":"client-b","habits":[{"id":"bob-habit","name":"Bob Habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":4,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-24T10:00:00Z"}]}`)
@@ -2218,7 +2218,7 @@ func TestProtocolV3CleanDataHidesDeletedAndOrphanHabits(t *testing.T) {
 	if res := syncWithBody(t, handler, "", identity.UserID, identity.Token, deleteBody); res.Code != http.StatusOK {
 		t.Fatalf("delete sync status=%d body=%s", res.Code, res.Body.String())
 	}
-	if _, err := store.db.Exec(`INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version) VALUES(?1,'habit-8',20260625,0,0,'2026-06-25T00:00:00Z',999)`, identity.UserID); err != nil {
+	if _, err := store.Database.Exec(`INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version) VALUES(?1,'habit-8',20260625,0,0,'2026-06-25T00:00:00Z',999)`, identity.UserID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2238,7 +2238,7 @@ func TestProtocolV3CleanDataHidesDeletedAndOrphanHabits(t *testing.T) {
 		t.Fatalf("deleted/orphan habit leaked into v3 data: %#v %#v", decoded.Data.Habits, decoded.Data.HabitDays)
 	}
 	var orphanCount int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habit_days WHERE user_id_hash=?1 AND habit_id='habit-8'`, identity.UserID).Scan(&orphanCount); err != nil {
+	if err := store.Database.QueryRow(`SELECT COUNT(*) FROM server_habit_days WHERE user_id_hash=?1 AND habit_id='habit-8'`, identity.UserID).Scan(&orphanCount); err != nil {
 		t.Fatal(err)
 	}
 	if orphanCount != 0 {
@@ -2251,7 +2251,7 @@ func TestProtocolV3MaterializesLegacyOrphanHabitDays(t *testing.T) {
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x75)
 
-	if _, err := store.db.Exec(`INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version) VALUES(?1,'habit-8',20260625,1,2,'2026-06-25T00:00:00Z',9)`, identity.UserID); err != nil {
+	if _, err := store.Database.Exec(`INSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version) VALUES(?1,'habit-8',20260625,1,2,'2026-06-25T00:00:00Z',9)`, identity.UserID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2274,7 +2274,7 @@ func TestProtocolV3MaterializesLegacyOrphanHabitDays(t *testing.T) {
 		t.Fatalf("legacy habit day was not attached to materialized habit: %#v", decoded.Data.HabitDays)
 	}
 	var habitRows int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id=?2 AND name='Habit 8'`, identity.UserID, decoded.Data.Habits[0].ID).Scan(&habitRows); err != nil {
+	if err := store.Database.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id=?2 AND name='Habit 8'`, identity.UserID, decoded.Data.Habits[0].ID).Scan(&habitRows); err != nil {
 		t.Fatal(err)
 	}
 	if habitRows != 1 {
@@ -2316,7 +2316,7 @@ func TestProtocolV3AutoMigratesSunSalutationHabitIDAndKeepsLegacyClient(t *testi
 		t.Fatalf("dual-mode compatibility should not warn: %q", decoded.UpgradeNotice)
 	}
 	var oldRows int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id='yoga'`, identity.UserID).Scan(&oldRows); err != nil {
+	if err := store.Database.QueryRow(`SELECT COUNT(*) FROM server_habits WHERE user_id_hash=?1 AND id='yoga'`, identity.UserID).Scan(&oldRows); err != nil {
 		t.Fatal(err)
 	}
 	if oldRows != 0 {
@@ -2640,13 +2640,13 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 	syncWithBody(t, handler, "", carol.UserID, carol.Token, []byte(`{"user_id_hash":"`+carol.UserID+`","client_id":"carol-stats","habits":[{"id":"whm","name":"WHM","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":1,"counter_enabled":0,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-26T00:00:00Z"}],"habit_days":[{"habit_id":"whm","local_date":`+time.Now().UTC().Format("20060102")+`,"completed":true,"count":1,"updated_at":"2026-06-28T00:00:00Z"}]}`))
 	yesterdayDay := time.Now().UTC().AddDate(0, 0, -1)
 	yesterdayDate := yesterdayDay.Year()*10000 + int(yesterdayDay.Month())*100 + yesterdayDay.Day()
-	if _, err := store.db.Exec(`
+	if _, err := store.Database.Exec(`
 	INSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,value,label,local_date,updated_at)
 	SELECT ?1,'inbe','whm','avg_hold',server_version,0,'0',0,'stale'
 	FROM server_sync_state WHERE user_id_hash=?1`, alice.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`
+	if _, err := store.Database.Exec(`
 	INSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,calc_version,value,label,local_date,updated_at)
 	SELECT ?1,'inbe','whm','streak',server_version,?2,9,'9',?3,'stale'
 	FROM server_sync_state WHERE user_id_hash=?1`,
@@ -2935,7 +2935,7 @@ CREATE TABLE server_meditation_logs (
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	rows, err := store.db.Query(`PRAGMA table_info(server_meditation_logs)`)
+	rows, err := store.Database.Query(`PRAGMA table_info(server_meditation_logs)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3027,7 +3027,7 @@ func TestMigrateSessionCheckinColumns(t *testing.T) {
 	}
 
 	var session Session
-	snapshot := SyncViews_SessionsSince(store.db, t.Context(), userID, 0)
+	snapshot := SyncViews_SessionsSince(store.Database, t.Context(), userID, 0)
 	rows, err := snapshot.Value, snapshot.Error
 	if err != nil {
 		t.Fatal(err)
@@ -3268,7 +3268,7 @@ func TestBearerSyncCanRegisterUserWithPublicKey(t *testing.T) {
 	if payload.Applied.Habits != 1 || len(payload.Changes.Habits) != 1 {
 		t.Fatalf("registered sync response = %#v", payload)
 	}
-	if account := AccountKeys_PublicKey(server.store.db, t.Context(), userID); account.Error != nil || !account.Found {
+	if account := AccountKeys_PublicKey(server.store.Database, t.Context(), userID); account.Error != nil || !account.Found {
 		t.Fatalf("registered public key found=%v err=%v", account.Found, account.Error)
 	}
 }
@@ -4140,7 +4140,7 @@ func mustDecodeHex(t *testing.T, value string) []byte {
 func assertCount(t *testing.T, store *Store, table string, want int) {
 	t.Helper()
 	var got int
-	if err := store.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&got); err != nil {
+	if err := store.Database.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
@@ -4150,7 +4150,7 @@ func assertCount(t *testing.T, store *Store, table string, want int) {
 
 func testTableHasColumn(t *testing.T, store *Store, table, column string) bool {
 	t.Helper()
-	rows, err := store.db.Query("PRAGMA table_info(" + table + ")")
+	rows, err := store.Database.Query("PRAGMA table_info(" + table + ")")
 	if err != nil {
 		t.Fatal(err)
 	}

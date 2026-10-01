@@ -17,7 +17,7 @@ var lifecycleAccounts = []string{strings.Repeat("a", 64), strings.Repeat("b", 64
 
 func lifecycleExecute(t *testing.T, store *Store, query string, values ...any) {
 	t.Helper()
-	if _, err := store.db.Exec(query, values...); err != nil {
+	if _, err := store.Database.Exec(query, values...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -83,7 +83,7 @@ func lifecycleSnapshot(t *testing.T, store *Store) map[string]any {
 	t.Helper()
 	result := make(map[string]any)
 	for _, table := range []string{"server_users", "server_clients", "server_sync_state", "server_sync_compaction", "server_sync_ops", "server_sync_audit", "server_encrypted_payloads", "server_account_tombstones", "monero_account_addresses", "token_ledger", "token_processed_payments"} {
-		rows := AccountExport_QueryRows(store.db, context.Background(), "SELECT * FROM "+table+" WHERE ?1='' ORDER BY rowid", "", nil)
+		rows := AccountExport_QueryRows(store.Database, context.Background(), "SELECT * FROM "+table+" WHERE ?1='' ORDER BY rowid", "", nil)
 		if rows.Error != nil {
 			t.Fatal(rows.Error)
 		}
@@ -118,7 +118,7 @@ func lifecycleCompareState(t *testing.T, actual, expected *Store) {
 	}
 	for _, store := range []*Store{actual, expected} {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		if err := store.db.PingContext(ctx); err != nil {
+		if err := store.Database.PingContext(ctx); err != nil {
 			t.Fatal("lifecycle operation retained a database connection", err)
 		}
 		cancel()
@@ -131,7 +131,7 @@ func TestZiranEncryptedPayloadReadsAgainstBaseline(t *testing.T) {
 	for _, user := range []string{lifecycleAccounts[0], lifecycleAccounts[1], "missing", "' OR 1=1 --"} {
 		for _, since := range []int64{-1, 0, 1, 3, 4, 10, 9223372036854775807} {
 			for _, limit := range []int{-1, 0, 1, 2, 3, 4, 10, 50, 51, maximum} {
-				got := EncryptedPayloads_Since(actual.db, context.Background(), user, since, limit)
+				got := EncryptedPayloads_Since(actual.Database, context.Background(), user, since, limit)
 				want, truncated, err := expected.baselineLifecycleEncryptedPayloadsSince(context.Background(), user, since, limit)
 				if !reflect.DeepEqual(got.Value, want) || got.Truncated != truncated || !sameIdentityError(got.Error, err) {
 					t.Fatalf("payload read changed for %q/%d/%d: %#v, baseline %#v/%t/%v", user, since, limit, got, want, truncated, err)
@@ -139,13 +139,13 @@ func TestZiranEncryptedPayloadReadsAgainstBaseline(t *testing.T) {
 			}
 		}
 		for _, limit := range []int{-1, 0, 1, 2, 10, 50, 51, maximum} {
-			got := EncryptedPayloads_Recent(actual.db, context.Background(), user, limit)
+			got := EncryptedPayloads_Recent(actual.Database, context.Background(), user, limit)
 			want, err := expected.baselineLifecycleRecentEncryptedPayloads(context.Background(), user, limit)
 			if !reflect.DeepEqual(got.Value, want) || !sameIdentityError(got.Error, err) {
 				t.Fatal("recent payloads changed")
 			}
 		}
-		bytes := EncryptedPayloads_Bytes(actual.db, context.Background(), user)
+		bytes := EncryptedPayloads_Bytes(actual.Database, context.Background(), user)
 		want, err := expected.baselineLifecycleEncryptedPayloadBytes(context.Background(), user)
 		if bytes.Value != want || !sameIdentityError(bytes.Error, err) {
 			t.Fatal("SQLite payload length changed")
@@ -153,7 +153,7 @@ func TestZiranEncryptedPayloadReadsAgainstBaseline(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	got := EncryptedPayloads_Since(actual.db, ctx, lifecycleAccounts[0], 0, 1)
+	got := EncryptedPayloads_Since(actual.Database, ctx, lifecycleAccounts[0], 0, 1)
 	want, truncated, err := expected.baselineLifecycleEncryptedPayloadsSince(ctx, lifecycleAccounts[0], 0, 1)
 	if !reflect.DeepEqual(got.Value, want) || got.Truncated != truncated || !errors.Is(got.Error, context.Canceled) || !sameIdentityError(got.Error, err) {
 		t.Fatal("cancelled payload query changed")
@@ -189,7 +189,7 @@ func TestZiranEncryptedPayloadWritesAndRollback(t *testing.T) {
 			}
 			before := lifecycleSnapshot(t, actual)
 			for _, payload := range [][]byte{nil, {}, []byte("null"), []byte(`{"v":2,"nonce":"n","ciphertext":"c"}`), {0, 0xff, '\n'}} {
-				got := EncryptedPayloads_Store(actual.db, ctx, user, "client\xff", payload, ErrSyncUserNotFound)
+				got := EncryptedPayloads_Store(actual.Database, ctx, user, "client\xff", payload, ErrSyncUserNotFound)
 				want, err := expected.baselineLifecycleStoreEncryptedPayload(ctx, user, "client\xff", payload)
 				if got.Version != want || !sameIdentityError(got.Error, err) {
 					t.Fatalf("payload write changed: %#v, baseline %d/%v", got, want, err)
@@ -235,7 +235,7 @@ func TestZiranEncryptedPayloadPruningAgainstBaseline(t *testing.T) {
 				}
 			}
 			before := lifecycleSnapshot(t, actual)
-			got := EncryptedPayloads_Prune(actual.db, context.Background(), lifecycleAccounts[0], test.age, test.maximum)
+			got := EncryptedPayloads_Prune(actual.Database, context.Background(), lifecycleAccounts[0], test.age, test.maximum)
 			want, err := expected.baselineLifecyclePruneEncryptedPayloads(context.Background(), lifecycleAccounts[0], test.age, test.maximum)
 			if got.Value != want || !sameIdentityError(got.Error, err) {
 				t.Fatalf("payload pruning changed: %#v, baseline %#v/%v", got, want, err)
@@ -284,7 +284,7 @@ func TestZiranSyncClientCompactionAndPolicyAgainstBaseline(t *testing.T) {
 				}
 			}
 			before := lifecycleSnapshot(t, actual)
-			got := SyncClients_Compact(actual.db, ctx, user)
+			got := SyncClients_Compact(actual.Database, ctx, user)
 			want := expected.baselineLifecycleCompactSyncOps(ctx, user)
 			if !sameIdentityError(got, want) {
 				t.Fatalf("compaction changed: %v, baseline %v", got, want)
@@ -294,14 +294,14 @@ func TestZiranSyncClientCompactionAndPolicyAgainstBaseline(t *testing.T) {
 				t.Fatal("failed compaction changed stored operations or checkpoint")
 			}
 			for _, clock := range []int64{-1, 0, 1, 3, 4, 5, 10, 100} {
-				got := SyncClients_Compacted(actual.db, context.Background(), user, clock)
+				got := SyncClients_Compacted(actual.Database, context.Background(), user, clock)
 				want, through, err := expected.baselineLifecycleSyncOpsCompacted(context.Background(), user, clock)
 				if got.Compacted != want || got.Through != through || !sameIdentityError(got.Error, err) {
 					t.Fatal("compacted clock boundary changed")
 				}
 			}
 			if mode == "normal" {
-				got := SyncClients_Compacted(actual.db, context.Background(), user, 0)
+				got := SyncClients_Compacted(actual.Database, context.Background(), user, 0)
 				if got.Through != 4 {
 					t.Fatal("compaction ignored the oldest active client clock")
 				}
@@ -311,13 +311,13 @@ func TestZiranSyncClientCompactionAndPolicyAgainstBaseline(t *testing.T) {
 	actual, expected := lifecycleFixturePair(t)
 	for _, user := range []string{lifecycleAccounts[0], lifecycleAccounts[1], "missing", "' OR 1=1 --"} {
 		for _, protocol := range []int{-1, 0, 1, 2, 3, 6, 7} {
-			got := SyncClients_Legacy(actual.db, context.Background(), user, protocol)
+			got := SyncClients_Legacy(actual.Database, context.Background(), user, protocol)
 			want, err := expected.baselineLifecycleLegacyClients(context.Background(), user, protocol)
 			if !reflect.DeepEqual(got.Value, want) || !sameIdentityError(got.Error, err) {
 				t.Fatal("legacy client ordering or filtering changed")
 			}
 		}
-		got := SyncClients_LegacyWritePolicy(actual.db, context.Background(), user)
+		got := SyncClients_LegacyWritePolicy(actual.Database, context.Background(), user)
 		want, epoch, err := expected.baselineLifecycleLegacyWritePolicy(context.Background(), user)
 		if got.Required != want || got.Epoch != epoch || !sameIdentityError(got.Error, err) {
 			t.Fatal("legacy write window changed")
@@ -357,7 +357,7 @@ func TestZiranAccountDeletionAgainstBaseline(t *testing.T) {
 			}
 			before := lifecycleSnapshot(t, actual)
 			for repeat := 0; repeat < 2; repeat++ {
-				got := AccountState_Delete(actual.db, ctx, user)
+				got := AccountState_Delete(actual.Database, ctx, user)
 				want := expected.baselineLifecycleDeleteAccount(ctx, user)
 				if !sameIdentityError(got, want) {
 					t.Fatalf("account deletion changed: %v, baseline %v", got, want)
@@ -369,13 +369,13 @@ func TestZiranAccountDeletionAgainstBaseline(t *testing.T) {
 			}
 			for _, table := range []string{"token_ledger", "token_processed_payments", "monero_account_addresses"} {
 				var count int
-				if err := actual.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 2 {
+				if err := actual.Database.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 2 {
 					t.Fatalf("account deletion removed retained payment/address rows from %s: %d/%v", table, count, err)
 				}
 			}
 			if mode == "already disabled" {
 				var disabled string
-				if err := actual.db.QueryRow("SELECT disabled_at FROM monero_account_addresses WHERE account_id=?1", user).Scan(&disabled); err != nil || disabled != lifecycleFixtureTime {
+				if err := actual.Database.QueryRow("SELECT disabled_at FROM monero_account_addresses WHERE account_id=?1", user).Scan(&disabled); err != nil || disabled != lifecycleFixtureTime {
 					t.Fatal("deletion rewrote an already-disabled address")
 				}
 			}
@@ -391,7 +391,7 @@ func TestZiranEncryptedPayloadConcurrentVersions(t *testing.T) {
 		workers.Add(1)
 		go func(index int) {
 			defer workers.Done()
-			results <- EncryptedPayloads_Store(store.db, context.Background(), lifecycleAccounts[0], fmt.Sprintf("client-%d", index), []byte("payload"), ErrSyncUserNotFound)
+			results <- EncryptedPayloads_Store(store.Database, context.Background(), lifecycleAccounts[0], fmt.Sprintf("client-%d", index), []byte("payload"), ErrSyncUserNotFound)
 		}(index)
 	}
 	workers.Wait()
@@ -406,7 +406,7 @@ func TestZiranEncryptedPayloadConcurrentVersions(t *testing.T) {
 	if len(seen) != 16 {
 		t.Fatal("concurrent writes lost payloads")
 	}
-	other := AccountState_CurrentVersion(store.db, context.Background(), lifecycleAccounts[1])
+	other := AccountState_CurrentVersion(store.Database, context.Background(), lifecycleAccounts[1])
 	if other.Error != nil || other.Value != 10 {
 		t.Fatal("payload writes changed another account's version")
 	}
@@ -417,20 +417,20 @@ func TestZiranSyncAuditAndClientWritesAgainstBaseline(t *testing.T) {
 	user := lifecycleAccounts[0]
 	ctx := context.Background()
 	for _, client := range []string{"floor", "new", "", "\xff", "日本語"} {
-		if got, want := SyncClients_RecordLogin(actual.db, ctx, user, client), expected.baselineLifecycleRecordClientLogin(ctx, user, client); !sameIdentityError(got, want) {
+		if got, want := SyncClients_RecordLogin(actual.Database, ctx, user, client), expected.baselineLifecycleRecordClientLogin(ctx, user, client); !sameIdentityError(got, want) {
 			t.Fatal("client login changed")
 		}
-		if got, want := SyncClients_RecordSync(actual.db, ctx, user, client, -1, 9223372036854775807, 6, 42), expected.baselineLifecycleRecordClientSync(ctx, user, client, -1, 9223372036854775807, 6, 42); !sameIdentityError(got, want) {
+		if got, want := SyncClients_RecordSync(actual.Database, ctx, user, client, -1, 9223372036854775807, 6, 42), expected.baselineLifecycleRecordClientSync(ctx, user, client, -1, 9223372036854775807, 6, 42); !sameIdentityError(got, want) {
 			t.Fatal("client sync changed")
 		}
 		entry := SyncAuditEntry{UserIDHash: user, ClientID: client, ProtocolVersion: 6, Applied: SyncResult{Habits: 2}, FullSnapshotRequired: true, EncryptedPayload: true, EncryptedPayloadBytes: 100}
-		if got, want := SyncAudit_Record(actual.db, ctx, entry), expected.baselineLifecycleRecordSyncAudit(ctx, entry); !sameIdentityError(got, want) {
+		if got, want := SyncAudit_Record(actual.Database, ctx, entry), expected.baselineLifecycleRecordSyncAudit(ctx, entry); !sameIdentityError(got, want) {
 			t.Fatal("audit record changed")
 		}
 	}
 	for _, account := range []string{user, lifecycleAccounts[1], "missing", "' OR 1=1 --"} {
 		for _, limit := range []int{-1, 0, 1, 2, 10, 50, 51} {
-			got := SyncAudit_Recent(actual.db, ctx, account, limit)
+			got := SyncAudit_Recent(actual.Database, ctx, account, limit)
 			want, err := expected.baselineLifecycleRecentSyncAudit(ctx, account, limit)
 			for _, items := range [][]SyncAuditEntry{got.Value, want} {
 				for index := range items {
@@ -447,12 +447,12 @@ func TestZiranSyncAuditAndClientWritesAgainstBaseline(t *testing.T) {
 			}
 		}
 		for _, since := range []int64{-1, 0, 2, 5, 10} {
-			got := SyncAudit_Logs(actual.db, ctx, account, since)
+			got := SyncAudit_Logs(actual.Database, ctx, account, since)
 			want, err := expected.baselineLifecycleSyncLogs(ctx, account, since)
 			if !reflect.DeepEqual(got.Value, want) || !sameIdentityError(got.Error, err) {
 				t.Fatal("sync operation ordering or payload changed")
 			}
-			deletes := SyncAudit_Deletes(actual.db, ctx, account, since)
+			deletes := SyncAudit_Deletes(actual.Database, ctx, account, since)
 			want, err = expected.baselineLifecycleDeleteLogs(ctx, account, since)
 			if !reflect.DeepEqual(deletes.Value, want) || !sameIdentityError(deletes.Error, err) {
 				t.Fatal("delete log filtering or kind changed")

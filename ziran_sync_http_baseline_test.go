@@ -19,7 +19,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		if !syncOK {
 			s.metrics.SyncFailures.Add(1)
 			if signedTx != nil {
-				SignedTx_Forget(s.store.db, r.Context(), *signedTx)
+				SignedTx_Forget(s.store.Database, r.Context(), *signedTx)
 			}
 		}
 	}()
@@ -75,7 +75,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			s.writeAuthError(w, err)
 			return
 		}
-		if err := authenticationError(SignedTx_Verify(s.store.db, r.Context(), r, body, tx, req.UserIDHash, req.AppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+		if err := authenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, body, tx, req.UserIDHash, req.AppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 			s.writeAuthError(w, err)
 			return
 		}
@@ -479,7 +479,7 @@ func (s *Server) baselineSyncHTTPValidateSyncRequest(ctx context.Context, req Sy
 		if !Identity_ValidNamespace(req.AppID) {
 			return errors.New("invalid app_id")
 		}
-		appResult := AppStore_ByID(s.store.db, ctx, req.AppID)
+		appResult := AppStore_ByID(s.store.Database, ctx, req.AppID)
 		app, exists, err := appResult.Value, appResult.Found, appResult.Error
 		if err != nil {
 			return err
@@ -495,7 +495,7 @@ func (s *Server) baselineSyncHTTPValidateSyncRequest(ctx context.Context, req Sy
 			return errors.New("app manifest expired")
 		}
 		if req.ProtocolVersion < 6 {
-			legacyResult := AppStore_AllowsLegacyProtocol(s.store.db, ctx, req.AppID, req.ProtocolVersion)
+			legacyResult := AppStore_AllowsLegacyProtocol(s.store.Database, ctx, req.AppID, req.ProtocolVersion)
 			allowed, err := legacyResult.Value, legacyResult.Error
 			if err != nil {
 				return err
@@ -513,7 +513,7 @@ func (s *Server) baselineSyncHTTPValidateSyncRequest(ctx context.Context, req Sy
 			return errors.New("invalid encrypted record")
 		}
 		if req.AppID != "" {
-			ownership := AppStore_OwnsCollection(s.store.db, ctx, req.AppID, item.Collection)
+			ownership := AppStore_OwnsCollection(s.store.Database, ctx, req.AppID, item.Collection)
 			owns, err := ownership.Value, ownership.Error
 			if err != nil {
 				return err

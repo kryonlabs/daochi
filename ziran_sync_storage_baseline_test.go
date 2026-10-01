@@ -25,7 +25,7 @@ func baselineLifecycleNextVersion(ctx context.Context, tx *sql.Tx, userID string
 }
 
 func (s *Store) baselineLifecycleRecordClientLogin(ctx context.Context, userID, clientID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_login_at)
 VALUES(?1,?2,?3,?3)
 ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
@@ -35,7 +35,7 @@ ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
 }
 
 func (s *Store) baselineLifecycleRecordClientSync(ctx context.Context, userID, clientID string, sinceVersion, serverVersion int64, protocolVersion int, clientClock int64) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_sync_at,last_since_server_version,last_seen_server_version,protocol_version,last_client_clock)
 VALUES(?1,?2,?3,?3,?4,?5,?6,?7)
 ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
@@ -49,7 +49,7 @@ ON CONFLICT(user_id_hash,client_id) DO UPDATE SET
 }
 
 func (s *Store) baselineLifecycleStoreEncryptedPayload(ctx context.Context, userID, clientID string, payload []byte) (int64, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -84,9 +84,9 @@ ORDER BY server_version,id` + limitClause
 	var rows *sql.Rows
 	var err error
 	if queryLimit > 0 {
-		rows, err = s.db.QueryContext(ctx, query, userID, sinceVersion, queryLimit)
+		rows, err = s.Database.QueryContext(ctx, query, userID, sinceVersion, queryLimit)
 	} else {
-		rows, err = s.db.QueryContext(ctx, query, userID, sinceVersion)
+		rows, err = s.Database.QueryContext(ctx, query, userID, sinceVersion)
 	}
 	if err != nil {
 		return nil, false, err
@@ -118,7 +118,7 @@ func (s *Store) baselineLifecycleRecentEncryptedPayloads(ctx context.Context, us
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,client_id,payload_json,created_at,server_version
 FROM server_encrypted_payloads
 WHERE user_id_hash=?1
@@ -144,7 +144,7 @@ LIMIT ?2`, userID, limit)
 
 func (s *Store) baselineLifecycleEncryptedPayloadBytes(ctx context.Context, userID string) (int64, error) {
 	var bytes sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.Database.QueryRowContext(ctx, `
 SELECT SUM(LENGTH(payload_json))
 FROM server_encrypted_payloads
 WHERE user_id_hash=?1`, userID).Scan(&bytes); err != nil {
@@ -161,7 +161,7 @@ func (s *Store) baselineLifecyclePruneEncryptedPayloads(ctx context.Context, use
 	if maxAge <= 0 && maxBytes <= 0 {
 		return result, nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return result, err
 	}
@@ -216,7 +216,7 @@ func (s *Store) baselineLifecycleRecordSyncAudit(ctx context.Context, entry Sync
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.Database.ExecContext(ctx, `
 INSERT INTO server_sync_audit(
 	user_id_hash,client_id,app_id,protocol_version,since_server_version,client_clock,
 	server_version,applied_json,remote_ops,full_snapshot_required,snapshot_reason,
@@ -233,7 +233,7 @@ func (s *Store) baselineLifecycleRecentSyncAudit(ctx context.Context, userID str
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,user_id_hash,client_id,app_id,protocol_version,since_server_version,client_clock,
        server_version,applied_json,remote_ops,full_snapshot_required,snapshot_reason,
        encrypted_payload,encrypted_payload_bytes,created_at
@@ -268,7 +268,7 @@ LIMIT ?2`, userID, limit)
 
 func (s *Store) baselineLifecycleSyncOpsCompacted(ctx context.Context, userID string, clientClock int64) (bool, int64, error) {
 	var compactedThrough int64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT compacted_through_version
 FROM server_sync_compaction
 WHERE user_id_hash=?1`, userID).Scan(&compactedThrough)
@@ -282,7 +282,7 @@ WHERE user_id_hash=?1`, userID).Scan(&compactedThrough)
 }
 
 func (s *Store) baselineLifecycleCompactSyncOps(ctx context.Context, userID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ ON CONFLICT(user_id_hash) DO UPDATE SET
 }
 
 func (s *Store) baselineLifecycleDeleteAccount(ctx context.Context, userID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -355,7 +355,7 @@ WHERE account_id=?1 AND disabled_at=''`, userID); err != nil {
 }
 
 func (s *Store) baselineLifecycleSyncLogs(ctx context.Context, userID string, sinceVersion int64) ([]SyncLog, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT server_version,entity_type,entity_id,local_date,op_type,payload_json,created_at
 FROM server_sync_ops
 WHERE user_id_hash=?1 AND server_version>?2
@@ -398,7 +398,7 @@ func (s *Store) baselineLifecycleDeleteLogs(ctx context.Context, userID string, 
 }
 
 func (s *Store) baselineLifecycleLegacyClients(ctx context.Context, userID string, minProtocol int) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT client_id
 FROM server_clients
 WHERE user_id_hash=?1 AND protocol_version<?2
@@ -422,7 +422,7 @@ ORDER BY last_seen_at DESC,client_id`, userID, minProtocol)
 func (s *Store) baselineLifecycleLegacyWritePolicy(ctx context.Context, userID string) (bool, int64, error) {
 	cutoff := Timestamp_CanonicalTimestamp(time.Now().Add(-baselineLegacyWriteWindow))
 	var latest sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT MAX(last_sync_at)
 FROM server_clients
 WHERE user_id_hash=?1 AND protocol_version<?2 AND last_sync_at>=?3`,
@@ -454,7 +454,7 @@ WHERE user_id_hash=?1`, userID).Scan(&version)
 
 func (s *Store) baselineLifecycleCurrentUserVersion(ctx context.Context, userID string) (int64, error) {
 	var version int64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT server_version
 FROM server_sync_state
 WHERE user_id_hash=?1`, userID).Scan(&version)

@@ -35,7 +35,7 @@ func moneroReconcileTestServer(t *testing.T) (*Server, *Store, *fakeMoneroWallet
 
 func expireTestMoneroInvoice(t *testing.T, store *Store, handler http.Handler, identity testIdentity, invoice MoneroInvoiceResponse) {
 	t.Helper()
-	if _, err := store.db.Exec(`UPDATE token_payment_intents SET expires_at=?1 WHERE id=?2`,
+	if _, err := store.Database.Exec(`UPDATE token_payment_intents SET expires_at=?1 WHERE id=?2`,
 		time.Now().UTC().Add(-time.Minute).Format(CanonicalTimestampLayout), invoice.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestExpiredMoneroInvoiceLatePaymentCredited(t *testing.T) {
 	if err := MoneroInvoices_SweepExpired(server.monero(), context.Background(), 50); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, AssetID)
+	balanceResult := TokenLedger_Balance(store.Database, context.Background(), identity.UserID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 5000000 {
 		t.Fatalf("late payment balance=%d err=%v, want 5000000", balance, err)
@@ -83,7 +83,7 @@ func TestMoneroInvoicePartialPaymentsAccumulate(t *testing.T) {
 	if err := MoneroInvoices_Pending(server.monero(), context.Background(), 100); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, AssetID)
+	balanceResult := TokenLedger_Balance(store.Database, context.Background(), identity.UserID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 5000000 {
 		t.Fatalf("top-up balance=%d err=%v, want 5000000", balance, err)
@@ -111,7 +111,7 @@ func TestMoneroExpiredInvoicePartialFundsReportedStuck(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, AssetID)
+	balanceResult := TokenLedger_Balance(store.Database, context.Background(), identity.UserID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 0 {
 		t.Fatalf("partial expired invoice must not credit: balance=%d err=%v", balance, err)
@@ -133,7 +133,7 @@ func TestMoneroDepositScanBookmarkAdvances(t *testing.T) {
 	if address.Code != http.StatusOK {
 		t.Fatalf("address status = %d body=%s", address.Code, address.Body.String())
 	}
-	addressResult := MoneroDepositStore_AccountAddress(store.db, context.Background(), identity.UserID)
+	addressResult := MoneroDepositStore_AccountAddress(store.Database, context.Background(), identity.UserID)
 	mapping, found, err := addressResult.Value, addressResult.Found, addressResult.Error
 	if err != nil || !found {
 		t.Fatalf("address mapping found=%v err=%v", found, err)
@@ -145,7 +145,7 @@ func TestMoneroDepositScanBookmarkAdvances(t *testing.T) {
 	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	heightResult := MoneroDepositStore_ScanHeight(store.db, context.Background())
+	heightResult := MoneroDepositStore_ScanHeight(store.Database, context.Background())
 	height, err := heightResult.Value, heightResult.Error
 	if err != nil || height != 5000 {
 		t.Fatalf("scan bookmark=%d err=%v, want 5000", height, err)

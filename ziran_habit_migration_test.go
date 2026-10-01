@@ -64,13 +64,13 @@ func TestZiranHabitAccountMigrationAgainstBaseline(t *testing.T) {
 				var got, want error
 				switch mode {
 				case "all accounts":
-					got = HabitMigration_AllAccounts(actual.db, ctx)
+					got = HabitMigration_AllAccounts(actual.Database, ctx)
 					want = expected.baselineMigrationAutoMigrateAllAccounts(ctx)
 				case "cleanup":
-					got = HabitMigration_Cleanup(actual.db, ctx, user)
+					got = HabitMigration_Cleanup(actual.Database, ctx, user)
 					want = expected.baselineMigrationCleanupOrphanHabitDays(ctx, user)
 				default:
-					got = HabitMigration_ForProtocol(actual.db, ctx, user, protocol)
+					got = HabitMigration_ForProtocol(actual.Database, ctx, user, protocol)
 					want = expected.baselineMigrationAutoMigrateAccountForProtocol(ctx, user, protocol)
 				}
 				if !sameIdentityError(got, want) {
@@ -101,7 +101,7 @@ func TestZiranHabitAccountMigrationAgainstBaseline(t *testing.T) {
 
 func migrationInTransaction(t *testing.T, store *Store, call func(*sql.Tx) MigrationResult) MigrationResult {
 	t.Helper()
-	transaction, err := store.db.BeginTx(t.Context(), nil)
+	transaction, err := store.Database.BeginTx(t.Context(), nil)
 	if err != nil {
 		return MigrationResult{Error: err}
 	}
@@ -201,7 +201,7 @@ func migrationDriverStore(t *testing.T, plan *lifecycleDriverPlan) *Store {
 	}
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
-	return &Store{db: database}
+	return &Store{Database: database}
 }
 
 func TestZiranHabitMigrationNativeFailures(t *testing.T) {
@@ -238,7 +238,7 @@ func TestZiranHabitMigrationNativeFailures(t *testing.T) {
 				store := migrationDriverStore(t, plan)
 				panics[index] = boundaryRecover(func() {
 					if index == 0 {
-						failures[index] = HabitMigration_AllAccounts(store.db, t.Context())
+						failures[index] = HabitMigration_AllAccounts(store.Database, t.Context())
 					} else {
 						failures[index] = store.baselineMigrationAutoMigrateAllAccounts(t.Context())
 					}
@@ -263,9 +263,9 @@ func TestZiranHabitMigrationClosesRowsOnPanic(t *testing.T) {
 		store := migrationDriverStore(t, plan)
 		got := boundaryRecover(func() {
 			if allAccounts {
-				_ = HabitMigration_AllAccounts(store.db, t.Context())
+				_ = HabitMigration_AllAccounts(store.Database, t.Context())
 			} else {
-				_ = HabitMigration_Account(store.db, t.Context(), "user")
+				_ = HabitMigration_Account(store.Database, t.Context(), "user")
 			}
 		})
 		if got != panicValue || plan.closed != 1 || (!allAccounts && plan.rolledBack != 1) {

@@ -84,7 +84,7 @@ func TestEncryptedRecordFractionalSecondLWW(t *testing.T) {
 	}
 	stored := func() (string, string) {
 		var ciphertext, updatedAt string
-		if err := store.db.QueryRowContext(ctx,
+		if err := store.Database.QueryRowContext(ctx,
 			`SELECT ciphertext,updated_at FROM server_encrypted_records
 			 WHERE user_id_hash=?1 AND collection=?2 AND id=?3`,
 			userID, "private.inbe.v1.habits", "record-1").Scan(&ciphertext, &updatedAt); err != nil {
@@ -126,7 +126,7 @@ func TestHabitFractionalSecondLWW(t *testing.T) {
 	stored := func() (string, string) {
 		var name, updatedAt string
 		// habit IDs are canonicalized on write, so look up by user.
-		if err := store.db.QueryRowContext(ctx,
+		if err := store.Database.QueryRowContext(ctx,
 			`SELECT name,updated_at FROM server_habits WHERE user_id_hash=?1`,
 			userID).Scan(&name, &updatedAt); err != nil {
 			t.Fatal(err)
@@ -170,7 +170,7 @@ func TestCompactSyncOpsUsesRecentClientFloor(t *testing.T) {
 	if err := store.RecordClientSync(ctx, userID, "client-1", 0, 0, 2, 42); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.ExecContext(ctx, `
+	if _, err := store.Database.ExecContext(ctx, `
 INSERT INTO server_sync_ops(user_id_hash,op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at,server_version)
 VALUES(?1,'op-1','client-1',1,'habit','habit-1',0,'upsert','{}',?2,1)`,
 		userID, Timestamp_CanonicalNow()); err != nil {
@@ -180,7 +180,7 @@ VALUES(?1,'op-1','client-1',1,'habit','habit-1',0,'upsert','{}',?2,1)`,
 		t.Fatal(err)
 	}
 	var remaining int
-	if err := store.db.QueryRowContext(ctx,
+	if err := store.Database.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM server_sync_ops WHERE user_id_hash=?1`, userID).Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
@@ -233,15 +233,15 @@ func TestCanonicalizeStoredTimestampsMigration(t *testing.T) {
 	ctx := context.Background()
 
 	var habitUpdated, recordUpdated, userSeen string
-	if err := store.db.QueryRowContext(ctx,
+	if err := store.Database.QueryRowContext(ctx,
 		`SELECT updated_at FROM server_habits WHERE user_id_hash='ts-user'`).Scan(&habitUpdated); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.db.QueryRowContext(ctx,
+	if err := store.Database.QueryRowContext(ctx,
 		`SELECT updated_at FROM server_encrypted_records WHERE user_id_hash='ts-user' AND id='record-1'`).Scan(&recordUpdated); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.db.QueryRowContext(ctx,
+	if err := store.Database.QueryRowContext(ctx,
 		`SELECT last_seen_at FROM server_users WHERE user_id_hash='ts-user'`).Scan(&userSeen); err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestCanonicalizeStoredTimestampsMigration(t *testing.T) {
 		t.Fatalf("migration did not canonicalize user last_seen_at: %q want %q", userSeen, want)
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	if err := store.Database.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
 	if version != TimestampSchemaVersion {
@@ -260,7 +260,7 @@ func TestCanonicalizeStoredTimestampsMigration(t *testing.T) {
 	}
 
 	// Reopening must not rewrite again (guard works).
-	if err := StoreTimestamps_Canonicalize(store.db, ctx); err != nil {
+	if err := StoreTimestamps_Canonicalize(store.Database, ctx); err != nil {
 		t.Fatal(err)
 	}
 }

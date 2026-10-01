@@ -51,7 +51,7 @@ WHERE excluded.json != server_social_snapshots.json`,
 }
 
 func (s *Store) baselineSnapshotSet(ctx context.Context, userID, kind string, payload []byte) (int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}

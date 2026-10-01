@@ -162,7 +162,7 @@ func lifecycleDriverStore(t *testing.T, plan *lifecycleDriverPlan) *Store {
 	}
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
-	return &Store{db: database}
+	return &Store{Database: database}
 }
 
 type lifecycleReadResult struct {
@@ -182,7 +182,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 	cases := []readCase{
 		{"payload since", []string{"id", "client", "payload", "created", "version"}, [][]driver.Value{{int64(1), "client", "{arbitrary\xff", "created", int64(2)}},
 			func(store *Store) lifecycleReadResult {
-				value := EncryptedPayloads_Since(store.db, context.Background(), "account", 0, 2)
+				value := EncryptedPayloads_Since(store.Database, context.Background(), "account", 0, 2)
 				return lifecycleReadResult{value.Value, value.Truncated, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, truncated, err := store.baselineLifecycleEncryptedPayloadsSince(context.Background(), "account", 0, 2)
@@ -190,7 +190,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 			}},
 		{"payload recent", []string{"id", "client", "payload", "created", "version"}, [][]driver.Value{{int64(1), "client", "", "created", int64(2)}},
 			func(store *Store) lifecycleReadResult {
-				value := EncryptedPayloads_Recent(store.db, context.Background(), "account", 4)
+				value := EncryptedPayloads_Recent(store.Database, context.Background(), "account", 4)
 				return lifecycleReadResult{value.Value, nil, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, err := store.baselineLifecycleRecentEncryptedPayloads(context.Background(), "account", 4)
@@ -198,7 +198,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 			}},
 		{"payload bytes", []string{"bytes"}, [][]driver.Value{{int64(42)}},
 			func(store *Store) lifecycleReadResult {
-				value := EncryptedPayloads_Bytes(store.db, context.Background(), "account")
+				value := EncryptedPayloads_Bytes(store.Database, context.Background(), "account")
 				return lifecycleReadResult{value.Value, nil, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, err := store.baselineLifecycleEncryptedPayloadBytes(context.Background(), "account")
@@ -207,7 +207,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 		{"audit", []string{"id", "user", "client", "app", "protocol", "since", "clock", "version", "applied", "remote", "snapshot", "reason", "encrypted", "bytes", "created"},
 			[][]driver.Value{{int64(1), "account", "client", "app", int64(6), int64(2), int64(3), int64(4), `{"habits":2,"sessions":"bad"}`, int64(5), int64(-1), "reason", int64(2), int64(6), "created"}},
 			func(store *Store) lifecycleReadResult {
-				value := SyncAudit_Recent(store.db, context.Background(), "account", 10)
+				value := SyncAudit_Recent(store.Database, context.Background(), "account", 10)
 				return lifecycleReadResult{value.Value, nil, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, err := store.baselineLifecycleRecentSyncAudit(context.Background(), "account", 10)
@@ -215,7 +215,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 			}},
 		{"logs", []string{"version", "entity", "id", "date", "op", "payload", "created"}, [][]driver.Value{{int64(1), "habit", "id", int64(20261001), "delete", "", "created"}},
 			func(store *Store) lifecycleReadResult {
-				value := SyncAudit_Logs(store.db, context.Background(), "account", 0)
+				value := SyncAudit_Logs(store.Database, context.Background(), "account", 0)
 				return lifecycleReadResult{value.Value, nil, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, err := store.baselineLifecycleSyncLogs(context.Background(), "account", 0)
@@ -223,7 +223,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 			}},
 		{"deletes", []string{"version", "entity", "id", "date", "op", "payload", "created"}, [][]driver.Value{{int64(1), "habit", "id", int64(20261001), "delete", "{invalid\xff", "created"}},
 			func(store *Store) lifecycleReadResult {
-				value := SyncAudit_Deletes(store.db, context.Background(), "account", 0)
+				value := SyncAudit_Deletes(store.Database, context.Background(), "account", 0)
 				return lifecycleReadResult{value.Value, nil, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, err := store.baselineLifecycleDeleteLogs(context.Background(), "account", 0)
@@ -231,7 +231,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 			}},
 		{"legacy clients", []string{"client"}, [][]driver.Value{{"client\xff"}},
 			func(store *Store) lifecycleReadResult {
-				value := SyncClients_Legacy(store.db, context.Background(), "account", 3)
+				value := SyncClients_Legacy(store.Database, context.Background(), "account", 3)
 				return lifecycleReadResult{value.Value, nil, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, err := store.baselineLifecycleLegacyClients(context.Background(), "account", 3)
@@ -239,7 +239,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 			}},
 		{"legacy policy", []string{"latest"}, [][]driver.Value{{"2026-10-01T00:00:00.000000000Z"}},
 			func(store *Store) lifecycleReadResult {
-				value := SyncClients_LegacyWritePolicy(store.db, context.Background(), "account")
+				value := SyncClients_LegacyWritePolicy(store.Database, context.Background(), "account")
 				return lifecycleReadResult{value.Required, value.Epoch, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, epoch, err := store.baselineLifecycleLegacyWritePolicy(context.Background(), "account")
@@ -247,7 +247,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 			}},
 		{"compaction", []string{"through"}, [][]driver.Value{{int64(10)}},
 			func(store *Store) lifecycleReadResult {
-				value := SyncClients_Compacted(store.db, context.Background(), "account", 5)
+				value := SyncClients_Compacted(store.Database, context.Background(), "account", 5)
 				return lifecycleReadResult{value.Compacted, value.Through, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, through, err := store.baselineLifecycleSyncOpsCompacted(context.Background(), "account", 5)
@@ -255,7 +255,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 			}},
 		{"version", []string{"version"}, [][]driver.Value{{int64(10)}},
 			func(store *Store) lifecycleReadResult {
-				value := AccountState_CurrentVersion(store.db, context.Background(), "account")
+				value := AccountState_CurrentVersion(store.Database, context.Background(), "account")
 				return lifecycleReadResult{value.Value, nil, value.Error}
 			}, func(store *Store) lifecycleReadResult {
 				value, err := store.baselineLifecycleCurrentUserVersion(context.Background(), "account")
@@ -293,7 +293,7 @@ func TestZiranSyncStorageNativeReadsAgainstBaseline(t *testing.T) {
 					store := lifecycleDriverStore(t, plan)
 					panics[index] = boundaryRecover(func() { results[index] = call(store) })
 					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-					if err := store.db.PingContext(ctx); err != nil {
+					if err := store.Database.PingContext(ctx); err != nil {
 						t.Fatalf("%s retained the database connection: %v", mode, err)
 					}
 					cancel()
@@ -321,29 +321,29 @@ func TestZiranSyncStorageTransactionFailuresAgainstBaseline(t *testing.T) {
 	}
 	cases := []transactionCase{
 		{"registration", func(store *Store) lifecycleReadResult {
-			return lifecycleReadResult{nil, nil, AccountState_Register(store.db, context.Background(), "account", []byte("key"))}
+			return lifecycleReadResult{nil, nil, AccountState_Register(store.Database, context.Background(), "account", []byte("key"))}
 		}, func(store *Store) lifecycleReadResult {
 			return lifecycleReadResult{nil, nil, store.baselineSocialRegisterUser(context.Background(), "account", []byte("key"))}
 		}},
 		{"payload", func(store *Store) lifecycleReadResult {
-			value := EncryptedPayloads_Store(store.db, context.Background(), "account", "client", []byte("arbitrary\x00\xff"), ErrSyncUserNotFound)
+			value := EncryptedPayloads_Store(store.Database, context.Background(), "account", "client", []byte("arbitrary\x00\xff"), ErrSyncUserNotFound)
 			return lifecycleReadResult{value.Version, nil, value.Error}
 		}, func(store *Store) lifecycleReadResult {
 			value, err := store.baselineLifecycleStoreEncryptedPayload(context.Background(), "account", "client", []byte("arbitrary\x00\xff"))
 			return lifecycleReadResult{value, nil, err}
 		}},
 		{"account deletion", func(store *Store) lifecycleReadResult {
-			return lifecycleReadResult{nil, nil, AccountState_Delete(store.db, context.Background(), "account")}
+			return lifecycleReadResult{nil, nil, AccountState_Delete(store.Database, context.Background(), "account")}
 		}, func(store *Store) lifecycleReadResult {
 			return lifecycleReadResult{nil, nil, store.baselineLifecycleDeleteAccount(context.Background(), "account")}
 		}},
 		{"compaction", func(store *Store) lifecycleReadResult {
-			return lifecycleReadResult{nil, nil, SyncClients_Compact(store.db, context.Background(), "account")}
+			return lifecycleReadResult{nil, nil, SyncClients_Compact(store.Database, context.Background(), "account")}
 		}, func(store *Store) lifecycleReadResult {
 			return lifecycleReadResult{nil, nil, store.baselineLifecycleCompactSyncOps(context.Background(), "account")}
 		}},
 		{"prune by age", func(store *Store) lifecycleReadResult {
-			value := EncryptedPayloads_Prune(store.db, context.Background(), "account", time.Hour, 0)
+			value := EncryptedPayloads_Prune(store.Database, context.Background(), "account", time.Hour, 0)
 			return lifecycleReadResult{value.Value, nil, value.Error}
 		}, func(store *Store) lifecycleReadResult {
 			value, err := store.baselineLifecyclePruneEncryptedPayloads(context.Background(), "account", time.Hour, 0)
@@ -375,7 +375,7 @@ func TestZiranSyncStorageTransactionFailuresAgainstBaseline(t *testing.T) {
 						store := lifecycleDriverStore(t, plan)
 						panics[index] = boundaryRecover(func() { results[index] = call(store) })
 						ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-						if err := store.db.PingContext(ctx); err != nil {
+						if err := store.Database.PingContext(ctx); err != nil {
 							t.Fatalf("%s at step %d retained the connection: %v", mode, step, err)
 						}
 						cancel()
@@ -415,17 +415,17 @@ func TestZiranSyncStorageNativeWritesAgainstBaseline(t *testing.T) {
 		baseline func(*Store, context.Context) error
 	}{
 		{"login", func(store *Store, ctx context.Context) error {
-			return SyncClients_RecordLogin(store.db, ctx, "account\xff", "client\x00")
+			return SyncClients_RecordLogin(store.Database, ctx, "account\xff", "client\x00")
 		}, func(store *Store, ctx context.Context) error {
 			return store.baselineLifecycleRecordClientLogin(ctx, "account\xff", "client\x00")
 		}},
 		{"sync", func(store *Store, ctx context.Context) error {
-			return SyncClients_RecordSync(store.db, ctx, "account\xff", "client\x00", -9223372036854775808, 9223372036854775807, -1, 42)
+			return SyncClients_RecordSync(store.Database, ctx, "account\xff", "client\x00", -9223372036854775808, 9223372036854775807, -1, 42)
 		}, func(store *Store, ctx context.Context) error {
 			return store.baselineLifecycleRecordClientSync(ctx, "account\xff", "client\x00", -9223372036854775808, 9223372036854775807, -1, 42)
 		}},
 		{"audit", func(store *Store, ctx context.Context) error {
-			return SyncAudit_Record(store.db, ctx, entry)
+			return SyncAudit_Record(store.Database, ctx, entry)
 		}, func(store *Store, ctx context.Context) error {
 			return store.baselineLifecycleRecordSyncAudit(ctx, entry)
 		}},

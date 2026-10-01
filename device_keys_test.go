@@ -49,7 +49,7 @@ func TestDeviceKeyRegistrationReplayAndRevocation(t *testing.T) {
 	if response := register(); response.Code != http.StatusConflict {
 		t.Fatalf("registration replay status=%d body=%s", response.Code, response.Body.String())
 	}
-	if active := DeviceKeys_Active(store.db, context.Background(), identity.UserID,
+	if active := DeviceKeys_Active(store.Database, context.Background(), identity.UserID,
 		"inbe", "device-key-1"); active.Error != nil || !active.Found {
 		t.Fatalf("registered device not active: found=%v err=%v", active.Found, active.Error)
 	}
@@ -77,7 +77,7 @@ func TestDeviceKeyRegistrationReplayAndRevocation(t *testing.T) {
 	if response := revoke(); response.Code != http.StatusOK {
 		t.Fatalf("revoke status=%d body=%s", response.Code, response.Body.String())
 	}
-	if active := DeviceKeys_Active(store.db, context.Background(), identity.UserID,
+	if active := DeviceKeys_Active(store.Database, context.Background(), identity.UserID,
 		"inbe", "device-key-1"); active.Error != nil || active.Found {
 		t.Fatalf("revoked device remains active: found=%v err=%v", active.Found, active.Error)
 	}
@@ -110,7 +110,7 @@ func TestLegacyWritePolicyUsesRollingWindow(t *testing.T) {
 	}
 
 	oldTimestamp := Timestamp_CanonicalTimestamp(time.Now().Add(-LegacyWriteWindow - time.Hour))
-	if _, err := store.db.ExecContext(ctx, `
+	if _, err := store.Database.ExecContext(ctx, `
 UPDATE server_clients SET last_sync_at=?3
 WHERE user_id_hash=?1 AND client_id=?2`, identity.UserID, "legacy-client-1", oldTimestamp); err != nil {
 		t.Fatal(err)

@@ -43,7 +43,7 @@ func baselineLeaderboardLeaderboardTodayDate() int {
 }
 
 func (s *Store) baselineLeaderboardVisibleStatsUsers(ctx context.Context, userID string) ([]baselineLeaderboardVisibleStatsUser, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 WITH visible_users AS (
   SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias, u.profile_icon
   FROM server_users u
@@ -79,7 +79,7 @@ func (s *Store) baselineLeaderboardCachedLeaderboardStat(ctx context.Context, us
 	var row FriendStatRow
 	var sourceVersion int64
 	var calcVersion int
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT source_version,calc_version,value,label,local_date,updated_at
 FROM server_leaderboard_stats
 WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4`,
@@ -106,7 +106,7 @@ WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4`,
 }
 
 func (s *Store) baselineLeaderboardActivityStreak(ctx context.Context, userID string, activity int) (int, int, string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT local_date, updated_at FROM server_sessions
 WHERE user_id_hash=?1 AND deleted_at=0 AND activity=?2 AND local_date>0
 UNION
@@ -156,7 +156,7 @@ func (s *Store) baselineLeaderboardActivityAverage(ctx context.Context, userID s
 			return 0, "0", nil
 		}
 		var value float64
-		err := s.db.QueryRowContext(ctx, `
+		err := s.Database.QueryRowContext(ctx, `
 SELECT COALESCE(AVG(sr.hold_seconds),0)
 FROM server_sessions s
 JOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id
@@ -167,7 +167,7 @@ WHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=0 AND sr.hold_seconds>
 			return 0, baselineLeaderboardLeaderboardTimeLabel(0), nil
 		}
 		var value float64
-		err := s.db.QueryRowContext(ctx, `
+		err := s.Database.QueryRowContext(ctx, `
 WITH session_totals AS (
   SELECT s.id, SUM(sr.hold_seconds) AS seconds
   FROM server_sessions s
@@ -220,7 +220,7 @@ func (s *Store) baselineLeaderboardComputeLeaderboardStat(ctx context.Context, u
 		row.Value = value
 		row.Label = label
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.Database.ExecContext(ctx, `
 INSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,calc_version,value,label,local_date,updated_at)
 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
 ON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET

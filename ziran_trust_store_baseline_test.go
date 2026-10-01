@@ -26,7 +26,7 @@ type baselineTrustedNodePeer struct {
 }
 
 func (s *Store) baselineEnsureMeshTrustSchema(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS trusted_node_peers (
     node_id TEXT PRIMARY KEY,
     public_key BLOB NOT NULL,
@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS node_request_nonces_expiry
 }
 
 func (s *Store) baselineTrustPeer(ctx context.Context, invite PairingInvite, publicKey ed25519.PublicKey) error {
-	return baselineWithTx(ctx, s.db, func(tx *sql.Tx) error {
+	return baselineWithTx(ctx, s.Database, func(tx *sql.Tx) error {
 		var consumed int
 		if err := tx.QueryRowContext(ctx,
 			`SELECT EXISTS(SELECT 1 FROM consumed_pairing_invites WHERE invite_id=?1)`,
@@ -129,7 +129,7 @@ ON CONFLICT(node_id) DO UPDATE SET
 }
 
 func (s *Store) baselineRecordIssuedPairingInvite(ctx context.Context, invite PairingInvite) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 INSERT INTO issued_pairing_invites(invite_id,signature,expires_at,created_at)
 VALUES(?1,?2,?3,?4)`, invite.InviteID, invite.Signature, invite.ExpiresAt, Timestamp_CanonicalNow())
 	return err
@@ -141,7 +141,7 @@ func (s *Store) baselineCompleteIssuedPairing(
 	acceptance PairingAcceptance,
 	publicKey ed25519.PublicKey,
 ) error {
-	return baselineWithTx(ctx, s.db, func(tx *sql.Tx) error {
+	return baselineWithTx(ctx, s.Database, func(tx *sql.Tx) error {
 		var storedSignature string
 		var expiresAt int64
 		var completedNodeID string
@@ -226,7 +226,7 @@ func baselineWithTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) err
 
 func (s *Store) baselineTrustedPeerPolicy(ctx context.Context, nodeID string) (NodeSyncPolicy, bool, error) {
 	var policyJSON string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT policy_json FROM trusted_node_peers
 WHERE node_id=?1 AND revoked_at=''`, nodeID).Scan(&policyJSON)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -243,7 +243,7 @@ WHERE node_id=?1 AND revoked_at=''`, nodeID).Scan(&policyJSON)
 }
 
 func (s *Store) baselineListTrustedPeers(ctx context.Context) ([]TrustedNodePeer, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT node_id,public_key,display_name,addresses_json,space_id,policy_json,trusted_at
 FROM trusted_node_peers
 WHERE revoked_at=''
@@ -282,7 +282,7 @@ func (s *Store) baselineCreateTrustSpace(ctx context.Context, displayName string
 	}
 	digest := sha256.Sum256(publicKey)
 	spaceID := hex.EncodeToString(digest[:])
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.Database.ExecContext(ctx, `
 INSERT INTO trust_spaces(
     space_id,display_name,authority_public_key,authority_private_key,created_at
 ) VALUES(?1,?2,?3,?4,?5)`, spaceID, displayName, []byte(publicKey),
@@ -292,7 +292,7 @@ INSERT INTO trust_spaces(
 
 func (s *Store) baselineSignAndStoreNameClaim(ctx context.Context, claim NameClaim) (NameClaim, error) {
 	var privateKey []byte
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.Database.QueryRowContext(ctx, `
 SELECT authority_private_key FROM trust_spaces
 WHERE space_id=?1`, claim.SpaceID).Scan(&privateKey); err != nil {
 		return claim, err
@@ -302,7 +302,7 @@ WHERE space_id=?1`, claim.SpaceID).Scan(&privateKey); err != nil {
 	}
 
 	var currentSequence int64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT sequence FROM name_claims
 WHERE space_id=?1 AND name=?2`, claim.SpaceID, claim.Name).Scan(&currentSequence)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -316,7 +316,7 @@ WHERE space_id=?1 AND name=?2`, claim.SpaceID, claim.Name).Scan(&currentSequence
 	}
 	claim.Signature = base64.RawURLEncoding.EncodeToString(
 		ed25519.Sign(ed25519.PrivateKey(privateKey), NodeIdentity_NameClaimMessage(claim)))
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.Database.ExecContext(ctx, `
 INSERT INTO name_claims(
     space_id,name,node_id,sequence,expires_at,services_json,signature,updated_at
 ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
@@ -334,7 +334,7 @@ ON CONFLICT(space_id,name) DO UPDATE SET
 func (s *Store) baselineResolveNameClaim(ctx context.Context, spaceID, name string) (NameClaim, bool, error) {
 	var claim NameClaim
 	var servicesJSON string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT space_id,name,node_id,sequence,expires_at,services_json,signature
 FROM name_claims
 WHERE space_id=?1 AND name=?2`, spaceID, name).Scan(&claim.SpaceID, &claim.Name,
@@ -354,7 +354,7 @@ WHERE space_id=?1 AND name=?2`, spaceID, name).Scan(&claim.SpaceID, &claim.Name,
 	}
 
 	var publicKey []byte
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.Database.QueryRowContext(ctx, `
 SELECT authority_public_key FROM trust_spaces
 WHERE space_id=?1`, spaceID).Scan(&publicKey); err != nil {
 		return claim, false, err
@@ -378,7 +378,7 @@ func (s *Store) baselineExportMeshNames(
 	for _, spaceID := range policy.Spaces {
 		var space MeshTrustSpace
 		var publicKey []byte
-		err := s.db.QueryRowContext(ctx, `
+		err := s.Database.QueryRowContext(ctx, `
 SELECT space_id,display_name,authority_public_key
 FROM trust_spaces
 WHERE space_id=?1`, spaceID).Scan(&space.SpaceID, &space.DisplayName, &publicKey)
@@ -391,7 +391,7 @@ WHERE space_id=?1`, spaceID).Scan(&space.SpaceID, &space.DisplayName, &publicKey
 		space.AuthorityPublicKey = hex.EncodeToString(publicKey)
 		spaces = append(spaces, space)
 
-		rows, err := s.db.QueryContext(ctx, `
+		rows, err := s.Database.QueryContext(ctx, `
 SELECT space_id,name,node_id,sequence,expires_at,services_json,signature
 FROM name_claims
 WHERE space_id=?1
@@ -435,7 +435,7 @@ func (s *Store) baselineImportMeshNames(
 		allowedSpaces[spaceID] = true
 	}
 	returnValue := 0
-	err := baselineWithTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := baselineWithTx(ctx, s.Database, func(tx *sql.Tx) error {
 		for _, space := range spaces {
 			if !allowedSpaces[space.SpaceID] {
 				continue

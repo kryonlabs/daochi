@@ -21,7 +21,7 @@ import (
 
 func compareAccountExport(t *testing.T, store *Store, ctx context.Context, user string) AccountExportResult {
 	t.Helper()
-	got := AccountExport_Export(store.db, ctx, user)
+	got := AccountExport_Export(store.Database, ctx, user)
 	want, err := store.baselineExportAccount(ctx, user)
 	if !reflect.DeepEqual(got.Value, want) || !sameIdentityError(got.Error, err) {
 		t.Fatalf("account export = %#v, baseline = %#v, %v", got, want, err)
@@ -42,7 +42,7 @@ func TestZiranAccountExportAgainstBaseline(t *testing.T) {
 	}
 	defer database.Close()
 	database.SetMaxOpenConns(1)
-	store := &Store{db: database}
+	store := &Store{Database: database}
 	for _, user := range []string{account, strings.Repeat("b", 64), "missing", "", "' OR 1=1 --"} {
 		result := compareAccountExport(t, store, context.Background(), user)
 		if result.Error == nil && len(result.Value.Tables) != 19 {
@@ -107,21 +107,21 @@ func TestZiranAccountExportRowValuesAgainstBaseline(t *testing.T) {
 
 func TestZiranAccountExportDynamicRowsAgainstBaseline(t *testing.T) {
 	_, store, _ := testServer(t)
-	if _, err := store.db.Exec("CREATE TABLE account_export_fixture(owner TEXT, rank INTEGER, payload BLOB, nullable BLOB, value REAL, text TEXT)"); err != nil {
+	if _, err := store.Database.Exec("CREATE TABLE account_export_fixture(owner TEXT, rank INTEGER, payload BLOB, nullable BLOB, value REAL, text TEXT)"); err != nil {
 		t.Fatal(err)
 	}
 	for index, value := range [][]byte{nil, {}, []byte("null"), []byte(`{"value":42}`), []byte("[true,false]"), []byte("not json"), {0xff, 0}} {
-		if _, err := store.db.Exec("INSERT INTO account_export_fixture VALUES(?,?,?,?,?,?)", "account", index, value, nil, 1.25, "日本語"); err != nil {
+		if _, err := store.Database.Exec("INSERT INTO account_export_fixture VALUES(?,?,?,?,?,?)", "account", index, value, nil, 1.25, "日本語"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := store.db.Exec("INSERT INTO account_export_fixture VALUES('other',0,X'42',NULL,0,'private')"); err != nil {
+	if _, err := store.Database.Exec("INSERT INTO account_export_fixture VALUES('other',0,X'42',NULL,0,'private')"); err != nil {
 		t.Fatal(err)
 	}
 	for _, user := range []string{"account", "missing", "other", "' OR 1=1 --"} {
 		for _, fields := range []map[string]bool{nil, {"payload": true}} {
 			query := "SELECT payload,nullable,rank,value,text FROM account_export_fixture WHERE owner=?1 ORDER BY rank DESC"
-			got := AccountExport_QueryRows(store.db, context.Background(), query, user, fields)
+			got := AccountExport_QueryRows(store.Database, context.Background(), query, user, fields)
 			want, err := store.baselineQueryAccountRows(context.Background(), query, user, fields)
 			if !reflect.DeepEqual(got.Value, want) || !sameIdentityError(got.Error, err) {
 				t.Fatalf("dynamic rows changed: %#v, baseline %#v, %v", got, want, err)
@@ -131,7 +131,7 @@ func TestZiranAccountExportDynamicRowsAgainstBaseline(t *testing.T) {
 			}
 		}
 	}
-	got := AccountExport_QueryRows(store.db, context.Background(), "SELECT missing FROM account_export_fixture WHERE owner=?1", "account", nil)
+	got := AccountExport_QueryRows(store.Database, context.Background(), "SELECT missing FROM account_export_fixture WHERE owner=?1", "account", nil)
 	if got.Error == nil || got.Value != nil {
 		t.Fatal("query error exposed rows")
 	}
@@ -201,7 +201,7 @@ func accountExportDriverStore(t *testing.T, plan *accountExportRowsPlan) *Store 
 	}
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
-	return &Store{db: database}
+	return &Store{Database: database}
 }
 
 func TestZiranAccountExportDriverErrorsAndWideRows(t *testing.T) {
@@ -220,7 +220,7 @@ func TestZiranAccountExportDriverErrorsAndWideRows(t *testing.T) {
 				plan.closeErr = sentinel
 			}
 			store := accountExportDriverStore(t, plan)
-			got := AccountExport_QueryRows(store.db, context.Background(), "fixture", "account", nil)
+			got := AccountExport_QueryRows(store.Database, context.Background(), "fixture", "account", nil)
 			want, err := store.baselineQueryAccountRows(context.Background(), "fixture", "account", nil)
 			if !reflect.DeepEqual(got.Value, want) || got.Error != err || plan.closed.Load() != 2 {
 				t.Fatalf("driver boundary changed: %#v, baseline %#v, %v; closes %d", got, want, err, plan.closed.Load())
@@ -247,7 +247,7 @@ func TestZiranAccountExportRowsCloseDuringPanic(t *testing.T) {
 				}
 			}()
 			if generated {
-				AccountExport_QueryRows(store.db, context.Background(), "fixture", "account", nil)
+				AccountExport_QueryRows(store.Database, context.Background(), "fixture", "account", nil)
 			} else {
 				store.baselineQueryAccountRows(context.Background(), "fixture", "account", nil)
 			}
@@ -255,7 +255,7 @@ func TestZiranAccountExportRowsCloseDuringPanic(t *testing.T) {
 		if plan.closed.Load() != 1 {
 			t.Fatal("panic retained a live rows iterator")
 		}
-		if err := store.db.Ping(); err != nil {
+		if err := store.Database.Ping(); err != nil {
 			t.Fatal("panic retained the only connection", err)
 		}
 	}
@@ -272,7 +272,7 @@ func TestZiranAccountExportHTTPMatchesBaseline(t *testing.T) {
 			case "missing bearer":
 				request.Header.Del("Authorization")
 			case "missing account":
-				if _, err := store.db.Exec("DELETE FROM server_users WHERE user_id_hash=?", account.UserID); err != nil {
+				if _, err := store.Database.Exec("DELETE FROM server_users WHERE user_id_hash=?", account.UserID); err != nil {
 					t.Fatal(err)
 				}
 			case "mismatched account":
@@ -282,7 +282,7 @@ func TestZiranAccountExportHTTPMatchesBaseline(t *testing.T) {
 				cancel()
 				request = request.WithContext(ctx)
 			case "late SQL failure":
-				if _, err := store.db.Exec("DROP TABLE server_app_grants"); err != nil {
+				if _, err := store.Database.Exec("DROP TABLE server_app_grants"); err != nil {
 					t.Fatal(err)
 				}
 			}

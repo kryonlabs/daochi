@@ -161,7 +161,7 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 				}
 			}
 			for _, server := range servers {
-				if server.store.db.Stats().InUse != 0 {
+				if server.store.Database.Stats().InUse != 0 {
 					t.Fatal("account signature retained a database connection")
 				}
 			}
@@ -202,7 +202,7 @@ func TestZiranAccountSignatureNativeFailuresAgainstBaseline(t *testing.T) {
 						values[index], failures[index] = server.baselineAccessAuthenticateSignature(t.Context(), user, "", signature, "daochi-sync-v1", "POST", "/login", nil)
 					}
 				})
-				if len(server.challenges.ByUser) != 0 || server.store.db.Stats().InUse != 0 {
+				if len(server.challenges.ByUser) != 0 || server.store.Database.Stats().InUse != 0 {
 					t.Fatal("native failure retained a challenge or connection")
 				}
 			}
@@ -227,7 +227,7 @@ func accessStoreState(t *testing.T, store *Store) [][][]any {
 	}
 	result := make([][][]any, len(queries))
 	for index, query := range queries {
-		rows, err := store.db.Query(query)
+		rows, err := store.Database.Query(query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -562,7 +562,7 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 					if mode != "closed" && mode != "log panic" {
 						states[index] = accessStoreState(t, store)
 					}
-					if store.db.Stats().InUse != 0 {
+					if store.Database.Stats().InUse != 0 {
 						t.Fatal("account access retained a database connection")
 					}
 				}

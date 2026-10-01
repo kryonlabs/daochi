@@ -34,7 +34,7 @@ func (s *Server) baselinePaymentRequireTokenIssuer() (ed25519.PrivateKey, error)
 }
 
 func (s *Server) baselinePaymentHandleTokenAssets(w http.ResponseWriter, r *http.Request) {
-	assetsResult := TokenAssets_List(s.store.db, r.Context())
+	assetsResult := TokenAssets_List(s.store.Database, r.Context())
 	assets, err := assetsResult.Value, assetsResult.Error
 	if err != nil {
 		slog.Error("list token assets", "error", err)
@@ -79,10 +79,10 @@ func (s *Server) baselinePaymentHandleTokenBalance(w http.ResponseWriter, r *htt
 	}
 	var balance int64
 	if appScoped {
-		appBalanceResult := TokenLedger_AppBalance(s.store.db, r.Context(), userID, AssetID, appID)
+		appBalanceResult := TokenLedger_AppBalance(s.store.Database, r.Context(), userID, AssetID, appID)
 		balance, err = appBalanceResult.Value, appBalanceResult.Error
 	} else {
-		balanceResult := TokenLedger_Balance(s.store.db, r.Context(), userID, AssetID)
+		balanceResult := TokenLedger_Balance(s.store.Database, r.Context(), userID, AssetID)
 		balance, err = balanceResult.Value, balanceResult.Error
 	}
 	if err != nil {
@@ -111,10 +111,10 @@ func (s *Server) baselinePaymentHandleTokenLedger(w http.ResponseWriter, r *http
 	}
 	var events []TokenReceipt
 	if appScoped {
-		appLedgerResult := TokenLedger_AppList(s.store.db, r.Context(), userID, AssetID, appID, since)
+		appLedgerResult := TokenLedger_AppList(s.store.Database, r.Context(), userID, AssetID, appID, since)
 		events, err = appLedgerResult.Value, appLedgerResult.Error
 	} else {
-		ledgerResult := TokenLedger_List(s.store.db, r.Context(), userID, AssetID, since)
+		ledgerResult := TokenLedger_List(s.store.Database, r.Context(), userID, AssetID, since)
 		events, err = ledgerResult.Value, ledgerResult.Error
 	}
 	if err != nil {
@@ -136,7 +136,7 @@ func (s *Server) baselinePaymentHandleTokenReceipt(w http.ResponseWriter, r *htt
 		Response_Error(w, http.StatusTooManyRequests, "too many receipt requests")
 		return
 	}
-	receiptResult := TokenLedger_ByID(s.store.db, r.Context(), receiptID)
+	receiptResult := TokenLedger_ByID(s.store.Database, r.Context(), receiptID)
 	receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 	if err != nil {
 		slog.Error("token receipt", "receipt", LogSafety_LogText(receiptID), "error", err)
@@ -169,7 +169,7 @@ func (s *Server) baselinePaymentHandleTokenSpend(w http.ResponseWriter, r *http.
 		Response_Error(w, http.StatusBadRequest, "unsupported asset_id")
 		return
 	}
-	existence := AppStore_Exists(s.store.db, r.Context(), req.AppID)
+	existence := AppStore_Exists(s.store.Database, r.Context(), req.AppID)
 	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("token spend app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "token spend failed")
@@ -181,7 +181,7 @@ func (s *Server) baselinePaymentHandleTokenSpend(w http.ResponseWriter, r *http.
 	signedTx, hasSignedTx, err := s.baselinePaymentAuthorizeTokenApp(r.Context(), r, body, userID, req.AppID, req.AssetID, "spend")
 	if err != nil {
 		if hasSignedTx {
-			SignedTx_Forget(s.store.db, r.Context(), signedTx)
+			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
 		}
 		s.writeAuthError(w, err)
 		return
@@ -189,14 +189,14 @@ func (s *Server) baselinePaymentHandleTokenSpend(w http.ResponseWriter, r *http.
 	completed := false
 	defer func() {
 		if hasSignedTx && !completed {
-			SignedTx_Forget(s.store.db, r.Context(), signedTx)
+			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
 		}
 	}()
 	sourceRef := req.Action + ":" + req.IdempotencyKey
 	if req.Metadata != "" {
 		sourceRef += ":" + baselinePaymentShortHash(req.Metadata)
 	}
-	spendResult := TokenLedger_Spend(s.store.db, r.Context(), signer, TokenEventInput{
+	spendResult := TokenLedger_Spend(s.store.Database, r.Context(), signer, TokenEventInput{
 		AccountID:   userID,
 		AppID:       req.AppID,
 		EventType:   "debit",
@@ -223,7 +223,7 @@ func (s *Server) baselinePaymentHandleTokenSpend(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) baselinePaymentHandleTokenCheckpointLatest(w http.ResponseWriter, r *http.Request) {
-	checkpointResult := TokenCheckpoint_Latest(s.store.db, r.Context())
+	checkpointResult := TokenCheckpoint_Latest(s.store.Database, r.Context())
 	checkpoint, found, err := checkpointResult.Value, checkpointResult.Found, checkpointResult.Error
 	if err != nil {
 		slog.Error("token checkpoint", "error", err)
@@ -268,7 +268,7 @@ func (s *Server) baselinePaymentHandleAdminManualCredit(w http.ResponseWriter, r
 	if req.SourceRef == "" {
 		req.SourceRef = "manual:" + time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	paymentResult := TokenLedger_CreditPayment(s.store.db, r.Context(), signer, "admin", req.SourceRef, TokenEventInput{
+	paymentResult := TokenLedger_CreditPayment(s.store.Database, r.Context(), signer, "admin", req.SourceRef, TokenEventInput{
 		AccountID:   req.AccountID,
 		AppID:       req.AppID,
 		EventType:   "credit",
@@ -281,7 +281,7 @@ func (s *Server) baselinePaymentHandleAdminManualCredit(w http.ResponseWriter, r
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	balanceResult := TokenLedger_Balance(s.store.db, r.Context(), req.AccountID, AssetID)
+	balanceResult := TokenLedger_Balance(s.store.Database, r.Context(), req.AccountID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusInternalServerError, "token balance failed")
@@ -299,7 +299,7 @@ func (s *Server) baselinePaymentHandleAdminTokenCheckpoint(w http.ResponseWriter
 		Response_Error(w, http.StatusServiceUnavailable, "token issuer unavailable")
 		return
 	}
-	checkpointResult := TokenCheckpoint_Create(s.store.db, r.Context(), signer, errTokenIssuerReadOnly)
+	checkpointResult := TokenCheckpoint_Create(s.store.Database, r.Context(), signer, errTokenIssuerReadOnly)
 	checkpoint, err := checkpointResult.Value, checkpointResult.Error
 	if err != nil {
 		slog.Error("create token checkpoint", "error", err)
@@ -406,7 +406,7 @@ func (s *Server) baselinePaymentAuthorizeTokenApp(ctx context.Context, r *http.R
 		if err != nil {
 			return signedTx, false, err
 		}
-		if err := authenticationError(SignedTx_Verify(s.store.db, ctx, r, body, tx, accountID, appID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+		if err := authenticationError(SignedTx_Verify(s.store.Database, ctx, r, body, tx, accountID, appID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 			return signedTx, false, err
 		}
 		signedTx = tx
@@ -414,7 +414,7 @@ func (s *Server) baselinePaymentAuthorizeTokenApp(ctx context.Context, r *http.R
 	if !Scope_ValidTokenPolicyPermission(permission) {
 		return signedTx, hasSignedTx, authError{status: http.StatusBadRequest, message: "invalid token permission"}
 	}
-	policyExists := AppStore_HasPolicy(s.store.db, ctx, appID)
+	policyExists := AppStore_HasPolicy(s.store.Database, ctx, appID)
 	hasPolicy, err := policyExists.Value, policyExists.Error
 	if err != nil {
 		return signedTx, hasSignedTx, err
@@ -422,7 +422,7 @@ func (s *Server) baselinePaymentAuthorizeTokenApp(ctx context.Context, r *http.R
 	if !hasPolicy {
 		return signedTx, hasSignedTx, nil
 	}
-	policyResult := AppStore_Permission(s.store.db, ctx, appID, assetID, permission)
+	policyResult := AppStore_Permission(s.store.Database, ctx, appID, assetID, permission)
 	policy, ok, err := policyResult.Value, policyResult.Found, policyResult.Error
 	if err != nil {
 		return signedTx, hasSignedTx, err

@@ -46,7 +46,7 @@ func (s *Store) baselineViewsChangesSince(ctx context.Context, userID string, si
 }
 
 func (s *Store) baselineViewsOpsSince(ctx context.Context, userID string, sinceVersion int64) ([]SyncOp, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at
 FROM server_sync_ops
 WHERE user_id_hash=?1 AND server_version>?2
@@ -120,7 +120,7 @@ func (s *Store) baselineViewsCleanData(ctx context.Context, userID string) (*Cle
 }
 
 func (s *Store) baselineViewsCleanHabits(ctx context.Context, userID string) ([]Habit, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at
 FROM server_habits
 WHERE user_id_hash=?1 AND deleted_at=0
@@ -144,7 +144,7 @@ ORDER BY sort_order,id`, userID)
 }
 
 func (s *Store) baselineViewsCleanHabitDays(ctx context.Context, userID string) ([]CleanHabitDay, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT hd.habit_id,h.name,hd.local_date,hd.completed,hd.count,hd.updated_at
 FROM server_habit_days hd
 JOIN server_habits h ON h.user_id_hash=hd.user_id_hash AND h.id=hd.habit_id
@@ -175,7 +175,7 @@ ORDER BY hd.local_date DESC,h.sort_order,hd.habit_id`, userID)
 }
 
 func (s *Store) baselineViewsCleanSessions(ctx context.Context, userID string) ([]Session, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 	SELECT id,started_at,local_date,topic,activity,source,rounds_hash,
 	       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at
 	FROM server_sessions
@@ -213,7 +213,7 @@ func (s *Store) baselineViewsCleanSessions(ctx context.Context, userID string) (
 }
 
 func (s *Store) baselineViewsCleanMeditationLogs(ctx context.Context, userID string) ([]MeditationLog, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,session_id,duration_seconds,completed_at
 FROM server_meditation_logs
 WHERE user_id_hash=?1
@@ -263,7 +263,7 @@ func (s *Store) baselineViewsStateHash(ctx context.Context, userID string) (stri
 }
 
 func (s *Store) baselineViewsHashHabits(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at
 FROM server_habits
 WHERE user_id_hash=?1
@@ -289,7 +289,7 @@ ORDER BY id`, userID)
 }
 
 func (s *Store) baselineViewsHashHabitDays(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT habit_id,local_date,completed,count,updated_at
 FROM server_habit_days
 WHERE user_id_hash=?1
@@ -313,7 +313,7 @@ ORDER BY habit_id,local_date`, userID)
 
 func (s *Store) baselineViewsHashSessions(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
 	sessionIDs := []string{}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 	SELECT id,started_at,local_date,topic,activity,source,rounds_hash,
 	       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at
 	FROM server_sessions
@@ -353,7 +353,7 @@ func (s *Store) baselineViewsHashSessions(ctx context.Context, h interface{ Writ
 }
 
 func (s *Store) baselineViewsHashSessionRounds(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID, sessionID string) error {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT round_index,breaths,hold_seconds
 FROM server_session_rounds
 WHERE user_id_hash=?1 AND session_id=?2
@@ -374,7 +374,7 @@ ORDER BY round_index`, userID, sessionID)
 }
 
 func (s *Store) baselineViewsHashMeditationLogs(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,session_id,duration_seconds,completed_at
 FROM server_meditation_logs
 WHERE user_id_hash=?1
@@ -396,7 +396,7 @@ ORDER BY id`, userID)
 }
 
 func (s *Store) baselineViewsHashSocialCache(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT kind,json,updated_at
 FROM server_social_snapshots
 WHERE user_id_hash=?1
@@ -417,7 +417,7 @@ ORDER BY kind`, userID)
 }
 
 func (s *Store) baselineViewsHashEncryptedRecords(ctx context.Context, h interface{ Write([]byte) (int, error) }, userID string) error {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
 FROM server_encrypted_records
 WHERE user_id_hash=?1
@@ -443,7 +443,7 @@ ORDER BY collection,id`, userID)
 }
 
 func (s *Store) baselineViewsSnapshotHabits(ctx context.Context, userID string, sinceVersion int64) ([]Habit, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version
 FROM (
 	SELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version
@@ -488,7 +488,7 @@ ORDER BY server_version,sort_order,id`, userID, sinceVersion)
 }
 
 func (s *Store) baselineViewsSnapshotHabitDays(ctx context.Context, userID string, sinceVersion int64) ([]HabitDay, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT habit_id,local_date,completed,count,updated_at
 FROM server_habit_days
 WHERE user_id_hash=?1 AND server_version>?2
@@ -515,7 +515,7 @@ ORDER BY server_version,habit_id,local_date`, userID, sinceVersion)
 }
 
 func (s *Store) baselineViewsSnapshotSessions(ctx context.Context, userID string, sinceVersion int64) ([]Session, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 	SELECT id,started_at,local_date,topic,activity,source,rounds_hash,
 	       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at
 	FROM server_sessions
@@ -553,7 +553,7 @@ func (s *Store) baselineViewsSnapshotSessions(ctx context.Context, userID string
 }
 
 func (s *Store) baselineViewsSnapshotSessionRounds(ctx context.Context, userID, sessionID string) ([]SessionRound, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT round_index,breaths,hold_seconds
 FROM server_session_rounds
 WHERE user_id_hash=?1 AND session_id=?2
@@ -575,7 +575,7 @@ ORDER BY round_index`, userID, sessionID)
 }
 
 func (s *Store) baselineViewsSnapshotMeditationLogs(ctx context.Context, userID string, sinceVersion int64) ([]MeditationLog, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT id,session_id,duration_seconds,completed_at
 FROM server_meditation_logs
 WHERE user_id_hash=?1 AND server_version>?2
@@ -597,7 +597,7 @@ ORDER BY server_version,completed_at,id`, userID, sinceVersion)
 }
 
 func (s *Store) baselineViewsSnapshotSocialCache(ctx context.Context, userID string, sinceVersion int64) ([]SocialSnapshot, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT kind,json,updated_at
 FROM server_social_snapshots
 WHERE user_id_hash=?1 AND server_version>?2
@@ -624,7 +624,7 @@ ORDER BY server_version,kind`, userID, sinceVersion)
 }
 
 func (s *Store) baselineViewsSnapshotEncryptedRecords(ctx context.Context, userID string, sinceVersion int64) ([]EncryptedRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
 FROM server_encrypted_records
 WHERE user_id_hash=?1 AND server_version>?2

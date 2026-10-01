@@ -1,0 +1,336 @@
+#import "std/go_types"
+#import "protocol"
+#import "sync_types"
+#import "types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+opened :: #import "store_open";
+sync :: #import "sync_application";
+state :: #import "account_state";
+profile :: #import "account_profile";
+lookup :: #import "account_lookup";
+friends :: #import "friend_store";
+leaderboard :: #import "leaderboard";
+clients :: #import "sync_clients";
+payloads :: #import "encrypted_payloads";
+audit :: #import "sync_audit";
+stats :: #import "store_stats";
+views :: #import "sync_views";
+habits :: #import "habit_migration";
+hash :: #import "state_hash";
+social :: #import "social_cache";
+diagnostics :: #import "store_diagnostics";
+builtin :: #system_library "go:builtin";
+
+Store :: struct {
+    database: *sql.Database
+    path: string
+}
+StoreResult :: struct {
+    value: *Store
+    error: Error
+}
+
+ErrSyncUserNotFound: Error = errors.New("sync user not found");
+
+#scope_file
+Allocate :: () -> *Store #foreign builtin "new";
+
+#scope_export
+Open :: (path: string) -> StoreResult {
+    openedStore := opened.Open(path)
+    result: StoreResult
+    if openedStore.error != null {
+        result.error = openedStore.error
+        return result
+    }
+    result.value = Allocate()
+    result.value.database = openedStore.value
+    result.value.path = path
+    return result
+}
+
+Close :: (store: *Store) -> Error #go_method "Close" {
+    return opened.Close(store.database)
+}
+
+ApplySync :: (store: *Store, context: ctx.Context,
+    req: SyncRequest, publicKey: []u8) -> SyncResult, Error #go_method "ApplySync" #go_results {
+    result, _, err := ApplySyncDetailed(store, context, req, publicKey)
+    return result, err
+}
+
+ApplySyncDetailed :: (store: *Store, context: ctx.Context,
+    req: SyncRequest, publicKey: []u8) -> SyncResult, []string, Error #go_method "ApplySyncDetailed" #go_results {
+    result := sync.Apply(store.database, context, req, publicKey, ErrSyncUserNotFound)
+    return result.value, result.accepted, result.error
+}
+
+RegisterUser :: (store: *Store, context: ctx.Context,
+    userID: string, publicKey: []u8) -> Error #go_method "RegisterUser" {
+    return state.Register(store.database, context, userID, publicKey)
+}
+
+AccountAlias :: (store: *Store, context: ctx.Context,
+    userID: string) -> string, Error #go_method "AccountAlias" #go_results {
+    result := profile.Alias(store.database, context, userID)
+    return result.value, result.error
+}
+
+SetAccountAlias :: (store: *Store, context: ctx.Context,
+    userID: string, alias: string) -> Error #go_method "SetAccountAlias" {
+    return profile.SetAlias(store.database, context, userID, alias, ErrSyncUserNotFound)
+}
+
+AccountProfileIcon :: (store: *Store, context: ctx.Context,
+    userID: string) -> isize, Error #go_method "AccountProfileIcon" #go_results {
+    result := profile.Icon(store.database, context, userID)
+    return result.value, result.error
+}
+
+SetAccountProfileIcon :: (store: *Store, context: ctx.Context,
+    userID: string, profileIcon: isize) -> Error #go_method "SetAccountProfileIcon" {
+    return profile.SetIcon(store.database, context, userID, profileIcon, ErrSyncUserNotFound)
+}
+
+ResolveAccountRef :: (store: *Store, context: ctx.Context,
+    ref: string) -> string, bool, Error #go_method "ResolveAccountRef" #go_results {
+    result := lookup.Resolve(store.database, context, ref)
+    return result.value, result.found, result.error
+}
+
+CreateFriendRequest :: (store: *Store, context: ctx.Context,
+    id: string, requester: string,
+    target: string) -> FriendRequest, Error #go_method "CreateFriendRequest" #go_results {
+    result := friends.CreateRequest(store.database, context, id, requester, target)
+    return result.value, result.error
+}
+
+FriendRequest :: (store: *Store, context: ctx.Context,
+    id: string) -> FriendRequest, bool, Error #go_method "FriendRequest" #go_results {
+    result := friends.Request(store.database, context, id)
+    return result.value, result.found, result.error
+}
+
+ListFriendRequests :: (store: *Store, context: ctx.Context,
+    userID: string) -> []FriendRequest, []FriendRequest, Error #go_method "ListFriendRequests" #go_results {
+    result := friends.Requests(store.database, context, userID)
+    return result.incoming, result.outgoing, result.error
+}
+
+AcceptFriendRequest :: (store: *Store, context: ctx.Context,
+    userID: string, id: string) -> FriendRequest, Error #go_method "AcceptFriendRequest" #go_results {
+    result := friends.Accept(store.database, context, userID, id, ErrSyncUserNotFound)
+    return result.value, result.error
+}
+
+DeclineFriendRequest :: (store: *Store, context: ctx.Context,
+    userID: string, id: string) -> FriendRequest, Error #go_method "DeclineFriendRequest" #go_results {
+    result := friends.Decline(store.database, context, userID, id, ErrSyncUserNotFound)
+    return result.value, result.error
+}
+
+ListFriends :: (store: *Store, context: ctx.Context,
+    userID: string) -> []Friend, Error #go_method "ListFriends" #go_results {
+    result := friends.Friends(store.database, context, userID)
+    return result.value, result.error
+}
+
+AuthoritativeSocial :: (store: *Store, context: ctx.Context,
+    userID: string) -> []SocialSnapshot, Error #go_method "AuthoritativeSocial" #go_results {
+    result := friends.Authoritative(store.database, context, userID)
+    return result.value, result.error
+}
+
+RemoveFriend :: (store: *Store, context: ctx.Context,
+    userID: string, friendID: string) -> Error #go_method "RemoveFriend" {
+    return friends.Remove(store.database, context, userID, friendID)
+}
+
+UpsertProfileStats :: (store: *Store, context: ctx.Context,
+    userID: string, app: string,
+    metrics: []ProfileMetric) -> isize, Error #go_method "UpsertProfileStats" #go_results {
+    result := friends.UpsertStats(store.database, context, userID, app, metrics)
+    return result.applied, result.error
+}
+
+FriendStats :: (store: *Store, context: ctx.Context,
+    userID: string, app: string,
+    practice: string, metric: string) -> []FriendStatRow, Error #go_method "FriendStats" #go_results {
+    result := leaderboard.Friends(store.database, context, userID, app, practice, metric)
+    return result.value, result.error
+}
+
+RecordClientLogin :: (store: *Store, context: ctx.Context,
+    userID: string, clientID: string) -> Error #go_method "RecordClientLogin" {
+    return clients.RecordLogin(store.database, context, userID, clientID)
+}
+
+RecordClientSync :: (store: *Store, context: ctx.Context,
+    userID: string, clientID: string,
+    sinceVersion: s64, serverVersion: s64,
+    protocolVersion: isize, clientClock: s64) -> Error #go_method "RecordClientSync" {
+    return clients.RecordSync(store.database, context, userID, clientID, sinceVersion, serverVersion, protocolVersion, clientClock)
+}
+
+StoreEncryptedPayload :: (store: *Store, context: ctx.Context,
+    userID: string, clientID: string,
+    payload: []u8) -> s64, Error #go_method "StoreEncryptedPayload" #go_results {
+    result := payloads.Store(store.database, context, userID, clientID, payload, ErrSyncUserNotFound)
+    return result.version, result.error
+}
+
+EncryptedPayloadsSince :: (store: *Store, context: ctx.Context,
+    userID: string, sinceVersion: s64,
+    limit: isize) -> []EncryptedPayload, bool, Error #go_method "EncryptedPayloadsSince" #go_results {
+    result := payloads.Since(store.database, context, userID, sinceVersion, limit)
+    return result.value, result.truncated, result.error
+}
+
+RecentEncryptedPayloads :: (store: *Store, context: ctx.Context,
+    userID: string, limit: isize) -> []EncryptedPayload, Error #go_method "RecentEncryptedPayloads" #go_results {
+    result := payloads.Recent(store.database, context, userID, limit)
+    return result.value, result.error
+}
+
+EncryptedPayloadBytes :: (store: *Store, context: ctx.Context,
+    userID: string) -> s64, Error #go_method "EncryptedPayloadBytes" #go_results {
+    result := payloads.Bytes(store.database, context, userID)
+    return result.value, result.error
+}
+
+PruneEncryptedPayloads :: (store: *Store, context: ctx.Context,
+    userID: string, maxAge: clock.Duration,
+    maxBytes: s64) -> payloads.EncryptedPayloadPruneResult, Error #go_method "PruneEncryptedPayloads" #go_results {
+    result := payloads.Prune(store.database, context, userID, maxAge, maxBytes)
+    return result.value, result.error
+}
+
+RecordSyncAudit :: (store: *Store, context: ctx.Context,
+    entry: SyncAuditEntry) -> Error #go_method "RecordSyncAudit" {
+    return audit.Record(store.database, context, entry)
+}
+
+RecentSyncAudit :: (store: *Store, context: ctx.Context,
+    userID: string, limit: isize) -> []SyncAuditEntry, Error #go_method "RecentSyncAudit" #go_results {
+    result := audit.Recent(store.database, context, userID, limit)
+    return result.value, result.error
+}
+
+SyncOpsCompacted :: (store: *Store, context: ctx.Context,
+    userID: string, clientClock: s64) -> bool, s64, Error #go_method "SyncOpsCompacted" #go_results {
+    result := clients.Compacted(store.database, context, userID, clientClock)
+    return result.compacted, result.through, result.error
+}
+
+CompactSyncOps :: (store: *Store, context: ctx.Context, userID: string) -> Error #go_method "CompactSyncOps" {
+    return clients.Compact(store.database, context, userID)
+}
+
+DeleteAccount :: (store: *Store, context: ctx.Context, userID: string) -> Error #go_method "DeleteAccount" {
+    return state.Delete(store.database, context, userID)
+}
+
+PublicStats :: (store: *Store, context: ctx.Context,
+    dbPath: string) -> PublicStats, Error #go_method "PublicStats" #go_results {
+    result := stats.Public(store.database, context, dbPath)
+    return result.value, result.error
+}
+
+ChangesSince :: (store: *Store, context: ctx.Context,
+    userID: string, sinceVersion: s64) -> SyncChanges, s64, Error #go_method "ChangesSince" #go_results {
+    result := views.Changes(store.database, context, userID, sinceVersion)
+    return result.value, result.version, result.error
+}
+
+OpsSince :: (store: *Store, context: ctx.Context,
+    userID: string, sinceVersion: s64) -> []SyncOp, Error #go_method "OpsSince" #go_results {
+    result := views.OperationsSince(store.database, context, userID, sinceVersion)
+    return result.value, result.error
+}
+
+CleanData :: (store: *Store, context: ctx.Context,
+    userID: string) -> *CleanData, Error #go_method "CleanData" #go_results {
+    result := views.Clean(store.database, context, userID)
+    return result.value, result.error
+}
+
+SyncLogs :: (store: *Store, context: ctx.Context,
+    userID: string, sinceVersion: s64) -> []SyncLog, Error #go_method "SyncLogs" #go_results {
+    result := audit.Logs(store.database, context, userID, sinceVersion)
+    return result.value, result.error
+}
+
+DeleteLogs :: (store: *Store, context: ctx.Context,
+    userID: string, sinceVersion: s64) -> []SyncLog, Error #go_method "DeleteLogs" #go_results {
+    result := audit.Deletes(store.database, context, userID, sinceVersion)
+    return result.value, result.error
+}
+
+LegacyClients :: (store: *Store, context: ctx.Context,
+    userID: string, minProtocol: isize) -> []string, Error #go_method "LegacyClients" #go_results {
+    result := clients.Legacy(store.database, context, userID, minProtocol)
+    return result.value, result.error
+}
+
+LegacyWritePolicy :: (store: *Store, context: ctx.Context,
+    userID: string) -> bool, s64, Error #go_method "LegacyWritePolicy" #go_results {
+    result := clients.LegacyWritePolicy(store.database, context, userID)
+    return result.required, result.epoch, result.error
+}
+
+CleanupOrphanHabitDays :: (store: *Store, context: ctx.Context,
+    userID: string) -> Error #go_method "CleanupOrphanHabitDays" {
+    return habits.Cleanup(store.database, context, userID)
+}
+
+AutoMigrateAccountForProtocol :: (store: *Store, context: ctx.Context,
+    userID: string, protocol: isize) -> Error #go_method "AutoMigrateAccountForProtocol" {
+    return habits.ForProtocol(store.database, context, userID, protocol)
+}
+
+AutoMigrateAllAccounts :: (store: *Store, context: ctx.Context) -> Error #go_method "AutoMigrateAllAccounts" {
+    return habits.AllAccounts(store.database, context)
+}
+
+StateHash :: (store: *Store, context: ctx.Context,
+    userID: string) -> string, Error #go_method "StateHash" #go_results {
+    result := hash.State(store.database, context, userID)
+    return result.value, result.error
+}
+
+SetSocialCacheJSON :: (store: *Store, context: ctx.Context,
+    userID: string, kind: string,
+    payload: []u8) -> isize, Error #go_method "SetSocialCacheJSON" #go_results {
+    result := social.Set(store.database, context, userID, kind, payload)
+    return result.applied, result.error
+}
+
+CurrentVersion :: (store: *Store, context: ctx.Context,
+    userID: string) -> s64, Error #go_method "currentUserVersion" #go_results {
+    result := state.CurrentVersion(store.database, context, userID)
+    return result.value, result.error
+}
+
+Health :: (store: *Store, context: ctx.Context) -> Error #go_method "Health" {
+    return diagnostics.Health(store.database, context)
+}
+
+NodeUsage :: (store: *Store, context: ctx.Context,
+    now: clock.Time) -> NodeUsage, Error #go_method "NodeUsage" #go_results {
+    result := stats.Usage(store.database, context, now)
+    return result.value, result.error
+}
+
+NodeStorageUsage :: (store: *Store, context: ctx.Context) -> NodeStorageUsage, Error #go_method "NodeStorageUsage" #go_results {
+    result := stats.Storage(store.database, context, store.path)
+    return result.value, result.error
+}
+
+SyncDiagnosticReport :: (store: *Store, context: ctx.Context,
+    userID: string) -> SyncDiagnosticReport, Error #go_method "SyncDiagnosticReport" #go_results {
+    result := diagnostics.Report(store.database, context, userID)
+    return result.value, result.error
+}

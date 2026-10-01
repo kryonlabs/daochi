@@ -23,7 +23,7 @@ func meshAppRegistration(t *testing.T, appID string, version int) (SignedAppRegi
 
 func compareMeshAppImport(t *testing.T, actual, expected *Store, ctx context.Context, key ed25519.PublicKey, policy NodeSyncPolicy, registrations []SignedAppRegistrationRequest) MeshAppsImportResult {
 	t.Helper()
-	got := MeshApps_Import(actual.db, ctx, key, policy, registrations, authenticationError)
+	got := MeshApps_Import(actual.Database, ctx, key, policy, registrations, authenticationError)
 	baseline := &Server{store: expected, cfg: Config{NodeRegistryPublicKey: key}}
 	want, err := baseline.baselineImportMeshApps(ctx, policy, registrations)
 	if got.Value != want || !sameIdentityError(got.Error, err) {
@@ -41,7 +41,7 @@ func compareMeshAppImport(t *testing.T, actual, expected *Store, ctx context.Con
 
 func compareMeshAppExport(t *testing.T, actual, expected *Store, ctx context.Context, policy NodeSyncPolicy) MeshAppsExportResult {
 	t.Helper()
-	got := MeshApps_Export(actual.db, ctx, policy)
+	got := MeshApps_Export(actual.Database, ctx, policy)
 	want, err := expected.baselineExportMeshApps(ctx, policy)
 	if !sameIdentityError(got.Error, err) || !reflect.DeepEqual(got.Value, want) || cap(got.Value) != cap(want) {
 		t.Fatalf("mesh app export = %#v, %v; baseline = %#v, %v", got, got.Error, want, err)
@@ -64,7 +64,7 @@ func TestZiranMeshAppsVersionsAndSignaturesAgainstBaseline(t *testing.T) {
 	// against independently seeded stored metadata rather than inventing a
 	// future wire version that the released validator rejects.
 	for _, store := range []*Store{actual, expected} {
-		if _, err := store.db.Exec("UPDATE server_app_manifests SET manifest_version=0 WHERE app_id='demo'"); err != nil {
+		if _, err := store.Database.Exec("UPDATE server_app_manifests SET manifest_version=0 WHERE app_id='demo'"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -72,7 +72,7 @@ func TestZiranMeshAppsVersionsAndSignaturesAgainstBaseline(t *testing.T) {
 		t.Fatal("higher manifest version was not applied", got)
 	}
 	for _, store := range []*Store{actual, expected} {
-		if _, err := store.db.Exec("UPDATE server_app_manifests SET manifest_version=2 WHERE app_id='demo'"); err != nil {
+		if _, err := store.Database.Exec("UPDATE server_app_manifests SET manifest_version=2 WHERE app_id='demo'"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -80,7 +80,7 @@ func TestZiranMeshAppsVersionsAndSignaturesAgainstBaseline(t *testing.T) {
 		t.Fatal("older manifest overwrote current version", got)
 	}
 	for _, store := range []*Store{actual, expected} {
-		if _, err := store.db.Exec("UPDATE server_app_manifests SET manifest_version=1 WHERE app_id='demo'"); err != nil {
+		if _, err := store.Database.Exec("UPDATE server_app_manifests SET manifest_version=1 WHERE app_id='demo'"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -136,7 +136,7 @@ CREATE TRIGGER reject_mesh_app AFTER INSERT ON server_app_manifests WHEN NEW.app
 			}
 			if query != "" {
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec(query); err != nil {
+					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -145,8 +145,8 @@ CREATE TRIGGER reject_mesh_app AFTER INSERT ON server_app_manifests WHEN NEW.app
 			if got.Error == nil || got.Value != 0 {
 				t.Fatal("failed batch changed its reported count", got)
 			}
-			firstVersion := MeshApps_LoadVersion(actual.db, t.Context(), "first")
-			secondVersion := MeshApps_LoadVersion(actual.db, t.Context(), "second")
+			firstVersion := MeshApps_LoadVersion(actual.Database, t.Context(), "first")
+			secondVersion := MeshApps_LoadVersion(actual.Database, t.Context(), "second")
 			if firstVersion.Error != nil || secondVersion.Error != nil || secondVersion.Found {
 				t.Fatal("failed app transaction left partial state", firstVersion, secondVersion)
 			}
@@ -155,7 +155,7 @@ CREATE TRIGGER reject_mesh_app AFTER INSERT ON server_app_manifests WHEN NEW.app
 			}
 			if query != "" {
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec("DROP TRIGGER reject_mesh_app"); err != nil {
+					if _, err := store.Database.Exec("DROP TRIGGER reject_mesh_app"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -191,18 +191,18 @@ func TestZiranMeshAppQueryErrorsAndFilteringAgainstBaseline(t *testing.T) {
 				query = "DROP TABLE server_app_manifests"
 			case "closed":
 				for _, store := range []*Store{actual, expected} {
-					_ = store.db.Close()
+					_ = store.Database.Close()
 				}
 			}
 			if query != "" {
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec(query); err != nil {
+					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
 			compareMeshAppExport(t, actual, expected, ctx, policy)
-			got := MeshApps_LoadVersion(actual.db, ctx, "demo")
+			got := MeshApps_LoadVersion(actual.Database, ctx, "demo")
 			want, found, err := expected.baselineLoadManifestVersion(ctx, "demo")
 			if got.Value != ManifestVersion(want) || got.Found != found || !sameIdentityError(got.Error, err) {
 				t.Fatal("stored version query changed", got, want, found, err)

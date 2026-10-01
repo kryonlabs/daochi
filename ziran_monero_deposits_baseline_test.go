@@ -100,7 +100,7 @@ func baselineHandleMoneroDeposits(s *Server, w http.ResponseWriter, r *http.Requ
 
 func baselineMoneroAccountAddress(s *Store, ctx context.Context, accountID string) (MoneroAccountAddress, bool, error) {
 	var out MoneroAccountAddress
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT m.account_id,COALESCE(u.alias,''),COALESCE(u.profile_icon,0),m.address,m.account_index,m.address_index,m.created_at
 FROM monero_account_addresses m
 LEFT JOIN server_users u ON u.user_id_hash=m.account_id
@@ -118,7 +118,7 @@ func baselineCreateMoneroAccountAddress(s *Store, ctx context.Context, accountID
 		return MoneroAccountAddress{}, errors.New("invalid account id")
 	}
 	var exists int
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)`, accountID).Scan(&exists); err != nil {
+	if err := s.Database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)`, accountID).Scan(&exists); err != nil {
 		return MoneroAccountAddress{}, err
 	}
 	if exists == 0 {
@@ -134,7 +134,7 @@ func baselineCreateMoneroAccountAddress(s *Store, ctx context.Context, accountID
 	if err != nil {
 		return MoneroAccountAddress{}, err
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.Database.ExecContext(ctx, `
 INSERT INTO monero_account_addresses(account_id,account_index,address_index,address,allocation_id)
 VALUES(?1,0,?2,?3,?4)`, accountID, index, address, allocationID); err != nil {
 		if existing, found, lookupErr := baselineMoneroAccountAddress(s, ctx, accountID); lookupErr == nil && found {
@@ -150,7 +150,7 @@ VALUES(?1,0,?2,?3,?4)`, accountID, index, address, allocationID); err != nil {
 // already scanned; 0 means "never scanned".
 func baselineMoneroScanHeight(s *Store, ctx context.Context) (int64, error) {
 	var height int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.Database.QueryRowContext(ctx,
 		`SELECT last_height FROM monero_wallet_state WHERE wallet_id='default'`).Scan(&height)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
@@ -164,7 +164,7 @@ func baselineSaveMoneroScanHeight(s *Store, ctx context.Context, height int64) e
 	if height <= 0 {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 INSERT INTO monero_wallet_state(wallet_id,last_height,updated_at)
 VALUES('default',?1,?2)
 ON CONFLICT(wallet_id) DO UPDATE SET
@@ -174,7 +174,7 @@ ON CONFLICT(wallet_id) DO UPDATE SET
 }
 
 func baselineMoneroAddressOwners(s *Store, ctx context.Context) (map[[2]int]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT account_index,address_index,account_id
 FROM monero_account_addresses
 WHERE disabled_at=''`)
@@ -312,7 +312,7 @@ func baselineSettleMoneroAccountDeposit(s *Server, ctx context.Context, accountI
 func baselineUpsertMoneroDeposit(s *Store, ctx context.Context, accountID string, transfer WalletTransfer, status string, cfg Config) (MoneroDeposit, error) {
 	conversion := MoneroWallet_TokenUnits(transfer.Amount, cfg.MoneroRateAtomicAmount, cfg.MoneroRateTokenUnits)
 	units := conversion.Value
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 INSERT INTO monero_deposits(tx_id,account_index,address_index,account_id,amount_atomic,block_height,
 	confirmations,unlock_time,locked,double_spend_seen,status,rate_atomic_amount,rate_token_units,token_units)
 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
@@ -335,7 +335,7 @@ ON CONFLICT(tx_id,account_index,address_index) DO UPDATE SET
 }
 
 func baselineCreditMoneroDeposit(s *Store, ctx context.Context, signer ed25519.PrivateKey, txID string, major, minor int) (TokenReceipt, bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return TokenReceipt{}, false, err
 	}
@@ -387,7 +387,7 @@ WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND receipt_id=''`, txI
 }
 
 func baselineMoneroDeposit(s *Store, ctx context.Context, txID string, major, minor int) (MoneroDeposit, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.Database.QueryRowContext(ctx, `
 SELECT tx_id,account_id,amount_atomic,token_units,block_height,confirmations,status,first_seen_at,
 	confirmed_at,credited_at,receipt_id,account_index,address_index,unlock_time,locked,double_spend_seen,
 	rate_atomic_amount,rate_token_units
@@ -399,7 +399,7 @@ func baselineMoneroDeposits(s *Store, ctx context.Context, accountID string, lim
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT tx_id,account_id,amount_atomic,token_units,block_height,confirmations,status,first_seen_at,
 	confirmed_at,credited_at,receipt_id,account_index,address_index,unlock_time,locked,double_spend_seen,
 	rate_atomic_amount,rate_token_units
@@ -426,7 +426,7 @@ FROM monero_deposits WHERE account_id=?1 ORDER BY first_seen_at DESC LIMIT ?2`, 
 		if out[i].ReceiptID == "" {
 			continue
 		}
-		receiptResult := TokenLedger_ByID(s.db, ctx, out[i].ReceiptID)
+		receiptResult := TokenLedger_ByID(s.Database, ctx, out[i].ReceiptID)
 		receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 		if err != nil {
 			return nil, err
@@ -452,7 +452,7 @@ func baselineScanMoneroDeposit(ctx context.Context, store *Store, row baselineMo
 		return MoneroDeposit{}, err
 	}
 	if store != nil && out.ReceiptID != "" {
-		receiptResult := TokenLedger_ByID(store.db, ctx, out.ReceiptID)
+		receiptResult := TokenLedger_ByID(store.Database, ctx, out.ReceiptID)
 		receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 		if err != nil {
 			return MoneroDeposit{}, err

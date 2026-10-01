@@ -152,7 +152,7 @@ func TestZiranOperationalHTTPAgainstBaseline(t *testing.T) {
 				if mode == "response panic" && panics[0] != sentinel {
 					t.Fatal("response panic was swallowed", panics)
 				}
-				if store.db.Stats().InUse != 0 {
+				if store.Database.Stats().InUse != 0 {
 					t.Fatal("operational HTTP retained a database connection")
 				}
 			})

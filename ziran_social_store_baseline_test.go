@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Store) baselineSocialRegisterUser(ctx context.Context, userID string, publicKey []byte) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -27,7 +27,7 @@ func (s *Store) baselineSocialRegisterUser(ctx context.Context, userID string, p
 
 func (s *Store) baselineSocialAccountAlias(ctx context.Context, userID string) (string, error) {
 	var alias sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT alias FROM server_users WHERE user_id_hash=?1`, userID).Scan(&alias)
+	err := s.Database.QueryRowContext(ctx, `SELECT alias FROM server_users WHERE user_id_hash=?1`, userID).Scan(&alias)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -41,7 +41,7 @@ func (s *Store) baselineSocialAccountAlias(ctx context.Context, userID string) (
 }
 
 func (s *Store) baselineSocialSetAccountAlias(ctx context.Context, userID, alias string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.Database.ExecContext(ctx, `
 UPDATE server_users
 SET alias=?2,last_seen_at=?3
 WHERE user_id_hash=?1`, userID, alias, Timestamp_CanonicalNow())
@@ -56,7 +56,7 @@ WHERE user_id_hash=?1`, userID, alias, Timestamp_CanonicalNow())
 
 func (s *Store) baselineSocialAccountProfileIcon(ctx context.Context, userID string) (int, error) {
 	var profileIcon int
-	err := s.db.QueryRowContext(ctx, `SELECT profile_icon FROM server_users WHERE user_id_hash=?1`, userID).Scan(&profileIcon)
+	err := s.Database.QueryRowContext(ctx, `SELECT profile_icon FROM server_users WHERE user_id_hash=?1`, userID).Scan(&profileIcon)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProfileIconNone, nil
 	}
@@ -67,7 +67,7 @@ func (s *Store) baselineSocialAccountProfileIcon(ctx context.Context, userID str
 }
 
 func (s *Store) baselineSocialSetAccountProfileIcon(ctx context.Context, userID string, profileIcon int) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.Database.ExecContext(ctx, `
 UPDATE server_users
 SET profile_icon=?2,last_seen_at=?3
 WHERE user_id_hash=?1`, userID, profileIcon, Timestamp_CanonicalNow())
@@ -88,7 +88,7 @@ func (s *Store) baselineSocialResolveAccountRef(ctx context.Context, ref string)
 	if Identity_ValidUserID(strings.ToLower(ref)) {
 		userID := strings.ToLower(ref)
 		var exists int
-		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)`, userID).Scan(&exists)
+		err := s.Database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)`, userID).Scan(&exists)
 		return userID, exists != 0, err
 	}
 	alias := strings.ToLower(ref)
@@ -96,7 +96,7 @@ func (s *Store) baselineSocialResolveAccountRef(ctx context.Context, ref string)
 		return "", false, nil
 	}
 	var userID string
-	err := s.db.QueryRowContext(ctx, `SELECT user_id_hash FROM server_users WHERE alias=?1`, alias).Scan(&userID)
+	err := s.Database.QueryRowContext(ctx, `SELECT user_id_hash FROM server_users WHERE alias=?1`, alias).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -116,14 +116,14 @@ func (s *Store) baselineSocialCreateFriendRequest(ctx context.Context, id, reque
 	}
 	a, b := baselineSocialFriendPair(requester, target)
 	var alreadyFriends int
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2)`, a, b).Scan(&alreadyFriends); err != nil {
+	if err := s.Database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2)`, a, b).Scan(&alreadyFriends); err != nil {
 		return FriendRequest{}, err
 	}
 	if alreadyFriends != 0 {
 		return FriendRequest{}, errors.New("already friends")
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.Database.ExecContext(ctx, `
 INSERT INTO server_friend_requests(id,requester_user_id_hash,target_user_id_hash,status,created_at,updated_at)
 VALUES(?1,?2,?3,'pending',?4,?4)
 ON CONFLICT(requester_user_id_hash,target_user_id_hash) DO UPDATE SET
@@ -136,7 +136,7 @@ ON CONFLICT(requester_user_id_hash,target_user_id_hash) DO UPDATE SET
 }
 
 func (s *Store) baselineSocialFriendRequestByUsers(ctx context.Context, requester, target string) (FriendRequest, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.Database.QueryRowContext(ctx, `
 SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
 FROM server_friend_requests fr
 JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
@@ -146,7 +146,7 @@ WHERE fr.requester_user_id_hash=?1 AND fr.target_user_id_hash=?2`, requester, ta
 }
 
 func (s *Store) baselineSocialFriendRequest(ctx context.Context, id string) (FriendRequest, bool, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.Database.QueryRowContext(ctx, `
 SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
 FROM server_friend_requests fr
 JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
@@ -167,7 +167,7 @@ func baselineSocialScanFriendRequest(row interface{ Scan(...any) error }) (Frien
 
 func (s *Store) baselineSocialListFriendRequests(ctx context.Context, userID string) ([]FriendRequest, []FriendRequest, error) {
 	query := func(where string) ([]FriendRequest, error) {
-		rows, err := s.db.QueryContext(ctx, `
+		rows, err := s.Database.QueryContext(ctx, `
 SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
 FROM server_friend_requests fr
 JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
@@ -197,7 +197,7 @@ ORDER BY fr.updated_at DESC`, userID)
 }
 
 func (s *Store) baselineSocialAcceptFriendRequest(ctx context.Context, userID, id string) (FriendRequest, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return FriendRequest{}, err
 	}
@@ -251,7 +251,7 @@ func (s *Store) baselineSocialDeclineFriendRequest(ctx context.Context, userID, 
 		return FriendRequest{}, errors.New("request not pending")
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `UPDATE server_friend_requests SET status='declined',updated_at=?2 WHERE id=?1`, id, now); err != nil {
+	if _, err := s.Database.ExecContext(ctx, `UPDATE server_friend_requests SET status='declined',updated_at=?2 WHERE id=?1`, id, now); err != nil {
 		return FriendRequest{}, err
 	}
 	req.Status = "declined"
@@ -260,7 +260,7 @@ func (s *Store) baselineSocialDeclineFriendRequest(ctx context.Context, userID, 
 }
 
 func (s *Store) baselineSocialListFriends(ctx context.Context, userID string) ([]Friend, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT u.user_id_hash,COALESCE(u.alias,''),u.profile_icon,f.created_at
 FROM server_friendships f
 JOIN server_users u ON u.user_id_hash=CASE WHEN f.user_id_a=?1 THEN f.user_id_b ELSE f.user_id_a END
@@ -310,7 +310,7 @@ func (s *Store) baselineSocialAuthoritativeSocial(ctx context.Context, userID st
 
 func (s *Store) baselineSocialRemoveFriend(ctx context.Context, userID, friendID string) error {
 	a, b := baselineSocialFriendPair(userID, friendID)
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ WHERE (requester_user_id_hash=?1 AND target_user_id_hash=?2)
 }
 
 func (s *Store) baselineSocialUpsertProfileStats(ctx context.Context, userID, app string, metrics []ProfileMetric) (int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}

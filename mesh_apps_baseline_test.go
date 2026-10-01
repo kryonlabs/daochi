@@ -25,7 +25,7 @@ func (s *Store) baselineExportMeshApps(
 	}
 
 	allowedApps := Sets_Normalize(policy.Apps)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT app_id,manifest_json,manifest_signature,approval_signature
 FROM server_app_manifests
 ORDER BY app_id`)
@@ -112,7 +112,7 @@ func (s *Server) baselineImportMeshApps(
 			continue
 		}
 
-		if err := AppStore_UpsertSignedManifest(s.store.db,
+		if err := AppStore_UpsertSignedManifest(s.store.Database,
 			ctx,
 			registration.Manifest,
 			manifestBytes,
@@ -132,7 +132,7 @@ func (s *Store) baselineLoadManifestVersion(
 	appID string,
 ) (baselineStoredManifestVersion, bool, error) {
 	var current baselineStoredManifestVersion
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT manifest_version,manifest_hash
 FROM server_app_manifests
 WHERE app_id=?1`, appID).Scan(&current.Version, &current.Hash)

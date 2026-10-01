@@ -66,12 +66,12 @@ VALUES('legacy-user','inbe.habits','legacy-1','data','2026-01-01T10:00:00Z');
 	ctx := context.Background()
 
 	// The upgrade must leave a delete trigger that actually logs tombstones.
-	if _, err := store.db.ExecContext(ctx,
+	if _, err := store.Database.ExecContext(ctx,
 		`DELETE FROM server_encrypted_records WHERE user_id_hash='legacy-user'`); err != nil {
 		t.Fatal(err)
 	}
 	var deletedAt string
-	if err := store.db.QueryRowContext(ctx,
+	if err := store.Database.QueryRowContext(ctx,
 		`SELECT deleted_at FROM server_mesh_changes WHERE record_id='legacy-1' AND op='delete'`).Scan(&deletedAt); err != nil {
 		t.Fatalf("no tombstone logged after delete: %v", err)
 	}
@@ -80,7 +80,7 @@ VALUES('legacy-user','inbe.habits','legacy-1','data','2026-01-01T10:00:00Z');
 	}
 	// Old upsert rows must default to op='upsert'.
 	var upserts int
-	if err := store.db.QueryRowContext(ctx,
+	if err := store.Database.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM server_mesh_changes WHERE op='upsert'`).Scan(&upserts); err != nil {
 		t.Fatal(err)
 	}

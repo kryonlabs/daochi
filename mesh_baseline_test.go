@@ -201,7 +201,7 @@ func (s *Store) baselineExportMeshEncryptedRecords(ctx context.Context, policy N
 	if err != nil {
 		return nil, nil, "", false, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT e.seq,e.op,e.user_id_hash,e.collection,e.record_id,e.deleted_at,
        r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,
        r.content_hash,r.schema_version,r.parent_id,u.public_key,u.created_at,u.last_seen_at
@@ -324,7 +324,7 @@ func (s *Store) baselineImportMeshEncryptedBatch(ctx context.Context, policy Nod
 	}
 	sort.SliceStable(changes, func(i, j int) bool { return changes[i].seq < changes[j].seq })
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -433,7 +433,7 @@ WHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4`,
 
 func (s *Store) baselineLoadNodeSyncCursor(ctx context.Context, peerKey string) (string, error) {
 	var cursor string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.Database.QueryRowContext(ctx, `
 SELECT cursor
 FROM node_sync_cursors
 WHERE peer_key=?1`, peerKey).Scan(&cursor)
@@ -450,7 +450,7 @@ func (s *Store) baselineSaveNodeSyncCursor(ctx context.Context, peerKey, cursor 
 	if strings.TrimSpace(cursor) == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.Database.ExecContext(ctx, `
 INSERT INTO node_sync_cursors(peer_key,cursor,updated_at)
 VALUES(?1,?2,CURRENT_TIMESTAMP)
 ON CONFLICT(peer_key) DO UPDATE SET
@@ -587,7 +587,7 @@ WHERE user_id_hash=?1`, userID).Scan(&version)
 }
 
 func (s *Store) baselineAppCollectionMatchers(ctx context.Context) ([]baselineAppCollectionMatcher, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.Database.QueryContext(ctx, `
 SELECT a.app_id,a.display_name,c.collection_prefix
 FROM server_apps a
 JOIN server_app_collections c ON c.app_id=a.app_id

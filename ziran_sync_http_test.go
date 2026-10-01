@@ -88,24 +88,24 @@ func syncHTTPTrackStore(t *testing.T, store *Store, plan *lifecycleDriverPlan) {
 	}
 	name := fmt.Sprintf("sync-http-%d", lifecycleDriverSequence.Add(1))
 	sql.Register(name, syncHTTPDriver{plan})
-	database, err := sql.Open(name, store.path+"?_busy_timeout=5000&_foreign_keys=on")
+	database, err := sql.Open(name, store.Path+"?_busy_timeout=5000&_foreign_keys=on")
 	if err != nil {
 		t.Fatal(err)
 	}
 	database.SetMaxOpenConns(1)
-	store.db = database
+	store.Database = database
 }
 
 func syncHTTPState(t *testing.T, store *Store) map[string]any {
 	t.Helper()
-	names := AccountExport_QueryRows(store.db, t.Context(), "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND ?1='' ORDER BY name", "", nil)
+	names := AccountExport_QueryRows(store.Database, t.Context(), "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND ?1='' ORDER BY name", "", nil)
 	if names.Error != nil {
 		t.Fatal(names.Error)
 	}
 	result := map[string]any{}
 	for _, table := range names.Value {
 		name := table["name"].(string)
-		rows := AccountExport_QueryRows(store.db, t.Context(), "SELECT * FROM "+name+" WHERE ?1='' ORDER BY rowid", "", nil)
+		rows := AccountExport_QueryRows(store.Database, t.Context(), "SELECT * FROM "+name+" WHERE ?1='' ORDER BY rowid", "", nil)
 		if rows.Error != nil {
 			t.Fatal(rows.Error)
 		}
@@ -242,7 +242,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 		t.Fatal(err)
 	}
 	device := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x57}, ed25519.SeedSize))
-	if err := AppStore_Upsert(store.db, t.Context(), AppRegistration{AppID: "syncapp", DisplayName: "Sync App", CompatibilityUntil: "2100-01-01",
+	if err := AppStore_Upsert(store.Database, t.Context(), AppRegistration{AppID: "syncapp", DisplayName: "Sync App", CompatibilityUntil: "2100-01-01",
 		ManifestExpiresAt: 4_000_000_000, Collections: []AppCollection{{CollectionPrefix: "private.syncapp.v1.*", Visibility: "private"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 		lifecycleExecute(t, store, `INSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at) VALUES('syncapp',1,'{"compatibility_until":"2100-01-01"}','fixture-hash','fixture-signature','fixture-approval',4000000000)`)
 	}
 	if test.version >= 6 && !test.envelope && test.mode != "missing account" && test.mode != "bootstrap" {
-		if err := DeviceKeys_Register(store.db, t.Context(), DeviceKey{AccountID: user, AppID: "syncapp", KeyID: "device-key", ClientID: "test-client", PublicKey: hex.EncodeToString(device.Public().(ed25519.PublicKey))}, "register-device", errSignedTxReplay); err != nil {
+		if err := DeviceKeys_Register(store.Database, t.Context(), DeviceKey{AccountID: user, AppID: "syncapp", KeyID: "device-key", ClientID: "test-client", PublicKey: hex.EncodeToString(device.Public().(ed25519.PublicKey))}, "register-device", errSignedTxReplay); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -459,7 +459,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 	if foreign.Channel.Len() != 0 {
 		t.Fatal("sync notification escaped its account")
 	}
-	if store.db.Stats().InUse != 0 {
+	if store.Database.Stats().InUse != 0 {
 		t.Fatal("sync handler retained a native SQL connection")
 	}
 	if test.mode != "closed" {

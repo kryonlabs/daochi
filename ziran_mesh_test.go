@@ -158,7 +158,7 @@ func TestZiranMeshScopeAgainstBaseline(t *testing.T) {
 func meshPortFixture(t *testing.T) *Store {
 	t.Helper()
 	store := grantStoreFixture(t)
-	_, err := store.db.Exec(`
+	_, err := store.Database.Exec(`
 CREATE TABLE server_account_tombstones(user_id_hash TEXT PRIMARY KEY);
 CREATE TABLE node_sync_cursors(peer_key TEXT PRIMARY KEY,cursor TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE server_mesh_changes(seq INTEGER PRIMARY KEY AUTOINCREMENT,op TEXT DEFAULT 'upsert',user_id_hash TEXT,collection TEXT,record_id TEXT,deleted_at TEXT DEFAULT '');
@@ -201,7 +201,7 @@ func compareMeshImport(t *testing.T, actual, expected *Store, ctx context.Contex
 	for _, item := range deletions {
 		baselineDeletions = append(baselineDeletions, baselineMeshEncryptedRecordDeletion(item))
 	}
-	got := MeshStore_ImportEncryptedBatch(actual.db, ctx, policy, records, deletions)
+	got := MeshStore_ImportEncryptedBatch(actual.Database, ctx, policy, records, deletions)
 	want, err := expected.baselineImportMeshEncryptedBatch(ctx, policy, baselineRecords, baselineDeletions)
 	if got.Value != want || !sameIdentityError(got.Error, err) {
 		t.Fatalf("mesh import = %#v; baseline = %d, %v", got, want, err)
@@ -221,7 +221,7 @@ func meshPortSnapshot(t *testing.T, store *Store) map[string][][]any {
 		"cursors": "SELECT peer_key,cursor FROM node_sync_cursors ORDER BY peer_key",
 	}
 	for name, query := range queries {
-		rows, err := store.db.Query(query)
+		rows, err := store.Database.Query(query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -263,7 +263,7 @@ func compareMeshState(t *testing.T, actual, expected *Store) {
 
 func compareMeshExport(t *testing.T, actual, expected *Store, ctx context.Context, policy NodeSyncPolicy, cursor string, limit int) MeshExportResult {
 	t.Helper()
-	got := MeshStore_ExportEncryptedRecords(actual.db, ctx, policy, cursor, limit)
+	got := MeshStore_ExportEncryptedRecords(actual.Database, ctx, policy, cursor, limit)
 	records, deletions, next, truncated, err := expected.baselineExportMeshEncryptedRecords(ctx, policy, cursor, limit)
 	var converted []MeshEncryptedRecord
 	if records != nil {
@@ -312,10 +312,10 @@ func TestZiranMeshImportConvergenceAgainstBaseline(t *testing.T) {
 	compareMeshImport(t, actual, expected, t.Context(), policy, []MeshEncryptedRecord{item}, []MeshEncryptedRecordDeletion{deletion})
 	for _, store := range []*Store{actual, expected} {
 		var count int
-		if err := store.db.QueryRow("SELECT COUNT(*) FROM server_encrypted_records WHERE user_id_hash=?", item.UserIDHash).Scan(&count); err != nil || count != 0 {
+		if err := store.Database.QueryRow("SELECT COUNT(*) FROM server_encrypted_records WHERE user_id_hash=?", item.UserIDHash).Scan(&count); err != nil || count != 0 {
 			t.Fatal("equal-sequence deletion no longer follows the upsert", count, err)
 		}
-		if _, err := store.db.Exec("INSERT INTO server_account_tombstones VALUES(?)", item.UserIDHash); err != nil {
+		if _, err := store.Database.Exec("INSERT INTO server_account_tombstones VALUES(?)", item.UserIDHash); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -380,7 +380,7 @@ CREATE TRIGGER reject_mesh AFTER INSERT ON server_encrypted_records BEGIN INSERT
 			}
 			if query != "" {
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec(query); err != nil {
+					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -398,7 +398,7 @@ CREATE TRIGGER reject_mesh AFTER INSERT ON server_encrypted_records BEGIN INSERT
 					t.Fatal("forced transaction failure was ignored")
 				}
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec("DROP TRIGGER reject_mesh"); err != nil {
+					if _, err := store.Database.Exec("DROP TRIGGER reject_mesh"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -450,12 +450,12 @@ func TestZiranMeshExportPaginationAndQueryErrorsAgainstBaseline(t *testing.T) {
 				query = "DROP TABLE server_mesh_changes"
 			case "closed":
 				for _, store := range []*Store{actual, expected} {
-					_ = store.db.Close()
+					_ = store.Database.Close()
 				}
 			}
 			if query != "" {
 				for _, store := range []*Store{actual, expected} {
-					if _, err := store.db.Exec(query); err != nil {
+					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -478,13 +478,13 @@ func TestZiranMeshExportPaginationAndQueryErrorsAgainstBaseline(t *testing.T) {
 func TestZiranMeshCursorPersistenceAgainstBaseline(t *testing.T) {
 	actual, expected := meshPortFixture(t), meshPortFixture(t)
 	for _, value := range []string{"", "\u2003\t", "cursor", " cursor ", "replacement\x00cursor"} {
-		got := MeshStore_SaveCursor(actual.db, t.Context(), "peer", value)
+		got := MeshStore_SaveCursor(actual.Database, t.Context(), "peer", value)
 		want := expected.baselineSaveNodeSyncCursor(t.Context(), "peer", value)
 		if !sameIdentityError(got, want) {
 			t.Fatal("cursor save error changed", got, want)
 		}
 		for _, key := range []string{"peer", "missing"} {
-			got := MeshStore_LoadCursor(actual.db, t.Context(), key)
+			got := MeshStore_LoadCursor(actual.Database, t.Context(), key)
 			want, err := expected.baselineLoadNodeSyncCursor(t.Context(), key)
 			if got.Value != want || !sameIdentityError(got.Error, err) {
 				t.Fatal("cursor load changed", got, want, err)
@@ -494,13 +494,13 @@ func TestZiranMeshCursorPersistenceAgainstBaseline(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if got := MeshStore_LoadCursor(actual.db, ctx, "peer"); !errors.Is(got.Error, context.Canceled) {
+	if got := MeshStore_LoadCursor(actual.Database, ctx, "peer"); !errors.Is(got.Error, context.Canceled) {
 		t.Fatal("cursor cancellation changed", got)
 	}
-	if err := MeshStore_SaveCursor(actual.db, ctx, "peer", ""); err != nil {
+	if err := MeshStore_SaveCursor(actual.Database, ctx, "peer", ""); err != nil {
 		t.Fatal("blank cursor began a database operation", err)
 	}
-	if err := MeshStore_SaveCursor(actual.db, ctx, "peer", "new"); !errors.Is(err, context.Canceled) {
+	if err := MeshStore_SaveCursor(actual.Database, ctx, "peer", "new"); !errors.Is(err, context.Canceled) {
 		t.Fatal("cursor save cancellation changed", err)
 	}
 }

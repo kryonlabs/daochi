@@ -82,13 +82,13 @@ func TestZiranMeshPullPaginationAndFailuresAgainstBaseline(t *testing.T) {
 					query = "CREATE TRIGGER reject_record BEFORE INSERT ON server_encrypted_records WHEN NEW.id='pull-second' BEGIN SELECT RAISE(ABORT,'record rejected'); END"
 				}
 				if query != "" {
-					if _, err := server.store.db.Exec(query); err != nil {
+					if _, err := server.store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "resume" {
 					key := MeshCursor_PeerKey("http://peer.test", policy)
-					if err := MeshStore_SaveCursor(server.store.db, ctx, key, " raw saved cursor "); err != nil {
+					if err := MeshStore_SaveCursor(server.store.Database, ctx, key, " raw saved cursor "); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -189,18 +189,18 @@ func TestZiranMeshConfiguredPeersAgainstBaseline(t *testing.T) {
 					{"push", `["http://push.test"]`, string(encodedPush)},
 					{"no addresses", `[]`, string(encodedPull)},
 				} {
-					if _, err := server.store.db.Exec(`INSERT INTO trusted_node_peers(node_id,public_key,display_name,addresses_json,policy_json,trusted_at)
+					if _, err := server.store.Database.Exec(`INSERT INTO trusted_node_peers(node_id,public_key,display_name,addresses_json,policy_json,trusted_at)
 VALUES(?1,?2,?1,?3,?4,'fixture')`, peer.name, server.node.PublicKey, peer.addresses, peer.policy); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "missing trust table" {
-					if _, err := server.store.db.Exec("DROP TABLE trusted_node_peers"); err != nil {
+					if _, err := server.store.Database.Exec("DROP TABLE trusted_node_peers"); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "invalid stored policy" {
-					if _, err := server.store.db.Exec("UPDATE trusted_node_peers SET policy_json='{' WHERE display_name='z-last'"); err != nil {
+					if _, err := server.store.Database.Exec("UPDATE trusted_node_peers SET policy_json='{' WHERE display_name='z-last'"); err != nil {
 						t.Fatal(err)
 					}
 				}

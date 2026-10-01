@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Store) baselineMigrationCleanupOrphanHabitDays(ctx context.Context, userID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (s *Store) baselineMigrationAutoMigrateAccountForProtocol(ctx context.Conte
 }
 
 func (s *Store) baselineMigrationAutoMigrateAllAccounts(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT user_id_hash FROM server_users ORDER BY user_id_hash`)
+	rows, err := s.Database.QueryContext(ctx, `SELECT user_id_hash FROM server_users ORDER BY user_id_hash`)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (s *Store) baselineMigrationAutoMigrateAllAccounts(ctx context.Context) err
 }
 
 func (s *Store) baselineMigrationAutoMigrateAccount(ctx context.Context, userID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

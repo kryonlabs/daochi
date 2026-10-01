@@ -19,14 +19,14 @@ import (
 func socialHTTPFixture(t *testing.T) (*Server, []string) {
 	t.Helper()
 	server, store, _ := testServer(t)
-	store.db.SetMaxOpenConns(1)
+	store.Database.SetMaxOpenConns(1)
 	users := []string{strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)}
 	for index, user := range users {
-		if _, err := store.db.Exec("INSERT INTO server_users(user_id_hash,public_key,alias,profile_icon,created_at,last_seen_at) VALUES(?,?,?,?,?,?)",
+		if _, err := store.Database.Exec("INSERT INTO server_users(user_id_hash,public_key,alias,profile_icon,created_at,last_seen_at) VALUES(?,?,?,?,?,?)",
 			user, []byte{byte(index + 1)}, fmt.Sprintf("user%d", index), index, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.db.Exec("INSERT INTO server_sync_state VALUES(?,7)", user); err != nil {
+		if _, err := store.Database.Exec("INSERT INTO server_sync_state VALUES(?,7)", user); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -46,7 +46,7 @@ func socialHTTPFixture(t *testing.T) (*Server, []string) {
 		}
 	}
 	for _, query := range queries {
-		if _, err := store.db.Exec(query); err != nil {
+		if _, err := store.Database.Exec(query); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -160,14 +160,14 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 					case "body panic":
 						body.panicValue = failure
 					case "database failure":
-						if _, err := server.store.db.Exec("DROP TABLE server_social_snapshots; DROP TABLE server_friend_requests; DROP TABLE server_friendships; DROP TABLE server_profile_stats; DROP TABLE server_sessions"); err != nil {
+						if _, err := server.store.Database.Exec("DROP TABLE server_social_snapshots; DROP TABLE server_friend_requests; DROP TABLE server_friendships; DROP TABLE server_profile_stats; DROP TABLE server_sessions"); err != nil {
 							t.Fatal(err)
 						}
 					case "write failure":
 						for _, table := range []string{"server_users", "server_friend_requests", "server_friendships", "server_profile_stats", "server_social_snapshots"} {
 							for _, event := range []string{"INSERT", "UPDATE", "DELETE"} {
 								query := fmt.Sprintf("CREATE TRIGGER reject_%s_%s BEFORE %s ON %s BEGIN SELECT RAISE(ABORT,'write rejected'); END", table, event, event, table)
-								if _, err := server.store.db.Exec(query); err != nil {
+								if _, err := server.store.Database.Exec(query); err != nil {
 									t.Fatal(err)
 								}
 							}
@@ -197,11 +197,11 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 					if observed.status == http.StatusOK {
 						observed.body = socialHTTPResponseTimes(t, endpoint.name, observed.body, started, finished)
 					}
-					if err := server.store.db.Ping(); err != nil {
+					if err := server.store.Database.Ping(); err != nil {
 						t.Fatal("HTTP path retained the database connection", err)
 					}
 					for _, user := range users {
-						exported := AccountExport_Export(server.store.db, context.Background(), user)
+						exported := AccountExport_Export(server.store.Database, context.Background(), user)
 						observed.accounts = append(observed.accounts, exported.Value)
 					}
 					for _, channel := range channels {

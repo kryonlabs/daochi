@@ -21,7 +21,7 @@ const invoiceFixtureID = "0123456789abcdef0123456789abcdef"
 
 func seedInvoiceFixture(t *testing.T, server *Server, account, status, expiry string) {
 	t.Helper()
-	_, err := server.store.db.Exec(`INSERT INTO token_payment_intents
+	_, err := server.store.Database.Exec(`INSERT INTO token_payment_intents
 (id,provider,account_id,app_id,product_id,asset_id,token_units,provider_amount,
 provider_address,provider_ref,status,expires_at,created_at)
 VALUES(?1,'monero',?2,'target','a','waozi:token',10,20,'test-address','17',?3,?4,'2026-01-01T00:00:00Z')`,
@@ -55,7 +55,7 @@ func TestZiranMoneroInvoiceStorageMatchesBaseline(t *testing.T) {
 			for _, server := range []*Server{actual, baseline} {
 				seedInvoiceFixture(t, server, account, status, expiry)
 				if mode == "bad scan" {
-					if _, err := server.store.db.Exec(`UPDATE token_payment_intents SET provider_ref='not-an-integer'`); err != nil {
+					if _, err := server.store.Database.Exec(`UPDATE token_payment_intents SET provider_ref='not-an-integer'`); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -76,18 +76,18 @@ func TestZiranMoneroInvoiceStorageMatchesBaseline(t *testing.T) {
 			if mode == "wrong account" {
 				user = "other"
 			}
-			got := MoneroInvoiceStore_Invoice(actual.store.db, ctx, user, id)
+			got := MoneroInvoiceStore_Invoice(actual.store.Database, ctx, user, id)
 			want, found, err := baseline.store.baselineInvoiceMoneroInvoice(ctx, user, id)
 			if !reflect.DeepEqual(got.Value, want) || got.Found != found || websocketErrorText(got.Error) != websocketErrorText(err) {
 				t.Fatalf("invoice result changed: %#v / %#v, %v, %v", got, want, found, err)
 			}
 			for _, limit := range []int{-1, 0, 1, 100} {
-				pending := MoneroInvoiceStore_Pending(actual.store.db, ctx, limit)
+				pending := MoneroInvoiceStore_Pending(actual.store.Database, ctx, limit)
 				pendingBaseline, pendingError := baseline.store.baselineInvoicePendingMoneroInvoices(ctx, limit)
 				if !reflect.DeepEqual(pending.Value, invoiceRecordsFromBaseline(pendingBaseline)) || websocketErrorText(pending.Error) != websocketErrorText(pendingError) {
 					t.Fatalf("pending query changed: %#v / %#v, %v", pending, pendingBaseline, pendingError)
 				}
-				expired := MoneroInvoiceStore_Expired(actual.store.db, ctx, limit)
+				expired := MoneroInvoiceStore_Expired(actual.store.Database, ctx, limit)
 				expiredBaseline, expiredError := baseline.store.baselineInvoiceExpiredMoneroInvoices(ctx, limit)
 				if !reflect.DeepEqual(expired.Value, invoiceRecordsFromBaseline(expiredBaseline)) || websocketErrorText(expired.Error) != websocketErrorText(expiredError) {
 					t.Fatalf("expired query changed: %#v / %#v, %v", expired, expiredBaseline, expiredError)
@@ -109,7 +109,7 @@ func TestZiranMoneroInvoiceStateChangesMatchBaseline(t *testing.T) {
 			for _, server := range []*Server{actual, baseline} {
 				seedInvoiceFixture(t, server, account, status, "2100-01-01T00:00:00Z")
 				if mode == "failed update" {
-					if _, err := server.store.db.Exec(`CREATE TRIGGER invoice_write_failure BEFORE UPDATE ON token_payment_intents BEGIN SELECT RAISE(FAIL,'invoice write failed'); END`); err != nil {
+					if _, err := server.store.Database.Exec(`CREATE TRIGGER invoice_write_failure BEFORE UPDATE ON token_payment_intents BEGIN SELECT RAISE(FAIL,'invoice write failed'); END`); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -130,13 +130,13 @@ func TestZiranMoneroInvoiceStateChangesMatchBaseline(t *testing.T) {
 			var got, want error
 			switch mode {
 			case "expire":
-				got = MoneroInvoiceStore_MarkExpired(actual.store.db, ctx, user, id)
+				got = MoneroInvoiceStore_MarkExpired(actual.store.Database, ctx, user, id)
 				want = baseline.store.baselineInvoiceMarkMoneroInvoiceExpired(ctx, user, id)
 			case "settle expired":
-				got = MoneroInvoiceStore_SettleExpired(actual.store.db, ctx, user, id, "receipt", "payment")
+				got = MoneroInvoiceStore_SettleExpired(actual.store.Database, ctx, user, id, "receipt", "payment")
 				want = baseline.store.baselineInvoiceSettleExpiredMoneroInvoice(ctx, user, id, "receipt", "payment")
 			default:
-				got = MoneroInvoiceStore_MarkPendingPaid(actual.store.db, ctx, user, id, "receipt", "payment")
+				got = MoneroInvoiceStore_MarkPendingPaid(actual.store.Database, ctx, user, id, "receipt", "payment")
 				want = baseline.store.baselineInvoiceMarkMoneroInvoicePaid(ctx, user, id, "receipt", "payment")
 			}
 			if websocketErrorText(got) != websocketErrorText(want) {
@@ -144,7 +144,7 @@ func TestZiranMoneroInvoiceStateChangesMatchBaseline(t *testing.T) {
 			}
 			for index, server := range []*Server{actual, baseline} {
 				var storedStatus, receiptID, paymentID string
-				if err := server.store.db.QueryRow(`SELECT status,receipt_id,provider_payment_id FROM token_payment_intents WHERE id=?1`, invoiceFixtureID).Scan(&storedStatus, &receiptID, &paymentID); err != nil {
+				if err := server.store.Database.QueryRow(`SELECT status,receipt_id,provider_payment_id FROM token_payment_intents WHERE id=?1`, invoiceFixtureID).Scan(&storedStatus, &receiptID, &paymentID); err != nil {
 					t.Fatal(err)
 				}
 				if index == 0 {
@@ -311,7 +311,7 @@ func TestZiranMoneroInvoiceCreationMatchesBaseline(t *testing.T) {
 		if err != nil || time.Until(expiry) < 44*time.Minute || time.Until(expiry) > 46*time.Minute || !Identity_ValidResourceID(invoice.ID) {
 			t.Fatal("invoice identifier or expiration contract changed")
 		}
-		loaded := MoneroInvoiceStore_Invoice(server.store.db, t.Context(), account, invoice.ID)
+		loaded := MoneroInvoiceStore_Invoice(server.store.Database, t.Context(), account, invoice.ID)
 		if loaded.Error != nil || !loaded.Found || !reflect.DeepEqual(loaded.Value, invoice) {
 			t.Fatal("created invoice response differs from its persisted row")
 		}
@@ -344,7 +344,7 @@ func TestZiranMoneroInvoiceSettlementMatchesBaseline(t *testing.T) {
 					expiry = "2020-01-01T00:00:00Z"
 				}
 				seedInvoiceFixture(t, server, account, "pending", expiry)
-				loaded := MoneroInvoiceStore_Invoice(server.store.db, t.Context(), account, invoiceFixtureID)
+				loaded := MoneroInvoiceStore_Invoice(server.store.Database, t.Context(), account, invoiceFixtureID)
 				if loaded.Error != nil || !loaded.Found {
 					t.Fatal("fixture invoice missing")
 				}
@@ -352,7 +352,7 @@ func TestZiranMoneroInvoiceSettlementMatchesBaseline(t *testing.T) {
 					wallet.setTransfer(moneroTransfer{TxID: "confirmed", Amount: 20, Confirmations: 10, Major: 0, Minor: 17})
 				}
 				if mode == "failed mark" {
-					if _, err := server.store.db.Exec(`CREATE TRIGGER invoice_mark_failure BEFORE UPDATE ON token_payment_intents BEGIN SELECT RAISE(FAIL,'invoice mark failed'); END`); err != nil {
+					if _, err := server.store.Database.Exec(`CREATE TRIGGER invoice_mark_failure BEFORE UPDATE ON token_payment_intents BEGIN SELECT RAISE(FAIL,'invoice mark failed'); END`); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -371,7 +371,7 @@ func TestZiranMoneroInvoiceSettlementMatchesBaseline(t *testing.T) {
 					normalized := receiptWithoutGeneratedFields(*invoices[index].Receipt)
 					invoices[index].Receipt = &normalized
 				}
-				balance := TokenLedger_Balance(server.store.db, t.Context(), account, AssetID)
+				balance := TokenLedger_Balance(server.store.Database, t.Context(), account, AssetID)
 				if balance.Error != nil {
 					t.Fatal(balance.Error)
 				}
@@ -412,7 +412,7 @@ func TestZiranMoneroInvoiceReplayCleanupMatchesBaseline(t *testing.T) {
 					server.cfg.MoneroWalletRPCURL = ""
 				}
 				if mode == "write failure" || mode == "log panic" || mode == "error response panic" {
-					if _, err := server.store.db.Exec(`CREATE TRIGGER invoice_insert_failure BEFORE INSERT ON token_payment_intents BEGIN SELECT RAISE(FAIL,'invoice write failed'); END`); err != nil {
+					if _, err := server.store.Database.Exec(`CREATE TRIGGER invoice_insert_failure BEFORE INSERT ON token_payment_intents BEGIN SELECT RAISE(FAIL,'invoice write failed'); END`); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -452,7 +452,7 @@ func TestZiranMoneroInvoiceReplayCleanupMatchesBaseline(t *testing.T) {
 			}
 			for _, server := range []*Server{actual, baseline} {
 				var count int
-				if err := server.store.db.QueryRow(`SELECT COUNT(*) FROM token_payment_intents`).Scan(&count); err != nil {
+				if err := server.store.Database.QueryRow(`SELECT COUNT(*) FROM token_payment_intents`).Scan(&count); err != nil {
 					t.Fatal(err)
 				}
 				if (count == 1) != (mode == "success response panic") {

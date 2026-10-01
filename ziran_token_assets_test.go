@@ -14,7 +14,7 @@ import (
 
 func TestZiranTokenAssetSeedPreservesReleasedFields(t *testing.T) {
 	_, store, _ := testServer(t)
-	if _, err := store.db.Exec(`
+	if _, err := store.Database.Exec(`
 UPDATE token_assets SET issuer_id='old', display_name='old', decimals=9,
 status='inactive', created_at='2000-01-01', updated_at='2000-01-01'
 WHERE asset_id='waozi:token';
@@ -23,13 +23,13 @@ VALUES('other','other:token','Other',3,'inactive')`); err != nil {
 		t.Fatal(err)
 	}
 	for pass := 0; pass < 2; pass++ {
-		if err := TokenAssets_Seed(store.db, context.Background()); err != nil {
+		if err := TokenAssets_Seed(store.Database, context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var issuer, asset, display, status, created, updated string
 	var decimals int
-	err := store.db.QueryRow(`
+	err := store.Database.QueryRow(`
 SELECT issuer_id,asset_id,display_name,decimals,status,created_at,updated_at
 FROM token_assets WHERE asset_id='waozi:token'`).Scan(
 		&issuer, &asset, &display, &decimals, &status, &created, &updated)
@@ -42,7 +42,7 @@ FROM token_assets WHERE asset_id='waozi:token'`).Scan(
 		t.Fatalf("seeded asset fields: %q/%q/%q/%d/%q/%q/%q",
 			issuer, asset, display, decimals, status, created, updated)
 	}
-	err = store.db.QueryRow(`
+	err = store.Database.QueryRow(`
 SELECT issuer_id,display_name,decimals,status FROM token_assets
 WHERE asset_id='other:token'`).Scan(&issuer, &display, &decimals, &status)
 	if err != nil {
@@ -52,7 +52,7 @@ WHERE asset_id='other:token'`).Scan(&issuer, &display, &decimals, &status)
 		t.Fatalf("seed changed another asset: %q/%q/%d/%q", issuer, display, decimals, status)
 	}
 	var count int
-	if err := store.db.QueryRow("SELECT count(*) FROM token_assets").Scan(&count); err != nil {
+	if err := store.Database.QueryRow("SELECT count(*) FROM token_assets").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 2 {
@@ -64,14 +64,14 @@ func TestZiranTokenAssetSeedReturnsNativeErrors(t *testing.T) {
 	_, store, _ := testServer(t)
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := TokenAssets_Seed(store.db, canceled); !errors.Is(err, context.Canceled) {
+	if err := TokenAssets_Seed(store.Database, canceled); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation identity: %v", err)
 	}
-	if err := store.db.Close(); err != nil {
+	if err := store.Database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, expected := store.db.ExecContext(context.Background(), "SELECT 1")
-	if actual := TokenAssets_Seed(store.db, context.Background()); actual != expected {
+	_, expected := store.Database.ExecContext(context.Background(), "SELECT 1")
+	if actual := TokenAssets_Seed(store.Database, context.Background()); actual != expected {
 		t.Fatalf("closed database error: %v, want native error %v", actual, expected)
 	}
 	database, err := sql.Open("sqlite3", ":memory:")

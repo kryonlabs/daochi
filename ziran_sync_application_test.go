@@ -29,7 +29,7 @@ func applicationFixture(t *testing.T) *Store {
 func applicationSnapshot(t *testing.T, store *Store) map[string]any {
 	t.Helper()
 	value := writesSnapshot(t, store)
-	rows := AccountExport_QueryRows(store.db, t.Context(), "SELECT * FROM server_habit_id_migrations WHERE ?1='' ORDER BY rowid", "", nil)
+	rows := AccountExport_QueryRows(store.Database, t.Context(), "SELECT * FROM server_habit_id_migrations WHERE ?1='' ORDER BY rowid", "", nil)
 	if rows.Error != nil {
 		t.Fatal(rows.Error)
 	}
@@ -77,7 +77,7 @@ func applicationRequest() SyncRequest {
 
 func compareApplication(t *testing.T, actual, expected *Store, ctx context.Context, request SyncRequest, key []byte) SyncApplicationResult {
 	t.Helper()
-	got := SyncApplication_Apply(actual.db, ctx, request, key, ErrSyncUserNotFound)
+	got := SyncApplication_Apply(actual.Database, ctx, request, key, ErrSyncUserNotFound)
 	value, accepted, err := expected.baselineApplicationApplySyncDetailed(ctx, request, key)
 	if got.Value != value || !reflect.DeepEqual(got.Accepted, accepted) || !sameIdentityError(got.Error, err) {
 		t.Fatalf("sync result changed: %#v; original %#v/%#v/%v", got, value, accepted, err)
@@ -231,7 +231,7 @@ func TestZiranSyncApplicationNativeFailures(t *testing.T) {
 						store := lifecycleDriverStore(t, plan)
 						panics[index] = boundaryRecover(func() {
 							if index == 0 {
-								results[index] = SyncApplication_Apply(store.db, t.Context(), request, key, ErrSyncUserNotFound)
+								results[index] = SyncApplication_Apply(store.Database, t.Context(), request, key, ErrSyncUserNotFound)
 							} else {
 								value, accepted, err := store.baselineApplicationApplySyncDetailed(t.Context(), request, key)
 								results[index] = SyncApplicationResult{value, accepted, err}
@@ -262,7 +262,7 @@ func TestZiranHabitIdentifiersAndPayloads(t *testing.T) {
 		}
 	}
 	store := applicationFixture(t)
-	transaction, err := store.db.BeginTx(t.Context(), nil)
+	transaction, err := store.Database.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

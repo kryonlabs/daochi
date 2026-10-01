@@ -1,0 +1,557 @@
+#import "std/go_types"
+#import "protocol"
+#import "sync_types"
+#import "transaction"
+config :: #import "config";
+auth :: #import "authentication";
+requests :: #import "sync_request";
+validation :: #import "sync_validation";
+signed :: #import "signed_tx";
+application :: #import "sync_application";
+views :: #import "sync_views";
+clients :: #import "sync_clients";
+audit :: #import "sync_audit";
+migration :: #import "habit_migration";
+hash :: #import "state_hash";
+state :: #import "account_state";
+profile :: #import "account_profile";
+friends :: #import "friend_store";
+payloads :: #import "encrypted_payloads";
+hub :: #import "sync_hub";
+metrics :: #import "metrics";
+node :: #import "node_info";
+identity :: #import "identity";
+logs :: #import "log_safety";
+body :: #import "http_body";
+http_auth :: #import "http_auth";
+response :: #import "response";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+errors :: #import "std/errors_go";
+atomic :: #import "std/atomic_go";
+strings :: #system_library "go:strings";
+strconv :: #system_library "go:strconv";
+logging :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+Synchronization :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    notifications: *hub.SyncHub
+    verify: auth.VerifySignature
+    replayError: Error
+    missingUser: Error
+}
+
+#scope_file
+SyncCompletion :: struct {
+    complete: bool
+    signed: bool
+    transaction: SignedTxEnvelope
+}
+FinishCallback :: #type (completion: *SyncCompletion, sync: Synchronization, request: *http.Request) -> void;
+FinishAtReturn :: (callback: FinishCallback, completion: *SyncCompletion, sync: Synchronization,
+    request: *http.Request) #go_defer #foreign builtin "call";
+IntegerResult :: struct {
+    value: s64
+    error: Error
+}
+ParseInteger :: (value: string, base: isize, bits: isize) -> IntegerResult #go_results #foreign strconv "ParseInt";
+EqualFold :: (left: string, right: string) -> bool #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+AllocateOperations :: (count: isize) -> []SyncOp #foreign builtin "make";
+AllocateHabits :: (count: isize) -> []Habit #foreign builtin "make";
+AllocateDays :: (count: isize, capacity: isize) -> []HabitDay #foreign builtin "make";
+AppendDay :: (values: []HabitDay, value: HabitDay) -> []HabitDay #foreign builtin "append";
+AllocateCleanDays :: (count: isize) -> []CleanHabitDay #foreign builtin "make";
+AllocateSessions :: (count: isize) -> []Session #foreign builtin "make";
+AllocateMeditations :: (count: isize) -> []MeditationLog #foreign builtin "make";
+LogAccountError :: (message: string, userKey: string, user: string, errorKey: string, error: Error) #foreign logging "Error";
+LogClientError :: (message: string, userKey: string, user: string, clientKey: string, client: string,
+    errorKey: string, error: Error) #foreign logging "Error";
+LogPruned :: (message: string, userKey: string, user: string, countKey: string, count: s64) #foreign logging "Info";
+
+Finish :: (completion: *SyncCompletion, sync: Synchronization, request: *http.Request) {
+    if !completion.complete {
+        atomic.Add(*sync.counters.syncFailures, cast(u64)1)
+        if completion.signed {
+            signed.Forget(sync.database, http.Context(request), completion.transaction)
+        }
+    }
+}
+
+StorageFailure :: (writer: http.ResponseWriter, message: string, user: string, error: Error, publicMessage: string) {
+    LogAccountError(message, "user", logs.LogText(user), "error", error)
+    response.Error(writer, cast(isize)500, publicMessage)
+}
+
+Applied :: (result: SyncResult) -> bool {
+    return result.MeditationLogs > cast(isize)0 || result.Habits > cast(isize)0 ||
+        result.HabitDays > cast(isize)0 || result.Sessions > cast(isize)0 ||
+        result.SocialCache > cast(isize)0 || result.EncryptedRecords > cast(isize)0
+}
+
+ChangesResult :: (changes: SyncChanges) -> SyncResult {
+    result: SyncResult
+    result.MeditationLogs = cast(isize)changes.MeditationLogs.count
+    result.Habits = cast(isize)changes.Habits.count
+    result.HabitDays = cast(isize)changes.HabitDays.count
+    result.Sessions = cast(isize)changes.Sessions.count
+    result.SocialCache = cast(isize)changes.SocialCache.count
+    result.EncryptedRecords = cast(isize)changes.EncryptedRecords.count
+    return result
+}
+
+ProjectClean :: (value: *SyncResponse, request: SyncRequest) {
+    if !requests.IncludeLegacyPrivateData(request) {
+        value.Data.Habits = AllocateHabits(cast(isize)0)
+        value.Data.HabitDays = AllocateCleanDays(cast(isize)0)
+        value.Data.Sessions = AllocateSessions(cast(isize)0)
+        value.Data.MeditationLogs = AllocateMeditations(cast(isize)0)
+    }
+    value.Changes.Habits = value.Data.Habits
+    value.Changes.HabitDays = AllocateDays(cast(isize)0, cast(isize)value.Data.HabitDays.count)
+    for clean: value.Data.HabitDays {
+        day: HabitDay
+        day.HabitID = clean.HabitID
+        day.LocalDate = clean.LocalDate
+        day.Completed = clean.Completed
+        day.Count = clean.Count
+        day.UpdatedAt = clean.UpdatedAt
+        value.Changes.HabitDays = AppendDay(value.Changes.HabitDays, day)
+    }
+    value.Changes.Sessions = value.Data.Sessions
+    value.Changes.MeditationLogs = value.Data.MeditationLogs
+    value.Changes.SocialCache = value.Data.Social
+    value.Changes.EncryptedRecords = value.Data.EncryptedRecords
+}
+
+#scope_export
+Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Request) {
+    atomic.Add(*sync.counters.syncRequests, cast(u64)1)
+    completion: SyncCompletion
+    FinishAtReturn(Finish, *completion, sync, request)
+    read := body.ReadJSON(writer, request, sync.configuration.MaxBodyBytes)
+    if read.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(read.error))
+        return
+    }
+    if requests.IsEncryptedEnvelope(read.value) {
+        if EncryptedEnvelope(sync, writer, request, read.value) {
+            completion.complete = true
+        }
+        return
+    }
+    parsed := requests.ParseSync(read.value)
+    if parsed.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(parsed.error))
+        return
+    }
+    input := parsed.value
+    error := requests.ApplyHeaderUser(request, *input.UserIDHash)
+    if error != null {
+        response.Error(writer, cast(isize)400, errors.Message(error))
+        return
+    }
+    if !identity.ValidClientID(input.ClientID) {
+        response.Error(writer, cast(isize)400, "invalid client_id")
+        return
+    }
+    authenticated := http_auth.AuthenticateToken(sync.database, request, sync.configuration.TokenSecret)
+    if authenticated.authentication.error != null || authenticated.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, sync.counters, authenticated.authentication)
+        return
+    }
+    if authenticated.value != input.UserIDHash {
+        response.Error(writer, cast(isize)401, "token user mismatch")
+        return
+    }
+    publicKey := requests.PublicKey(input)
+    if publicKey.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(publicKey.error))
+        return
+    }
+    context := http.Context(request)
+    error = validation.Validate(sync.database, context, input)
+    if error != null {
+        response.Error(writer, cast(isize)400, errors.Message(error))
+        return
+    }
+    if input.ProtocolVersion >= cast(isize)6 {
+        header := signed.ReadHeader(request)
+        if header.authentication.error != null || header.authentication.status != cast(isize)0 {
+            http_auth.Respond(writer, sync.counters, header.authentication)
+            return
+        }
+        verified := signed.Verify(sync.database, context, request, read.value, header.value,
+            input.UserIDHash, input.AppID, sync.verify, sync.replayError)
+        if verified.error != null || verified.status != cast(isize)0 {
+            http_auth.Respond(writer, sync.counters, verified)
+            return
+        }
+        completion.signed = true
+        completion.transaction = header.value
+    }
+    requests.NormalizeMeditationDurations(input.MeditationLogs)
+    base := hash.State(sync.database, context, input.UserIDHash)
+    if base.error != null {
+        StorageFailure(writer, "hash sync state", input.UserIDHash, base.error, "state hash failed")
+        return
+    }
+    result: SyncResult
+    accepted := AllocateStrings(cast(isize)0)
+    remote := AllocateOperations(cast(isize)0)
+    fullSnapshot := false
+    completeChanges := true
+    sinceVersion := input.SinceServerVersion
+    recordedClock := input.ClientClock
+    snapshotReason := ""
+    compactedThrough: s64 = 0
+    apply := true
+    if input.LastServerStateHash != "" && !EqualFold(input.LastServerStateHash, base.value) && !input.FullSyncRequested {
+        fullSnapshot = true
+        completeChanges = false
+        sinceVersion = 0
+        snapshotReason = "state_hash_mismatch"
+        apply = false
+    } else if input.ProtocolVersion >= cast(isize)2 && !input.FullSyncRequested {
+        compacted := clients.Compacted(sync.database, context, input.UserIDHash, input.ClientClock)
+        if compacted.error != null {
+            StorageFailure(writer, "check sync op compaction", input.UserIDHash, compacted.error, "compaction check failed")
+            return
+        }
+        compactedThrough = compacted.through
+        if compacted.compacted {
+            fullSnapshot = true
+            completeChanges = false
+            sinceVersion = 0
+            snapshotReason = "sync_ops_compacted"
+            apply = false
+        }
+    }
+    if apply {
+        applied := application.Apply(sync.database, context, input, publicKey.value, sync.missingUser)
+        if applied.error != null {
+            StorageFailure(writer, "apply sync", input.UserIDHash, applied.error, "sync failed")
+            return
+        }
+        result = applied.value
+        accepted = applied.accepted
+    }
+    if fullSnapshot && requests.HasLocalChanges(input) {
+        applied := application.Apply(sync.database, context, input, publicKey.value, sync.missingUser)
+        if applied.error != null {
+            StorageFailure(writer, "apply stale sync uploads", input.UserIDHash, applied.error, "sync failed")
+            return
+        }
+        result = applied.value
+        accepted = applied.accepted
+    }
+    if fullSnapshot {
+        metrics.RecordFullSnapshot(sync.counters, snapshotReason)
+    }
+    loaded := views.Changes(sync.database, context, input.UserIDHash, sinceVersion)
+    if loaded.error != null {
+        StorageFailure(writer, "load sync changes", input.UserIDHash, loaded.error, "changes failed")
+        return
+    }
+    changes := loaded.value
+    serverVersion := loaded.version
+    social := friends.Authoritative(sync.database, context, input.UserIDHash)
+    if social.error != null {
+        StorageFailure(writer, "load authoritative social state", input.UserIDHash, social.error, "social state failed")
+        return
+    }
+    changes.SocialCache = social.value
+    if input.ProtocolVersion >= cast(isize)2 {
+        if fullSnapshot {
+            remote = AllocateOperations(cast(isize)0)
+            recordedClock = serverVersion
+        } else {
+            operations := views.OperationsSince(sync.database, context, input.UserIDHash, input.ClientClock)
+            if operations.error != null {
+                StorageFailure(writer, "load sync ops", input.UserIDHash, operations.error, "ops failed")
+                return
+            }
+            remote = operations.value
+        }
+    }
+    serverHash := hash.State(sync.database, context, input.UserIDHash)
+    if serverHash.error != null {
+        StorageFailure(writer, "hash sync response", input.UserIDHash, serverHash.error, "state hash failed")
+        return
+    }
+    error = clients.RecordSync(sync.database, context, input.UserIDHash, input.ClientID,
+        input.SinceServerVersion, serverVersion, input.ProtocolVersion, recordedClock)
+    if error != null {
+        LogClientError("record sync client", "user", logs.LogText(input.UserIDHash), "client", logs.LogText(input.ClientID), "error", error)
+        response.Error(writer, cast(isize)500, "client state failed")
+        return
+    }
+    if input.ProtocolVersion >= cast(isize)2 {
+        error = clients.Compact(sync.database, context, input.UserIDHash)
+        if error != null {
+            StorageFailure(writer, "compact sync ops", input.UserIDHash, error, "compaction failed")
+            return
+        }
+    }
+    if Applied(result) {
+        hub.Publish(sync.notifications, input.UserIDHash, serverVersion)
+    }
+    alias := profile.Alias(sync.database, context, input.UserIDHash)
+    if alias.error != null {
+        StorageFailure(writer, "load account alias", input.UserIDHash, alias.error, "alias failed")
+        return
+    }
+    icon := profile.Icon(sync.database, context, input.UserIDHash)
+    if icon.error != null {
+        StorageFailure(writer, "load profile icon", input.UserIDHash, icon.error, "profile icon failed")
+        return
+    }
+    value: SyncResponse
+    value.ProtocolVersion = input.ProtocolVersion
+    value.Status = "ok"
+    value.ServerCapabilities = node.Capabilities()
+    value.TransitionMode = requests.TransitionMode(input)
+    value.Applied = result
+    value.AccountAlias = alias.value
+    value.ProfileIcon = icon.value
+    value.ServerVersion = serverVersion
+    value.ServerClock = serverVersion
+    value.ServerStateHash = serverHash.value
+    value.BaseStateHash = base.value
+    value.ChangesComplete = completeChanges
+    value.FullSnapshotRequired = fullSnapshot
+    value.AcceptedOps = accepted
+    value.Ops = remote
+    value.Changes = changes
+    value.MinSupportedProtocol = MinSupportedProtocol
+    value.LatestProtocol = input.ProtocolVersion
+    value.ServerLatestProtocol = LatestProtocol
+    diagnostics: SyncDiagnostics
+    diagnostics.SnapshotReason = snapshotReason
+    diagnostics.RequestedSinceServerVersion = input.SinceServerVersion
+    diagnostics.EffectiveSinceServerVersion = sinceVersion
+    diagnostics.ClientClock = input.ClientClock
+    diagnostics.CompactedThroughVersion = compactedThrough
+    diagnostics.HasLocalChanges = requests.HasLocalChanges(input)
+    diagnostics.AcceptedOps = cast(isize)accepted.count
+    diagnostics.RemoteOps = cast(isize)remote.count
+    diagnostics.AppliedInput = result
+    diagnostics.ReturnedChanges = ChangesResult(changes)
+    value.Diagnostics = *diagnostics
+    if input.ProtocolVersion >= cast(isize)3 {
+        error = migration.ForProtocol(sync.database, context, input.UserIDHash, input.ProtocolVersion)
+        if error != null {
+            StorageFailure(writer, "auto migrate account", input.UserIDHash, error, "migration failed")
+            return
+        }
+        current := state.CurrentVersion(sync.database, context, input.UserIDHash)
+        if current.error != null {
+            StorageFailure(writer, "load migrated server version", input.UserIDHash, current.error, "version failed")
+            return
+        }
+        migratedHash := hash.State(sync.database, context, input.UserIDHash)
+        if migratedHash.error != null {
+            StorageFailure(writer, "hash migrated sync response", input.UserIDHash, migratedHash.error, "state hash failed")
+            return
+        }
+        value.ServerVersion = current.value
+        value.ServerClock = current.value
+        value.ServerStateHash = migratedHash.value
+        clean := views.Clean(sync.database, context, input.UserIDHash)
+        if clean.error != null {
+            StorageFailure(writer, "load clean data", input.UserIDHash, clean.error, "clean data failed")
+            return
+        }
+        value.Data = clean.value
+        ProjectClean(*value, input)
+        logEntries := audit.Logs(sync.database, context, input.UserIDHash, input.ClientClock)
+        if logEntries.error != null {
+            StorageFailure(writer, "load sync logs", input.UserIDHash, logEntries.error, "logs failed")
+            return
+        }
+        value.Logs = logEntries.value
+        deleted := audit.Deletes(sync.database, context, input.UserIDHash, input.ClientClock)
+        if deleted.error != null {
+            StorageFailure(writer, "load delete logs", input.UserIDHash, deleted.error, "delete logs failed")
+            return
+        }
+        value.Deletes = deleted.value
+        legacy := clients.Legacy(sync.database, context, input.UserIDHash, LatestProtocol)
+        if legacy.error != null {
+            StorageFailure(writer, "load legacy clients", input.UserIDHash, legacy.error, "legacy clients failed")
+            return
+        }
+        value.LegacyClients = legacy.value
+        if legacy.value.count > 0 {
+            atomic.Add(*sync.counters.legacyClientHints, cast(u64)legacy.value.count)
+        }
+    }
+    policy := clients.LegacyWritePolicy(sync.database, context, input.UserIDHash)
+    if policy.error != null {
+        StorageFailure(writer, "load legacy write policy", input.UserIDHash, policy.error, "legacy write policy failed")
+        return
+    }
+    value.LegacyWriteRequired = policy.required
+    value.LegacyProjectionEpoch = policy.epoch
+    if value.Diagnostics != null {
+        value.Diagnostics.ReturnedChanges = ChangesResult(value.Changes)
+    }
+    if result.EncryptedRecords > cast(isize)0 {
+        atomic.Add(*sync.counters.syncEncryptedRecords, cast(u64)result.EncryptedRecords)
+    }
+    entry: SyncAuditEntry
+    entry.UserIDHash = input.UserIDHash
+    entry.ClientID = input.ClientID
+    entry.AppID = input.AppID
+    entry.ProtocolVersion = input.ProtocolVersion
+    entry.SinceServerVersion = input.SinceServerVersion
+    entry.ClientClock = input.ClientClock
+    entry.ServerVersion = value.ServerVersion
+    entry.Applied = result
+    entry.RemoteOps = cast(isize)remote.count
+    entry.FullSnapshotRequired = fullSnapshot
+    entry.SnapshotReason = snapshotReason
+    error = audit.Record(sync.database, context, entry)
+    if error != null {
+        LogClientError("record sync audit", "user", logs.LogText(input.UserIDHash), "client", logs.LogText(input.ClientID), "error", error)
+    }
+    completion.complete = true
+    response.JSON(writer, cast(isize)200, value)
+}
+
+EncryptedEnvelope :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Request, bytes: []u8) -> bool {
+    header := http_auth.UserHeader(request)
+    user := header.value
+    if user == "" {
+        response.Error(writer, cast(isize)400, "missing X-Daochi-User")
+        return false
+    }
+    if !identity.ValidUserID(user) {
+        parts: [2]string = .["invalid ", header.name]
+        response.Error(writer, cast(isize)400, Join(parts[:], ""))
+        return false
+    }
+    authenticated := http_auth.AuthenticateToken(sync.database, request, sync.configuration.TokenSecret)
+    if authenticated.authentication.error != null || authenticated.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, sync.counters, authenticated.authentication)
+        return false
+    }
+    if authenticated.value != user {
+        http_auth.Respond(writer, sync.counters, auth.Failure(cast(isize)401, "token user mismatch"))
+        return false
+    }
+    clientNames: [2]string = .["X-Daochi-Client", "X-Ksync-Client"]
+    client := http_auth.HeaderAlias(request, clientNames[:])
+    if client != "" && !identity.ValidClientID(client) {
+        response.Error(writer, cast(isize)400, "invalid X-Daochi-Client")
+        return false
+    }
+    sinceVersion: s64 = 0
+    versionNames: [2]string = .["X-Daochi-Since-Version", "X-Ksync-Since-Version"]
+    versionText := http_auth.HeaderAlias(request, versionNames[:])
+    if versionText != "" {
+        parsed := ParseInteger(versionText, cast(isize)10, cast(isize)64)
+        if parsed.error != null || parsed.value < 0 {
+            response.Error(writer, cast(isize)400, "invalid X-Daochi-Since-Version")
+            return false
+        }
+        sinceVersion = parsed.value
+    }
+    limit := requests.EncryptedPayloadLimit(request, sync.configuration.EncryptedPayloadMaxReturn)
+    if limit.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(limit.error))
+        return false
+    }
+    context := http.Context(request)
+    if sync.configuration.EncryptedPayloadMaxAccountBytes > 0 {
+        usage := payloads.Bytes(sync.database, context, user)
+        if usage.error != null {
+            StorageFailure(writer, "load encrypted payload usage", user, usage.error, "encrypted sync failed")
+            return false
+        }
+        if bytes.count > sync.configuration.EncryptedPayloadMaxAccountBytes ||
+            usage.value + bytes.count > sync.configuration.EncryptedPayloadMaxAccountBytes {
+            response.Error(writer, cast(isize)413, "encrypted payload quota exceeded")
+            return false
+        }
+    }
+    alias := profile.Alias(sync.database, context, user)
+    if alias.error != null {
+        StorageFailure(writer, "load encrypted sync account alias", user, alias.error, "alias failed")
+        return false
+    }
+    icon := profile.Icon(sync.database, context, user)
+    if icon.error != null {
+        StorageFailure(writer, "load encrypted sync profile icon", user, icon.error, "profile icon failed")
+        return false
+    }
+    social := friends.Authoritative(sync.database, context, user)
+    if social.error != null {
+        StorageFailure(writer, "load encrypted sync social state", user, social.error, "social state failed")
+        return false
+    }
+    stored := payloads.Store(sync.database, context, user, client, bytes, sync.missingUser)
+    if stored.error != null {
+        if errors.Is(stored.error, sync.missingUser) {
+            response.Error(writer, cast(isize)404, "sync account not found")
+            return false
+        }
+        StorageFailure(writer, "store encrypted payload", user, stored.error, "encrypted sync failed")
+        return false
+    }
+    pruned := payloads.Prune(sync.database, context, user, sync.configuration.EncryptedPayloadRetention, 0)
+    if pruned.error != null {
+        LogAccountError("prune encrypted payloads", "user", logs.LogText(user), "error", pruned.error)
+    } else if pruned.value.Deleted > 0 {
+        LogPruned("pruned encrypted payloads", "user", logs.LogText(user), "deleted", pruned.value.Deleted)
+    }
+    loaded := payloads.Since(sync.database, context, user, sinceVersion, limit.value)
+    if loaded.error != null {
+        StorageFailure(writer, "load encrypted payloads", user, loaded.error, "encrypted sync failed")
+        return false
+    }
+    error := clients.RecordSync(sync.database, context, user, client, sinceVersion, stored.version, LatestProtocol, stored.version)
+    if error != null {
+        LogClientError("record encrypted sync client", "user", logs.LogText(user), "client", logs.LogText(client), "error", error)
+    }
+    entry: SyncAuditEntry
+    entry.UserIDHash = user
+    entry.ClientID = client
+    entry.ProtocolVersion = LatestProtocol
+    entry.SinceServerVersion = sinceVersion
+    entry.ClientClock = sinceVersion
+    entry.ServerVersion = stored.version
+    entry.EncryptedPayload = true
+    entry.EncryptedPayloadBytes = bytes.count
+    error = audit.Record(sync.database, context, entry)
+    if error != null {
+        LogClientError("record encrypted sync audit", "user", logs.LogText(user), "client", logs.LogText(client), "error", error)
+    }
+    atomic.Add(*sync.counters.syncEncryptedPayloads, cast(u64)1)
+    hub.Publish(sync.notifications, user, stored.version)
+    value: SyncResponse
+    value.ProtocolVersion = LatestProtocol
+    value.Status = "ok"
+    value.ServerCapabilities = node.Capabilities()
+    value.TransitionMode = "encrypted_payload"
+    value.AccountAlias = alias.value
+    value.ProfileIcon = icon.value
+    value.ServerVersion = stored.version
+    value.ServerClock = stored.version
+    value.ChangesComplete = true
+    value.Changes = requests.EmptyChanges()
+    value.EncryptedPayloads = loaded.value
+    value.MinSupportedProtocol = MinSupportedProtocol
+    value.ServerLatestProtocol = LatestProtocol
+    value.Changes.SocialCache = social.value
+    if loaded.truncated {
+        value.EncryptedPayloadsTruncated = true
+        value.EncryptedPayloadsNextSinceVersion = loaded.value[loaded.value.count - 1].ServerVersion
+    }
+    response.JSON(writer, cast(isize)200, value)
+    return true
+}

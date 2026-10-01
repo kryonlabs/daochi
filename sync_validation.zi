@@ -1,0 +1,69 @@
+#import "std/go_types"
+#import "sync_types"
+apps :: #import "app_store";
+records :: #import "encrypted_record";
+identity :: #import "identity";
+logs :: #import "log_safety";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+logging :: #system_library "go:log/slog";
+
+#scope_file
+WarnCollection :: (message: string, appKey: string, app: string,
+    collectionKey: string, collection: string, modeKey: string, mode: string) #foreign logging "Warn";
+
+#scope_export
+Validate :: (database: *sql.Database, context: ctx.Context, request: SyncRequest) -> Error {
+    if request.AppID != "" {
+        if !identity.ValidNamespace(request.AppID) {
+            return errors.New("invalid app_id")
+        }
+        selected := apps.ByID(database, context, request.AppID)
+        if selected.error != null {
+            return selected.error
+        }
+        if !selected.found {
+            return errors.New("unknown app_id")
+        }
+        if selected.value.Status != "active" {
+            return errors.New("app_id inactive")
+        }
+        if request.ProtocolVersion >= cast(isize)6 && selected.value.ManifestExpiresAt > 0 &&
+            clock.Unix(clock.Now()) > selected.value.ManifestExpiresAt {
+            return errors.New("app manifest expired")
+        }
+        if request.ProtocolVersion < cast(isize)6 {
+            legacy := apps.AllowsLegacyProtocol(database, context, request.AppID, request.ProtocolVersion)
+            if legacy.error != null {
+                return legacy.error
+            }
+            if !legacy.value {
+                return errors.New("legacy protocol not allowed for app_id")
+            }
+        }
+    }
+    if request.ProtocolVersion >= cast(isize)6 && request.AppID == "" {
+        return errors.New("app_id required")
+    }
+    for record: request.EncryptedRecords {
+        if !records.ValidForProtocol(record, request.ProtocolVersion) {
+            return errors.New("invalid encrypted record")
+        }
+        if request.AppID != "" {
+            ownership := apps.OwnsCollection(database, context, request.AppID, record.Collection)
+            if ownership.error != null {
+                return ownership.error
+            }
+            if !ownership.value {
+                if request.ProtocolVersion >= cast(isize)6 {
+                    return errors.New("encrypted record collection is not registered for app_id")
+                }
+                WarnCollection("sync request used unregistered app collection", "app_id",
+                    logs.LogText(request.AppID), "collection", logs.LogText(record.Collection), "mode", "compat")
+            }
+        }
+    }
+    return null
+}

@@ -1,0 +1,301 @@
+#import "protocol"
+#import "std/go_types"
+#import "std/map_go"
+#import "std/option"
+deposits :: #import "monero_deposits";
+storage :: #import "monero_invoice_store";
+wallet :: #import "monero_wallet";
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+policy :: #import "token_policy";
+requests :: #import "payment_request";
+apps :: #import "app_store";
+signed :: #import "signed_tx";
+auth :: #import "http_auth";
+identity :: #import "identity";
+response :: #import "response";
+logs :: #import "log_safety";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+clock :: #import "std/time_go";
+atomic :: #import "std/atomic_go";
+sync :: #import "std/sync_go";
+select :: #import "std/select_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+logging :: #system_library "go:log/slog";
+go_time :: #system_library "go:time";
+builtin :: #system_library "go:builtin";
+
+#scope_file
+ReplayCleanup :: #type (database: *sql.Database, context: ctx.Context,
+    authorization: policy.TokenAuthorizationResult, completed: *bool) -> void;
+CleanupAtReturn :: (callback: ReplayCleanup, database: *sql.Database, context: ctx.Context,
+    authorization: policy.TokenAuthorizationResult, completed: *bool) #go_defer #foreign builtin "call";
+StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
+TrimSpace :: (value: string) -> string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+LogError :: (message: string, key: string, error: Error) #foreign logging "Error";
+LogWarning :: (message: string, key: string, error: Error) #foreign logging "Warn";
+LogSubjectError :: (message: string, subjectKey: string, subject: string,
+    errorKey: string, error: Error) #foreign logging "Error";
+LogSubjectWarning :: (message: string, subjectKey: string, subject: string,
+    errorKey: string, error: Error) #foreign logging "Warn";
+LogInvoiceError :: (message: string, userKey: string, user: string,
+    invoiceKey: string, invoice: string, errorKey: string, error: Error) #foreign logging "Error";
+LogInvoiceWarning :: (message: string, userKey: string, user: string,
+    invoiceKey: string, invoice: string, errorKey: string, error: Error) #foreign logging "Warn";
+LogLatePayment :: (message: string, invoiceKey: string, invoice: string,
+    accountKey: string, account: string, paymentKey: string, payment: string) #foreign logging "Info";
+LogStuckPayment :: (message: string, invoiceKey: string, invoice: string,
+    accountKey: string, account: string, seenKey: string, seen: s64,
+    confirmedKey: string, confirmed: s64) #foreign logging "Warn";
+
+ForgetOnFailure :: (database: *sql.Database, context: ctx.Context,
+    authorization: policy.TokenAuthorizationResult, completed: *bool) {
+    if authorization.signed && !<<completed {
+        signed.Forget(database, context, authorization.value)
+    }
+}
+
+CreditEvent :: (accountID: string, invoice: MoneroInvoiceResponse,
+    payment: wallet.InvoicePaymentState) -> receipts.TokenEventInput {
+    event: receipts.TokenEventInput
+    event.AccountID = accountID
+    event.AppID = invoice.AppID
+    event.EventType = "credit"
+    event.AmountDelta = invoice.TokenUnits
+    event.SourceType = "monero"
+    event.SourceRef = payment.PaymentID
+    return event
+}
+
+#scope_export
+Create :: (monero: deposits.Monero, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(monero.database, request, monero.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, monero.counters, user.authentication)
+        return
+    }
+    decoded := requests.ReadInvoice(writer, request, monero.configuration.MaxBodyBytes)
+    if decoded.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    if !monero.configuration.TokenDirectPurchasesEnabled {
+        response.Error(writer, cast(isize)503, "direct token purchases disabled")
+        return
+    }
+    product := MapLookup(monero.configuration.TokenProducts, decoded.value.ProductID)
+    if !product.has_value || product.value.MoneroAtomicAmount <= 0 {
+        response.Error(writer, cast(isize)400, "unknown monero product_id")
+        return
+    }
+    existence := apps.Exists(monero.database, http.Context(request), decoded.value.AppID)
+    if existence.error != null {
+        LogSubjectError("monero invoice app lookup", "app", logs.LogText(decoded.value.AppID), "error", existence.error)
+        response.Error(writer, cast(isize)500, "monero invoice failed")
+        return
+    }
+    if !existence.value {
+        response.Error(writer, cast(isize)400, "unknown app_id")
+        return
+    }
+    authorization := policy.Authorize(monero.database, http.Context(request), request, decoded.body,
+        user.value, decoded.value.AppID, receipts.AssetID, "purchase", monero.verify, monero.replayError)
+    if authorization.authentication.error != null || authorization.authentication.status != 0 {
+        if authorization.signed {
+            signed.Forget(monero.database, http.Context(request), authorization.value)
+        }
+        auth.Respond(writer, monero.counters, authorization.authentication)
+        return
+    }
+    completed := false
+    CleanupAtReturn(ForgetOnFailure, monero.database, http.Context(request), authorization, *completed)
+    created := storage.Create(monero.database, http.Context(request), user.value, decoded.value.AppID,
+        product.value, <<monero.configuration, monero.unavailable)
+    if created.error != null {
+        LogSubjectError("create monero invoice", "user", logs.LogText(user.value), "error", created.error)
+        response.Error(writer, cast(isize)500, "monero invoice failed")
+        return
+    }
+    completed = true
+    response.JSON(writer, cast(isize)201, created.value)
+}
+
+Read :: (monero: deposits.Monero, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(monero.database, request, monero.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, monero.counters, user.authentication)
+        return
+    }
+    id := TrimPrefix(url.Path(http.RequestURL(request)), "/api/v1/tokens/purchases/monero/invoices/")
+    if !identity.ValidResourceID(id) {
+        response.Error(writer, cast(isize)400, "invalid invoice id")
+        return
+    }
+    invoice := storage.Invoice(monero.database, http.Context(request), user.value, id)
+    if invoice.error != null {
+        LogInvoiceError("load monero invoice", "user", logs.LogText(user.value), "invoice", logs.LogText(id), "error", invoice.error)
+        response.Error(writer, cast(isize)500, "monero invoice failed")
+        return
+    }
+    if !invoice.found {
+        response.Error(writer, cast(isize)404, "invoice not found")
+        return
+    }
+    if invoice.value.Status == "pending" {
+        updated := Settle(monero, http.Context(request), user.value, invoice.value)
+        if updated.error != null {
+            LogInvoiceWarning("monero invoice settlement failed", "user", logs.LogText(user.value), "invoice", logs.LogText(id), "error", updated.error)
+        } else if updated.value.ID != "" {
+            invoice.value = updated.value
+        }
+    }
+    response.JSON(writer, cast(isize)200, invoice.value)
+}
+
+Expired :: (invoice: MoneroInvoiceResponse) -> bool {
+    expiresAt := clock.Parse("2006-01-02T15:04:05Z07:00", invoice.ExpiresAt)
+    return expiresAt.error == null && clock.After(clock.UTC(clock.Now()), expiresAt.value)
+}
+
+Settle :: (monero: deposits.Monero, context: ctx.Context, accountID: string,
+    invoice: MoneroInvoiceResponse) -> storage.InvoiceResult {
+    result: storage.InvoiceResult
+    issuer := policy.Issuer(<<monero.configuration, monero.issuerUnavailable)
+    result.error = issuer.error
+    if result.error != null {
+        return result
+    }
+    inspected := wallet.InspectInvoice(context, <<monero.configuration, invoice, monero.unavailable)
+    result.error = inspected.error
+    if result.error != null {
+        return result
+    }
+    if inspected.value.ConfirmedAtomic >= invoice.AtomicAmount {
+        credited := ledger.CreditPayment(monero.database, context, issuer.value, "monero",
+            inspected.value.PaymentID, CreditEvent(accountID, invoice, inspected.value), monero.issuerUnavailable)
+        result.error = credited.error
+        if result.error != null {
+            return result
+        }
+        result.error = storage.MarkPendingPaid(monero.database, context, accountID, invoice.ID,
+            credited.value.ReceiptID, inspected.value.PaymentID)
+        if result.error != null {
+            return result
+        }
+        return storage.Invoice(monero.database, context, accountID, invoice.ID)
+    }
+    if Expired(invoice) {
+        result.error = storage.MarkExpired(monero.database, context, accountID, invoice.ID)
+        if result.error != null {
+            return result
+        }
+        return storage.Invoice(monero.database, context, accountID, invoice.ID)
+    }
+    return result
+}
+
+Pending :: (monero: deposits.Monero, context: ctx.Context, limit: isize) -> Error {
+    invoices := storage.Pending(monero.database, context, limit)
+    if invoices.error != null {
+        return invoices.error
+    }
+    for item: invoices.value {
+        updated := Settle(monero, context, item.accountID, item.invoice)
+        if updated.error != null {
+            LogInvoiceWarning("monero invoice reconciliation item failed", "account", logs.LogText(item.accountID),
+                "invoice", logs.LogText(item.invoice.ID), "error", updated.error)
+        }
+    }
+    return null
+}
+
+ReportStuck :: (monero: deposits.Monero, invoiceID: string, accountID: string,
+    payment: wallet.InvoicePaymentState) {
+    notified := sync.LoadOrStore(monero.stuckNotified, invoiceID, true)
+    if notified.loaded {
+        return
+    }
+    atomic.Add(*monero.counters.moneroStuckInvoices, cast(u64)1)
+    LogStuckPayment("monero invoice has uncredited funds", "invoice", logs.LogText(invoiceID),
+        "account", logs.LogText(accountID), "seen_atomic", payment.SeenAtomic,
+        "confirmed_atomic", payment.ConfirmedAtomic)
+}
+
+SweepExpired :: (monero: deposits.Monero, context: ctx.Context, limit: isize) -> Error {
+    if TrimSpace(monero.configuration.MoneroWalletRPCURL) == "" {
+        return null
+    }
+    invoices := storage.Expired(monero.database, context, limit)
+    if invoices.error != null {
+        return invoices.error
+    }
+    if invoices.value.count == 0 {
+        return null
+    }
+    issuer := policy.Issuer(<<monero.configuration, monero.issuerUnavailable)
+    if issuer.error != null {
+        return issuer.error
+    }
+    for item: invoices.value {
+        inspected := wallet.InspectInvoice(context, <<monero.configuration, item.invoice, monero.unavailable)
+        if inspected.error != null {
+            LogSubjectWarning("expired monero invoice sweep failed", "invoice", logs.LogText(item.invoice.ID), "error", inspected.error)
+            continue
+        }
+        if inspected.value.ConfirmedAtomic >= item.invoice.AtomicAmount {
+            credited := ledger.CreditPayment(monero.database, context, issuer.value, "monero",
+                inspected.value.PaymentID, CreditEvent(item.accountID, item.invoice, inspected.value), monero.issuerUnavailable)
+            if credited.error != null {
+                LogSubjectWarning("expired monero invoice credit failed", "invoice", logs.LogText(item.invoice.ID), "error", credited.error)
+                continue
+            }
+            settled := storage.SettleExpired(monero.database, context, item.accountID,
+                item.invoice.ID, credited.value.ReceiptID, inspected.value.PaymentID)
+            if settled != null {
+                LogSubjectWarning("expired monero invoice settle failed", "invoice", logs.LogText(item.invoice.ID), "error", settled)
+                continue
+            }
+            LogLatePayment("credited late monero invoice payment", "invoice", logs.LogText(item.invoice.ID),
+                "account", logs.LogText(item.accountID), "payment", logs.LogText(inspected.value.PaymentID))
+            continue
+        }
+        if inspected.value.SeenAtomic > 0 {
+            ReportStuck(monero, item.invoice.ID, item.accountID, inspected.value)
+        }
+    }
+    return null
+}
+
+Run :: (monero: deposits.Monero, context: ctx.Context, interval: clock.Duration) {
+    if cast(s64)interval <= 0 {
+        interval = cast(clock.Duration)60000000000
+    }
+    ticker := clock.NewTicker(interval)
+    StopAtReturn(ticker)
+    cases: [2]select.Case
+    cases[0] = select.Receive(ctx.Done(context))
+    cases[1] = select.Receive(clock.TickerChannel(ticker))
+    while true {
+        pendingError := Pending(monero, context, cast(isize)100)
+        if pendingError != null {
+            LogWarning("monero invoice reconciliation failed", "error", pendingError)
+        }
+        expiredError := SweepExpired(monero, context, cast(isize)50)
+        if expiredError != null {
+            LogWarning("monero expired invoice sweep failed", "error", expiredError)
+        }
+        depositError := deposits.Reconcile(monero, context)
+        if depositError != null {
+            LogWarning("monero account deposit reconciliation failed", "error", depositError)
+        }
+        selected := select.Select(cases[:])
+        if selected.chosen == cast(isize)0 {
+            return
+        }
+    }
+}

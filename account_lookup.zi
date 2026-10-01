@@ -1,0 +1,47 @@
+#import "std/go_types"
+identity :: #import "identity";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+
+AccountResult :: struct {
+    value: string
+    found: bool
+    error: Error
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+
+#scope_export
+Resolve :: (database: *sql.Database, context: ctx.Context, reference: string) -> AccountResult {
+    result: AccountResult
+    reference = ToLower(TrimPrefix(TrimSpace(reference), "@"))
+    arguments: [1]Any
+    arguments[0] = reference
+    destinations: [1]Any
+    if identity.ValidUserID(reference) {
+        result.value = reference
+        exists: isize
+        destinations[0] = *exists
+        row := sql.QueryRow(database, context, "SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)", arguments[:])
+        result.error = sql.ScanRow(row, destinations[:])
+        result.found = exists != cast(isize)0
+        return result
+    }
+    if !identity.ValidAccountAlias(reference) {
+        return result
+    }
+    destinations[0] = *result.value
+    row := sql.QueryRow(database, context, "SELECT user_id_hash FROM server_users WHERE alias=?1", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    result.found = true
+    return result
+}

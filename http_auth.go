@@ -43,7 +43,11 @@ func HttpAuth_HeaderAlias(request *Request, names []string) string {
 func HttpAuth_UserHeader(request *Request) UserHeaderResult {
 	var result UserHeaderResult = UserHeaderResult{}
 	headers := StdHttpGo_Headers(request)
-	names := [3]string{"X-Daochi-User", "X-Ksync-User", "X-Inbe-User"}
+	var value_0 [3]string
+	value_0[0] = "X-Daochi-User"
+	value_0[1] = "X-Ksync-User"
+	value_0[2] = "X-Inbe-User"
+	names := value_0
 	for _, name := range names {
 		value := strings.ToLower(strings.TrimSpace(StdHttpGo_HeaderValue(headers, name)))
 		if value != "" {
@@ -60,11 +64,14 @@ func HttpAuth_RequireAdmin(writer ResponseWriter, request *Request, expected str
 		Response_Error(writer, int(403), "admin disabled")
 		return false
 	}
-	names := [2]string{"X-Daochi-Admin", "X-Ksync-Admin"}
+	var value_0 [2]string
+	value_0[0] = "X-Daochi-Admin"
+	value_0[1] = "X-Ksync-Admin"
+	names := value_0
 	_ = names
 	provided := HttpAuth_HeaderAlias(request, names[0:2:2])
-	var value_0 bool = StdConstantTime_ConstantTimeTextEqual(provided, expected)
-	if !value_0 {
+	var value_1 bool = StdConstantTime_ConstantTimeTextEqual(provided, expected)
+	if !value_1 {
 		Response_Error(writer, int(401), "admin token required")
 		return false
 	}

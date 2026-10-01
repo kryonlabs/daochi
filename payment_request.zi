@@ -1,0 +1,141 @@
+#import "protocol"
+#import "std/go_types"
+identity :: #import "identity";
+receipt :: #import "token_receipt";
+body :: #import "http_body";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+json :: #import "std/json_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+
+SpendRequestResult :: struct {
+    value: TokenSpendRequest
+    body: []u8
+    error: Error
+}
+GoogleRequestResult :: struct {
+    value: GooglePurchaseVerifyRequest
+    body: []u8
+    error: Error
+}
+InvoiceRequestResult :: struct {
+    value: MoneroInvoiceRequest
+    body: []u8
+    error: Error
+}
+AppFilterResult :: struct {
+    value: string
+    scoped: bool
+    error: Error
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign strings;
+
+#scope_export
+ReadSpend :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> SpendRequestResult {
+    result: SpendRequestResult
+    read := body.ReadJSON(writer, request, limit)
+    result.error = read.error
+    if result.error != null {
+        return result
+    }
+    if json.Unmarshal(read.value, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.AppID = TrimSpace(result.value.AppID)
+    result.value.AssetID = TrimSpace(result.value.AssetID)
+    result.value.Action = TrimSpace(result.value.Action)
+    result.value.IdempotencyKey = TrimSpace(result.value.IdempotencyKey)
+    result.value.Metadata = TrimSpace(result.value.Metadata)
+    if !identity.ValidNamespace(result.value.AppID) {
+        result.error = errors.New("invalid app_id")
+        return result
+    }
+    if result.value.AssetID == "" {
+        result.value.AssetID = receipt.AssetID
+    }
+    if result.value.Amount <= 0 {
+        result.error = errors.New("amount required")
+        return result
+    }
+    if !identity.ValidNamespace(result.value.Action) {
+        result.error = errors.New("invalid action")
+        return result
+    }
+    if !identity.ValidClientID(result.value.IdempotencyKey) {
+        result.error = errors.New("invalid idempotency_key")
+        return result
+    }
+    result.body = read.value
+    return result
+}
+
+ReadGoogle :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> GoogleRequestResult {
+    result: GoogleRequestResult
+    read := body.ReadJSON(writer, request, limit)
+    result.error = read.error
+    if result.error != null {
+        return result
+    }
+    if json.Unmarshal(read.value, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.AppID = TrimSpace(result.value.AppID)
+    result.value.PackageName = TrimSpace(result.value.PackageName)
+    result.value.ProductID = TrimSpace(result.value.ProductID)
+    result.value.PurchaseToken = TrimSpace(result.value.PurchaseToken)
+    if !identity.ValidNamespace(result.value.AppID) {
+        result.error = errors.New("invalid app_id")
+        return result
+    }
+    if result.value.PackageName == "" || result.value.ProductID == "" || result.value.PurchaseToken == "" {
+        result.error = errors.New("purchase fields required")
+        return result
+    }
+    result.body = read.value
+    return result
+}
+
+ReadInvoice :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> InvoiceRequestResult {
+    result: InvoiceRequestResult
+    read := body.ReadJSON(writer, request, limit)
+    result.error = read.error
+    if result.error != null {
+        return result
+    }
+    if json.Unmarshal(read.value, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.AppID = TrimSpace(result.value.AppID)
+    result.value.ProductID = TrimSpace(result.value.ProductID)
+    if !identity.ValidNamespace(result.value.AppID) {
+        result.error = errors.New("invalid app_id")
+        return result
+    }
+    if result.value.ProductID == "" {
+        result.error = errors.New("product_id required")
+        return result
+    }
+    result.body = read.value
+    return result
+}
+
+AppFilter :: (request: *http.Request) -> AppFilterResult {
+    result: AppFilterResult
+    result.value = TrimSpace(url.Value(url.Query(http.RequestURL(request)), "app_id"))
+    if result.value == "" {
+        return result
+    }
+    if !identity.ValidNamespace(result.value) {
+        result.value = ""
+        result.error = errors.New("invalid app_id")
+        return result
+    }
+    result.scoped = true
+    return result
+}

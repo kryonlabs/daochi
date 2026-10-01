@@ -209,8 +209,8 @@ func appManifestFixture() AppManifest {
 			{KeyID: "s", Algorithm: "ed25519", PublicKey: "key-s", Status: "suspended"},
 		},
 		TokenPolicies: []TokenPolicy{
-			{AssetID: waoziTokenAssetID, Permission: "spend", LegacyUnsignedUntil: 9223372036854775807},
-			{AssetID: waoziTokenAssetID, Permission: "purchase", Status: "suspended"},
+			{AssetID: AssetID, Permission: "spend", LegacyUnsignedUntil: 9223372036854775807},
+			{AssetID: AssetID, Permission: "purchase", Status: "suspended"},
 		},
 	}
 }
@@ -260,8 +260,8 @@ func TestZiranAppRegistryLifecycleAgainstBaseline(t *testing.T) {
 			t.Fatalf("policy existence = %#v, baseline = %v, %v", got, found, err)
 		}
 		for _, permission := range []string{"spend", "purchase", "missing"} {
-			got := AppStore_Permission(actual.db, t.Context(), id, waoziTokenAssetID, permission)
-			policy, found, err := expected.baselineAppTokenPermission(t.Context(), id, waoziTokenAssetID, permission)
+			got := AppStore_Permission(actual.db, t.Context(), id, AssetID, permission)
+			policy, found, err := expected.baselineAppTokenPermission(t.Context(), id, AssetID, permission)
 			if got.Found != found || got.Value != policy || !sameIdentityError(got.Error, err) {
 				t.Fatalf("permission = %#v, baseline = %#v, %v, %v", got, policy, found, err)
 			}
@@ -399,8 +399,8 @@ func TestZiranAppQueriesAndNativeErrorsAgainstBaseline(t *testing.T) {
 			if !sameIdentityError(key.Error, err) || key.Found != found || key.Value != wantKey {
 				t.Fatalf("key error = %#v, baseline = %#v, %v, %v", key, wantKey, found, err)
 			}
-			policy := AppStore_Permission(actual.db, ctx, "demo", waoziTokenAssetID, "spend")
-			wantPolicy, found, err := expected.baselineAppTokenPermission(ctx, "demo", waoziTokenAssetID, "spend")
+			policy := AppStore_Permission(actual.db, ctx, "demo", AssetID, "spend")
+			wantPolicy, found, err := expected.baselineAppTokenPermission(ctx, "demo", AssetID, "spend")
 			if !sameIdentityError(policy.Error, err) || policy.Found != found || policy.Value != wantPolicy {
 				t.Fatalf("policy error = %#v, baseline = %#v, %v, %v", policy, wantPolicy, found, err)
 			}

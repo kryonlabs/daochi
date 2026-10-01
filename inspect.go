@@ -469,14 +469,18 @@ func Inspect_Count(context Context, database *Database, table string, where stri
 	var result CountResult = CountResult{}
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", table)
 	if where != "" {
-		parts := [3]string{query, " ", where}
+		var value_0 [3]string
+		value_0[0] = query
+		value_0[1] = " "
+		value_0[2] = where
+		parts := value_0
 		_ = parts
 		query = strings.Join(parts[0:3:3], "")
-		var value_0 Error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, query, userID), &(result.Value))
-		result.Error = value_0
-	} else {
-		var value_1 Error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, query), &(result.Value))
+		var value_1 Error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, query, userID), &(result.Value))
 		result.Error = value_1
+	} else {
+		var value_2 Error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, query), &(result.Value))
+		result.Error = value_2
 	}
 	return result
 }
@@ -485,7 +489,11 @@ func Inspect_RedactID(value string, full bool) string {
 	if full || int64(len(value)) <= 16 {
 		return value
 	}
-	parts := [3]string{value[:12], "...", value[(int64(len(value)) - 8):]}
+	var value_0 [3]string
+	value_0[0] = value[:12]
+	value_0[1] = "..."
+	value_0[2] = value[(int64(len(value)) - 8):]
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:3:3], "")
 }

@@ -191,19 +191,22 @@ func Mesh_Authorize(mesh Mesh, writer ResponseWriter, request *Request, body []u
 		Response_Error(writer, int(503), "node sync disabled")
 		return false
 	}
-	names := [2]string{"X-Daochi-Node-Token", "X-Ksync-Node-Token"}
+	var value_3 [2]string
+	value_3[0] = "X-Daochi-Node-Token"
+	value_3[1] = "X-Ksync-Node-Token"
+	names := value_3
 	_ = names
 	provided := strings.TrimSpace(HttpAuth_HeaderAlias(request, names[0:2:2]))
 	if provided == "" {
 		provided = Mesh_BearerToken(StdHttpGo_HeaderValue(headers, "Authorization"))
 	}
-	var value_3 bool = provided == ""
-	var value_4 bool = value_3
-	if !value_4 {
-		var value_5 bool = StdConstantTime_ConstantTimeTextEqual(provided, token)
-		value_4 = !value_5
+	var value_4 bool = provided == ""
+	var value_5 bool = value_4
+	if !value_5 {
+		var value_6 bool = StdConstantTime_ConstantTimeTextEqual(provided, token)
+		value_5 = !value_6
 	}
-	if value_4 {
+	if value_5 {
 		Response_Error(writer, int(401), "invalid node token")
 		return false
 	}
@@ -328,27 +331,30 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 		request.Limit = value_0
 		request.Policy = sync
 		var exported NodeMeshExportResponse = NodeMeshExportResponse{}
-		target := [2]string{baseURL, "/api/v1/node/mesh/export"}
+		var value_1 [2]string
+		value_1[0] = baseURL
+		value_1[1] = "/api/v1/node/mesh/export"
+		target := value_1
 		_ = target
-		var value_1 Mesh = mesh
-		var value_2 Context = context
-		var value_3 string = peer.NodeID
-		var value_4 string = strings.Join(target[0:2:2], "")
-		error := Mesh_PostJSON(value_1, value_2, value_3, value_4, request, &(exported))
+		var value_2 Mesh = mesh
+		var value_3 Context = context
+		var value_4 string = peer.NodeID
+		var value_5 string = strings.Join(target[0:2:2], "")
+		error := Mesh_PostJSON(value_2, value_3, value_4, value_5, request, &(exported))
 		if error != nil {
 			return error
 		}
-		var value_5 bool = int64(len(exported.Apps)) == 0 && int64(len(exported.Records)) == 0 && int64(len(exported.Deletions)) == 0
-		if value_5 && int64(len(exported.Names)) == 0 {
+		var value_6 bool = int64(len(exported.Apps)) == 0 && int64(len(exported.Records)) == 0 && int64(len(exported.Deletions)) == 0
+		if value_6 && int64(len(exported.Names)) == 0 {
 			return nil
 		}
-		var value_6 MeshAppsImportResult = MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, sync, exported.Apps, mesh.ConvertError)
-		importedApps := value_6
+		var value_7 MeshAppsImportResult = MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, sync, exported.Apps, mesh.ConvertError)
+		importedApps := value_7
 		if importedApps.Error != nil {
 			return importedApps.Error
 		}
-		var value_7 MeshImportResult = MeshStore_ImportEncryptedBatch(mesh.Database, context, sync, exported.Records, exported.Deletions)
-		importedRecords := value_7
+		var value_8 MeshImportResult = MeshStore_ImportEncryptedBatch(mesh.Database, context, sync, exported.Records, exported.Deletions)
+		importedRecords := value_8
 		if importedRecords.Error != nil {
 			return importedRecords.Error
 		}
@@ -361,11 +367,11 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 		if lastCursor == "" {
 			var lastSequence int64 = 0
 			{
-				value_8 := exported.Records[:]
-				if int64(0) < 0 || int64(int64(len(value_8))) < int64(0) || int64(int64(len(value_8))) > int64(len(value_8)) {
+				value_9 := exported.Records[:]
+				if int64(0) < 0 || int64(int64(len(value_9))) < int64(0) || int64(int64(len(value_9))) > int64(len(value_9)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_44 := value_8[0:int64(len(value_8)):int64(len(value_8))]
+				loop_view_44 := value_9[0:int64(len(value_9)):int64(len(value_9))]
 				loop_count_44 := int64(len(loop_view_44))
 				var loop_cursor_44 int64 = 0
 				for loop_cursor_44 < loop_count_44 {
@@ -378,11 +384,11 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 				}
 			}
 			{
-				value_9 := exported.Deletions[:]
-				if int64(0) < 0 || int64(int64(len(value_9))) < int64(0) || int64(int64(len(value_9))) > int64(len(value_9)) {
+				value_10 := exported.Deletions[:]
+				if int64(0) < 0 || int64(int64(len(value_10))) < int64(0) || int64(int64(len(value_10))) > int64(len(value_10)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_49 := value_9[0:int64(len(value_9)):int64(len(value_9))]
+				loop_view_49 := value_10[0:int64(len(value_10)):int64(len(value_10))]
 				loop_count_49 := int64(len(loop_view_49))
 				var loop_cursor_49 int64 = 0
 				for loop_cursor_49 < loop_count_49 {
@@ -430,10 +436,13 @@ func Mesh_PostJSON(mesh Mesh, context Context, peerNodeID string, target string,
 	if peerNodeID != "" {
 		NodeAuth_Sign(mesh.Identity.ID, mesh.Identity.PrivateKey, outbound.Value, encoded.Value)
 	} else {
-		token := [2]string{"Bearer ", mesh.Configuration.NodeSyncToken}
+		var value_2 [2]string
+		value_2[0] = "Bearer "
+		value_2[1] = mesh.Configuration.NodeSyncToken
+		token := value_2
 		_ = token
-		var value_2 Header = headers
-		StdHttpGo_SetHeader(value_2, "Authorization", strings.Join(token[0:2:2], ""))
+		var value_3 Header = headers
+		StdHttpGo_SetHeader(value_3, "Authorization", strings.Join(token[0:2:2], ""))
 	}
 	client := StdHttpGo_NewClient(Duration(20000000000))
 	result := StdHttpGo_Do(client, outbound.Value)
@@ -445,9 +454,9 @@ func Mesh_PostJSON(mesh Mesh, context Context, peerNodeID string, target string,
 	status := StdHttpGo_StatusCode(result.Value)
 	if status < int(200) || status >= int(300) {
 		data := StdIoGo_ReadAll(StdIoGo_LimitReader(Reader(body), 2048))
-		var value_3 Error = fmt.Errorf("node mesh request failed: %s %s", StdHttpGo_Status(result.Value), strings.TrimSpace(StdTextGo_FromBytes(data.Value)))
-		return value_3
+		var value_4 Error = fmt.Errorf("node mesh request failed: %s %s", StdHttpGo_Status(result.Value), strings.TrimSpace(StdTextGo_FromBytes(data.Value)))
+		return value_4
 	}
-	var value_4 *Decoder = StdJsonGo_NewDecoder(Reader(body))
-	return StdJsonGo_Decode(value_4, reply)
+	var value_5 *Decoder = StdJsonGo_NewDecoder(Reader(body))
+	return StdJsonGo_Decode(value_5, reply)
 }

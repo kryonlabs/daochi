@@ -78,3 +78,39 @@ Touch :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, m
         "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
     return inserted.error
 }
+
+Upsert :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, publicKey: []u8) -> Error {
+    arguments: [3]Any
+    arguments[0] = userID
+    arguments[1] = publicKey
+    arguments[2] = timestamp.CanonicalNow()
+    updated := sql.ExecTx(transaction, context,
+        "INSERT INTO server_users(user_id_hash,public_key) VALUES(?1,?2) ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=?3",
+        arguments[:])
+    if updated.error != null {
+        return updated.error
+    }
+    inserted := EnsureSync(transaction, context,
+        "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
+    return inserted.error
+}
+
+Register :: (database: *sql.Database, context: ctx.Context, userID: string, publicKey: []u8) -> Error {
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    defer sql.Rollback(opened.value)
+    arguments: [1]Any
+    arguments[0] = userID
+    removed := sql.ExecTx(opened.value, context,
+        "DELETE FROM server_account_tombstones WHERE user_id_hash=?1", arguments[:])
+    if removed.error != null {
+        return removed.error
+    }
+    error := Upsert(opened.value, context, userID, publicKey)
+    if error != null {
+        return error
+    }
+    return sql.Commit(opened.value)
+}

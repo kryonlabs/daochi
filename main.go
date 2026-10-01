@@ -67,7 +67,7 @@ func main() {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			daochi.runMoneroInvoiceReconciler(runtimeContext, time.Minute)
+			MoneroInvoices_Run(daochi.monero(), runtimeContext, time.Minute)
 		}()
 	}
 	workers.Add(1)

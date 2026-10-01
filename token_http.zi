@@ -1,0 +1,380 @@
+#import "protocol"
+#import "std/go_types"
+#import "std/map_go"
+config :: #import "config";
+auth :: #import "authentication";
+policy :: #import "token_policy";
+requests :: #import "payment_request";
+receipts :: #import "token_receipt";
+ledger :: #import "token_ledger";
+assets :: #import "token_assets";
+checkpoints :: #import "token_checkpoint";
+apps :: #import "app_store";
+signed :: #import "signed_tx";
+envelope :: #import "transaction";
+response :: #import "response";
+http_auth :: #import "http_auth";
+http_body :: #import "http_body";
+identity :: #import "identity";
+metrics :: #import "metrics";
+logs :: #import "log_safety";
+address :: #import "client_address";
+rate :: #import "rate_limit";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+atomic :: #import "std/atomic_go";
+json :: #import "std/json_go";
+errors :: #import "std/errors_go";
+sorting :: #import "std/sort";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+hex :: #system_library "go:encoding/hex";
+logging :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+Tokens :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    limiter: *rate.RateLimiter
+    verify: auth.VerifySignature
+    replayError: Error
+    issuerUnavailable: Error
+}
+
+operator < :: (left: TokenProduct, right: TokenProduct) -> bool {
+    return Compare(left.ProductID, right.ProductID) < cast(isize)0
+}
+
+#scope_file
+IntegerResult :: struct {
+    value: s64
+    error: Error
+}
+ManualCreditRequest :: struct {
+    accountID: string #go_tag "json:\"account_id\""
+    appID: string #go_tag "json:\"app_id\""
+    amount: s64 #go_tag "json:\"amount\""
+    sourceRef: string #go_tag "json:\"source_ref\""
+}
+ReplayCleanup :: #type (database: *sql.Database, context: ctx.Context, authorization: policy.TokenAuthorizationResult, completed: *bool) -> void;
+CleanupAtReturn :: (callback: ReplayCleanup, database: *sql.Database, context: ctx.Context, authorization: policy.TokenAuthorizationResult, completed: *bool) #go_defer #foreign builtin "call";
+TrimSpace :: (value: string) -> string #foreign strings;
+Compare :: (left: string, right: string) -> isize #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+Contains :: (value: string, part: string) -> bool #foreign strings;
+ParseInt :: (value: string, base: isize, width: isize) -> IntegerResult #go_results #foreign numbers;
+EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
+AllocateProducts :: (length: isize, capacity: isize) -> []TokenProduct #foreign builtin "make";
+AppendProduct :: (values: []TokenProduct, value: TokenProduct) -> []TokenProduct #foreign builtin "append";
+LogError :: (message: string, key: string, error: Error) #foreign logging "Error";
+LogSubjectError :: (message: string, subjectKey: string, subject: string, errorKey: string, error: Error) #foreign logging "Error";
+
+Bearer :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) -> http_auth.UserAuthenticationResult {
+    result := http_auth.BearerUser(tokens.database, request, tokens.configuration.TokenSecret)
+    if result.authentication.error != null || result.authentication.status != 0 {
+        http_auth.Respond(writer, tokens.counters, result.authentication)
+    }
+    return result
+}
+
+ForgetOnFailure :: (database: *sql.Database, context: ctx.Context, authorization: policy.TokenAuthorizationResult, completed: *bool) {
+    if authorization.signed && !<<completed {
+        signed.Forget(database, context, authorization.value)
+    }
+}
+
+AllowReceipt :: (tokens: Tokens, key: string) -> bool {
+    if tokens.limiter == null {
+        return true
+    }
+    allowed := rate.Allow(tokens.limiter, key, cast(isize)60, cast(clock.Duration)60000000000)
+    if !allowed {
+        atomic.Add(*tokens.counters.rateLimitedRequests, cast(u64)1)
+    }
+    return allowed
+}
+
+#scope_export
+Assets :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    listed := assets.List(tokens.database, http.Context(request))
+    if listed.error != null {
+        LogError("list token assets", "error", listed.error)
+        response.Error(writer, cast(isize)500, "token assets failed")
+        return
+    }
+    value: TokenAssetsResponse
+    value.Assets = listed.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Products :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    products := AllocateProducts(cast(isize)0, cast(isize)MapCount(tokens.configuration.TokenProducts))
+    keys := MapKeys(tokens.configuration.TokenProducts)
+    for key: keys {
+        product := MapGet(tokens.configuration.TokenProducts, key)
+        if !tokens.configuration.TokenDirectPurchasesEnabled {
+            product.MoneroAtomicAmount = 0
+        }
+        products = AppendProduct(products, product)
+    }
+    sorting.Sort(products)
+    value: TokenProductsResponse
+    value.Products = products
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Issuer :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    value: TokenIssuerResponse
+    value.IssuerID = receipts.IssuerID
+    value.PublicKey = EncodeHex(cast([]u8)tokens.configuration.WaoziIssuerPublicKey)
+    value.Algorithm = "Ed25519"
+    value.Status = policy.IssuerStatus(<<tokens.configuration)
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Balance :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(tokens, writer, request)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        return
+    }
+    filter := requests.AppFilter(request)
+    if filter.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(filter.error))
+        return
+    }
+    balance: ledger.BalanceResult
+    if filter.scoped {
+        balance = ledger.AppBalance(tokens.database, http.Context(request), user.value, receipts.AssetID, filter.value)
+    } else {
+        balance = ledger.Balance(tokens.database, http.Context(request), user.value, receipts.AssetID)
+    }
+    if balance.error != null {
+        LogSubjectError("token balance", "user", logs.LogText(user.value), "error", balance.error)
+        response.Error(writer, cast(isize)500, "token balance failed")
+        return
+    }
+    value: TokenBalanceResponse
+    value.AccountID = user.value
+    value.AssetID = receipts.AssetID
+    value.AppID = filter.value
+    value.Balance = balance.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Ledger :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(tokens, writer, request)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        return
+    }
+    since := ParseInt(TrimSpace(url.Value(url.Query(http.RequestURL(request)), "since")), cast(isize)10, cast(isize)64)
+    filter := requests.AppFilter(request)
+    if filter.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(filter.error))
+        return
+    }
+    listed: ledger.ReceiptsResult
+    if filter.scoped {
+        listed = ledger.AppList(tokens.database, http.Context(request), user.value, receipts.AssetID, filter.value, since.value)
+    } else {
+        listed = ledger.List(tokens.database, http.Context(request), user.value, receipts.AssetID, since.value)
+    }
+    if listed.error != null {
+        LogSubjectError("token ledger", "user", logs.LogText(user.value), "error", listed.error)
+        response.Error(writer, cast(isize)500, "token ledger failed")
+        return
+    }
+    value: TokenLedgerResponse
+    value.Events = listed.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Receipt :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    receiptID := TrimPrefix(url.Path(http.RequestURL(request)), "/api/v1/tokens/receipts/")
+    if !identity.ValidResourceID(receiptID) {
+        response.Error(writer, cast(isize)400, "invalid receipt_id")
+        return
+    }
+    parts: [2]string = .["token-receipt:", address.FromRequest(request)]
+    if !AllowReceipt(tokens, Join(parts[:], "")) {
+        response.Error(writer, cast(isize)429, "too many receipt requests")
+        return
+    }
+    receipt := ledger.ByID(tokens.database, http.Context(request), receiptID)
+    if receipt.error != null {
+        LogSubjectError("token receipt", "receipt", logs.LogText(receiptID), "error", receipt.error)
+        response.Error(writer, cast(isize)500, "token receipt failed")
+        return
+    }
+    if !receipt.found {
+        response.Error(writer, cast(isize)404, "receipt not found")
+        return
+    }
+    response.JSON(writer, cast(isize)200, receipt.value)
+}
+
+Spend :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(tokens, writer, request)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        return
+    }
+    decoded := requests.ReadSpend(writer, request, tokens.configuration.MaxBodyBytes)
+    if decoded.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    signer := policy.Issuer(<<tokens.configuration, tokens.issuerUnavailable)
+    if signer.error != null {
+        response.Error(writer, cast(isize)503, "token issuer unavailable")
+        return
+    }
+    value := decoded.value
+    if value.AssetID != receipts.AssetID {
+        response.Error(writer, cast(isize)400, "unsupported asset_id")
+        return
+    }
+    context := http.Context(request)
+    existence := apps.Exists(tokens.database, context, value.AppID)
+    if existence.error != null {
+        LogSubjectError("token spend app lookup", "app", logs.LogText(value.AppID), "error", existence.error)
+        response.Error(writer, cast(isize)500, "token spend failed")
+        return
+    }
+    if !existence.value {
+        response.Error(writer, cast(isize)400, "unknown app_id")
+        return
+    }
+    authorization := policy.Authorize(tokens.database, context, request, decoded.body,
+        user.value, value.AppID, value.AssetID, "spend", tokens.verify, tokens.replayError)
+    if authorization.authentication.error != null || authorization.authentication.status != 0 {
+        if authorization.signed {
+            signed.Forget(tokens.database, context, authorization.value)
+        }
+        http_auth.Respond(writer, tokens.counters, authorization.authentication)
+        return
+    }
+    completed := false
+    CleanupAtReturn(ForgetOnFailure, tokens.database, context, authorization, *completed)
+    parts: [3]string = .[value.Action, ":", value.IdempotencyKey]
+    sourceRef := Join(parts[:], "")
+    if value.Metadata != "" {
+        metadata: [3]string = .[sourceRef, ":", policy.ShortHash(value.Metadata)]
+        sourceRef = Join(metadata[:], "")
+    }
+    input: receipts.TokenEventInput
+    input.AccountID = user.value
+    input.AppID = value.AppID
+    input.EventType = "debit"
+    input.AmountDelta = -value.Amount
+    input.SourceType = "spend"
+    input.SourceRef = sourceRef
+    spent := ledger.Spend(tokens.database, context, signer.value, input, value.IdempotencyKey, tokens.issuerUnavailable)
+    if spent.error != null {
+        message := errors.Message(spent.error)
+        if Contains(message, "insufficient balance") {
+            response.Error(writer, cast(isize)409, "insufficient balance")
+            return
+        }
+        if Contains(message, "idempotency key reused") {
+            response.Error(writer, cast(isize)409, message)
+            return
+        }
+        LogSubjectError("token spend", "user", logs.LogText(user.value), "error", spent.error)
+        response.Error(writer, cast(isize)500, "token spend failed")
+        return
+    }
+    completed = true
+    reply: TokenSpendResponse
+    reply.Status = "ok"
+    reply.Balance = spent.balance
+    reply.Receipt = spent.value
+    response.JSON(writer, cast(isize)200, reply)
+}
+
+LatestCheckpoint :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    checkpoint := checkpoints.Latest(tokens.database, http.Context(request))
+    if checkpoint.error != null {
+        LogError("token checkpoint", "error", checkpoint.error)
+        response.Error(writer, cast(isize)500, "token checkpoint failed")
+        return
+    }
+    if !checkpoint.found {
+        response.Error(writer, cast(isize)404, "checkpoint not found")
+        return
+    }
+    response.JSON(writer, cast(isize)200, checkpoint.value)
+}
+
+ManualCredit :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    if !http_auth.RequireAdmin(writer, request, tokens.configuration.AdminToken) {
+        return
+    }
+    read := http_body.ReadJSON(writer, request, tokens.configuration.MaxBodyBytes)
+    if read.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(read.error))
+        return
+    }
+    value: ManualCreditRequest
+    if json.Unmarshal(read.value, *value) != null {
+        response.Error(writer, cast(isize)400, "invalid json")
+        return
+    }
+    value.accountID = ToLower(TrimSpace(value.accountID))
+    value.appID = TrimSpace(value.appID)
+    value.sourceRef = TrimSpace(value.sourceRef)
+    signer := policy.Issuer(<<tokens.configuration, tokens.issuerUnavailable)
+    if signer.error != null {
+        response.Error(writer, cast(isize)503, "token issuer unavailable")
+        return
+    }
+    if value.sourceRef == "" {
+        parts: [2]string = .["manual:", clock.Format(clock.UTC(clock.Now()), "2006-01-02T15:04:05.999999999Z07:00")]
+        value.sourceRef = Join(parts[:], "")
+    }
+    input: receipts.TokenEventInput
+    input.AccountID = value.accountID
+    input.AppID = value.appID
+    input.EventType = "credit"
+    input.AmountDelta = value.amount
+    input.SourceType = "admin"
+    input.SourceRef = value.sourceRef
+    context := http.Context(request)
+    credited := ledger.CreditPayment(tokens.database, context, signer.value, "admin", value.sourceRef, input, tokens.issuerUnavailable)
+    if credited.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(credited.error))
+        return
+    }
+    balance := ledger.Balance(tokens.database, context, value.accountID, receipts.AssetID)
+    if balance.error != null {
+        response.Error(writer, cast(isize)500, "token balance failed")
+        return
+    }
+    reply: TokenPurchaseResponse
+    reply.Status = "ok"
+    reply.Balance = balance.value
+    reply.Receipt = credited.value
+    response.JSON(writer, cast(isize)200, reply)
+}
+
+CreateCheckpoint :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    if !http_auth.RequireAdmin(writer, request, tokens.configuration.AdminToken) {
+        return
+    }
+    signer := policy.Issuer(<<tokens.configuration, tokens.issuerUnavailable)
+    if signer.error != null {
+        response.Error(writer, cast(isize)503, "token issuer unavailable")
+        return
+    }
+    checkpoint := checkpoints.Create(tokens.database, http.Context(request), signer.value, tokens.issuerUnavailable)
+    if checkpoint.error != null {
+        LogError("create token checkpoint", "error", checkpoint.error)
+        response.Error(writer, cast(isize)500, "token checkpoint failed")
+        return
+    }
+    response.JSON(writer, cast(isize)200, checkpoint.value)
+}

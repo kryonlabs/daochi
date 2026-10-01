@@ -1,0 +1,153 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+go_sql :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+AccountExportResult :: struct {
+    value: AccountExportResponse
+    error: Error
+}
+AccountRowsResult :: struct {
+    value: []Map(string, Any)
+    error: Error
+}
+
+#scope_file
+TableQuery :: struct {
+    name: string
+    query: string
+    jsonField: string
+}
+ByteAssertion :: struct {
+    value: []u8
+    present: bool
+}
+AsBytes :: (value: Any) -> ByteAssertion #go_results #foreign builtin "assert";
+AllocateValues :: (count: isize) -> []Any #foreign builtin "make";
+AllocateRows :: (count: isize) -> []Map(string, Any) #foreign builtin "make";
+AppendRow :: (rows: []Map(string, Any), row: Map(string, Any)) -> []Map(string, Any) #foreign builtin "append";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+
+#scope_export
+RowValue :: (column: string, value: Any, jsonFields: Map(string, bool)) -> Any {
+    if value == null {
+        return null
+    }
+    bytes := AsBytes(value)
+    if bytes.present {
+        if MapGet(jsonFields, column) {
+            raw: Any
+            if json.Unmarshal(bytes.value, *raw) == null {
+                return raw
+            }
+        }
+        return text.FromBytes(bytes.value)
+    }
+    return value
+}
+
+QueryRows :: (database: *sql.Database, context: ctx.Context, query: string, userID: string, jsonFields: Map(string, bool)) -> AccountRowsResult {
+    result: AccountRowsResult
+    arguments: [1]Any
+    arguments[0] = userID
+    queried := sql.Query(database, context, query, arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    columns := sql.Columns(rows)
+    result.error = columns.error
+    if result.error != null {
+        return result
+    }
+    output := AllocateRows(cast(isize)0)
+    while sql.Next(rows) {
+        values := AllocateValues(cast(isize)columns.value.count)
+        destinations := AllocateValues(cast(isize)columns.value.count)
+        index: s64 = 0
+        while index < values.count {
+            destinations[index] = *values[index]
+            index += 1
+        }
+        result.error = sql.ScanRows(rows, destinations)
+        if result.error != null {
+            return result
+        }
+        item: Map(string, Any)
+        MapInit(item)
+        index = 0
+        while index < columns.value.count {
+            column := columns.value[index]
+            MapSet(item, column, RowValue(column, values[index], jsonFields))
+            index += 1
+        }
+        output = AppendRow(output, item)
+    }
+    result.value = output
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Export :: (database: *sql.Database, context: ctx.Context, userID: string) -> AccountExportResult {
+    result: AccountExportResult
+    alias: sql.NullString
+    response: AccountExportResponse
+    response.Status = "ok"
+    response.UserIDHash = userID
+    MapInit(response.Tables)
+    arguments: [1]Any
+    arguments[0] = userID
+    destinations: [2]Any
+    destinations[0] = *alias
+    destinations[1] = *response.ProfileIcon
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "\nSELECT alias,profile_icon\nFROM server_users\nWHERE user_id_hash=?1", arguments[:]), destinations[:])
+    if result.error != null {
+        return result
+    }
+    if sql.NullStringValid(alias) {
+        response.AccountAlias = sql.NullStringValue(alias)
+    }
+    queries: [19]TableQuery = .[
+        .{name = "users", query = "SELECT user_id_hash, alias, profile_icon, created_at, last_seen_at FROM server_users WHERE user_id_hash=?1"},
+        .{name = "clients", query = "SELECT client_id, created_at, last_seen_at, last_login_at, last_sync_at, last_since_server_version, last_seen_server_version, protocol_version, last_client_clock FROM server_clients WHERE user_id_hash=?1 ORDER BY last_seen_at DESC, client_id"},
+        .{name = "sync_state", query = "SELECT server_version FROM server_sync_state WHERE user_id_hash=?1"},
+        .{name = "sync_compaction", query = "SELECT compacted_through_version, updated_at FROM server_sync_compaction WHERE user_id_hash=?1"},
+        .{name = "habits", query = "SELECT id, name, color_r, color_g, color_b, sync_mode, sync_activity, counter_enabled, sort_order, deleted_at, updated_at, server_version FROM server_habits WHERE user_id_hash=?1 ORDER BY sort_order, id"},
+        .{name = "habit_days", query = "SELECT habit_id, local_date, completed, count, updated_at, server_version FROM server_habit_days WHERE user_id_hash=?1 ORDER BY local_date DESC, habit_id"},
+        .{name = "sessions", query = "SELECT id, started_at, local_date, topic, activity, source, rounds_hash, mood_before, mood_after, energy, stress, note, tags, deleted_at, updated_at, server_version FROM server_sessions WHERE user_id_hash=?1 ORDER BY started_at DESC, id"},
+        .{name = "session_rounds", query = "SELECT session_id, round_index, breaths, hold_seconds FROM server_session_rounds WHERE user_id_hash=?1 ORDER BY session_id, round_index"},
+        .{name = "meditation_logs", query = "SELECT id, session_id, duration_seconds, completed_at, server_version, created_at FROM server_meditation_logs WHERE user_id_hash=?1 ORDER BY completed_at DESC, id"},
+        .{name = "social_snapshots", query = "SELECT kind, json, updated_at, server_version FROM server_social_snapshots WHERE user_id_hash=?1 ORDER BY kind", jsonField = "json"},
+        .{name = "encrypted_records", query = "SELECT collection, id, key_id, nonce, ciphertext, updated_at, deleted_at, content_hash, schema_version, parent_id, server_version FROM server_encrypted_records WHERE user_id_hash=?1 ORDER BY collection, id"},
+        .{name = "sync_ops", query = "SELECT op_id, client_id, seq, entity_type, entity_id, local_date, op_type, payload_json, created_at, server_version FROM server_sync_ops WHERE user_id_hash=?1 ORDER BY server_version, client_id, seq", jsonField = "payload_json"},
+        .{name = "encrypted_payloads", query = "SELECT id, client_id, payload_json, created_at, server_version FROM server_encrypted_payloads WHERE user_id_hash=?1 ORDER BY server_version, id", jsonField = "payload_json"},
+        .{name = "sync_audit", query = "SELECT id, client_id, app_id, protocol_version, since_server_version, client_clock, server_version, applied_json, remote_ops, full_snapshot_required, snapshot_reason, encrypted_payload, encrypted_payload_bytes, created_at FROM server_sync_audit WHERE user_id_hash=?1 ORDER BY id DESC LIMIT 200", jsonField = "applied_json"},
+        .{name = "friend_requests", query = "SELECT id, requester_user_id_hash, target_user_id_hash, status, created_at, updated_at FROM server_friend_requests WHERE requester_user_id_hash=?1 OR target_user_id_hash=?1 ORDER BY updated_at DESC, id"},
+        .{name = "friendships", query = "SELECT user_id_a, user_id_b, created_at FROM server_friendships WHERE user_id_a=?1 OR user_id_b=?1 ORDER BY created_at DESC, user_id_a, user_id_b"},
+        .{name = "profile_stats", query = "SELECT app, practice, metric, value, label, local_date, updated_at FROM server_profile_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric"},
+        .{name = "leaderboard_stats", query = "SELECT app, practice, metric, source_version, calc_version, value, label, local_date, updated_at FROM server_leaderboard_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric"},
+        .{name = "app_grants", query = "SELECT id, source_app_id, target_app_id, collection_prefix, permission, status, created_at, updated_at, revoked_at FROM server_app_grants WHERE user_id_hash=?1 ORDER BY updated_at DESC, id"},
+    ]
+    for item: queries {
+        fields: Map(string, bool)
+        if item.jsonField != "" {
+            MapSet(fields, item.jsonField, true)
+        }
+        queried := QueryRows(database, context, item.query, userID, fields)
+        result.error = queried.error
+        if result.error != null {
+            return result
+        }
+        MapSet(response.Tables, item.name, queried.value)
+    }
+    result.value = response
+    return result
+}

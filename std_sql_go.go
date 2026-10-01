@@ -23,6 +23,26 @@ type AffectedRowsResult struct {
 	Error Error
 }
 
+type QueryResult struct {
+	Value *Rows
+	Error Error
+}
+
+type ColumnsResult struct {
+	Value []string
+	Error Error
+}
+
+type zir_519e32da2199d006_ExecResult struct {
+	Value Result
+	Error Error
+}
+
+type zir_d5b316b5f5dca782_TransactionResult struct {
+	Value *Transaction
+	Error Error
+}
+
 func StdSqlGo_NullStringValidRaw(Value NullString) bool {
 	return Value.Valid
 }
@@ -43,6 +63,98 @@ func StdSqlGo_RowsAffectedRaw(Result Result) AffectedRowsResult {
 	var result AffectedRowsResult
 	result.Value, result.Error = (sql.Result).RowsAffected(Result)
 	return result
+}
+
+func StdSqlGo_QueryRaw(Database *Database, Context Context, Query string, Arguments []Any) QueryResult {
+	var result QueryResult
+	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query, Arguments...)
+	return result
+}
+
+func StdSqlGo_QueryRowRaw(Database *Database, Context Context, Query string, Arguments []Any) *Row {
+	return (*sql.DB).QueryRowContext(Database, Context, Query, Arguments...)
+}
+
+func StdSqlGo_ColumnsRaw(Rows *Rows) ColumnsResult {
+	var result ColumnsResult
+	result.Value, result.Error = (*sql.Rows).Columns(Rows)
+	return result
+}
+
+func StdSqlGo_ScanRowsRaw(Rows *Rows, Destinations []Any) Error {
+	return (*sql.Rows).Scan(Rows, Destinations...)
+}
+
+func StdSqlGo_ScanRowRaw(Row *Row, Destinations []Any) Error {
+	return (*sql.Row).Scan(Row, Destinations...)
+}
+
+func StdSqlGo_BeginRaw(Database *Database, Context Context, Options *TransactionOptions) zir_d5b316b5f5dca782_TransactionResult {
+	var result zir_d5b316b5f5dca782_TransactionResult
+	result.Value, result.Error = (*sql.DB).BeginTx(Database, Context, Options)
+	return result
+}
+
+func StdSqlGo_ExecRaw(Database *Database, Context Context, Query string, Arguments []Any) zir_519e32da2199d006_ExecResult {
+	var result zir_519e32da2199d006_ExecResult
+	result.Value, result.Error = (*sql.DB).ExecContext(Database, Context, Query, Arguments...)
+	return result
+}
+
+func StdSqlGo_ExecTxRaw(Transaction *Transaction, Context Context, Query string, Arguments []Any) zir_519e32da2199d006_ExecResult {
+	var result zir_519e32da2199d006_ExecResult
+	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, Arguments...)
+	return result
+}
+
+func StdSqlGo_QueryTxRaw(Transaction *Transaction, Context Context, Query string, Arguments []Any) QueryResult {
+	var result QueryResult
+	result.Value, result.Error = (*sql.Tx).QueryContext(Transaction, Context, Query, Arguments...)
+	return result
+}
+
+func StdSqlGo_QueryRowTxRaw(Transaction *Transaction, Context Context, Query string, Arguments []Any) *Row {
+	return (*sql.Tx).QueryRowContext(Transaction, Context, Query, Arguments...)
+}
+
+func StdSqlGo_Begin(database *Database, context Context, options *TransactionOptions) zir_d5b316b5f5dca782_TransactionResult {
+	return StdSqlGo_BeginRaw(database, context, options)
+}
+
+func StdSqlGo_Exec(database *Database, context Context, query string, arguments []Any) zir_519e32da2199d006_ExecResult {
+	return StdSqlGo_ExecRaw(database, context, query, arguments)
+}
+
+func StdSqlGo_ExecTx(transaction *Transaction, context Context, query string, arguments []Any) zir_519e32da2199d006_ExecResult {
+	return StdSqlGo_ExecTxRaw(transaction, context, query, arguments)
+}
+
+func StdSqlGo_QueryTx(transaction *Transaction, context Context, query string, arguments []Any) QueryResult {
+	return StdSqlGo_QueryTxRaw(transaction, context, query, arguments)
+}
+
+func StdSqlGo_QueryRowTx(transaction *Transaction, context Context, query string, arguments []Any) *Row {
+	return StdSqlGo_QueryRowTxRaw(transaction, context, query, arguments)
+}
+
+func StdSqlGo_Query(database *Database, context Context, query string, arguments []Any) QueryResult {
+	return StdSqlGo_QueryRaw(database, context, query, arguments)
+}
+
+func StdSqlGo_QueryRow(database *Database, context Context, query string, arguments []Any) *Row {
+	return StdSqlGo_QueryRowRaw(database, context, query, arguments)
+}
+
+func StdSqlGo_Columns(rows *Rows) ColumnsResult {
+	return StdSqlGo_ColumnsRaw(rows)
+}
+
+func StdSqlGo_ScanRows(rows *Rows, destinations []Any) Error {
+	return StdSqlGo_ScanRowsRaw(rows, destinations)
+}
+
+func StdSqlGo_ScanRow(row *Row, destinations []Any) Error {
+	return StdSqlGo_ScanRowRaw(row, destinations)
 }
 
 func StdSqlGo_Next(rows *Rows) bool {

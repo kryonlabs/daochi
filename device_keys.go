@@ -148,17 +148,33 @@ func DeviceKeys_RecordNonce(transaction *Transaction, context Context, accountID
 }
 
 func DeviceKeys_RegistrationMessage(accountID string, request DeviceRegistrationRequest) []uint8 {
-	var value_0 string = strconv.FormatInt(int64(request.ExpiresAt), int(int(10)))
-	var value_1 [9]string = [9]string{"daochi-device-registration-v1", accountID, request.AppID, request.KeyID, request.ClientID, request.PublicKey, request.Nonce, value_0, ""}
-	parts := value_1
+	var value_0 [9]string
+	value_0[0] = "daochi-device-registration-v1"
+	value_0[1] = accountID
+	value_0[2] = request.AppID
+	value_0[3] = request.KeyID
+	value_0[4] = request.ClientID
+	value_0[5] = request.PublicKey
+	value_0[6] = request.Nonce
+	var value_1 string = strconv.FormatInt(int64(request.ExpiresAt), int(int(10)))
+	value_0[7] = value_1
+	value_0[8] = ""
+	parts := value_0
 	_ = parts
 	return StdTextGo_ToBytes(strings.Join(parts[0:9:9], "\n"))
 }
 
 func DeviceKeys_RevocationMessage(accountID string, request DeviceRevocationRequest) []uint8 {
-	var value_0 string = strconv.FormatInt(int64(request.ExpiresAt), int(int(10)))
-	var value_1 [7]string = [7]string{"daochi-device-revocation-v1", accountID, request.AppID, request.KeyID, request.Nonce, value_0, ""}
-	parts := value_1
+	var value_0 [7]string
+	value_0[0] = "daochi-device-revocation-v1"
+	value_0[1] = accountID
+	value_0[2] = request.AppID
+	value_0[3] = request.KeyID
+	value_0[4] = request.Nonce
+	var value_1 string = strconv.FormatInt(int64(request.ExpiresAt), int(int(10)))
+	value_0[5] = value_1
+	value_0[6] = ""
+	parts := value_0
 	_ = parts
 	return StdTextGo_ToBytes(strings.Join(parts[0:7:7], "\n"))
 }

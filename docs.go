@@ -27,8 +27,6 @@ type zir_d6432f2c25808066_WriteResult struct {
 	Error Error
 }
 
-type __type_7d6cc8a85f09fc88 = map[string]Any
-
 func Docs_Write(Writer Writer, Value []uint8) zir_d6432f2c25808066_WriteResult {
 	var result zir_d6432f2c25808066_WriteResult
 	result.Count, result.Error = (io.Writer).Write(Writer, Value)

@@ -15,7 +15,7 @@ type CutResult struct {
 	Found  bool
 }
 
-type IntegerResult struct {
+type zir_6a8a8ebfd8ccfc38_IntegerResult struct {
 	Value int64
 	Error Error
 }
@@ -26,8 +26,8 @@ func ConfigValues_Cut(Value string, Separator string) CutResult {
 	return result
 }
 
-func ConfigValues_ParseInt(Value string, Base int, Bits int) IntegerResult {
-	var result IntegerResult
+func ConfigValues_ParseInt(Value string, Base int, Bits int) zir_6a8a8ebfd8ccfc38_IntegerResult {
+	var result zir_6a8a8ebfd8ccfc38_IntegerResult
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }

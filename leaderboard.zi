@@ -1,0 +1,371 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "types"
+#import "protocol"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+format :: #system_library "go:fmt";
+go_time :: #system_library "go:time";
+go_sql :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+strconv :: #system_library "go:strconv";
+
+VisibleStatsUser :: struct {
+    UserIDHash: string
+    Alias: string
+    ProfileIcon: isize
+    SourceVersion: s64
+}
+LeaderboardResult :: struct {
+    value: []FriendStatRow
+    error: Error
+}
+LeaderboardRowResult :: struct {
+    value: FriendStatRow
+    found: bool
+    error: Error
+}
+StreakResult :: struct {
+    value: isize
+    date: isize
+    updatedAt: string
+    error: Error
+}
+AverageResult :: struct {
+    value: float64
+    label: string
+    error: Error
+}
+CalculationVersion :: 4;
+
+#scope_file
+UsersResult :: struct {
+    value: []VisibleStatsUser
+    error: Error
+}
+IntegerResult :: struct {
+    value: isize
+    error: Error
+}
+MakeUsers :: (count: isize) -> []VisibleStatsUser #foreign builtin "make";
+AppendUser :: (values: []VisibleStatsUser, value: VisibleStatsUser) -> []VisibleStatsUser #foreign builtin "append";
+MakeRows :: (count: isize, capacity: isize) -> []FriendStatRow #foreign builtin "make";
+AppendRow :: (values: []FriendStatRow, value: FriendStatRow) -> []FriendStatRow #foreign builtin "append";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+AddDate :: (time: clock.Time, years: isize, months: isize, days: isize) -> clock.Time #foreign go_time "Time.AddDate";
+DateInteger :: (value: string) -> IntegerResult #go_results #foreign strconv "Atoi";
+TimeFormat :: (format: string, hours: isize, minutes: isize) -> string #foreign format "Sprintf";
+IntegerFormat :: (format: string, value: isize) -> string #foreign format "Sprintf";
+FloatFormat :: (format: string, value: float64) -> string #foreign format "Sprintf";
+Compare :: (left: string, right: string) -> isize #foreign strings;
+
+Less :: (left: FriendStatRow, right: FriendStatRow) -> bool {
+    if left.Value != right.Value {
+        return left.Value > right.Value
+    }
+    leftName := left.Alias
+    if leftName == "" {
+        leftName = left.UserIDHash
+    }
+    rightName := right.Alias
+    if rightName == "" {
+        rightName = right.UserIDHash
+    }
+    if leftName != rightName {
+        return Compare(leftName, rightName) < cast(isize)0
+    }
+    return Compare(left.UserIDHash, right.UserIDHash) < cast(isize)0
+}
+
+SortRows :: (values: []FriendStatRow) {
+    count := values.count
+    if count < 2 {
+        return
+    }
+    scratch := MakeRows(cast(isize)count, cast(isize)count)
+    width: s64 = 1
+    while width < count {
+        start: s64 = 0
+        while start < count {
+            middle := start + width
+            if middle > count {
+                middle = count
+            }
+            end := middle + width
+            if end > count {
+                end = count
+            }
+            left := start
+            right := middle
+            index := start
+            while index < end {
+                if right >= end || (left < middle && !Less(values[right], values[left])) {
+                    scratch[index] = values[left]
+                    left += 1
+                } else {
+                    scratch[index] = values[right]
+                    right += 1
+                }
+                index += 1
+            }
+            index = start
+            while index < end {
+                values[index] = scratch[index]
+                index += 1
+            }
+            start = end
+        }
+        width *= 2
+    }
+}
+
+#scope_export
+Activity :: (practice: string) -> isize {
+    if practice == "meditation" {
+        return cast(isize)1
+    }
+    if practice == "sun_salutation" {
+        return cast(isize)2
+    }
+    return cast(isize)0
+}
+
+TimeLabel :: (seconds: isize) -> string {
+    value := seconds
+    if value < cast(isize)0 {
+        value = cast(isize)0
+    }
+    return TimeFormat("%d:%02d", value / cast(isize)3600, (value % cast(isize)3600) / cast(isize)60)
+}
+
+TodayDate :: () -> isize {
+    return DateInteger(clock.Format(clock.UTC(clock.Now()), "20060102")).value
+}
+
+VisibleUsers :: (database: *sql.Database, context: ctx.Context, userID: string) -> UsersResult {
+    result: UsersResult
+    arguments: [1]Any
+    arguments[0] = userID
+    queried := sql.Query(database, context,
+        "\nWITH visible_users AS (\n  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias, u.profile_icon\n  FROM server_users u\n  WHERE u.user_id_hash=?1\n  UNION\n  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias, u.profile_icon\n  FROM server_friendships f\n  JOIN server_users u ON u.user_id_hash=CASE\n      WHEN f.user_id_a=?1 THEN f.user_id_b\n      ELSE f.user_id_a\n  END\n  WHERE f.user_id_a=?1 OR f.user_id_b=?1\n)\nSELECT vu.user_id_hash, vu.alias, vu.profile_icon, COALESCE(ss.server_version,0)\nFROM visible_users vu\nLEFT JOIN server_sync_state ss ON ss.user_id_hash=vu.user_id_hash", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    users := MakeUsers(cast(isize)0)
+    while sql.Next(rows) {
+        user: VisibleStatsUser
+        destinations: [4]Any
+        destinations[0] = *user.UserIDHash
+        destinations[1] = *user.Alias
+        destinations[2] = *user.ProfileIcon
+        destinations[3] = *user.SourceVersion
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        users = AppendUser(users, user)
+    }
+    result.value = users
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Cached :: (database: *sql.Database, context: ctx.Context, user: VisibleStatsUser,
+    app: string, practice: string, metric: string) -> LeaderboardRowResult {
+    result: LeaderboardRowResult
+    sourceVersion: s64
+    calcVersion: isize
+    arguments: [4]Any
+    arguments[0] = user.UserIDHash
+    arguments[1] = app
+    arguments[2] = practice
+    arguments[3] = metric
+    destinations: [6]Any
+    destinations[0] = *sourceVersion
+    destinations[1] = *calcVersion
+    destinations[2] = *result.value.Value
+    destinations[3] = *result.value.Label
+    destinations[4] = *result.value.LocalDate
+    destinations[5] = *result.value.UpdatedAt
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "\nSELECT source_version,calc_version,value,label,local_date,updated_at\nFROM server_leaderboard_stats\nWHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null || sourceVersion != user.SourceVersion || calcVersion != cast(isize)CalculationVersion {
+        return result
+    }
+    if metric == "streak" && result.value.LocalDate != TodayDate() {
+        return result
+    }
+    result.value.UserIDHash = user.UserIDHash
+    result.value.Alias = user.Alias
+    result.value.ProfileIcon = user.ProfileIcon
+    result.value.App = app
+    result.value.Practice = practice
+    result.value.Metric = metric
+    result.found = true
+    return result
+}
+
+Streak :: (database: *sql.Database, context: ctx.Context, userID: string, activity: isize) -> StreakResult {
+    result: StreakResult
+    arguments: [2]Any
+    arguments[0] = userID
+    arguments[1] = activity
+    queried := sql.Query(database, context,
+        "\nSELECT local_date, updated_at FROM server_sessions\nWHERE user_id_hash=?1 AND deleted_at=0 AND activity=?2 AND local_date>0\nUNION\nSELECT CAST(strftime('%Y%m%d', completed_at) AS INTEGER), completed_at\nFROM server_meditation_logs\nWHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    seen: Map(isize, bool)
+    updatedAt := ""
+    while sql.Next(rows) {
+        localDate: isize
+        updated: string
+        destinations: [2]Any
+        destinations[0] = *localDate
+        destinations[1] = *updated
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        if localDate > cast(isize)0 {
+            MapSet(seen, localDate, true)
+        }
+        if Compare(updated, updatedAt) > cast(isize)0 {
+            updatedAt = updated
+        }
+    }
+    result.error = sql.RowsError(rows)
+    if result.error != null {
+        return result
+    }
+    today := clock.UTC(clock.Now())
+    result.date = TodayDate()
+    while result.value <= cast(isize)370 {
+        day := AddDate(today, cast(isize)0, cast(isize)0, -result.value)
+        localDate := DateInteger(clock.Format(day, "20060102")).value
+        if !MapGet(seen, localDate) {
+            break
+        }
+        result.value += cast(isize)1
+    }
+    result.updatedAt = updatedAt
+    return result
+}
+
+Average :: (database: *sql.Database, context: ctx.Context, userID: string,
+    practice: string, metric: string) -> AverageResult {
+    result: AverageResult
+    result.label = "0"
+    query: string
+    if metric == "avg_hold" {
+        if practice != "whm" {
+            return result
+        }
+        query = "\nSELECT COALESCE(AVG(sr.hold_seconds),0)\nFROM server_sessions s\nJOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id\nWHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=0 AND sr.hold_seconds>0"
+    } else if metric == "avg_time" {
+        if practice != "meditation" {
+            result.label = TimeLabel(cast(isize)0)
+            return result
+        }
+        query = "\nWITH session_totals AS (\n  SELECT s.id, SUM(sr.hold_seconds) AS seconds\n  FROM server_sessions s\n  JOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id\n  WHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=1 AND sr.hold_seconds>0\n  GROUP BY s.id\n),\nlog_totals AS (\n  SELECT ml.session_id AS id, ml.duration_seconds AS seconds\n  FROM server_meditation_logs ml\n  WHERE ml.user_id_hash=?1 AND ml.duration_seconds>0\n    AND NOT EXISTS (SELECT 1 FROM session_totals st WHERE st.id=ml.session_id)\n),\nall_totals AS (\n  SELECT seconds FROM session_totals\n  UNION ALL\n  SELECT seconds FROM log_totals\n)\nSELECT COALESCE(AVG(seconds),0) FROM all_totals"
+    } else {
+        return result
+    }
+    arguments: [1]Any
+    arguments[0] = userID
+    destinations: [1]Any
+    destinations[0] = *result.value
+    result.error = sql.ScanRow(sql.QueryRow(database, context, query, arguments[:]), destinations[:])
+    if metric == "avg_hold" {
+        result.label = FloatFormat("%.0f", result.value)
+    } else {
+        result.label = TimeLabel(cast(isize)(result.value + 0.5))
+    }
+    return result
+}
+
+Compute :: (database: *sql.Database, context: ctx.Context, user: VisibleStatsUser,
+    app: string, practice: string, metric: string) -> LeaderboardRowResult {
+    result: LeaderboardRowResult
+    streak := Streak(database, context, user.UserIDHash, Activity(practice))
+    result.error = streak.error
+    if result.error != null {
+        return result
+    }
+    result.value.UserIDHash = user.UserIDHash
+    result.value.Alias = user.Alias
+    result.value.ProfileIcon = user.ProfileIcon
+    result.value.App = app
+    result.value.Practice = practice
+    result.value.Metric = metric
+    result.value.LocalDate = streak.date
+    result.value.UpdatedAt = streak.updatedAt
+    if metric == "streak" {
+        result.value.Value = cast(float64)streak.value
+        result.value.Label = IntegerFormat("%d", streak.value)
+    } else {
+        average := Average(database, context, user.UserIDHash, practice, metric)
+        result.error = average.error
+        if result.error != null {
+            return result
+        }
+        result.value.Value = average.value
+        result.value.Label = average.label
+    }
+    arguments: [10]Any
+    arguments[0] = user.UserIDHash
+    arguments[1] = app
+    arguments[2] = practice
+    arguments[3] = metric
+    arguments[4] = user.SourceVersion
+    arguments[5] = CalculationVersion
+    arguments[6] = result.value.Value
+    arguments[7] = result.value.Label
+    arguments[8] = result.value.LocalDate
+    arguments[9] = result.value.UpdatedAt
+    result.error = sql.Exec(database, context,
+        "\nINSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,calc_version,value,label,local_date,updated_at)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)\nON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET\n\tsource_version=excluded.source_version,\n\tcalc_version=excluded.calc_version,\n\tvalue=excluded.value,\n\tlabel=excluded.label,\n\tlocal_date=excluded.local_date,\n\tupdated_at=excluded.updated_at", arguments[:]).error
+    return result
+}
+
+Friends :: (database: *sql.Database, context: ctx.Context, userID: string,
+    app: string, practice: string, metric: string) -> LeaderboardResult {
+    result: LeaderboardResult
+    users := VisibleUsers(database, context, userID)
+    result.error = users.error
+    if result.error != null {
+        return result
+    }
+    items := MakeRows(cast(isize)0, cast(isize)users.value.count)
+    for user: users.value {
+        row := Cached(database, context, user, app, practice, metric)
+        result.error = row.error
+        if result.error != null {
+            return result
+        }
+        if !row.found {
+            row = Compute(database, context, user, app, practice, metric)
+            result.error = row.error
+            if result.error != null {
+                return result
+            }
+        }
+        items = AppendRow(items, row.value)
+    }
+    SortRows(items)
+    result.value = items
+    return result
+}

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/subtle"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -84,6 +83,47 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 		metrics:    &ServerMetrics{},
 		node:       node.Value,
 	}
+}
+
+func (s *Server) tokens() Tokens {
+	return Tokens{
+		Database:          s.store.db,
+		Configuration:     &s.cfg,
+		Counters:          s.metrics,
+		Limiter:           s.limiter,
+		Verify:            s.verifier.Verify,
+		ReplayError:       errSignedTxReplay,
+		IssuerUnavailable: errTokenIssuerReadOnly,
+	}
+}
+
+func (s *Server) monero() Monero {
+	return Monero{
+		Database:          s.store.db,
+		Configuration:     &s.cfg,
+		Counters:          s.metrics,
+		Limiter:           s.limiter,
+		AddressLocks:      &s.moneroAddressLocks,
+		StuckNotified:     &s.moneroStuckNotified,
+		Verify:            s.verifier.Verify,
+		ReplayError:       errSignedTxReplay,
+		Unavailable:       errPaymentUnavailable,
+		IssuerUnavailable: errTokenIssuerReadOnly,
+		MissingUser:       ErrSyncUserNotFound,
+	}
+}
+
+func (s *Server) accounts() Accounts {
+	return Accounts{
+		Database:      s.store.db,
+		Configuration: &s.cfg,
+		Counters:      s.metrics,
+		MissingUser:   ErrSyncUserNotFound,
+	}
+}
+
+func (s *Server) social() Social {
+	return Social{Accounts: s.accounts(), Notifications: s.syncHub}
 }
 
 func (s *Server) appRegistry() Registry {
@@ -194,30 +234,62 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/v1/apps/", func(w http.ResponseWriter, r *http.Request) {
 		AppHttp_Route(s.appRegistry(), w, r)
 	})
-	mux.HandleFunc("GET /api/v1/tokens/assets", s.handleTokenAssets)
-	mux.HandleFunc("GET /api/v1/tokens/products", s.handleTokenProducts)
-	mux.HandleFunc("GET /api/v1/tokens/issuer", s.handleTokenIssuer)
-	mux.HandleFunc("GET /api/v1/tokens/balance", s.handleTokenBalance)
-	mux.HandleFunc("GET /api/v1/tokens/ledger", s.handleTokenLedger)
-	mux.HandleFunc("POST /api/v1/tokens/spend", s.handleTokenSpend)
-	mux.HandleFunc("POST /api/v1/tokens/purchases/google/verify", s.handleGooglePurchaseVerify)
-	mux.HandleFunc("POST /api/v1/tokens/purchases/monero/invoices", s.handleMoneroInvoices)
-	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/invoices/", s.handleMoneroInvoiceRoute)
-	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/address", s.handleMoneroAddress)
-	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/address/", s.handleMoneroAddress)
-	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/deposits", s.handleMoneroDeposits)
-	mux.HandleFunc("GET /api/v1/tokens/checkpoints/latest", s.handleTokenCheckpointLatest)
-	mux.HandleFunc("GET /api/v1/tokens/receipts/", s.handleTokenReceipt)
-	mux.HandleFunc("POST /api/v1/admin/tokens/manual-credit", s.handleAdminManualCredit)
-	mux.HandleFunc("POST /api/v1/admin/tokens/checkpoint", s.handleAdminTokenCheckpoint)
+	mux.HandleFunc("GET /api/v1/tokens/assets", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_Assets(s.tokens(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/tokens/products", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_Products(s.tokens(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/tokens/issuer", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_Issuer(s.tokens(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/tokens/balance", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_Balance(s.tokens(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/tokens/ledger", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_Ledger(s.tokens(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/tokens/spend", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_Spend(s.tokens(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/tokens/purchases/google/verify", func(w http.ResponseWriter, r *http.Request) {
+		GooglePlayHttp_Verify(s.tokens(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/tokens/purchases/monero/invoices", func(w http.ResponseWriter, r *http.Request) {
+		MoneroInvoices_Create(s.monero(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/invoices/", func(w http.ResponseWriter, r *http.Request) {
+		MoneroInvoices_Read(s.monero(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/address", func(w http.ResponseWriter, r *http.Request) { MoneroDeposits_Address(s.monero(), w, r) })
+	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/address/", func(w http.ResponseWriter, r *http.Request) { MoneroDeposits_Address(s.monero(), w, r) })
+	mux.HandleFunc("GET /api/v1/tokens/purchases/monero/deposits", func(w http.ResponseWriter, r *http.Request) { MoneroDeposits_Deposits(s.monero(), w, r) })
+	mux.HandleFunc("GET /api/v1/tokens/checkpoints/latest", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_LatestCheckpoint(s.tokens(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/tokens/receipts/", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_Receipt(s.tokens(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/admin/tokens/manual-credit", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_ManualCredit(s.tokens(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/admin/tokens/checkpoint", func(w http.ResponseWriter, r *http.Request) {
+		TokenHttp_CreateCheckpoint(s.tokens(), w, r)
+	})
 	mux.HandleFunc("GET /api/v1/sync/diagnostics", s.handleSyncDiagnostics)
 	mux.HandleFunc("GET /api/v1/sync/challenge", s.handleChallenge)
 	mux.HandleFunc("GET /api/v1/sync/ws", s.handleSyncWebSocket)
 	mux.HandleFunc("POST /api/v1/sync/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
-	mux.HandleFunc("POST /api/v1/account/alias", s.handleAlias)
-	mux.HandleFunc("POST /api/v1/account/profile-icon", s.handleProfileIcon)
-	mux.HandleFunc("GET /api/v1/account/export", s.handleAccountExport)
+	mux.HandleFunc("POST /api/v1/account/alias", func(w http.ResponseWriter, r *http.Request) {
+		AccountHttp_Alias(s.accounts(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/account/profile-icon", func(w http.ResponseWriter, r *http.Request) {
+		AccountHttp_ProfileIcon(s.accounts(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/account/export", func(w http.ResponseWriter, r *http.Request) {
+		AccountHttp_Export(s.accounts(), w, r)
+	})
 	mux.HandleFunc("GET /api/v1/account/devices", func(w http.ResponseWriter, r *http.Request) {
 		DeviceHttp_Route(s.devices(), w, r)
 	})
@@ -245,13 +317,27 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/account", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete", s.handleDeleteAccount)
 	mux.HandleFunc("POST /api/v1/account/delete-with-key", s.handleDeleteAccountWithKey)
-	mux.HandleFunc("GET /api/v1/friends", s.handleFriends)
-	mux.HandleFunc("DELETE /api/v1/friends/", s.handleFriendRoute)
-	mux.HandleFunc("GET /api/v1/friends/requests", s.handleFriendRequests)
-	mux.HandleFunc("POST /api/v1/friends/requests", s.handleFriendRequestCreate)
-	mux.HandleFunc("POST /api/v1/friends/requests/", s.handleFriendRequestRoute)
-	mux.HandleFunc("PUT /api/v1/profile/stats", s.handleProfileStatsPut)
-	mux.HandleFunc("GET /api/v1/friends/stats", s.handleFriendStats)
+	mux.HandleFunc("GET /api/v1/friends", func(w http.ResponseWriter, r *http.Request) {
+		SocialHttp_Friends(s.social(), w, r)
+	})
+	mux.HandleFunc("DELETE /api/v1/friends/", func(w http.ResponseWriter, r *http.Request) {
+		SocialHttp_RemoveFriend(s.social(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/friends/requests", func(w http.ResponseWriter, r *http.Request) {
+		SocialHttp_Requests(s.social(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/friends/requests", func(w http.ResponseWriter, r *http.Request) {
+		SocialHttp_CreateRequest(s.social(), w, r)
+	})
+	mux.HandleFunc("POST /api/v1/friends/requests/", func(w http.ResponseWriter, r *http.Request) {
+		SocialHttp_RequestAction(s.social(), w, r)
+	})
+	mux.HandleFunc("PUT /api/v1/profile/stats", func(w http.ResponseWriter, r *http.Request) {
+		SocialHttp_PutStats(s.social(), w, r)
+	})
+	mux.HandleFunc("GET /api/v1/friends/stats", func(w http.ResponseWriter, r *http.Request) {
+		SocialHttp_FriendStats(s.social(), w, r)
+	})
 	return s.withCommonHeaders(mux)
 }
 
@@ -264,7 +350,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"database":     "ok",
 		"token_secret": "ok",
 		"verifier":     "ok",
-		"token_issuer": s.tokenIssuerStatus(),
+		"token_issuer": TokenPolicy_IssuerStatus(s.cfg),
 	}
 	status := http.StatusOK
 	if s.cfg.TokenSecretEphemeral || len(s.cfg.TokenSecret) < 32 {
@@ -277,10 +363,10 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.cfg.TokenDirectPurchasesEnabled {
 		checks["token_direct_purchases"] = "ok"
-		if s.tokenIssuerStatus() != "ok" {
+		if TokenPolicy_IssuerStatus(s.cfg) != "ok" {
 			checks["token_direct_purchases"] = "issuer_private_key_missing"
 			status = http.StatusServiceUnavailable
-		} else if !hasMoneroTokenProduct(s.cfg.TokenProducts) && !validMoneroRate(s.cfg) {
+		} else if !TokenPolicy_HasMoneroProduct(s.cfg.TokenProducts) && !MoneroWallet_ValidRate(s.cfg) {
 			checks["token_direct_purchases"] = "monero_rate_or_product_missing"
 			status = http.StatusServiceUnavailable
 		} else if strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
@@ -906,291 +992,6 @@ func syncRequestHasLocalChanges(req SyncRequest) bool {
 		len(req.Ops) > 0
 }
 
-func (s *Server) handleAlias(w http.ResponseWriter, r *http.Request) {
-	_, req, err := readAliasRequest(w, r, s.cfg.MaxBodyBytes)
-	if err != nil {
-		Response_Error(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
-		Response_Error(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	tokenUser, err := s.authenticateToken(r)
-	if err != nil {
-		s.writeAuthError(w, err)
-		return
-	}
-	if tokenUser != req.UserIDHash {
-		Response_Error(w, http.StatusUnauthorized, "token user mismatch")
-		return
-	}
-	alias := normalizeAlias(req.Alias)
-	if !Identity_ValidAccountAlias(alias) {
-		Response_Error(w, http.StatusBadRequest, "invalid alias")
-		return
-	}
-	if err := s.store.SetAccountAlias(r.Context(), req.UserIDHash, alias); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
-			Response_Error(w, http.StatusConflict, "alias unavailable")
-			return
-		}
-		if errors.Is(err, ErrSyncUserNotFound) {
-			Response_Error(w, http.StatusNotFound, "sync account not found")
-			return
-		}
-		slog.Error("set account alias", "user", LogSafety_LogText(req.UserIDHash), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "alias failed")
-		return
-	}
-	Response_JSON(w, http.StatusOK, AliasResponse{Status: "ok", Alias: alias})
-}
-
-func (s *Server) handleProfileIcon(w http.ResponseWriter, r *http.Request) {
-	_, req, err := readProfileIconRequest(w, r, s.cfg.MaxBodyBytes)
-	if err != nil {
-		Response_Error(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
-		Response_Error(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	tokenUser, err := s.authenticateToken(r)
-	if err != nil {
-		s.writeAuthError(w, err)
-		return
-	}
-	if tokenUser != req.UserIDHash {
-		Response_Error(w, http.StatusUnauthorized, "token user mismatch")
-		return
-	}
-	if !validProfileIcon(req.ProfileIcon) {
-		Response_Error(w, http.StatusBadRequest, "invalid profile_icon")
-		return
-	}
-	if err := s.store.SetAccountProfileIcon(r.Context(), req.UserIDHash, req.ProfileIcon); err != nil {
-		if errors.Is(err, ErrSyncUserNotFound) {
-			Response_Error(w, http.StatusNotFound, "sync account not found")
-			return
-		}
-		slog.Error("set profile icon", "user", LogSafety_LogText(req.UserIDHash), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "profile icon failed")
-		return
-	}
-	Response_JSON(w, http.StatusOK, ProfileIconResponse{Status: "ok", ProfileIcon: req.ProfileIcon})
-}
-
-func (s *Server) handleAccountExport(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	response, err := s.store.ExportAccount(r.Context(), userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			Response_Error(w, http.StatusNotFound, "sync account not found")
-			return
-		}
-		slog.Error("export account", "user", LogSafety_LogText(userID), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "export failed")
-		return
-	}
-	Response_JSON(w, http.StatusOK, response)
-}
-
-func (s *Server) handleFriends(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	friends, err := s.store.ListFriends(r.Context(), userID)
-	if err != nil {
-		slog.Error("list friends", "user", LogSafety_LogText(userID), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "friends failed")
-		return
-	}
-	response := FriendsResponse{Friends: friends}
-	s.cacheSocialSnapshot(r.Context(), userID, "friends.list", response)
-	Response_JSON(w, http.StatusOK, response)
-}
-
-func (s *Server) handleFriendRoute(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	friendID := strings.TrimPrefix(r.URL.Path, "/api/v1/friends/")
-	friendID = strings.ToLower(strings.Trim(friendID, "/"))
-	if !Identity_ValidUserID(friendID) {
-		Response_Error(w, http.StatusNotFound, "friend not found")
-		return
-	}
-	if err := s.store.RemoveFriend(r.Context(), userID, friendID); err != nil {
-		slog.Error("remove friend", "user", LogSafety_LogText(userID), "friend", LogSafety_LogText(friendID), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "friend remove failed")
-		return
-	}
-	SyncHub_Publish(s.syncHub, userID, 0)
-	SyncHub_Publish(s.syncHub, friendID, 0)
-	Response_JSON(w, http.StatusOK, map[string]string{"status": "removed"})
-}
-
-func (s *Server) handleFriendRequests(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	incoming, outgoing, err := s.store.ListFriendRequests(r.Context(), userID)
-	if err != nil {
-		slog.Error("list friend requests", "user", LogSafety_LogText(userID), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "friend requests failed")
-		return
-	}
-	response := FriendRequestsResponse{Incoming: incoming, Outgoing: outgoing}
-	s.cacheSocialSnapshot(r.Context(), userID, "friends.requests", response)
-	Response_JSON(w, http.StatusOK, response)
-}
-
-func (s *Server) handleFriendRequestCreate(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	req, err := readFriendRequestCreateRequest(w, r, s.cfg.MaxBodyBytes)
-	if err != nil {
-		Response_Error(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	target, found, err := s.store.ResolveAccountRef(r.Context(), req.Target)
-	if err != nil {
-		slog.Error("resolve friend target", "user", LogSafety_LogText(userID), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "friend request failed")
-		return
-	}
-	if !found {
-		Response_Error(w, http.StatusNotFound, "friend target not found")
-		return
-	}
-	resource := ResourceId_New()
-	id, err := resource.Value, resource.Error
-	if err != nil {
-		slog.Error("generate friend request id", "error", err)
-		Response_Error(w, http.StatusInternalServerError, "friend request failed")
-		return
-	}
-	item, err := s.store.CreateFriendRequest(r.Context(), id, userID, target)
-	if err != nil {
-		if strings.Contains(err.Error(), "self") || strings.Contains(err.Error(), "already friends") {
-			Response_Error(w, http.StatusConflict, err.Error())
-			return
-		}
-		slog.Error("create friend request", "user", LogSafety_LogText(userID), "target", LogSafety_LogText(target), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "friend request failed")
-		return
-	}
-	SyncHub_Publish(s.syncHub, userID, 0)
-	SyncHub_Publish(s.syncHub, target, 0)
-	Response_JSON(w, http.StatusCreated, FriendRequestResponse{Status: "ok", Request: item})
-}
-
-func (s *Server) handleFriendRequestRoute(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	requestID, action, ok := parseFriendRequestPath(r.URL.Path)
-	if !ok {
-		Response_Error(w, http.StatusNotFound, "friend request not found")
-		return
-	}
-	var item FriendRequest
-	var err error
-	switch action {
-	case "accept":
-		item, err = s.store.AcceptFriendRequest(r.Context(), userID, requestID)
-	case "decline":
-		item, err = s.store.DeclineFriendRequest(r.Context(), userID, requestID)
-	default:
-		Response_Error(w, http.StatusNotFound, "friend request not found")
-		return
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		Response_Error(w, http.StatusNotFound, "friend request not found")
-		return
-	}
-	if errors.Is(err, ErrSyncUserNotFound) {
-		Response_Error(w, http.StatusForbidden, "friend request not owned by user")
-		return
-	}
-	if err != nil {
-		if strings.Contains(err.Error(), "not pending") {
-			Response_Error(w, http.StatusConflict, err.Error())
-			return
-		}
-		slog.Error("friend request action", "user", LogSafety_LogText(userID), "request", LogSafety_LogText(requestID), "action", LogSafety_LogText(action), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "friend request failed")
-		return
-	}
-	SyncHub_Publish(s.syncHub, item.RequesterUserID, 0)
-	SyncHub_Publish(s.syncHub, item.TargetUserID, 0)
-	Response_JSON(w, http.StatusOK, FriendRequestResponse{Status: item.Status, Request: item})
-}
-
-func (s *Server) handleProfileStatsPut(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	req, err := readProfileStatsRequest(w, r, s.cfg.MaxBodyBytes)
-	if err != nil {
-		Response_Error(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	applied, err := s.store.UpsertProfileStats(r.Context(), userID, req.App, req.Metrics)
-	if err != nil {
-		slog.Error("upsert profile stats", "user", LogSafety_LogText(userID), "app", LogSafety_LogText(req.App), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "profile stats failed")
-		return
-	}
-	if applied > 0 {
-		SyncHub_Publish(s.syncHub, userID, 0)
-		if friends, err := s.store.ListFriends(r.Context(), userID); err == nil {
-			for _, friend := range friends {
-				SyncHub_Publish(s.syncHub, friend.UserIDHash, 0)
-			}
-		} else {
-			slog.Error("notify profile stats friends", "user", LogSafety_LogText(userID), "error", err)
-		}
-	}
-	Response_JSON(w, http.StatusOK, ProfileStatsResponse{Status: "ok", Applied: applied})
-}
-
-func (s *Server) handleFriendStats(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	app := strings.TrimSpace(r.URL.Query().Get("app"))
-	practice := strings.TrimSpace(r.URL.Query().Get("practice"))
-	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
-	if !Identity_ValidNamespace(app) || !Identity_ValidNamespace(practice) || !Identity_ValidNamespace(metric) ||
-		!validLeaderboardMetric(practice, metric) {
-		Response_Error(w, http.StatusBadRequest, "invalid stats query")
-		return
-	}
-	rows, err := s.store.FriendStats(r.Context(), userID, app, practice, metric)
-	if err != nil {
-		slog.Error("friend stats", "user", LogSafety_LogText(userID), "app", LogSafety_LogText(app), "practice", LogSafety_LogText(practice), "metric", LogSafety_LogText(metric), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "friend stats failed")
-		return
-	}
-	response := FriendStatsResponse{Rows: rows}
-	s.cacheSocialSnapshot(r.Context(), userID,
-		"leaderboard."+app+"."+practice+"."+metric, response)
-	Response_JSON(w, http.StatusOK, response)
-}
-
 func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
 	if strings.TrimSpace(req.PublicKey) == "" {
 		return nil, nil
@@ -1281,45 +1082,6 @@ func syncChangesResult(changes SyncChanges) SyncResult {
 		Sessions:         len(changes.Sessions),
 		SocialCache:      len(changes.SocialCache),
 		EncryptedRecords: len(changes.EncryptedRecords),
-	}
-}
-
-func (s *Server) cacheSocialSnapshot(ctx context.Context, userID, kind string, value any) {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		slog.Error("marshal social cache", "user", LogSafety_LogText(userID), "kind", LogSafety_LogText(kind), "error", err)
-		return
-	}
-	applied, err := s.store.SetSocialCacheJSON(ctx, userID, kind, payload)
-	if err != nil {
-		slog.Error("write social cache", "user", LogSafety_LogText(userID), "kind", LogSafety_LogText(kind), "error", err)
-		return
-	}
-	if applied > 0 {
-		SyncHub_Publish(s.syncHub, userID, 0)
-	}
-}
-
-func normalizeAlias(alias string) string {
-	alias = strings.ToLower(strings.TrimSpace(alias))
-	alias = strings.TrimPrefix(alias, "@")
-	return alias
-}
-
-func validProfileIcon(profileIcon int) bool {
-	return profileIcon >= ProfileIconNone && profileIcon <= ProfileIconTree5
-}
-
-func validLeaderboardMetric(practice, metric string) bool {
-	switch practice {
-	case "whm":
-		return metric == "streak" || metric == "avg_hold"
-	case "meditation":
-		return metric == "streak" || metric == "avg_time"
-	case "sun_salutation":
-		return metric == "streak"
-	default:
-		return false
 	}
 }
 
@@ -1630,80 +1392,6 @@ func readDeleteRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([
 	return body, req, nil
 }
 
-func readAliasRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, AliasRequest, error) {
-	var req AliasRequest
-	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
-	body, err := bodyResult.Value, bodyResult.Error
-	if err != nil {
-		return nil, req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	req.Alias = normalizeAlias(req.Alias)
-	return body, req, nil
-}
-
-func readProfileIconRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, ProfileIconRequest, error) {
-	var req ProfileIconRequest
-	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
-	body, err := bodyResult.Value, bodyResult.Error
-	if err != nil {
-		return nil, req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	return body, req, nil
-}
-
-func readFriendRequestCreateRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (FriendRequestCreateRequest, error) {
-	var req FriendRequestCreateRequest
-	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
-	body, err := bodyResult.Value, bodyResult.Error
-	if err != nil {
-		return req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.Target = strings.TrimSpace(req.Target)
-	if req.Target == "" {
-		return req, errors.New("target required")
-	}
-	return req, nil
-}
-
-func readProfileStatsRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (ProfileStatsRequest, error) {
-	var req ProfileStatsRequest
-	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
-	body, err := bodyResult.Value, bodyResult.Error
-	if err != nil {
-		return req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.App = strings.TrimSpace(req.App)
-	if !Identity_ValidNamespace(req.App) {
-		return req, errors.New("invalid app")
-	}
-	if len(req.Metrics) > 100 {
-		return req, errors.New("too many metrics")
-	}
-	for i := range req.Metrics {
-		req.Metrics[i].Practice = strings.TrimSpace(req.Metrics[i].Practice)
-		req.Metrics[i].Metric = strings.TrimSpace(req.Metrics[i].Metric)
-		req.Metrics[i].Label = strings.TrimSpace(req.Metrics[i].Label)
-		if !Identity_ValidNamespace(req.Metrics[i].Practice) || !Identity_ValidNamespace(req.Metrics[i].Metric) {
-			return req, errors.New("invalid metric")
-		}
-	}
-	return req, nil
-}
-
 func readDeleteWithKeyRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (DeleteWithKeyRequest, error) {
 	var req DeleteWithKeyRequest
 	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
@@ -1731,19 +1419,6 @@ func normalizeMeditationDurations(logs []MeditationLog) {
 			logs[i].DurationSeconds = logs[i].Duration
 		}
 	}
-}
-
-func parseFriendRequestPath(path string) (requestID string, action string, ok bool) {
-	const prefix = "/api/v1/friends/requests/"
-	rest := strings.TrimPrefix(path, prefix)
-	if rest == path || rest == "" {
-		return "", "", false
-	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) == 2 && Identity_ValidResourceID(parts[0]) && (parts[1] == "accept" || parts[1] == "decline") {
-		return parts[0], parts[1], true
-	}
-	return "", "", false
 }
 
 type exportedSyncKey struct {

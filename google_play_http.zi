@@ -1,0 +1,131 @@
+#import "protocol"
+#import "std/go_types"
+#import "std/map_go"
+#import "std/option"
+google :: #import "google_play";
+state :: #import "payment_state";
+tokens :: #import "token_http";
+auth :: #import "http_auth";
+policy :: #import "token_policy";
+requests :: #import "payment_request";
+receipts :: #import "token_receipt";
+ledger :: #import "token_ledger";
+apps :: #import "app_store";
+signed :: #import "signed_tx";
+response :: #import "response";
+logs :: #import "log_safety";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+http :: #import "std/http_go";
+errors :: #import "std/errors_go";
+logging :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+#scope_file
+ReplayCleanup :: #type (database: *sql.Database, context: ctx.Context,
+    authorization: policy.TokenAuthorizationResult, completed: *bool) -> void;
+CleanupAtReturn :: (callback: ReplayCleanup, database: *sql.Database, context: ctx.Context,
+    authorization: policy.TokenAuthorizationResult, completed: *bool) #go_defer #foreign builtin "call";
+LogAppError :: (message: string, appKey: string, app: string, errorKey: string, error: Error) #foreign logging "Error";
+LogCreditError :: (message: string, userKey: string, user: string,
+    paymentKey: string, payment: string, errorKey: string, error: Error) #foreign logging "Error";
+LogConsumeError :: (message: string, userKey: string, user: string,
+    paymentKey: string, payment: string, errorKey: string, error: Error) #foreign logging "Warn";
+
+ForgetOnFailure :: (database: *sql.Database, context: ctx.Context,
+    authorization: policy.TokenAuthorizationResult, completed: *bool) {
+    if authorization.signed && !<<completed {
+        signed.Forget(database, context, authorization.value)
+    }
+}
+PaymentError :: (writer: http.ResponseWriter, failure: Error) {
+    if errors.Is(failure, state.errPaymentUnavailable) {
+        response.Error(writer, cast(isize)503, "payment verifier unavailable")
+        return
+    }
+    response.Error(writer, cast(isize)400, errors.Message(failure))
+}
+
+#scope_export
+Verify :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(server.database, request, server.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, server.counters, user.authentication)
+        return
+    }
+    decoded := requests.ReadGoogle(writer, request, server.configuration.MaxBodyBytes)
+    if decoded.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    issuer := policy.Issuer(<<server.configuration, server.issuerUnavailable)
+    if issuer.error != null {
+        response.Error(writer, cast(isize)503, "token issuer unavailable")
+        return
+    }
+    product := MapLookup(server.configuration.TokenProducts, decoded.value.ProductID)
+    if !product.has_value {
+        response.Error(writer, cast(isize)400, "unknown product_id")
+        return
+    }
+    existence := apps.Exists(server.database, http.Context(request), decoded.value.AppID)
+    if existence.error != null {
+        LogAppError("google token purchase app lookup", "app", logs.LogText(decoded.value.AppID), "error", existence.error)
+        response.Error(writer, cast(isize)500, "token purchase failed")
+        return
+    }
+    if !existence.value {
+        response.Error(writer, cast(isize)400, "unknown app_id")
+        return
+    }
+    authorization := policy.Authorize(server.database, http.Context(request), request, decoded.body,
+        user.value, decoded.value.AppID, receipts.AssetID, "purchase", server.verify, server.replayError)
+    if authorization.authentication.error != null || authorization.authentication.status != 0 {
+        if authorization.signed {
+            signed.Forget(server.database, http.Context(request), authorization.value)
+        }
+        auth.Respond(writer, server.counters, authorization.authentication)
+        return
+    }
+    completed := false
+    CleanupAtReturn(ForgetOnFailure, server.database, http.Context(request), authorization, *completed)
+    if MapCount(server.configuration.GooglePackageNames) > 0 &&
+        !MapGet(server.configuration.GooglePackageNames, decoded.value.PackageName) {
+        response.Error(writer, cast(isize)400, "package not allowed")
+        return
+    }
+    verified := google.VerifyPurchase(http.Context(request), <<server.configuration, decoded.value)
+    if verified.error != null {
+        PaymentError(writer, verified.error)
+        return
+    }
+    event: receipts.TokenEventInput
+    event.AccountID = user.value
+    event.AppID = decoded.value.AppID
+    event.EventType = "credit"
+    event.AmountDelta = product.value.TokenUnits
+    event.SourceType = "google_play"
+    event.SourceRef = verified.value
+    credited := ledger.CreditPayment(server.database, http.Context(request), issuer.value,
+        "google_play", verified.value, event, server.issuerUnavailable)
+    if credited.error != null {
+        LogCreditError("google token credit", "user", logs.LogText(user.value), "payment", logs.LogText(verified.value), "error", credited.error)
+        response.Error(writer, cast(isize)500, "token credit failed")
+        return
+    }
+    consumed := google.ConsumePurchase(http.Context(request), <<server.configuration, decoded.value)
+    if consumed != null {
+        LogConsumeError("google purchase consume failed after token credit", "user", logs.LogText(user.value), "payment", logs.LogText(verified.value), "error", consumed)
+    }
+    balance := ledger.Balance(server.database, http.Context(request), user.value, receipts.AssetID)
+    if balance.error != null {
+        response.Error(writer, cast(isize)500, "token balance failed")
+        return
+    }
+    completed = true
+    purchase: TokenPurchaseResponse
+    purchase.Status = "ok"
+    purchase.Balance = balance.value
+    purchase.Receipt = credited.value
+    response.JSON(writer, cast(isize)200, purchase)
+}

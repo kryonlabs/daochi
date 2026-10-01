@@ -312,8 +312,8 @@ func (s *Store) baselineSeedBuiltinApps(ctx context.Context) error {
 			{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: appCompatibilityDeadline},
 		},
 		TokenPolicies: []TokenPolicy{
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionSpend, Status: appStatusActive, LegacyUnsignedUntil: 1819756800},
-			{AssetID: waoziTokenAssetID, Permission: tokenPermissionPurchase, Status: appStatusActive, LegacyUnsignedUntil: 1819756800},
+			{AssetID: AssetID, Permission: "spend", Status: appStatusActive, LegacyUnsignedUntil: 1819756800},
+			{AssetID: AssetID, Permission: "purchase", Status: appStatusActive, LegacyUnsignedUntil: 1819756800},
 		},
 	}
 	var signedManifest int

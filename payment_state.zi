@@ -1,0 +1,5 @@
+#import "std/go_types"
+errors :: #import "std/errors_go";
+
+errTokenIssuerReadOnly: Error = errors.New("token issuer private key unavailable");
+errPaymentUnavailable: Error = errors.New("payment verifier unavailable");

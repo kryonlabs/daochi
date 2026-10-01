@@ -106,7 +106,10 @@ func Scope_LikePatternForCollectionPrefix(prefix string) string {
 	base = strings.ReplaceAll(base, "\\", "\\\\")
 	base = strings.ReplaceAll(base, "%", "\\%")
 	base = strings.ReplaceAll(base, "_", "\\_")
-	parts := [2]string{base, ".%"}
+	var value_0 [2]string
+	value_0[0] = base
+	value_0[1] = ".%"
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:2:2], "")
 }

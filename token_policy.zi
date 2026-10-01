@@ -1,0 +1,114 @@
+#import "protocol"
+#import "std/go_types"
+#import "std/map_go"
+config :: #import "config";
+auth :: #import "authentication";
+apps :: #import "app_store";
+scope :: #import "scope";
+signed :: #import "signed_tx";
+envelope :: #import "transaction";
+signing :: #import "signing";
+http :: #import "std/http_go";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+ed :: #import "std/ed25519_go";
+clock :: #import "std/time_go";
+text :: #import "std/text_go";
+strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+IssuerResult :: struct {
+    value: ed.PrivateKey
+    error: Error
+}
+TokenAuthorizationResult :: struct {
+    value: envelope.SignedTxEnvelope
+    signed: bool
+    authentication: auth.AuthenticationResult
+}
+
+#scope_file
+PrivateLength :: (value: ed.PrivateKey) -> isize #foreign builtin "len";
+PublicLength :: (value: ed.PublicKey) -> isize #foreign builtin "len";
+TrimSpace :: (value: string) -> string #foreign strings;
+
+#scope_export
+IssuerStatus :: (configuration: config.Config) -> string {
+    if PrivateLength(configuration.WaoziIssuerPrivateKey) == cast(isize)64 {
+        return "ok"
+    }
+    if PublicLength(configuration.WaoziIssuerPublicKey) == cast(isize)32 {
+        return "read_only"
+    }
+    return "disabled"
+}
+
+Issuer :: (configuration: config.Config, unavailable: Error) -> IssuerResult {
+    result: IssuerResult
+    if PrivateLength(configuration.WaoziIssuerPrivateKey) != cast(isize)64 {
+        result.error = unavailable
+        return result
+    }
+    result.value = configuration.WaoziIssuerPrivateKey
+    return result
+}
+
+HasMoneroProduct :: (products: Map(string, TokenProduct)) -> bool {
+    keys := MapKeys(products)
+    for key: keys {
+        product := MapGet(products, key)
+        if product.TokenUnits > 0 && product.MoneroAtomicAmount > 0 {
+            return true
+        }
+    }
+    return false
+}
+
+ShortHash :: (value: string) -> string {
+    return signing.SHA256Hex(text.ToBytes(value))[0:16]
+}
+
+Authorize :: (database: *sql.Database, context: ctx.Context, request: *http.Request, body: []u8, accountID: string, appID: string, assetID: string, permission: string, verify: auth.VerifySignature, replayError: Error) -> TokenAuthorizationResult {
+    result: TokenAuthorizationResult
+    hasSignature := TrimSpace(http.HeaderValue(http.Headers(request), "X-Daochi-Tx")) != ""
+    if hasSignature {
+        header := signed.ReadHeader(request)
+        result.authentication = header.authentication
+        if result.authentication.error != null || result.authentication.status != 0 {
+            return result
+        }
+        result.authentication = signed.Verify(database, context, request, body,
+            header.value, accountID, appID, verify, replayError)
+        if result.authentication.error != null || result.authentication.status != 0 {
+            return result
+        }
+        result.value = header.value
+    }
+    result.signed = hasSignature
+    if !scope.ValidTokenPolicyPermission(permission) {
+        result.authentication = auth.Failure(cast(isize)400, "invalid token permission")
+        return result
+    }
+    policyExists := apps.HasPolicy(database, context, appID)
+    if policyExists.error != null {
+        result.authentication = auth.NativeFailure(policyExists.error)
+        return result
+    }
+    if !policyExists.value {
+        return result
+    }
+    permissionResult := apps.Permission(database, context, appID, assetID, permission)
+    if permissionResult.error != null {
+        result.authentication = auth.NativeFailure(permissionResult.error)
+        return result
+    }
+    if !permissionResult.found {
+        result.authentication = auth.Failure(cast(isize)403, "app token permission denied")
+        return result
+    }
+    if !hasSignature && (permissionResult.value.LegacyUnsignedUntil == 0 ||
+        clock.Unix(clock.Now()) > permissionResult.value.LegacyUnsignedUntil) {
+        result.authentication = auth.Failure(cast(isize)401, "signed transaction required")
+    }
+    return result
+}

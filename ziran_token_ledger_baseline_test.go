@@ -204,7 +204,7 @@ WHERE provider=?1 AND provider_payment_id=?2`, provider, providerPaymentID).Scan
 			&existingAccountID, &existingAssetID, &existingAmount); err != nil {
 			return baselineTokenReceipt{}, false, err
 		}
-		if existingAccountID != input.AccountID || existingAssetID != waoziTokenAssetID || existingAmount != input.AmountDelta {
+		if existingAccountID != input.AccountID || existingAssetID != AssetID || existingAmount != input.AmountDelta {
 			return baselineTokenReceipt{}, false, errors.New("provider payment id collision")
 		}
 		receipt, found, err := baselineTokenReceiptByIDTx(ctx, tx, existingReceiptID)
@@ -227,7 +227,7 @@ WHERE provider=?1 AND provider_payment_id=?2`, provider, providerPaymentID).Scan
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO token_processed_payments(provider,provider_payment_id,account_id,asset_id,amount,receipt_id)
 VALUES(?1,?2,?3,?4,?5,?6)`, provider, providerPaymentID, input.AccountID,
-		waoziTokenAssetID, input.AmountDelta, receipt.ReceiptID); err != nil {
+		AssetID, input.AmountDelta, receipt.ReceiptID); err != nil {
 		return baselineTokenReceipt{}, false, err
 	}
 	return receipt, true, nil
@@ -262,7 +262,7 @@ WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3`,
 		if !found {
 			return baselineTokenReceipt{}, 0, false, errors.New("spend receipt missing")
 		}
-		balance, err := baselineTokenBalanceTx(ctx, tx, input.AccountID, waoziTokenAssetID)
+		balance, err := baselineTokenBalanceTx(ctx, tx, input.AccountID, AssetID)
 		if err != nil {
 			return baselineTokenReceipt{}, 0, false, err
 		}
@@ -272,7 +272,7 @@ WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3`,
 		return baselineTokenReceipt{}, 0, false, err
 	}
 
-	balance, err := baselineTokenBalanceTx(ctx, tx, input.AccountID, waoziTokenAssetID)
+	balance, err := baselineTokenBalanceTx(ctx, tx, input.AccountID, AssetID)
 	if err != nil {
 		return baselineTokenReceipt{}, 0, false, err
 	}
@@ -325,8 +325,8 @@ LIMIT 1`).Scan(&previousSeq, &previousHash); err != nil && !errors.Is(err, sql.E
 	createdAt := time.Now().UTC().Format(time.RFC3339)
 	payload := baselineTokenReceiptPayload{
 		ReceiptID:    receiptID,
-		IssuerID:     waoziIssuerID,
-		AssetID:      waoziTokenAssetID,
+		IssuerID:     IssuerID,
+		AssetID:      AssetID,
 		AccountID:    input.AccountID,
 		AppID:        input.AppID,
 		EventType:    input.EventType,
@@ -475,7 +475,7 @@ func (s *Store) baselineCreateTokenCheckpoint(ctx context.Context, signer ed2551
 SELECT ledger_seq,event_hash
 FROM token_ledger
 WHERE issuer_id=?1 AND asset_id=?2
-ORDER BY ledger_seq`, waoziIssuerID, waoziTokenAssetID)
+ORDER BY ledger_seq`, IssuerID, AssetID)
 	if err != nil {
 		return TokenCheckpoint{}, err
 	}
@@ -496,7 +496,7 @@ ORDER BY ledger_seq`, waoziIssuerID, waoziTokenAssetID)
 	sum := sha256.Sum256(root.Bytes())
 	ledgerRoot := hex.EncodeToString(sum[:])
 	message := []byte(fmt.Sprintf("ksync-token-checkpoint-v1\n%s\n%s\n%d\n%s\n",
-		waoziIssuerID, waoziTokenAssetID, seq, ledgerRoot))
+		IssuerID, AssetID, seq, ledgerRoot))
 	signature := hex.EncodeToString(ed25519.Sign(signer, message))
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO token_checkpoints(ledger_seq,issuer_id,asset_id,ledger_root,signature)
@@ -504,7 +504,7 @@ VALUES(?1,?2,?3,?4,?5)
 ON CONFLICT(ledger_seq) DO UPDATE SET
 	ledger_root=excluded.ledger_root,
 	signature=excluded.signature,
-	created_at=CURRENT_TIMESTAMP`, seq, waoziIssuerID, waoziTokenAssetID, ledgerRoot, signature)
+	created_at=CURRENT_TIMESTAMP`, seq, IssuerID, AssetID, ledgerRoot, signature)
 	if err != nil {
 		return TokenCheckpoint{}, err
 	}

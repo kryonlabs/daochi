@@ -58,168 +58,6 @@ func isCanonicalHabitID(id string) bool {
 	return true
 }
 
-func (s *Store) ExportAccount(ctx context.Context, userID string) (AccountExportResponse, error) {
-	var alias sql.NullString
-	var profileIcon int
-	response := AccountExportResponse{
-		Status:     "ok",
-		UserIDHash: userID,
-		Tables:     make(map[string][]map[string]any),
-	}
-	if err := s.db.QueryRowContext(ctx, `
-SELECT alias,profile_icon
-FROM server_users
-WHERE user_id_hash=?1`, userID).Scan(&alias, &profileIcon); err != nil {
-		return AccountExportResponse{}, err
-	}
-	if alias.Valid {
-		response.AccountAlias = alias.String
-	}
-	response.ProfileIcon = profileIcon
-
-	queries := []struct {
-		name       string
-		query      string
-		jsonFields map[string]bool
-	}{
-		{
-			name:  "users",
-			query: `SELECT user_id_hash, alias, profile_icon, created_at, last_seen_at FROM server_users WHERE user_id_hash=?1`,
-		},
-		{
-			name:  "clients",
-			query: `SELECT client_id, created_at, last_seen_at, last_login_at, last_sync_at, last_since_server_version, last_seen_server_version, protocol_version, last_client_clock FROM server_clients WHERE user_id_hash=?1 ORDER BY last_seen_at DESC, client_id`,
-		},
-		{
-			name:  "sync_state",
-			query: `SELECT server_version FROM server_sync_state WHERE user_id_hash=?1`,
-		},
-		{
-			name:  "sync_compaction",
-			query: `SELECT compacted_through_version, updated_at FROM server_sync_compaction WHERE user_id_hash=?1`,
-		},
-		{
-			name:  "habits",
-			query: `SELECT id, name, color_r, color_g, color_b, sync_mode, sync_activity, counter_enabled, sort_order, deleted_at, updated_at, server_version FROM server_habits WHERE user_id_hash=?1 ORDER BY sort_order, id`,
-		},
-		{
-			name:  "habit_days",
-			query: `SELECT habit_id, local_date, completed, count, updated_at, server_version FROM server_habit_days WHERE user_id_hash=?1 ORDER BY local_date DESC, habit_id`,
-		},
-		{
-			name:  "sessions",
-			query: `SELECT id, started_at, local_date, topic, activity, source, rounds_hash, mood_before, mood_after, energy, stress, note, tags, deleted_at, updated_at, server_version FROM server_sessions WHERE user_id_hash=?1 ORDER BY started_at DESC, id`,
-		},
-		{
-			name:  "session_rounds",
-			query: `SELECT session_id, round_index, breaths, hold_seconds FROM server_session_rounds WHERE user_id_hash=?1 ORDER BY session_id, round_index`,
-		},
-		{
-			name:  "meditation_logs",
-			query: `SELECT id, session_id, duration_seconds, completed_at, server_version, created_at FROM server_meditation_logs WHERE user_id_hash=?1 ORDER BY completed_at DESC, id`,
-		},
-		{
-			name:       "social_snapshots",
-			query:      `SELECT kind, json, updated_at, server_version FROM server_social_snapshots WHERE user_id_hash=?1 ORDER BY kind`,
-			jsonFields: map[string]bool{"json": true},
-		},
-		{
-			name:  "encrypted_records",
-			query: `SELECT collection, id, key_id, nonce, ciphertext, updated_at, deleted_at, content_hash, schema_version, parent_id, server_version FROM server_encrypted_records WHERE user_id_hash=?1 ORDER BY collection, id`,
-		},
-		{
-			name:       "sync_ops",
-			query:      `SELECT op_id, client_id, seq, entity_type, entity_id, local_date, op_type, payload_json, created_at, server_version FROM server_sync_ops WHERE user_id_hash=?1 ORDER BY server_version, client_id, seq`,
-			jsonFields: map[string]bool{"payload_json": true},
-		},
-		{
-			name:       "encrypted_payloads",
-			query:      `SELECT id, client_id, payload_json, created_at, server_version FROM server_encrypted_payloads WHERE user_id_hash=?1 ORDER BY server_version, id`,
-			jsonFields: map[string]bool{"payload_json": true},
-		},
-		{
-			name:       "sync_audit",
-			query:      `SELECT id, client_id, app_id, protocol_version, since_server_version, client_clock, server_version, applied_json, remote_ops, full_snapshot_required, snapshot_reason, encrypted_payload, encrypted_payload_bytes, created_at FROM server_sync_audit WHERE user_id_hash=?1 ORDER BY id DESC LIMIT 200`,
-			jsonFields: map[string]bool{"applied_json": true},
-		},
-		{
-			name:  "friend_requests",
-			query: `SELECT id, requester_user_id_hash, target_user_id_hash, status, created_at, updated_at FROM server_friend_requests WHERE requester_user_id_hash=?1 OR target_user_id_hash=?1 ORDER BY updated_at DESC, id`,
-		},
-		{
-			name:  "friendships",
-			query: `SELECT user_id_a, user_id_b, created_at FROM server_friendships WHERE user_id_a=?1 OR user_id_b=?1 ORDER BY created_at DESC, user_id_a, user_id_b`,
-		},
-		{
-			name:  "profile_stats",
-			query: `SELECT app, practice, metric, value, label, local_date, updated_at FROM server_profile_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric`,
-		},
-		{
-			name:  "leaderboard_stats",
-			query: `SELECT app, practice, metric, source_version, calc_version, value, label, local_date, updated_at FROM server_leaderboard_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric`,
-		},
-		{
-			name:  "app_grants",
-			query: `SELECT id, source_app_id, target_app_id, collection_prefix, permission, status, created_at, updated_at, revoked_at FROM server_app_grants WHERE user_id_hash=?1 ORDER BY updated_at DESC, id`,
-		},
-	}
-	for _, item := range queries {
-		rows, err := s.queryAccountRows(ctx, item.query, userID, item.jsonFields)
-		if err != nil {
-			return AccountExportResponse{}, err
-		}
-		response.Tables[item.name] = rows
-	}
-	return response, nil
-}
-
-func (s *Store) queryAccountRows(ctx context.Context, query string, userID string, jsonFields map[string]bool) ([]map[string]any, error) {
-	rows, err := s.db.QueryContext(ctx, query, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	out := []map[string]any{}
-	for rows.Next() {
-		values := make([]any, len(columns))
-		dest := make([]any, len(columns))
-		for i := range values {
-			dest[i] = &values[i]
-		}
-		if err := rows.Scan(dest...); err != nil {
-			return nil, err
-		}
-		item := make(map[string]any, len(columns))
-		for i, column := range columns {
-			item[column] = exportRowValue(column, values[i], jsonFields)
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func exportRowValue(column string, value any, jsonFields map[string]bool) any {
-	if value == nil {
-		return nil
-	}
-	if bytes, ok := value.([]byte); ok {
-		text := string(bytes)
-		if jsonFields[column] {
-			var raw any
-			if err := json.Unmarshal(bytes, &raw); err == nil {
-				return raw
-			}
-		}
-		return text
-	}
-	return value
-}
-
 func OpenStore(path string) (*Store, error) {
 	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000&_foreign_keys=on")
 	if err != nil {
@@ -1361,615 +1199,79 @@ WHERE user_id_hash=?1`, userID).Scan(&version)
 }
 
 func (s *Store) RegisterUser(ctx context.Context, userID string, publicKey []byte) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM server_account_tombstones WHERE user_id_hash=?1`, userID); err != nil {
-		return err
-	}
-	if err := upsertUser(ctx, tx, userID, publicKey); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return AccountState_Register(s.db, ctx, userID, publicKey)
 }
 
 func (s *Store) AccountAlias(ctx context.Context, userID string) (string, error) {
-	var alias sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT alias FROM server_users WHERE user_id_hash=?1`, userID).Scan(&alias)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if !alias.Valid {
-		return "", nil
-	}
-	return alias.String, nil
+	result := AccountProfile_Alias(s.db, ctx, userID)
+	return result.Value, result.Error
 }
 
 func (s *Store) SetAccountAlias(ctx context.Context, userID, alias string) error {
-	res, err := s.db.ExecContext(ctx, `
-UPDATE server_users
-SET alias=?2,last_seen_at=?3
-WHERE user_id_hash=?1`, userID, alias, Timestamp_CanonicalNow())
-	if err != nil {
-		return err
-	}
-	if AccountState_Affected(res) == 0 {
-		return ErrSyncUserNotFound
-	}
-	return nil
+	return AccountProfile_SetAlias(s.db, ctx, userID, alias, ErrSyncUserNotFound)
 }
 
 func (s *Store) AccountProfileIcon(ctx context.Context, userID string) (int, error) {
-	var profileIcon int
-	err := s.db.QueryRowContext(ctx, `SELECT profile_icon FROM server_users WHERE user_id_hash=?1`, userID).Scan(&profileIcon)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ProfileIconNone, nil
-	}
-	if err != nil {
-		return ProfileIconNone, err
-	}
-	return profileIcon, nil
+	result := AccountProfile_Icon(s.db, ctx, userID)
+	return result.Value, result.Error
 }
 
 func (s *Store) SetAccountProfileIcon(ctx context.Context, userID string, profileIcon int) error {
-	res, err := s.db.ExecContext(ctx, `
-UPDATE server_users
-SET profile_icon=?2,last_seen_at=?3
-WHERE user_id_hash=?1`, userID, profileIcon, Timestamp_CanonicalNow())
-	if err != nil {
-		return err
-	}
-	if AccountState_Affected(res) == 0 {
-		return ErrSyncUserNotFound
-	}
-	return nil
+	return AccountProfile_SetIcon(s.db, ctx, userID, profileIcon, ErrSyncUserNotFound)
 }
 
 func (s *Store) ResolveAccountRef(ctx context.Context, ref string) (string, bool, error) {
-	ref = strings.TrimSpace(ref)
-	if strings.HasPrefix(ref, "@") {
-		ref = strings.TrimPrefix(ref, "@")
-	}
-	if Identity_ValidUserID(strings.ToLower(ref)) {
-		userID := strings.ToLower(ref)
-		var exists int
-		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)`, userID).Scan(&exists)
-		return userID, exists != 0, err
-	}
-	alias := strings.ToLower(ref)
-	if !Identity_ValidAccountAlias(alias) {
-		return "", false, nil
-	}
-	var userID string
-	err := s.db.QueryRowContext(ctx, `SELECT user_id_hash FROM server_users WHERE alias=?1`, alias).Scan(&userID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	return userID, true, err
-}
-
-func friendPair(a, b string) (string, string) {
-	if a < b {
-		return a, b
-	}
-	return b, a
+	result := AccountLookup_Resolve(s.db, ctx, ref)
+	return result.Value, result.Found, result.Error
 }
 
 func (s *Store) CreateFriendRequest(ctx context.Context, id, requester, target string) (FriendRequest, error) {
-	if requester == target {
-		return FriendRequest{}, errors.New("cannot friend self")
-	}
-	a, b := friendPair(requester, target)
-	var alreadyFriends int
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2)`, a, b).Scan(&alreadyFriends); err != nil {
-		return FriendRequest{}, err
-	}
-	if alreadyFriends != 0 {
-		return FriendRequest{}, errors.New("already friends")
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `
-INSERT INTO server_friend_requests(id,requester_user_id_hash,target_user_id_hash,status,created_at,updated_at)
-VALUES(?1,?2,?3,'pending',?4,?4)
-ON CONFLICT(requester_user_id_hash,target_user_id_hash) DO UPDATE SET
-	status=CASE WHEN server_friend_requests.status='declined' THEN 'pending' ELSE server_friend_requests.status END,
-	updated_at=CASE WHEN server_friend_requests.status='declined' THEN excluded.updated_at ELSE server_friend_requests.updated_at END`,
-		id, requester, target, now); err != nil {
-		return FriendRequest{}, err
-	}
-	return s.friendRequestByUsers(ctx, requester, target)
-}
-
-func (s *Store) friendRequestByUsers(ctx context.Context, requester, target string) (FriendRequest, error) {
-	row := s.db.QueryRowContext(ctx, `
-SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
-FROM server_friend_requests fr
-JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
-JOIN server_users tu ON tu.user_id_hash=fr.target_user_id_hash
-WHERE fr.requester_user_id_hash=?1 AND fr.target_user_id_hash=?2`, requester, target)
-	return scanFriendRequest(row)
+	result := FriendStore_CreateRequest(s.db, ctx, id, requester, target)
+	return result.Value, result.Error
 }
 
 func (s *Store) FriendRequest(ctx context.Context, id string) (FriendRequest, bool, error) {
-	row := s.db.QueryRowContext(ctx, `
-SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
-FROM server_friend_requests fr
-JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
-JOIN server_users tu ON tu.user_id_hash=fr.target_user_id_hash
-WHERE fr.id=?1`, id)
-	req, err := scanFriendRequest(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return FriendRequest{}, false, nil
-	}
-	return req, err == nil, err
-}
-
-func scanFriendRequest(row interface{ Scan(...any) error }) (FriendRequest, error) {
-	var req FriendRequest
-	err := row.Scan(&req.ID, &req.RequesterUserID, &req.RequesterAlias, &req.TargetUserID, &req.TargetAlias, &req.Status, &req.CreatedAt, &req.UpdatedAt)
-	return req, err
+	result := FriendStore_Request(s.db, ctx, id)
+	return result.Value, result.Found, result.Error
 }
 
 func (s *Store) ListFriendRequests(ctx context.Context, userID string) ([]FriendRequest, []FriendRequest, error) {
-	query := func(where string) ([]FriendRequest, error) {
-		rows, err := s.db.QueryContext(ctx, `
-SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
-FROM server_friend_requests fr
-JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
-JOIN server_users tu ON tu.user_id_hash=fr.target_user_id_hash
-WHERE `+where+` AND fr.status='pending'
-ORDER BY fr.updated_at DESC`, userID)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		items := []FriendRequest{}
-		for rows.Next() {
-			req, err := scanFriendRequest(rows)
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, req)
-		}
-		return items, rows.Err()
-	}
-	incoming, err := query("fr.target_user_id_hash=?1")
-	if err != nil {
-		return nil, nil, err
-	}
-	outgoing, err := query("fr.requester_user_id_hash=?1")
-	return incoming, outgoing, err
+	result := FriendStore_Requests(s.db, ctx, userID)
+	return result.Incoming, result.Outgoing, result.Error
 }
 
 func (s *Store) AcceptFriendRequest(ctx context.Context, userID, id string) (FriendRequest, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return FriendRequest{}, err
-	}
-	defer tx.Rollback()
-	var req FriendRequest
-	row := tx.QueryRowContext(ctx, `
-SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
-FROM server_friend_requests fr
-JOIN server_users ru ON ru.user_id_hash=fr.requester_user_id_hash
-JOIN server_users tu ON tu.user_id_hash=fr.target_user_id_hash
-WHERE fr.id=?1`, id)
-	if err := row.Scan(&req.ID, &req.RequesterUserID, &req.RequesterAlias, &req.TargetUserID, &req.TargetAlias, &req.Status, &req.CreatedAt, &req.UpdatedAt); err != nil {
-		return FriendRequest{}, err
-	}
-	if req.TargetUserID != userID {
-		return FriendRequest{}, ErrSyncUserNotFound
-	}
-	if req.Status != "pending" {
-		return FriendRequest{}, errors.New("request not pending")
-	}
-	a, b := friendPair(req.RequesterUserID, req.TargetUserID)
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := tx.ExecContext(ctx, `UPDATE server_friend_requests SET status='accepted',updated_at=?2 WHERE id=?1`, id, now); err != nil {
-		return FriendRequest{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT OR IGNORE INTO server_friendships(user_id_a,user_id_b,created_at)
-VALUES(?1,?2,?3)`, a, b, now); err != nil {
-		return FriendRequest{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return FriendRequest{}, err
-	}
-	req.Status = "accepted"
-	req.UpdatedAt = now
-	return req, nil
+	result := FriendStore_Accept(s.db, ctx, userID, id, ErrSyncUserNotFound)
+	return result.Value, result.Error
 }
 
 func (s *Store) DeclineFriendRequest(ctx context.Context, userID, id string) (FriendRequest, error) {
-	req, found, err := s.FriendRequest(ctx, id)
-	if err != nil {
-		return FriendRequest{}, err
-	}
-	if !found {
-		return FriendRequest{}, sql.ErrNoRows
-	}
-	if req.TargetUserID != userID && req.RequesterUserID != userID {
-		return FriendRequest{}, ErrSyncUserNotFound
-	}
-	if req.Status != "pending" {
-		return FriendRequest{}, errors.New("request not pending")
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `UPDATE server_friend_requests SET status='declined',updated_at=?2 WHERE id=?1`, id, now); err != nil {
-		return FriendRequest{}, err
-	}
-	req.Status = "declined"
-	req.UpdatedAt = now
-	return req, nil
+	result := FriendStore_Decline(s.db, ctx, userID, id, ErrSyncUserNotFound)
+	return result.Value, result.Error
 }
 
 func (s *Store) ListFriends(ctx context.Context, userID string) ([]Friend, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT u.user_id_hash,COALESCE(u.alias,''),u.profile_icon,f.created_at
-FROM server_friendships f
-JOIN server_users u ON u.user_id_hash=CASE WHEN f.user_id_a=?1 THEN f.user_id_b ELSE f.user_id_a END
-WHERE f.user_id_a=?1 OR f.user_id_b=?1
-ORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Friend{}
-	for rows.Next() {
-		var item Friend
-		if err := rows.Scan(&item.UserIDHash, &item.Alias, &item.ProfileIcon, &item.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	result := FriendStore_Friends(s.db, ctx, userID)
+	return result.Value, result.Error
 }
 
-// AuthoritativeSocial returns the current social state from the friendship
-// tables. server_social_snapshots is only a cache populated by the standalone
-// social endpoints, so it must not decide what a newly restored client sees.
 func (s *Store) AuthoritativeSocial(ctx context.Context, userID string) ([]SocialSnapshot, error) {
-	friends, err := s.ListFriends(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	incoming, outgoing, err := s.ListFriendRequests(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	friendsJSON, err := json.Marshal(FriendsResponse{Friends: friends})
-	if err != nil {
-		return nil, err
-	}
-	requestsJSON, err := json.Marshal(FriendRequestsResponse{Incoming: incoming, Outgoing: outgoing})
-	if err != nil {
-		return nil, err
-	}
-	now := Timestamp_CanonicalNow()
-	return []SocialSnapshot{
-		{Kind: "friends.list", JSON: friendsJSON, UpdatedAt: now},
-		{Kind: "friends.requests", JSON: requestsJSON, UpdatedAt: now},
-	}, nil
+	result := FriendStore_Authoritative(s.db, ctx, userID)
+	return result.Value, result.Error
 }
 
 func (s *Store) RemoveFriend(ctx context.Context, userID, friendID string) error {
-	a, b := friendPair(userID, friendID)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2`, a, b); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-DELETE FROM server_friend_requests
-WHERE (requester_user_id_hash=?1 AND target_user_id_hash=?2)
-   OR (requester_user_id_hash=?2 AND target_user_id_hash=?1)`, userID, friendID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return FriendStore_Remove(s.db, ctx, userID, friendID)
 }
 
 func (s *Store) UpsertProfileStats(ctx context.Context, userID, app string, metrics []ProfileMetric) (int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	now := time.Now().UTC().Format(time.RFC3339)
-	applied := 0
-	for _, metric := range metrics {
-		practice := strings.TrimSpace(metric.Practice)
-		name := strings.TrimSpace(metric.Metric)
-		if practice == "" || name == "" {
-			continue
-		}
-		res, err := tx.ExecContext(ctx, `
-INSERT INTO server_profile_stats(user_id_hash,app,practice,metric,value,label,local_date,updated_at)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
-ON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET
-	value=excluded.value,label=excluded.label,local_date=excluded.local_date,updated_at=excluded.updated_at
-WHERE excluded.value != server_profile_stats.value
-   OR excluded.label != server_profile_stats.label
-   OR excluded.local_date != server_profile_stats.local_date`,
-			userID, app, practice, name, metric.Value, metric.Label, metric.LocalDate, now)
-		if err != nil {
-			return 0, err
-		}
-		applied += AccountState_Affected(res)
-	}
-	return applied, tx.Commit()
-}
-
-type visibleStatsUser struct {
-	UserIDHash    string
-	Alias         string
-	ProfileIcon   int
-	SourceVersion int64
-}
-
-const leaderboardStatsCalcVersion = 4
-
-func leaderboardActivity(practice string) int {
-	switch practice {
-	case "meditation":
-		return 1
-	case "sun_salutation":
-		return 2
-	default:
-		return 0
-	}
-}
-
-func leaderboardTimeLabel(seconds int) string {
-	if seconds < 0 {
-		seconds = 0
-	}
-	return fmt.Sprintf("%d:%02d", seconds/3600, (seconds%3600)/60)
-}
-
-func leaderboardTodayDate() int {
-	today := time.Now().UTC()
-	return today.Year()*10000 + int(today.Month())*100 + today.Day()
-}
-
-func (s *Store) visibleStatsUsers(ctx context.Context, userID string) ([]visibleStatsUser, error) {
-	rows, err := s.db.QueryContext(ctx, `
-WITH visible_users AS (
-  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias, u.profile_icon
-  FROM server_users u
-  WHERE u.user_id_hash=?1
-  UNION
-  SELECT u.user_id_hash, COALESCE(u.alias,'') AS alias, u.profile_icon
-  FROM server_friendships f
-  JOIN server_users u ON u.user_id_hash=CASE
-      WHEN f.user_id_a=?1 THEN f.user_id_b
-      ELSE f.user_id_a
-  END
-  WHERE f.user_id_a=?1 OR f.user_id_b=?1
-)
-SELECT vu.user_id_hash, vu.alias, vu.profile_icon, COALESCE(ss.server_version,0)
-FROM visible_users vu
-LEFT JOIN server_sync_state ss ON ss.user_id_hash=vu.user_id_hash`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	users := []visibleStatsUser{}
-	for rows.Next() {
-		var user visibleStatsUser
-		if err := rows.Scan(&user.UserIDHash, &user.Alias, &user.ProfileIcon, &user.SourceVersion); err != nil {
-			return nil, err
-		}
-		users = append(users, user)
-	}
-	return users, rows.Err()
-}
-
-func (s *Store) cachedLeaderboardStat(ctx context.Context, user visibleStatsUser, app, practice, metric string) (FriendStatRow, bool, error) {
-	var row FriendStatRow
-	var sourceVersion int64
-	var calcVersion int
-	err := s.db.QueryRowContext(ctx, `
-SELECT source_version,calc_version,value,label,local_date,updated_at
-FROM server_leaderboard_stats
-WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4`,
-		user.UserIDHash, app, practice, metric).Scan(&sourceVersion, &calcVersion, &row.Value, &row.Label, &row.LocalDate, &row.UpdatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return row, false, nil
-	}
-	if err != nil {
-		return row, false, err
-	}
-	if sourceVersion != user.SourceVersion || calcVersion != leaderboardStatsCalcVersion {
-		return row, false, nil
-	}
-	if metric == "streak" && row.LocalDate != leaderboardTodayDate() {
-		return row, false, nil
-	}
-	row.UserIDHash = user.UserIDHash
-	row.Alias = user.Alias
-	row.ProfileIcon = user.ProfileIcon
-	row.App = app
-	row.Practice = practice
-	row.Metric = metric
-	return row, true, nil
-}
-
-func (s *Store) activityStreak(ctx context.Context, userID string, activity int) (int, int, string, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT local_date, updated_at FROM server_sessions
-WHERE user_id_hash=?1 AND deleted_at=0 AND activity=?2 AND local_date>0
-UNION
-SELECT CAST(strftime('%Y%m%d', completed_at) AS INTEGER), completed_at
-FROM server_meditation_logs
-WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity)
-	if err != nil {
-		return 0, 0, "", err
-	}
-	defer rows.Close()
-	seen := map[int]bool{}
-	updatedAt := ""
-	for rows.Next() {
-		var localDate int
-		var updated string
-		if err := rows.Scan(&localDate, &updated); err != nil {
-			return 0, 0, "", err
-		}
-		if localDate > 0 {
-			seen[localDate] = true
-		}
-		if updated > updatedAt {
-			updatedAt = updated
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, 0, "", err
-	}
-	today := time.Now().UTC()
-	todayDate := leaderboardTodayDate()
-	start := today
-	streak := 0
-	for ; streak <= 370; streak++ {
-		day := start.AddDate(0, 0, -streak)
-		localDate := day.Year()*10000 + int(day.Month())*100 + day.Day()
-		if !seen[localDate] {
-			break
-		}
-	}
-	return streak, todayDate, updatedAt, nil
-}
-
-func (s *Store) activityAverage(ctx context.Context, userID string, practice, metric string) (float64, string, error) {
-	switch metric {
-	case "avg_hold":
-		if practice != "whm" {
-			return 0, "0", nil
-		}
-		var value float64
-		err := s.db.QueryRowContext(ctx, `
-SELECT COALESCE(AVG(sr.hold_seconds),0)
-FROM server_sessions s
-JOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id
-WHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=0 AND sr.hold_seconds>0`, userID).Scan(&value)
-		return value, fmt.Sprintf("%.0f", value), err
-	case "avg_time":
-		if practice != "meditation" {
-			return 0, leaderboardTimeLabel(0), nil
-		}
-		var value float64
-		err := s.db.QueryRowContext(ctx, `
-WITH session_totals AS (
-  SELECT s.id, SUM(sr.hold_seconds) AS seconds
-  FROM server_sessions s
-  JOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id
-  WHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=1 AND sr.hold_seconds>0
-  GROUP BY s.id
-),
-log_totals AS (
-  SELECT ml.session_id AS id, ml.duration_seconds AS seconds
-  FROM server_meditation_logs ml
-  WHERE ml.user_id_hash=?1 AND ml.duration_seconds>0
-    AND NOT EXISTS (SELECT 1 FROM session_totals st WHERE st.id=ml.session_id)
-),
-all_totals AS (
-  SELECT seconds FROM session_totals
-  UNION ALL
-  SELECT seconds FROM log_totals
-)
-SELECT COALESCE(AVG(seconds),0) FROM all_totals`, userID).Scan(&value)
-		return value, leaderboardTimeLabel(int(value + 0.5)), err
-	default:
-		return 0, "0", nil
-	}
-}
-
-func (s *Store) computeLeaderboardStat(ctx context.Context, user visibleStatsUser, app, practice, metric string) (FriendStatRow, error) {
-	activity := leaderboardActivity(practice)
-	streak, todayDate, updatedAt, err := s.activityStreak(ctx, user.UserIDHash, activity)
-	if err != nil {
-		return FriendStatRow{}, err
-	}
-	row := FriendStatRow{
-		UserIDHash:  user.UserIDHash,
-		Alias:       user.Alias,
-		ProfileIcon: user.ProfileIcon,
-		App:         app,
-		Practice:    practice,
-		Metric:      metric,
-		LocalDate:   todayDate,
-		UpdatedAt:   updatedAt,
-	}
-	if metric == "streak" {
-		row.Value = float64(streak)
-		row.Label = fmt.Sprintf("%d", streak)
-	} else {
-		value, label, err := s.activityAverage(ctx, user.UserIDHash, practice, metric)
-		if err != nil {
-			return row, err
-		}
-		row.Value = value
-		row.Label = label
-	}
-	_, err = s.db.ExecContext(ctx, `
-INSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,calc_version,value,label,local_date,updated_at)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
-ON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET
-	source_version=excluded.source_version,
-	calc_version=excluded.calc_version,
-	value=excluded.value,
-	label=excluded.label,
-	local_date=excluded.local_date,
-	updated_at=excluded.updated_at`,
-		user.UserIDHash, app, practice, metric, user.SourceVersion, leaderboardStatsCalcVersion,
-		row.Value, row.Label, row.LocalDate, row.UpdatedAt)
-	return row, err
+	result := FriendStore_UpsertStats(s.db, ctx, userID, app, metrics)
+	return result.Applied, result.Error
 }
 
 func (s *Store) FriendStats(ctx context.Context, userID, app, practice, metric string) ([]FriendStatRow, error) {
-	users, err := s.visibleStatsUsers(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]FriendStatRow, 0, len(users))
-	for _, user := range users {
-		row, ok, err := s.cachedLeaderboardStat(ctx, user, app, practice, metric)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			row, err = s.computeLeaderboardStat(ctx, user, app, practice, metric)
-			if err != nil {
-				return nil, err
-			}
-		}
-		items = append(items, row)
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Value != items[j].Value {
-			return items[i].Value > items[j].Value
-		}
-		left := items[i].Alias
-		if left == "" {
-			left = items[i].UserIDHash
-		}
-		right := items[j].Alias
-		if right == "" {
-			right = items[j].UserIDHash
-		}
-		if left != right {
-			return left < right
-		}
-		return items[i].UserIDHash < items[j].UserIDHash
-	})
-	return items, nil
+	result := Leaderboard_Friends(s.db, ctx, userID, app, practice, metric)
+	return result.Value, result.Error
 }
 
 func (s *Store) RecordClientLogin(ctx context.Context, userID, clientID string) error {
@@ -3587,16 +2889,7 @@ ORDER BY server_version,collection,id`, userID, sinceVersion)
 }
 
 func upsertUser(ctx context.Context, tx *sql.Tx, userID string, publicKey []byte) error {
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_users(user_id_hash,public_key)
-VALUES(?1,?2)
-ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=?3`, userID, publicKey, Timestamp_CanonicalNow()); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `
-INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version)
-VALUES(?1,0)`, userID)
-	return err
+	return AccountState_Upsert(tx, ctx, userID, publicKey)
 }
 
 func replaceUserData(ctx context.Context, tx *sql.Tx, userID string) error {
@@ -3670,63 +2963,13 @@ VALUES(?1,?2,?3,?4,?5)`, userID, session.ID, round.RoundIndex, round.Breaths, ro
 }
 
 func upsertSocialCache(ctx context.Context, tx *sql.Tx, userID string, item SocialSnapshot) (int, error) {
-	kind := strings.TrimSpace(item.Kind)
-	payload := item.JSON
-	var same int
-
-	if kind == "" || len(kind) > 96 {
-		return 0, fmt.Errorf("invalid social_cache kind")
-	}
-	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	if !json.Valid(payload) {
-		return 0, fmt.Errorf("invalid social_cache json")
-	}
-	if err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM server_social_snapshots WHERE user_id_hash=?1 AND kind=?2 AND json=?3)`,
-		userID, kind, string(payload)).Scan(&same); err != nil {
-		return 0, err
-	}
-	if same != 0 {
-		return 0, nil
-	}
-	version, err := nextUserVersion(ctx, tx, userID)
-	if err != nil {
-		return 0, err
-	}
-	res, err := tx.ExecContext(ctx, `
-INSERT INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)
-VALUES(?1,?2,?3,?4,?5)
-ON CONFLICT(user_id_hash,kind) DO UPDATE SET
-	json=excluded.json,
-	updated_at=excluded.updated_at,
-	server_version=excluded.server_version
-WHERE excluded.json != server_social_snapshots.json`,
-		userID, kind, string(payload), Timestamp_NormalizeTime(item.UpdatedAt, ""), version)
-	if err != nil {
-		return 0, err
-	}
-	return AccountState_Affected(res), nil
+	result := SocialCache_Upsert(tx, ctx, userID, item)
+	return result.Applied, result.Error
 }
 
 func (s *Store) SetSocialCacheJSON(ctx context.Context, userID, kind string, payload []byte) (int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	applied, err := upsertSocialCache(ctx, tx, userID, SocialSnapshot{
-		Kind: kind,
-		JSON: json.RawMessage(payload),
-	})
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return applied, nil
+	result := SocialCache_Set(s.db, ctx, userID, kind, payload)
+	return result.Applied, result.Error
 }
 
 func upsertEncryptedRecord(ctx context.Context, tx *sql.Tx, userID string, item EncryptedRecord) (int, error) {

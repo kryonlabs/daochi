@@ -54,10 +54,22 @@ func Transaction_Normalize(tx *SignedTxEnvelope) {
 }
 
 func Transaction_CanonicalMessage(context string, tx SignedTxEnvelope) string {
-	var value_0 string = strconv.FormatInt(int64(int64(tx.ProtocolVersion)), int(int(10)))
-	var value_1 string = strconv.FormatInt(int64(tx.ExpiresAt), int(int(10)))
-	var value_2 [12]string = [12]string{context, value_0, tx.TxID, tx.AccountID, tx.AppID, tx.DeviceKeyID, tx.Method, tx.Path, tx.BodySHA256, tx.Nonce, value_1, ""}
-	parts := value_2
+	var value_0 [12]string
+	value_0[0] = context
+	var value_1 string = strconv.FormatInt(int64(int64(tx.ProtocolVersion)), int(int(10)))
+	value_0[1] = value_1
+	value_0[2] = tx.TxID
+	value_0[3] = tx.AccountID
+	value_0[4] = tx.AppID
+	value_0[5] = tx.DeviceKeyID
+	value_0[6] = tx.Method
+	value_0[7] = tx.Path
+	value_0[8] = tx.BodySHA256
+	value_0[9] = tx.Nonce
+	var value_2 string = strconv.FormatInt(int64(tx.ExpiresAt), int(int(10)))
+	value_0[10] = value_2
+	value_0[11] = ""
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:12:12], "\n")
 }

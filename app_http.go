@@ -27,9 +27,9 @@ type StatusResponse struct {
 	Status string "json:\"status\""
 }
 
-type ReplayCleanup func(*Database, Context, SignedTxEnvelope, *bool)
+type zir_a9f2e3112734250a_ReplayCleanup func(*Database, Context, SignedTxEnvelope, *bool)
 
-func AppHttp_CleanupAtReturn(Callback ReplayCleanup, Database *Database, Context Context, Transaction SignedTxEnvelope, Completed *bool) {
+func AppHttp_CleanupAtReturn(Callback zir_a9f2e3112734250a_ReplayCleanup, Database *Database, Context Context, Transaction SignedTxEnvelope, Completed *bool) {
 	Callback(Database, Context, Transaction, Completed)
 }
 
@@ -112,10 +112,13 @@ func AppHttp_AuthenticateAdmin(writer ResponseWriter, request *Request, expected
 		Response_Error(writer, int(403), "admin registration disabled")
 		return false
 	}
-	names := [2]string{"X-Daochi-Admin", "X-Ksync-Admin"}
+	var value_0 [2]string
+	value_0[0] = "X-Daochi-Admin"
+	value_0[1] = "X-Ksync-Admin"
+	names := value_0
 	_ = names
-	var value_0 string = HttpAuth_HeaderAlias(request, names[0:2:2])
-	if value_0 != expected {
+	var value_1 string = HttpAuth_HeaderAlias(request, names[0:2:2])
+	if value_1 != expected {
 		Response_Error(writer, int(401), "admin token required")
 		return false
 	}
@@ -317,7 +320,7 @@ func AppHttp_GrantSigned(registry Registry, writer ResponseWriter, request *Requ
 		return
 	}
 	completed := false
-	var value_6 ReplayCleanup = func(value_2 *Database, value_3 Context, value_4 SignedTxEnvelope, value_5 *bool) {
+	var value_6 zir_a9f2e3112734250a_ReplayCleanup = func(value_2 *Database, value_3 Context, value_4 SignedTxEnvelope, value_5 *bool) {
 		AppHttp_ForgetOnFailure(value_2, value_3, value_4, value_5)
 	}
 	defer AppHttp_CleanupAtReturn(value_6, registry.Database, context, value.Tx, &(completed))
@@ -394,7 +397,7 @@ func AppHttp_Records(registry Registry, writer ResponseWriter, request *Request)
 		return
 	}
 	completed := false
-	var value_10 ReplayCleanup = func(value_6 *Database, value_7 Context, value_8 SignedTxEnvelope, value_9 *bool) {
+	var value_10 zir_a9f2e3112734250a_ReplayCleanup = func(value_6 *Database, value_7 Context, value_8 SignedTxEnvelope, value_9 *bool) {
 		AppHttp_ForgetOnFailure(value_6, value_7, value_8, value_9)
 	}
 	defer AppHttp_CleanupAtReturn(value_10, registry.Database, context, header.Value, &(completed))

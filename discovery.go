@@ -101,17 +101,24 @@ func Discovery_InstanceName(displayName string, nodeID string) string {
 	if int64(len(nodeID)) > 12 {
 		nodeID = nodeID[:12]
 	}
-	parts := [3]string{name, " ", nodeID}
+	var value_0 [3]string
+	value_0[0] = name
+	value_0[1] = " "
+	value_0[2] = nodeID
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:3:3], "")
 }
 
 func Discovery_Text(nodeID string) []string {
 	value := make([]string, int(int(4)))
-	parts := [2]string{"id=", nodeID}
+	var value_0 [2]string
+	value_0[0] = "id="
+	value_0[1] = nodeID
+	parts := value_0
 	_ = parts
-	var value_0 string = strings.Join(parts[0:2:2], "")
-	value[0] = value_0
+	var value_1 string = strings.Join(parts[0:2:2], "")
+	value[0] = value_1
 	value[1] = "protocol=6"
 	value[2] = "trust=pairing-required"
 	value[3] = "path=/api/v1/node"

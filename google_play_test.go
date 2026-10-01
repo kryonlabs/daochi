@@ -96,7 +96,7 @@ func (f *fakeGooglePlay) serviceAccountJSON(t *testing.T) string {
 		t.Fatal(err)
 	}
 	pemKey := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
-	payload, err := json.Marshal(googleServiceAccount{
+	payload, err := json.Marshal(GoogleServiceAccount{
 		ClientEmail: "daochi-test@example.iam.gserviceaccount.com",
 		PrivateKey:  pemKey,
 		TokenURI:    f.Token.URL,
@@ -112,10 +112,10 @@ func (f *fakeGooglePlay) serviceAccountJSON(t *testing.T) string {
 func googleTestConfig(t *testing.T) (*fakeGooglePlay, Config, func()) {
 	t.Helper()
 	fake := newFakeGooglePlay(t)
-	previous := googlePlayAPIBaseURL
-	googlePlayAPIBaseURL = fake.API.URL
+	previous := GoogleAPIBaseURL
+	GoogleAPIBaseURL = fake.API.URL
 	cfg := Config{GoogleServiceAccountJSON: fake.serviceAccountJSON(t)}
-	return fake, cfg, func() { googlePlayAPIBaseURL = previous }
+	return fake, cfg, func() { GoogleAPIBaseURL = previous }
 }
 
 func TestVerifyGooglePlayPurchaseAcceptsValidPurchase(t *testing.T) {
@@ -126,7 +126,8 @@ func TestVerifyGooglePlayPurchaseAcceptsValidPurchase(t *testing.T) {
 		ProductID:     "waozi_tokens_small",
 		PurchaseToken: "purchase-token-1",
 	}
-	ref, err := verifyGooglePlayPurchase(context.Background(), cfg, req)
+	result := GooglePlay_VerifyPurchase(context.Background(), cfg, req)
+	ref, err := result.Value, result.Error
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +145,7 @@ func TestVerifyGooglePlayPurchaseRejectsBadStates(t *testing.T) {
 		PurchaseToken: "purchase-token-2",
 	}
 	verify := func() error {
-		_, err := verifyGooglePlayPurchase(context.Background(), cfg, req)
-		return err
+		return GooglePlay_VerifyPurchase(context.Background(), cfg, req).Error
 	}
 	if err := verify(); err != nil {
 		t.Fatalf("valid purchase rejected: %v", err)
@@ -168,7 +168,7 @@ func TestConsumeGooglePlayPurchase(t *testing.T) {
 		ProductID:     "waozi_tokens_small",
 		PurchaseToken: "purchase-token-3",
 	}
-	if err := consumeGooglePlayPurchase(context.Background(), cfg, req); err != nil {
+	if err := GooglePlay_ConsumePurchase(context.Background(), cfg, req); err != nil {
 		t.Fatal(err)
 	}
 	if fake.consumeCount() != 1 {
@@ -178,13 +178,14 @@ func TestConsumeGooglePlayPurchase(t *testing.T) {
 
 func TestGoogleRefreshAccessTokenUsesClientTokenURI(t *testing.T) {
 	fake := newFakeGooglePlay(t)
-	clientFile, err := json.Marshal(googleOAuthClientFile{
-		Web: googleOAuthClient{ClientID: "cid", ClientSecret: "secret", TokenURI: fake.Token.URL},
+	clientFile, err := json.Marshal(GoogleOAuthClientFile{
+		Web: GoogleOAuthClient{ClientID: "cid", ClientSecret: "secret", TokenURI: fake.Token.URL},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := googleRefreshAccessToken(context.Background(), string(clientFile), "refresh-token")
+	result := GooglePlay_RefreshAccessToken(context.Background(), string(clientFile), "refresh-token")
+	token, err := result.Value, result.Error
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,371 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "protocol"
+#import "account_http"
+friends :: #import "friend_store";
+lookup :: #import "account_lookup";
+leaderboard :: #import "leaderboard";
+snapshots :: #import "social_cache";
+hub :: #import "sync_hub";
+auth :: #import "http_auth";
+response :: #import "response";
+body :: #import "http_body";
+logs :: #import "log_safety";
+resource :: #import "resource_id";
+identity :: #import "identity";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+json :: #import "std/json_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+logging :: #system_library "go:log/slog";
+
+Social :: struct {
+    accounts: Accounts
+    notifications: *hub.SyncHub
+}
+FriendCreateDecodeResult :: struct {
+    value: FriendRequestCreateRequest
+    error: Error
+}
+ProfileStatsDecodeResult :: struct {
+    value: ProfileStatsRequest
+    error: Error
+}
+FriendRequestPath :: struct {
+    id: string
+    action: string
+    valid: bool
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+Trim :: (value: string, cutset: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+Contains :: (value: string, part: string) -> bool #foreign strings;
+Split :: (value: string, separator: string) -> []string #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+LogError :: (message: string, key: string, error: Error) #foreign logging "Error";
+LogUserError :: (message: string, userKey: string, user: string, errorKey: string, error: Error) #foreign logging "Error";
+LogSubjectError :: (message: string, userKey: string, user: string, subjectKey: string, subject: string, errorKey: string, error: Error) #foreign logging "Error";
+LogActionError :: (message: string, userKey: string, user: string, requestKey: string, request: string, actionKey: string, action: string, errorKey: string, error: Error) #foreign logging "Error";
+LogStatsError :: (message: string, userKey: string, user: string, appKey: string, app: string, practiceKey: string, practice: string, metricKey: string, metric: string, errorKey: string, error: Error) #foreign logging "Error";
+
+Bearer :: (social: Social, writer: http.ResponseWriter, request: *http.Request) -> auth.UserAuthenticationResult {
+    result := auth.BearerUser(social.accounts.database, request, social.accounts.configuration.TokenSecret)
+    if result.authentication.error != null || result.authentication.status != cast(isize)0 {
+        auth.Respond(writer, social.accounts.counters, result.authentication)
+    }
+    return result
+}
+
+Failed :: (result: auth.UserAuthenticationResult) -> bool {
+    return result.authentication.error != null || result.authentication.status != cast(isize)0
+}
+
+#scope_export
+Cache :: (social: Social, context: ctx.Context, userID: string, kind: string, value: Any) {
+    marshaled := json.Marshal(value)
+    if marshaled.error != null {
+        LogSubjectError("marshal social cache", "user", logs.LogText(userID), "kind", logs.LogText(kind), "error", marshaled.error)
+        return
+    }
+    written := snapshots.Set(social.accounts.database, context, userID, kind, marshaled.value)
+    if written.error != null {
+        LogSubjectError("write social cache", "user", logs.LogText(userID), "kind", logs.LogText(kind), "error", written.error)
+        return
+    }
+    if written.applied > cast(isize)0 {
+        hub.Publish(social.notifications, userID, 0)
+    }
+}
+
+ValidMetric :: (practice: string, metric: string) -> bool {
+    if practice == "whm" {
+        return metric == "streak" || metric == "avg_hold"
+    }
+    if practice == "meditation" {
+        return metric == "streak" || metric == "avg_time"
+    }
+    if practice == "sun_salutation" {
+        return metric == "streak"
+    }
+    return false
+}
+
+ParseRequestPath :: (path: string) -> FriendRequestPath {
+    result: FriendRequestPath
+    rest := TrimPrefix(path, "/api/v1/friends/requests/")
+    if rest == path || rest == "" {
+        return result
+    }
+    parts := Split(Trim(rest, "/"), "/")
+    if parts.count == 2 && identity.ValidResourceID(parts[0]) && (parts[1] == "accept" || parts[1] == "decline") {
+        result.id = parts[0]
+        result.action = parts[1]
+        result.valid = true
+    }
+    return result
+}
+
+ReadCreate :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> FriendCreateDecodeResult {
+    result: FriendCreateDecodeResult
+    read := body.ReadJSON(writer, request, limit)
+    result.error = read.error
+    if result.error != null {
+        return result
+    }
+    if json.Unmarshal(read.value, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.Target = TrimSpace(result.value.Target)
+    if result.value.Target == "" {
+        result.error = errors.New("target required")
+    }
+    return result
+}
+
+ReadStats :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> ProfileStatsDecodeResult {
+    result: ProfileStatsDecodeResult
+    read := body.ReadJSON(writer, request, limit)
+    result.error = read.error
+    if result.error != null {
+        return result
+    }
+    if json.Unmarshal(read.value, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.App = TrimSpace(result.value.App)
+    if !identity.ValidNamespace(result.value.App) {
+        result.error = errors.New("invalid app")
+        return result
+    }
+    if result.value.Metrics.count > 100 {
+        result.error = errors.New("too many metrics")
+        return result
+    }
+    index: s64 = 0
+    while index < result.value.Metrics.count {
+        result.value.Metrics[index].Practice = TrimSpace(result.value.Metrics[index].Practice)
+        result.value.Metrics[index].Metric = TrimSpace(result.value.Metrics[index].Metric)
+        result.value.Metrics[index].Label = TrimSpace(result.value.Metrics[index].Label)
+        if !identity.ValidNamespace(result.value.Metrics[index].Practice) || !identity.ValidNamespace(result.value.Metrics[index].Metric) {
+            result.error = errors.New("invalid metric")
+            return result
+        }
+        index += 1
+    }
+    return result
+}
+
+Friends :: (social: Social, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(social, writer, request)
+    if Failed(user) {
+        return
+    }
+    listed := friends.Friends(social.accounts.database, http.Context(request), user.value)
+    if listed.error != null {
+        LogUserError("list friends", "user", logs.LogText(user.value), "error", listed.error)
+        response.Error(writer, cast(isize)500, "friends failed")
+        return
+    }
+    output: FriendsResponse
+    output.Friends = listed.value
+    Cache(social, http.Context(request), user.value, "friends.list", output)
+    response.JSON(writer, cast(isize)200, output)
+}
+
+RemoveFriend :: (social: Social, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(social, writer, request)
+    if Failed(user) {
+        return
+    }
+    friendID := ToLower(Trim(TrimPrefix(url.Path(http.RequestURL(request)), "/api/v1/friends/"), "/"))
+    if !identity.ValidUserID(friendID) {
+        response.Error(writer, cast(isize)404, "friend not found")
+        return
+    }
+    error := friends.Remove(social.accounts.database, http.Context(request), user.value, friendID)
+    if error != null {
+        LogSubjectError("remove friend", "user", logs.LogText(user.value), "friend", logs.LogText(friendID), "error", error)
+        response.Error(writer, cast(isize)500, "friend remove failed")
+        return
+    }
+    hub.Publish(social.notifications, user.value, 0)
+    hub.Publish(social.notifications, friendID, 0)
+    output: Map(string, string)
+    MapSet(output, "status", "removed")
+    response.JSON(writer, cast(isize)200, output)
+}
+
+Requests :: (social: Social, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(social, writer, request)
+    if Failed(user) {
+        return
+    }
+    listed := friends.Requests(social.accounts.database, http.Context(request), user.value)
+    if listed.error != null {
+        LogUserError("list friend requests", "user", logs.LogText(user.value), "error", listed.error)
+        response.Error(writer, cast(isize)500, "friend requests failed")
+        return
+    }
+    output: FriendRequestsResponse
+    output.Incoming = listed.incoming
+    output.Outgoing = listed.outgoing
+    Cache(social, http.Context(request), user.value, "friends.requests", output)
+    response.JSON(writer, cast(isize)200, output)
+}
+
+CreateRequest :: (social: Social, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(social, writer, request)
+    if Failed(user) {
+        return
+    }
+    decoded := ReadCreate(writer, request, social.accounts.configuration.MaxBodyBytes)
+    if decoded.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    target := lookup.Resolve(social.accounts.database, http.Context(request), decoded.value.Target)
+    if target.error != null {
+        LogUserError("resolve friend target", "user", logs.LogText(user.value), "error", target.error)
+        response.Error(writer, cast(isize)500, "friend request failed")
+        return
+    }
+    if !target.found {
+        response.Error(writer, cast(isize)404, "friend target not found")
+        return
+    }
+    identifier := resource.New()
+    if identifier.error != null {
+        LogError("generate friend request id", "error", identifier.error)
+        response.Error(writer, cast(isize)500, "friend request failed")
+        return
+    }
+    created := friends.CreateRequest(social.accounts.database, http.Context(request), identifier.value, user.value, target.value)
+    if created.error != null {
+        message := errors.Message(created.error)
+        if Contains(message, "self") || Contains(message, "already friends") {
+            response.Error(writer, cast(isize)409, message)
+            return
+        }
+        LogSubjectError("create friend request", "user", logs.LogText(user.value), "target", logs.LogText(target.value), "error", created.error)
+        response.Error(writer, cast(isize)500, "friend request failed")
+        return
+    }
+    hub.Publish(social.notifications, user.value, 0)
+    hub.Publish(social.notifications, target.value, 0)
+    output: FriendRequestResponse
+    output.Status = "ok"
+    output.Request = created.value
+    response.JSON(writer, cast(isize)201, output)
+}
+
+RequestAction :: (social: Social, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(social, writer, request)
+    if Failed(user) {
+        return
+    }
+    path := ParseRequestPath(url.Path(http.RequestURL(request)))
+    if !path.valid {
+        response.Error(writer, cast(isize)404, "friend request not found")
+        return
+    }
+    changed: friends.FriendRequestResult
+    if path.action == "accept" {
+        changed = friends.Accept(social.accounts.database, http.Context(request), user.value, path.id, social.accounts.missingUser)
+    } else if path.action == "decline" {
+        changed = friends.Decline(social.accounts.database, http.Context(request), user.value, path.id, social.accounts.missingUser)
+    } else {
+        response.Error(writer, cast(isize)404, "friend request not found")
+        return
+    }
+    if errors.Is(changed.error, sql.NoRows()) {
+        response.Error(writer, cast(isize)404, "friend request not found")
+        return
+    }
+    if errors.Is(changed.error, social.accounts.missingUser) {
+        response.Error(writer, cast(isize)403, "friend request not owned by user")
+        return
+    }
+    if changed.error != null {
+        message := errors.Message(changed.error)
+        if Contains(message, "not pending") {
+            response.Error(writer, cast(isize)409, message)
+            return
+        }
+        LogActionError("friend request action", "user", logs.LogText(user.value), "request", logs.LogText(path.id), "action", logs.LogText(path.action), "error", changed.error)
+        response.Error(writer, cast(isize)500, "friend request failed")
+        return
+    }
+    hub.Publish(social.notifications, changed.value.RequesterUserID, 0)
+    hub.Publish(social.notifications, changed.value.TargetUserID, 0)
+    output: FriendRequestResponse
+    output.Status = changed.value.Status
+    output.Request = changed.value
+    response.JSON(writer, cast(isize)200, output)
+}
+
+PutStats :: (social: Social, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(social, writer, request)
+    if Failed(user) {
+        return
+    }
+    decoded := ReadStats(writer, request, social.accounts.configuration.MaxBodyBytes)
+    if decoded.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    written := friends.UpsertStats(social.accounts.database, http.Context(request), user.value, decoded.value.App, decoded.value.Metrics)
+    if written.error != null {
+        LogSubjectError("upsert profile stats", "user", logs.LogText(user.value), "app", logs.LogText(decoded.value.App), "error", written.error)
+        response.Error(writer, cast(isize)500, "profile stats failed")
+        return
+    }
+    if written.applied > cast(isize)0 {
+        hub.Publish(social.notifications, user.value, 0)
+        listed := friends.Friends(social.accounts.database, http.Context(request), user.value)
+        if listed.error == null {
+            for friend: listed.value {
+                hub.Publish(social.notifications, friend.UserIDHash, 0)
+            }
+        } else {
+            LogUserError("notify profile stats friends", "user", logs.LogText(user.value), "error", listed.error)
+        }
+    }
+    output: ProfileStatsResponse
+    output.Status = "ok"
+    output.Applied = written.applied
+    response.JSON(writer, cast(isize)200, output)
+}
+
+FriendStats :: (social: Social, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(social, writer, request)
+    if Failed(user) {
+        return
+    }
+    query := url.Query(http.RequestURL(request))
+    app := TrimSpace(url.Value(query, "app"))
+    practice := TrimSpace(url.Value(query, "practice"))
+    metric := TrimSpace(url.Value(query, "metric"))
+    if !identity.ValidNamespace(app) || !identity.ValidNamespace(practice) || !identity.ValidNamespace(metric) || !ValidMetric(practice, metric) {
+        response.Error(writer, cast(isize)400, "invalid stats query")
+        return
+    }
+    listed := leaderboard.Friends(social.accounts.database, http.Context(request), user.value, app, practice, metric)
+    if listed.error != null {
+        LogStatsError("friend stats", "user", logs.LogText(user.value), "app", logs.LogText(app), "practice", logs.LogText(practice), "metric", logs.LogText(metric), "error", listed.error)
+        response.Error(writer, cast(isize)500, "friend stats failed")
+        return
+    }
+    output: FriendStatsResponse
+    output.Rows = listed.value
+    parts: [4]string = .["leaderboard", app, practice, metric]
+    Cache(social, http.Context(request), user.value, Join(parts[:], "."), output)
+    response.JSON(writer, cast(isize)200, output)
+}

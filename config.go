@@ -20,8 +20,6 @@ import (
 // #import std_ed25519_go
 type __type_cd75cecb5feef7fa = map[string]TokenProduct
 
-type __type_c922d3f56b74fd5a = map[string]bool
-
 type Config struct {
 	Addr                            string
 	BaseURL                         string

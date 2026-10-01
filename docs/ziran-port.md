@@ -5,6 +5,11 @@ an incremental implementation: the running server currently combines generated
 Go from canonical `.zi` files with substantial handwritten Go. Caller changes
 alone do not count as a completed module.
 
+The goal is Daochi's complete port. Ziran's existing C compiler/bootstrap is
+allowed to remain; upstream changes are made only when Daochi needs a language,
+backend, or standard-library capability. Fully self-hosting Ziran is a separate
+project and is not a prerequisite for this port.
+
 The baseline is commit `30f291e`: 35 root production Go files (17,580 lines)
 and 17 root Go test files (6,206 lines). The separate `daochi-client` repository
 already uses Ziran; it is not a replacement for porting this server.
@@ -77,19 +82,19 @@ field names, Go storage types, order and reflection tags.
 | `mesh_apps.go` | Ziran | `mesh_apps.zi`: scoped signed registry export/import, manifest decoding, signature verification, version queries, downgrade/fork rejection and per-app transactions; native authentication error conversion remains supplied by the Go caller |
 | `mesh_store.go` | Ziran | `mesh_store.zi`: encrypted-record export/import, stable change ordering, account tombstones, conflicts, deletion propagation, cursor persistence and atomic rollback; collection ownership in `collection_scope.zi`, record validation in `encrypted_record.zi` |
 | `metrics.go` | Ziran | `metrics.zi`: concurrent counters, route/reason normalization, escaped labels, sorted maps, aggregate usage and exact Prometheus output |
-| `monero_deposits.go` | Go with ported callers | Deposit reconciliation and credit transactions |
+| `monero_deposits.go` | Ziran | `monero_deposits.zi`: account address/deposit HTTP handling, transfer polling, confirmation checks and reconciliation; `monero_deposit_store.zi`: account addresses, scan height, transfer ownership, deposit upserts, atomic ledger crediting and ordered queries; wallet calls in `monero_wallet.zi` |
 | `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
 | `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
-| `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; remaining HTTP handlers and lifecycle remain Go |
+| `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion, operational handlers, middleware and server construction remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, statistics queries, sync transactions, conflicts and projections remain Go |
+| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, operational statistics, sync transactions, conflicts and projections remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Ziran | `sync_ws.zi`: authenticated upgrades, account and IP limits, reader worker, event/ping selection, deadlines and cancellation; `websocket.zi`: native handshakes and exact frame encoding/validation; `sync_hub.zi`: scoped subscriptions, bounded event delivery, counts and disconnect cleanup |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
 | `token_assets.go` | Ziran | `token_assets.zi`: native SQL seed/upsert, sorted asset listing, released fields, row cleanup and error propagation |
-| `token_money.go` | Partial Ziran | `token_ledger.zi`: balances, scoped ledger/receipt queries, atomic payment crediting, collision checks, idempotent spending and rollback; `token_receipt.zi`: validation, canonical bytes, hashes and Ed25519 signatures; `token_checkpoint.zi`: signed ledger checkpoints; purchase verification, invoices, payment HTTP handlers and recurring reconciliation remain Go |
+| `token_money.go` | Ziran | `token_ledger.zi`: balances, scoped ledger/receipt queries, atomic payment crediting, collision checks, idempotent spending and rollback; `token_receipt.zi`: validation, canonical bytes, hashes and Ed25519 signatures; `token_checkpoint.zi`: signed ledger checkpoints; `token_policy.zi`: issuer and signed app authorization; `payment_request.zi`: purchase and spending request validation; `token_http.zi`: asset/product/issuer, balance/ledger/receipt, spend, checkpoint and admin HTTP handlers; Google verification and OAuth in `google_play.zi`, purchase HTTP in `google_play_http.zi`; Monero wallet operations in `monero_wallet.zi`, invoice storage in `monero_invoice_store.zi`, invoice HTTP and recurring reconciliation in `monero_invoices.zi`; payment errors in `payment_state.zi` |
 | `trust_handlers.go` | Ziran | `trust_http.zi`: operator access, signed pairing invitations/acceptances, outbound completion and retries, trusted-peer listing, trust-space creation and namespace registration/resolution |
 | `trust_store.go` | Ziran | `trust_store.zi`: schema, atomic pairing, peer policy/list queries, trust spaces, namespace signing/resolution and scoped mesh name replication; nonces in `node_nonce.zi`, public-key lookup in `peer_trust.zi` |
 | `types.go` | Ziran | All 77 original records and profile constants in `protocol.zi`, `manifest.zi`, `sync_types.zi` and `types.zi` |
@@ -202,8 +207,62 @@ canonical bytes and signatures, malformed byte strings, validation order,
 account/app filtering, receipt lookup, retries, collisions, hash-chain order,
 checkpoint roots, cancellation, malformed stored rows, failed writes and failed
 commits. Existing payment and deposit callers now use the generated functions
-directly. Native issuer-error creation, payment HTTP handlers, Google purchase
-verification, Monero invoices and recurring reconciliation still need porting.
+directly. Payment error identities now live in `payment_state.zi`; Google
+purchase verification, Monero invoices and recurring reconciliation are also
+implemented in the Ziran modules listed in the inventory.
+
+`token_http.zi`, `token_policy.zi` and `payment_request.zi` own token HTTP
+handlers, issuer selection, signed app authorization and purchase/spend request
+decoding. Product listing uses the generic Ziran sort over native slices of
+protocol records. Callback types in payment and registry modules retain
+distinct native names. The pinned compiler preserves each generic library's
+private helper scope while specializing for caller-owned records.
+Independent Go baseline comparisons cover body limits, malformed and duplicate
+JSON fields, arbitrary byte strings, issuer key/error identity, query filters,
+sorted products, authentication and rejection counters, signed/unsigned policy,
+replay state, SQL failure, cancellation and deferred replay cleanup during log
+and response panics. Admin comparisons cover credit normalization, generated
+source references, signature validity, checkpoint responses and failure paths.
+Source and saved-IR generation run the same complete server regression suite.
+
+`google_play.zi` owns Google purchase verification/consumption, service-account
+JWT signing, refresh-token exchange and verifier selection. Native cryptographic,
+JSON, HTTP and error primitives retain original bytes and error identity.
+`google_play_http.zi` keeps authorization/replay cleanup, ledger crediting and
+post-credit purchase consumption at the HTTP boundary. `monero_wallet.zi` owns
+RPC encoding and bounded replies, subaddress creation, payment inspection and
+overflow-checked token conversion. `monero_invoice_store.zi` owns invoice
+persistence and state transitions; `monero_invoices.zi` owns signed invoice
+HTTP, expiry/settlement and recurring reconciliation, including late confirmed
+payments and one-time stuck-payment reporting. `monero_deposit_store.zi` and
+`monero_deposits.zi` own permanent account subaddresses, transfer collection,
+confirmation/height tracking and atomic deposit crediting. Existing payment
+and reconciliation suites run against both source and saved Ziran IR, including
+native panic cleanup, retries, double-credit prevention and cancellation.
+
+`account_state.zi`, `account_profile.zi`, `account_lookup.zi` and
+`friend_store.zi` own account registration, aliases/icons, account-reference
+resolution, friend requests, friendships, authoritative social snapshots and
+profile-stat writes. `account_export.zi` owns all nineteen account-export
+queries and dynamic native SQL scanning; `account_http.zi` serves account
+export, alias and profile-icon requests. Header precedence, validation order,
+case/Unicode normalization, native errors, nil/empty results and JSON bytes
+remain consistent with the original implementation.
+
+`leaderboard.zi` owns friend visibility queries, daily streaks, practice-specific
+averages, label rounding, cache validity and stable ordering. Non-friends stay
+excluded; changes to source/calculation versions or the streak date invalidate
+cached rows. `social_cache.zi` owns transactional snapshot writes, exact payload
+comparison and version allocation; identical writes consume no extra version,
+and failures roll back both snapshot and version changes. `social_http.zi`
+owns friend/request endpoints, profile-stat handling and social-cache updates,
+including notifications to the affected users. Independent baselines compare
+HTTP bytes, headers, authentication order, body closure, database contents and
+notifications for success, rejection, cancellation, write failure and native
+panics. Storage comparisons cover cache invalidation, nil/empty results,
+scan/query errors, failed writes/commits, connection reuse and concurrent
+idempotent snapshot updates. Source and saved-IR server suites pass with race
+detection.
 
 `types.zi` owns account export and diagnostic records. Their map fields keep
 the original `map[string][]map[string]any` and `map[string]int` Go types and

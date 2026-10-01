@@ -150,9 +150,12 @@ func Websocket_Accept(writer ResponseWriter, request *Request) AcceptedSocket {
 	if hijacked.Error != nil {
 		return Websocket_Failure(hijacked.Error)
 	}
-	var value_6 string = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
-	var value_7 string = Websocket_AcceptKey(key)
-	parts := [2]string{value_6, value_7}
+	var value_6 [2]string
+	var value_7 string = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
+	value_6[0] = value_7
+	var value_8 string = Websocket_AcceptKey(key)
+	value_6[1] = value_8
+	parts := value_6
 	_ = parts
 	reply := strings.Join(parts[0:2:2], "")
 	protocol := StdHttpGo_HeaderValue(headers, "Sec-WebSocket-Protocol")
@@ -256,7 +259,10 @@ func Websocket_AcceptKey(key string) string {
 }
 
 func Websocket_AddText(left string, right string) string {
-	parts := [2]string{left, right}
+	var value_0 [2]string
+	value_0[0] = left
+	value_0[1] = right
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:2:2], "")
 }

@@ -82,7 +82,11 @@ func EncryptedRecord_ValidForProtocol(item EncryptedRecord, version int) bool {
 }
 
 func EncryptedRecord_ContentKey(item EncryptedRecord) string {
-	parts := [3]string{item.ContentHash, "\x00", item.Ciphertext}
+	var value_0 [3]string
+	value_0[0] = item.ContentHash
+	value_0[1] = "\x00"
+	value_0[2] = item.Ciphertext
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:3:3], "")
 }

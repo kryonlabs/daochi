@@ -56,10 +56,10 @@ func TestExpiredMoneroInvoiceLatePaymentCredited(t *testing.T) {
 		TxID: "tx-late", Amount: invoice.AtomicAmount, Confirmations: 10,
 		Major: 0, Minor: invoice.AddressIndex, Height: 900,
 	})
-	if err := server.reconcileMoneroExpiredInvoices(context.Background(), 50); err != nil {
+	if err := MoneroInvoices_SweepExpired(server.monero(), context.Background(), 50); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 5000000 {
 		t.Fatalf("late payment balance=%d err=%v, want 5000000", balance, err)
@@ -80,10 +80,10 @@ func TestMoneroInvoicePartialPaymentsAccumulate(t *testing.T) {
 		moneroTransfer{TxID: "tx-part-b", Amount: half, Confirmations: 10, Major: 0, Minor: invoice.AddressIndex},
 		moneroTransfer{TxID: "tx-part-a", Amount: invoice.AtomicAmount - half, Confirmations: 10, Major: 0, Minor: invoice.AddressIndex},
 	)
-	if err := server.reconcileMoneroInvoices(context.Background(), 100); err != nil {
+	if err := MoneroInvoices_Pending(server.monero(), context.Background(), 100); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 5000000 {
 		t.Fatalf("top-up balance=%d err=%v, want 5000000", balance, err)
@@ -107,11 +107,11 @@ func TestMoneroExpiredInvoicePartialFundsReportedStuck(t *testing.T) {
 		Major: 0, Minor: invoice.AddressIndex, Height: 901,
 	})
 	for i := 0; i < 2; i++ {
-		if err := server.reconcileMoneroExpiredInvoices(context.Background(), 50); err != nil {
+		if err := MoneroInvoices_SweepExpired(server.monero(), context.Background(), 50); err != nil {
 			t.Fatal(err)
 		}
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 0 {
 		t.Fatalf("partial expired invoice must not credit: balance=%d err=%v", balance, err)
@@ -133,7 +133,8 @@ func TestMoneroDepositScanBookmarkAdvances(t *testing.T) {
 	if address.Code != http.StatusOK {
 		t.Fatalf("address status = %d body=%s", address.Code, address.Body.String())
 	}
-	mapping, found, err := store.MoneroAccountAddress(context.Background(), identity.UserID)
+	addressResult := MoneroDepositStore_AccountAddress(store.db, context.Background(), identity.UserID)
+	mapping, found, err := addressResult.Value, addressResult.Found, addressResult.Error
 	if err != nil || !found {
 		t.Fatalf("address mapping found=%v err=%v", found, err)
 	}
@@ -141,10 +142,11 @@ func TestMoneroDepositScanBookmarkAdvances(t *testing.T) {
 		TxID: "tx-heightmark", Amount: 1000000000000, Confirmations: 10, Height: 5000,
 		Major: mapping.AccountIndex, Minor: mapping.AddressIndex,
 	})
-	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	height, err := store.MoneroScanHeight(context.Background())
+	heightResult := MoneroDepositStore_ScanHeight(store.db, context.Background())
+	height, err := heightResult.Value, heightResult.Error
 	if err != nil || height != 5000 {
 		t.Fatalf("scan bookmark=%d err=%v, want 5000", height, err)
 	}
@@ -154,7 +156,7 @@ func TestMoneroDepositScanBookmarkAdvances(t *testing.T) {
 	if firstMin != 0 {
 		t.Fatalf("first whole-wallet scan min_height=%d, want 0", firstMin)
 	}
-	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	// The confirmed-history query must carry the bookmark; the pool query

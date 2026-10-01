@@ -1,0 +1,183 @@
+#import "std/go_types"
+#import "protocol"
+config :: #import "config";
+metrics :: #import "metrics";
+exporter :: #import "account_export";
+auth :: #import "http_auth";
+response :: #import "response";
+logs :: #import "log_safety";
+profile :: #import "account_profile";
+identity :: #import "identity";
+body :: #import "http_body";
+json :: #import "std/json_go";
+strings :: #system_library "go:strings";
+format :: #system_library "go:fmt";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+errors :: #import "std/errors_go";
+logging :: #system_library "go:log/slog";
+
+Accounts :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    missingUser: Error
+}
+
+#scope_file
+LogError :: (message: string, userKey: string, user: string, errorKey: string, error: Error) #foreign logging "Error";
+TrimSpace :: (value: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+Contains :: (value: string, part: string) -> bool #foreign strings;
+HeaderMessage :: (format: string, header: string) -> string #foreign format "Sprintf";
+
+HeaderUserResult :: struct {
+    value: string
+    error: Error
+}
+
+HeaderUser :: (request: *http.Request, bodyUser: string) -> HeaderUserResult {
+    result: HeaderUserResult
+    header := auth.UserHeader(request)
+    if header.value == "" {
+        result.error = errors.New("missing X-Daochi-User")
+        return result
+    }
+    if bodyUser == "" {
+        result.value = header.value
+        return result
+    }
+    result.value = ToLower(TrimSpace(bodyUser))
+    if result.value != header.value {
+        result.error = errors.New(HeaderMessage("%s does not match user_id_hash", header.name))
+    }
+    return result
+}
+
+Authenticate :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Request, userID: string) -> bool {
+    token := auth.AuthenticateToken(accounts.database, request, accounts.configuration.TokenSecret)
+    if token.authentication.error != null || token.authentication.status != cast(isize)0 {
+        auth.Respond(writer, accounts.counters, token.authentication)
+        return false
+    }
+    if token.value != userID {
+        response.Error(writer, cast(isize)401, "token user mismatch")
+        return false
+    }
+    return true
+}
+
+#scope_export
+NormalizeAlias :: (value: string) -> string {
+    return TrimPrefix(ToLower(TrimSpace(value)), "@")
+}
+
+ValidIcon :: (value: isize) -> bool {
+    return value >= cast(isize)ProfileIconNone && value <= cast(isize)ProfileIconTree5
+}
+
+Alias :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    read := body.ReadJSON(writer, request, accounts.configuration.MaxBodyBytes)
+    if read.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(read.error))
+        return
+    }
+    decoded: AliasRequest
+    if json.Unmarshal(read.value, *decoded) != null {
+        response.Error(writer, cast(isize)400, "invalid json")
+        return
+    }
+    decoded.UserIDHash = ToLower(TrimSpace(decoded.UserIDHash))
+    decoded.Alias = NormalizeAlias(decoded.Alias)
+    user := HeaderUser(request, decoded.UserIDHash)
+    if user.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(user.error))
+        return
+    }
+    if !Authenticate(accounts, writer, request, user.value) {
+        return
+    }
+    alias := NormalizeAlias(decoded.Alias)
+    if !identity.ValidAccountAlias(alias) {
+        response.Error(writer, cast(isize)400, "invalid alias")
+        return
+    }
+    error := profile.SetAlias(accounts.database, http.Context(request), user.value, alias, accounts.missingUser)
+    if error != null {
+        if Contains(errors.Message(error), "UNIQUE") {
+            response.Error(writer, cast(isize)409, "alias unavailable")
+            return
+        }
+        if errors.Is(error, accounts.missingUser) {
+            response.Error(writer, cast(isize)404, "sync account not found")
+            return
+        }
+        LogError("set account alias", "user", logs.LogText(user.value), "error", error)
+        response.Error(writer, cast(isize)500, "alias failed")
+        return
+    }
+    output: AliasResponse
+    output.Status = "ok"
+    output.Alias = alias
+    response.JSON(writer, cast(isize)200, output)
+}
+
+ProfileIcon :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    read := body.ReadJSON(writer, request, accounts.configuration.MaxBodyBytes)
+    if read.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(read.error))
+        return
+    }
+    decoded: ProfileIconRequest
+    if json.Unmarshal(read.value, *decoded) != null {
+        response.Error(writer, cast(isize)400, "invalid json")
+        return
+    }
+    decoded.UserIDHash = ToLower(TrimSpace(decoded.UserIDHash))
+    user := HeaderUser(request, decoded.UserIDHash)
+    if user.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(user.error))
+        return
+    }
+    if !Authenticate(accounts, writer, request, user.value) {
+        return
+    }
+    if !ValidIcon(decoded.ProfileIcon) {
+        response.Error(writer, cast(isize)400, "invalid profile_icon")
+        return
+    }
+    error := profile.SetIcon(accounts.database, http.Context(request), user.value, decoded.ProfileIcon, accounts.missingUser)
+    if error != null {
+        if errors.Is(error, accounts.missingUser) {
+            response.Error(writer, cast(isize)404, "sync account not found")
+            return
+        }
+        LogError("set profile icon", "user", logs.LogText(user.value), "error", error)
+        response.Error(writer, cast(isize)500, "profile icon failed")
+        return
+    }
+    output: ProfileIconResponse
+    output.Status = "ok"
+    output.ProfileIcon = decoded.ProfileIcon
+    response.JSON(writer, cast(isize)200, output)
+}
+
+Export :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    exported := exporter.Export(accounts.database, http.Context(request), user.value)
+    if exported.error != null {
+        if errors.Is(exported.error, sql.NoRows()) {
+            response.Error(writer, cast(isize)404, "sync account not found")
+            return
+        }
+        LogError("export account", "user", logs.LogText(user.value), "error", exported.error)
+        response.Error(writer, cast(isize)500, "export failed")
+        return
+    }
+    response.JSON(writer, cast(isize)200, exported.value)
+}

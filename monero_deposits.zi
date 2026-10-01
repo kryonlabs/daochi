@@ -1,0 +1,289 @@
+#import "protocol"
+#import "std/go_types"
+#import "std/map_go"
+#import "std/option"
+wallet :: #import "monero_wallet";
+storage :: #import "monero_deposit_store";
+accounts :: #import "account_lookup";
+config :: #import "config";
+policy :: #import "token_policy";
+auth :: #import "http_auth";
+authentication :: #import "authentication";
+metrics :: #import "metrics";
+response :: #import "response";
+logs :: #import "log_safety";
+rate :: #import "rate_limit";
+address :: #import "client_address";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+http :: #import "std/http_go";
+clock :: #import "std/time_go";
+url :: #import "std/url_go";
+sync :: #import "std/sync_go";
+strings :: #system_library "go:strings";
+format :: #system_library "go:fmt";
+logging :: #system_library "go:log/slog";
+go_url :: #system_library "go:net/url";
+builtin :: #system_library "go:builtin";
+
+Monero :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    limiter: *rate.RateLimiter
+    addressLocks: *sync.ConcurrentMap
+    stuckNotified: *sync.ConcurrentMap
+    verify: authentication.VerifySignature
+    replayError: Error
+    unavailable: Error
+    issuerUnavailable: Error
+    missingUser: Error
+}
+TransfersResult :: struct {
+    value: []wallet.WalletTransfer
+    error: Error
+}
+
+#scope_file
+ConfirmedTransfers :: struct {
+    #go_anonymous
+    incoming: []wallet.WalletTransfer #go_tag "json:\"in\""
+    pending: []wallet.WalletTransfer #go_tag "json:\"pending\""
+}
+PoolTransfers :: struct {
+    #go_anonymous
+    pool: []wallet.WalletTransfer #go_tag "json:\"pool\""
+}
+WalletHeight :: struct {
+    #go_anonymous
+    height: s64 #go_tag "json:\"height\""
+}
+NewMutex :: () -> *sync.Mutex #foreign builtin "new";
+AssertMutex :: (value: Any) -> *sync.Mutex #foreign builtin "assert";
+AllocateTransfers :: (count: isize, capacity: isize) -> []wallet.WalletTransfer #foreign builtin "make";
+AppendTransfer :: (values: []wallet.WalletTransfer, value: wallet.WalletTransfer) -> []wallet.WalletTransfer #foreign builtin "append";
+TrimSpace :: (value: string) -> string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+PaymentKey :: (pattern: string, transaction: string, account: isize, address: isize) -> string #foreign format "Sprintf";
+LogLookupError :: (message: string, key: string, error: Error) #foreign logging "Error";
+LogAccountError :: (message: string, accountKey: string, account: string, errorKey: string, error: Error) #foreign logging "Error";
+LogSettlementError :: (message: string, accountKey: string, account: string, transactionKey: string, transaction: string, errorKey: string, error: Error) #foreign logging "Warn";
+PathEscape :: (value: string) -> string #foreign go_url;
+
+CollectTransfers :: (payments: Map(string, wallet.WalletTransfer), transfers: []wallet.WalletTransfer) {
+    for transfer: transfers {
+        key := PaymentKey("%s:%d:%d", transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
+        previous := MapLookup(payments, key)
+        if !previous.has_value || transfer.Confirmations >= previous.value.Confirmations {
+            MapSet(payments, key, transfer)
+        }
+    }
+}
+
+#scope_export
+Address :: (monero: Monero, writer: http.ResponseWriter, request: *http.Request) {
+    if !monero.configuration.TokenDirectPurchasesEnabled || !wallet.ValidRate(<<monero.configuration) ||
+        TrimSpace(monero.configuration.MoneroWalletRPCURL) == "" {
+        response.Error(writer, cast(isize)503, "monero purchases disabled")
+        return
+    }
+    parts: [2]string
+    parts[0] = "monero-address:"
+    parts[1] = address.FromRequest(request)
+    if !rate.Allow(monero.limiter, Join(parts[:], ""), cast(isize)60,
+        cast(clock.Duration)3600000000000) {
+        response.Error(writer, cast(isize)429, "too many address requests")
+        return
+    }
+    path := url.Path(http.RequestURL(request))
+    reference := TrimSpace(TrimPrefix(path, "/api/v1/tokens/purchases/monero/address/"))
+    accountID: string
+    if path == "/api/v1/tokens/purchases/monero/address" || reference == "" {
+        user := auth.BearerUser(monero.database, request, monero.configuration.TokenSecret)
+        if user.authentication.error != null || user.authentication.status != 0 {
+            auth.Respond(writer, monero.counters, user.authentication)
+            return
+        }
+        accountID = user.value
+    } else {
+        recipient := accounts.Resolve(monero.database, http.Context(request), reference)
+        if recipient.error != null {
+            LogLookupError("resolve monero recipient", "error", recipient.error)
+            response.Error(writer, cast(isize)500, "recipient lookup failed")
+            return
+        }
+        if !recipient.found {
+            response.Error(writer, cast(isize)404, "recipient not found")
+            return
+        }
+        accountID = recipient.value
+    }
+    loaded := sync.LoadOrStore(monero.addressLocks, accountID, NewMutex())
+    lock := AssertMutex(loaded.value)
+    sync.Lock(lock)
+    allocated := storage.AccountAddress(monero.database, http.Context(request), accountID)
+    if allocated.error == null && !allocated.found {
+        allocated = storage.CreateAccountAddress(monero.database, http.Context(request), accountID,
+            <<monero.configuration, monero.missingUser, monero.unavailable)
+    }
+    sync.Unlock(lock)
+    if allocated.error != null {
+        LogAccountError("allocate monero account address", "account", logs.LogText(accountID), "error", allocated.error)
+        response.Error(writer, cast(isize)500, "monero address unavailable")
+        return
+    }
+    network := ToLower(TrimSpace(monero.configuration.MoneroNetwork))
+    if network != "mainnet" && network != "stagenet" && network != "testnet" {
+        network = "mainnet"
+    }
+    value: MoneroAddressResponse
+    value.AccountID = allocated.value.AccountID
+    value.Alias = allocated.value.Alias
+    value.ProfileIcon = allocated.value.ProfileIcon
+    value.AssetID = "waozi:token"
+    value.Address = allocated.value.Address
+    parts[0] = "monero:"
+    parts[1] = PathEscape(allocated.value.Address)
+    value.URI = Join(parts[:], "")
+    value.Network = network
+    value.ConfirmationsRequired = wallet.ConfirmationsRequired(<<monero.configuration)
+    value.MinimumAtomicAmount = wallet.MinimumAtomicAmount(<<monero.configuration)
+    value.Rate.AtomicAmount = monero.configuration.MoneroRateAtomicAmount
+    value.Rate.TokenUnits = monero.configuration.MoneroRateTokenUnits
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Deposits :: (monero: Monero, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(monero.database, request, monero.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, monero.counters, user.authentication)
+        return
+    }
+    deposits := storage.Deposits(monero.database, http.Context(request), user.value, cast(isize)100)
+    if deposits.error != null {
+        LogAccountError("list monero deposits", "account", logs.LogText(user.value), "error", deposits.error)
+        response.Error(writer, cast(isize)500, "monero deposits unavailable")
+        return
+    }
+    value: MoneroDepositsResponse
+    value.Deposits = deposits.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Transfers :: (monero: Monero, context: ctx.Context) -> TransfersResult {
+    result: TransfersResult
+    bookmark := storage.ScanHeight(monero.database, context)
+    result.error = bookmark.error
+    if result.error != null {
+        return result
+    }
+    parameters: Map(string, Any)
+    MapInit(parameters)
+    MapSet(parameters, "in", true)
+    MapSet(parameters, "pending", true)
+    MapSet(parameters, "failed", false)
+    MapSet(parameters, "account_index", cast(isize)0)
+    MapSet(parameters, "min_height", bookmark.value)
+    confirmed: ConfirmedTransfers
+    result.error = wallet.Request(context, <<monero.configuration, "get_transfers", parameters, *confirmed, monero.unavailable)
+    if result.error != null {
+        return result
+    }
+    MapClear(parameters)
+    MapSet(parameters, "pool", true)
+    MapSet(parameters, "account_index", cast(isize)0)
+    pool: PoolTransfers
+    result.error = wallet.Request(context, <<monero.configuration, "get_transfers", parameters, *pool, monero.unavailable)
+    if result.error != null {
+        return result
+    }
+    maximum := bookmark.value
+    MapClear(parameters)
+    height: WalletHeight
+    heightError := wallet.Request(context, <<monero.configuration, "get_height", parameters, *height, monero.unavailable)
+    if heightError == null && height.height > maximum {
+        maximum = height.height
+    }
+    for transfer: confirmed.incoming {
+        if transfer.Height > maximum {
+            maximum = transfer.Height
+        }
+    }
+    if maximum > bookmark.value {
+        result.error = storage.SaveScanHeight(monero.database, context, maximum)
+        if result.error != null {
+            return result
+        }
+    }
+    payments: Map(string, wallet.WalletTransfer)
+    MapInit(payments)
+    CollectTransfers(payments, pool.pool)
+    CollectTransfers(payments, confirmed.incoming)
+    CollectTransfers(payments, confirmed.pending)
+    transfers := AllocateTransfers(cast(isize)0, cast(isize)MapCount(payments))
+    for key: MapKeys(payments) {
+        transfers = AppendTransfer(transfers, MapGet(payments, key))
+    }
+    result.value = transfers
+    return result
+}
+
+SettleDeposit :: (monero: Monero, context: ctx.Context, accountID: string, transfer: wallet.WalletTransfer) -> Error {
+    conversion := wallet.TokenUnits(transfer.Amount, monero.configuration.MoneroRateAtomicAmount, monero.configuration.MoneroRateTokenUnits)
+    status := "confirming"
+    if transfer.DoubleSpendSeen {
+        status = "double_spend"
+    } else if transfer.Amount < wallet.MinimumAtomicAmount(<<monero.configuration) || conversion.error != null || conversion.value <= 0 {
+        status = "below_minimum"
+    } else if transfer.Confirmations >= wallet.ConfirmationsRequired(<<monero.configuration) && !transfer.Locked && transfer.UnlockTime == 0 {
+        status = "confirmed"
+    }
+    deposit := storage.UpsertDeposit(monero.database, context, accountID, transfer, status, <<monero.configuration)
+    if deposit.error != null || status != "confirmed" || deposit.value.Receipt != null {
+        return deposit.error
+    }
+    issuer := policy.Issuer(<<monero.configuration, monero.issuerUnavailable)
+    if issuer.error != null {
+        return issuer.error
+    }
+    credited := storage.CreditDeposit(monero.database, context, issuer.value, transfer.TxID,
+        transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor, monero.issuerUnavailable)
+    return credited.error
+}
+
+Reconcile :: (monero: Monero, context: ctx.Context) -> Error {
+    if !wallet.ValidRate(<<monero.configuration) {
+        return null
+    }
+    owners := storage.AddressOwners(monero.database, context)
+    if owners.error != null {
+        return owners.error
+    }
+    if MapCount(owners.value) == 0 {
+        return null
+    }
+    transfers := Transfers(monero, context)
+    if transfers.error != null {
+        return transfers.error
+    }
+    for transfer: transfers.value {
+        if transfer.TxID == "" || transfer.Amount <= 0 {
+            continue
+        }
+        indices: [2]isize
+        indices[0] = transfer.SubaddrIndex.Major
+        indices[1] = transfer.SubaddrIndex.Minor
+        owner := MapLookup(owners.value, indices)
+        if !owner.has_value {
+            continue
+        }
+        settled := SettleDeposit(monero, context, owner.value, transfer)
+        if settled != null {
+            LogSettlementError("monero account deposit settlement failed", "account", logs.LogText(owner.value),
+                "tx", logs.LogText(transfer.TxID), "error", settled)
+        }
+    }
+    return null
+}

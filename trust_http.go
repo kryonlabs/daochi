@@ -196,13 +196,16 @@ func TrustHttp_CompleteRemote(context Context, invite PairingInvite, acceptance 
 		for loop_cursor_9 < loop_count_9 {
 			loop_index_9 := loop_cursor_9
 			address := loop_view_9[loop_index_9]
-			var value_1 string = strings.TrimRight(address, "/")
-			targetParts := [2]string{value_1, "/api/v1/node/pairing/complete"}
+			var value_1 [2]string
+			var value_2 string = strings.TrimRight(address, "/")
+			value_1[0] = value_2
+			value_1[1] = "/api/v1/node/pairing/complete"
+			targetParts := value_1
 			_ = targetParts
 			target := strings.Join(targetParts[0:2:2], "")
-			var value_2 Context = context
-			var value_3 string = target
-			request := StdHttpGo_NewRequest(value_2, "POST", value_3, StdIoGo_FromBytes(body.Value))
+			var value_3 Context = context
+			var value_4 string = target
+			request := StdHttpGo_NewRequest(value_3, "POST", value_4, StdIoGo_FromBytes(body.Value))
 			if request.Error != nil {
 				lastError = request.Error
 				loop_cursor_9++
@@ -227,8 +230,8 @@ func TrustHttp_CompleteRemote(context Context, invite PairingInvite, acceptance 
 			if status >= int(200) && status < int(300) {
 				return nil
 			}
-			var value_4 Error = fmt.Errorf("pairing completion failed: %s %s", StdHttpGo_Status(reply.Value), strings.TrimSpace(StdTextGo_FromBytes(responseBody.Value)))
-			lastError = value_4
+			var value_5 Error = fmt.Errorf("pairing completion failed: %s %s", StdHttpGo_Status(reply.Value), strings.TrimSpace(StdTextGo_FromBytes(responseBody.Value)))
+			lastError = value_5
 			loop_cursor_9++
 		}
 	}
@@ -491,9 +494,14 @@ func TrustHttp_ResolveName(trust Trust, writer ResponseWriter, request *Request)
 	var value_5 int64 = resolved.Value.ExpiresAt
 	var value_6 int64 = value_5 - StdTimeGo_Unix(StdTimeGo_Now())
 	value.TtlSeconds = value_6
-	uriParts := [4]string{"daochi://", spaceID, "/", name}
+	var value_7 [4]string
+	value_7[0] = "daochi://"
+	value_7[1] = spaceID
+	value_7[2] = "/"
+	value_7[3] = name
+	uriParts := value_7
 	_ = uriParts
-	var value_7 string = strings.Join(uriParts[0:4:4], "")
-	value.Uri = value_7
+	var value_8 string = strings.Join(uriParts[0:4:4], "")
+	value.Uri = value_8
 	Response_JSON(writer, int(200), value)
 }

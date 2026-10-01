@@ -1,0 +1,260 @@
+#import "protocol"
+#import "std/go_types"
+configuration :: #import "config";
+wallet :: #import "monero_wallet";
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+resource :: #import "resource_id";
+timestamp :: #import "timestamp";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+go_sql :: #system_library "go:database/sql";
+numbers :: #system_library "go:strconv";
+strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+InvoiceRecord :: struct {
+    accountID: string
+    invoice: MoneroInvoiceResponse
+}
+InvoiceResult :: struct {
+    value: MoneroInvoiceResponse
+    found: bool
+    error: Error
+}
+InvoicesResult :: struct {
+    value: []InvoiceRecord
+    error: Error
+}
+
+#scope_file
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+IntegerText :: (value: isize) -> string #foreign numbers "Itoa";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+AllocateRecords :: (count: isize) -> []InvoiceRecord #foreign builtin "make";
+AppendRecord :: (records: []InvoiceRecord, record: InvoiceRecord) -> []InvoiceRecord #foreign builtin "append";
+
+InvoiceSQL :: #string SQL
+SELECT id,app_id,status,product_id,asset_id,token_units,provider_amount,provider_address,provider_ref,provider_payment_id,expires_at,receipt_id
+FROM token_payment_intents
+WHERE account_id=?1 AND id=?2 AND provider='monero'
+SQL;
+PendingSQL :: #string SQL
+SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,
+    provider_address,provider_ref,provider_payment_id,expires_at,receipt_id
+FROM token_payment_intents
+WHERE provider='monero' AND status='pending'
+ORDER BY created_at
+LIMIT ?1
+SQL;
+ExpiredSQL :: #string SQL
+SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,
+    provider_address,provider_ref,provider_payment_id,expires_at,receipt_id
+FROM token_payment_intents
+WHERE provider='monero' AND status='expired' AND receipt_id='' AND expires_at>=?1
+ORDER BY created_at
+LIMIT ?2
+SQL;
+InsertSQL :: #string SQL
+INSERT INTO token_payment_intents(id,provider,account_id,app_id,product_id,asset_id,token_units,
+    provider_amount,provider_address,provider_ref,status,expires_at)
+VALUES(?1,'monero',?2,?3,?4,?5,?6,?7,?8,?9,'pending',?10)
+SQL;
+PaidSQL :: #string SQL
+UPDATE token_payment_intents
+SET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP
+WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='pending'
+SQL;
+ExpireSQL :: #string SQL
+UPDATE token_payment_intents
+SET status='expired', updated_at=CURRENT_TIMESTAMP
+WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='pending'
+SQL;
+SettleExpiredSQL :: #string SQL
+UPDATE token_payment_intents
+SET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP
+WHERE account_id=?1 AND id=?2 AND provider='monero' AND status='expired' AND receipt_id=''
+SQL;
+
+Destinations :: (invoice: *MoneroInvoiceResponse, receiptID: *string) -> [12]Any {
+    values: [12]Any
+    values[0] = *invoice.ID
+    values[1] = *invoice.AppID
+    values[2] = *invoice.Status
+    values[3] = *invoice.ProductID
+    values[4] = *invoice.AssetID
+    values[5] = *invoice.TokenUnits
+    values[6] = *invoice.AtomicAmount
+    values[7] = *invoice.Address
+    values[8] = *invoice.AddressIndex
+    values[9] = *invoice.PaymentID
+    values[10] = *invoice.ExpiresAt
+    values[11] = receiptID
+    return values
+}
+
+AttachReceipt :: (database: *sql.Database, context: ctx.Context, invoice: *MoneroInvoiceResponse, receiptID: string) -> Error {
+    if receiptID == "" {
+        return null
+    }
+    loaded := ledger.ByID(database, context, receiptID)
+    if loaded.error != null {
+        return loaded.error
+    }
+    if loaded.found {
+        invoice.Receipt = *loaded.value
+    }
+    return null
+}
+
+List :: (database: *sql.Database, context: ctx.Context, query: string, arguments: []Any, attachReceipt: bool) -> InvoicesResult {
+    result: InvoicesResult
+    rows := sql.Query(database, context, query, arguments)
+    result.error = rows.error
+    if result.error != null {
+        return result
+    }
+    CloseAtReturn(rows.value)
+    records := AllocateRecords(cast(isize)0)
+    while sql.Next(rows.value) {
+        record: InvoiceRecord
+        receiptID: string
+        invoiceValues := Destinations(*record.invoice, *receiptID)
+        values: [13]Any
+        values[0] = *record.accountID
+        for index: 0..11 {
+            values[index + 1] = invoiceValues[index]
+        }
+        result.error = sql.ScanRows(rows.value, values[:])
+        if result.error != null {
+            return result
+        }
+        if attachReceipt {
+            result.error = AttachReceipt(database, context, *record.invoice, receiptID)
+            if result.error != null {
+                return result
+            }
+        }
+        records = AppendRecord(records, record)
+    }
+    result.value = records
+    result.error = sql.RowsError(rows.value)
+    return result
+}
+
+MarkPaid :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string,
+    id: string, receiptID: string, paymentRef: string, unchanged: string) -> Error {
+    arguments: [4]Any = .[accountID, id, receiptID, paymentRef]
+    updated := sql.Exec(database, context, query, arguments[:])
+    if updated.error != null {
+        return updated.error
+    }
+    changed := sql.RowsAffected(updated.value)
+    if changed.error != null {
+        return changed.error
+    }
+    if changed.value == 0 {
+        return errors.New(unchanged)
+    }
+    return null
+}
+
+#scope_export
+Create :: (database: *sql.Database, context: ctx.Context, accountID: string, appID: string,
+    product: TokenProduct, config: configuration.Config, unavailable: Error) -> InvoiceResult {
+    result: InvoiceResult
+    if product.MoneroAtomicAmount <= 0 {
+        result.error = errors.New("monero amount required")
+        return result
+    }
+    identifier := resource.New()
+    result.error = identifier.error
+    if result.error != null {
+        return result
+    }
+    label: [2]string = .["daochi-", identifier.value]
+    address := wallet.CreateAddress(context, config, Join(label[:], ""), unavailable)
+    result.error = address.error
+    if result.error != null {
+        return result
+    }
+    expiresAt := clock.Format(clock.Add(clock.UTC(clock.Now()), cast(clock.Duration)2700000000000), timestamp.CanonicalTimestampLayout)
+    arguments: [10]Any = .[identifier.value, accountID, appID, product.ProductID, receipts.AssetID,
+        product.TokenUnits, product.MoneroAtomicAmount, address.address, IntegerText(address.index), expiresAt]
+    inserted := sql.Exec(database, context, InsertSQL, arguments[:])
+    result.error = inserted.error
+    if result.error != null {
+        return result
+    }
+    result.value.ID = identifier.value
+    result.value.AppID = appID
+    result.value.Status = "pending"
+    result.value.ProductID = product.ProductID
+    result.value.AssetID = receipts.AssetID
+    result.value.TokenUnits = product.TokenUnits
+    result.value.AtomicAmount = product.MoneroAtomicAmount
+    result.value.Address = address.address
+    result.value.AddressIndex = address.index
+    result.value.ExpiresAt = expiresAt
+    result.found = true
+    return result
+}
+
+Invoice :: (database: *sql.Database, context: ctx.Context, accountID: string, id: string) -> InvoiceResult {
+    result: InvoiceResult
+    arguments: [2]Any = .[accountID, id]
+    row := sql.QueryRow(database, context, InvoiceSQL, arguments[:])
+    invoice: MoneroInvoiceResponse
+    receiptID: string
+    destinations := Destinations(*invoice, *receiptID)
+    result.error = sql.ScanRow(row, destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null {
+        return result
+    }
+    result.error = AttachReceipt(database, context, *invoice, receiptID)
+    if result.error != null {
+        return result
+    }
+    result.value = invoice
+    result.found = true
+    return result
+}
+
+Pending :: (database: *sql.Database, context: ctx.Context, limit: isize) -> InvoicesResult {
+    if limit <= cast(isize)0 {
+        limit = cast(isize)100
+    }
+    arguments: [1]Any = .[limit]
+    return List(database, context, PendingSQL, arguments[:], true)
+}
+
+Expired :: (database: *sql.Database, context: ctx.Context, limit: isize) -> InvoicesResult {
+    if limit <= cast(isize)0 {
+        limit = cast(isize)50
+    }
+    cutoff := clock.Format(clock.Add(clock.UTC(clock.Now()), cast(clock.Duration)-2592000000000000), timestamp.CanonicalTimestampLayout)
+    arguments: [2]Any = .[cutoff, limit]
+    return List(database, context, ExpiredSQL, arguments[:], false)
+}
+
+MarkPendingPaid :: (database: *sql.Database, context: ctx.Context, accountID: string,
+    id: string, receiptID: string, paymentRef: string) -> Error {
+    return MarkPaid(database, context, PaidSQL, accountID, id, receiptID, paymentRef, "invoice not pending")
+}
+
+MarkExpired :: (database: *sql.Database, context: ctx.Context, accountID: string, id: string) -> Error {
+    arguments: [2]Any = .[accountID, id]
+    changed := sql.Exec(database, context, ExpireSQL, arguments[:])
+    return changed.error
+}
+
+SettleExpired :: (database: *sql.Database, context: ctx.Context, accountID: string,
+    id: string, receiptID: string, paymentRef: string) -> Error {
+    return MarkPaid(database, context, SettleExpiredSQL, accountID, id, receiptID, paymentRef, "expired invoice no longer unsettled")
+}

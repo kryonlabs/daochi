@@ -137,7 +137,12 @@ func Token_IssueAuthToken(secret []uint8, userID string, expiresAt int64) AuthTo
 	if expiry.Error != "" {
 		return expiry
 	}
-	parts := [4]string{"v1", userID, expiry.Value, ""}
+	var value_3 [4]string
+	value_3[0] = "v1"
+	value_3[1] = userID
+	value_3[2] = expiry.Value
+	value_3[3] = ""
+	parts := value_3
 	_ = parts
 	payload := strings.Join(parts[0:4:4], "\n")
 	mac := StdHmacSha256Go_HMACSHA256(secret, payload)
@@ -151,10 +156,13 @@ func Token_IssueAuthToken(secret []uint8, userID string, expiresAt int64) AuthTo
 		result.Error = "token allocation failed"
 		return result
 	}
-	tokenParts := [2]string{encodedPayload.Value, encodedMAC.Value}
+	var value_4 [2]string
+	value_4[0] = encodedPayload.Value
+	value_4[1] = encodedMAC.Value
+	tokenParts := value_4
 	_ = tokenParts
-	var value_3 string = strings.Join(tokenParts[0:2:2], ".")
-	result.Value = value_3
+	var value_5 string = strings.Join(tokenParts[0:2:2], ".")
+	result.Value = value_5
 	return result
 }
 

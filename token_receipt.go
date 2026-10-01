@@ -91,8 +91,11 @@ func TokenReceipt_SpendRequestHash(input TokenEventInput) string {
 
 func TokenReceipt_Canonical(payload ReceiptPayload) []uint8 {
 	encoded := StdJsonGo_Marshal(payload)
-	var value_0 string = StdTextGo_FromBytes(encoded.Value)
-	parts := [2]string{"ksync-token-receipt-v1\n", value_0}
+	var value_0 [2]string
+	value_0[0] = "ksync-token-receipt-v1\n"
+	var value_1 string = StdTextGo_FromBytes(encoded.Value)
+	value_0[1] = value_1
+	parts := value_0
 	_ = parts
 	return StdTextGo_ToBytes(strings.Join(parts[0:2:2], ""))
 }

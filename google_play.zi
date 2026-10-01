@@ -1,0 +1,348 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "protocol"
+config :: #import "config";
+state :: #import "payment_state";
+policy :: #import "token_policy";
+ctx :: #import "std/context_go";
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+json :: #import "std/json_go";
+clock :: #import "std/time_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+url :: #import "std/url_go";
+strings :: #system_library "go:strings";
+format :: #system_library "go:fmt";
+base64 :: #system_library "go:encoding/base64";
+pem :: #system_library "go:encoding/pem";
+x509 :: #system_library "go:crypto/x509";
+rsa :: #system_library "go:crypto/rsa";
+crypto :: #system_library "go:crypto";
+sha256 :: #system_library "go:crypto/sha256";
+go_url :: #system_library "go:net/url";
+go_io :: #system_library "go:io";
+builtin :: #system_library "go:builtin";
+
+AccessTokenResult :: struct {
+    value: string
+    error: Error
+}
+GooglePurchaseResult :: struct {
+    value: string
+    error: Error
+}
+GoogleServiceAccount :: struct {
+    ClientEmail: string #go_tag "json:\"client_email\""
+    PrivateKey: string #go_tag "json:\"private_key\""
+    TokenURI: string #go_tag "json:\"token_uri\""
+}
+GoogleOAuthClient :: struct {
+    ClientID: string #go_tag "json:\"client_id\""
+    ClientSecret: string #go_tag "json:\"client_secret\""
+    TokenURI: string #go_tag "json:\"token_uri\""
+    RedirectURIs: []string #go_tag "json:\"redirect_uris\""
+}
+GoogleOAuthClientFile :: struct {
+    Web: GoogleOAuthClient #go_tag "json:\"web\""
+    Installed: GoogleOAuthClient #go_tag "json:\"installed\""
+}
+
+GoogleHTTPClient: *http.Client = http.NewClient(cast(clock.Duration)20000000000);
+GoogleAPIBaseURL: string = "https://androidpublisher.googleapis.com/androidpublisher/v3";
+
+#scope_file
+PurchasePayload :: struct {
+    #go_anonymous
+    purchaseState: isize #go_tag "json:\"purchaseState\""
+    consumptionState: isize #go_tag "json:\"consumptionState\""
+    acknowledgementState: isize #go_tag "json:\"acknowledgementState\""
+    orderID: string #go_tag "json:\"orderId\""
+    purchaseType: *isize #go_tag "json:\"purchaseType,omitempty\""
+}
+TokenPayload :: struct {
+    #go_anonymous
+    accessToken: string #go_tag "json:\"access_token\""
+}
+Encoding :: #type #foreign base64 "Encoding";
+PEMBlock :: #type #foreign pem "Block";
+RSAPrivateKey :: #type #foreign rsa "PrivateKey";
+CryptoHash :: #type #foreign crypto "Hash";
+StringReader :: #type #foreign strings "Reader";
+PEMResult :: struct {
+    value: *PEMBlock
+    rest: []u8
+}
+PrivateKeyResult :: struct {
+    value: Any
+    error: Error
+}
+RSAKeyResult :: struct {
+    value: *RSAPrivateKey
+    present: bool
+}
+SignatureResult :: struct {
+    value: []u8
+    error: Error
+}
+RawURL :: () -> *Encoding #go_field #foreign base64 "RawURLEncoding";
+EncodeBase64 :: (encoding: *Encoding, value: []u8) -> string #foreign base64 "(*Encoding).EncodeToString";
+DecodePEM :: (value: []u8) -> PEMResult #go_results #foreign pem "Decode";
+PEMBytes :: (block: *PEMBlock) -> []u8 #go_field #foreign pem "(*Block).Bytes";
+ParsePrivateKey :: (value: []u8) -> PrivateKeyResult #go_results #foreign x509 "ParsePKCS8PrivateKey";
+AsRSAKey :: (value: Any) -> RSAKeyResult #go_results #foreign builtin "assert";
+SHA256 :: () -> CryptoHash #go_field #foreign crypto "SHA256";
+Sign :: (random: io.Reader, key: *RSAPrivateKey, hash: CryptoHash, digest: []u8) -> SignatureResult #go_results #foreign rsa "SignPKCS1v15";
+Sum256 :: (value: []u8) -> [32]u8 #foreign sha256;
+FormValues :: (value: Map(string, []string)) -> url.Values #foreign go_url "Values";
+EncodeForm :: (values: url.Values) -> string #foreign go_url "Values.Encode";
+NewStringReader :: (value: string) -> *StringReader #foreign strings "NewReader";
+PathEscape :: (value: string) -> string #foreign go_url;
+TrimSpace :: (value: string) -> string #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+StatusError :: (message: string, status: isize) -> Error #foreign format "Errorf";
+CloseAtReturn :: (body: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+
+Endpoint :: (request: GooglePurchaseVerifyRequest) -> string {
+    parts: [7]string
+    parts[0] = GoogleAPIBaseURL
+    parts[1] = "/applications/"
+    parts[2] = PathEscape(request.PackageName)
+    parts[3] = "/purchases/products/"
+    parts[4] = PathEscape(request.ProductID)
+    parts[5] = "/tokens/"
+    parts[6] = PathEscape(request.PurchaseToken)
+    return Join(parts[:], "")
+}
+Authorization :: (token: string) -> string {
+    parts: [2]string
+    parts[0] = "Bearer "
+    parts[1] = token
+    return Join(parts[:], "")
+}
+Base64JSON :: (value: Any) -> string {
+    encoded := json.Marshal(value)
+    return EncodeBase64(RawURL(), encoded.value)
+}
+FormSet :: (form: Map(string, []string), name: string, value: string) {
+    values := AllocateStrings(cast(isize)1)
+    values[0] = value
+    MapSet(form, name, values)
+}
+RequestToken :: (context: ctx.Context, target: string, form: Map(string, []string),
+    failure: string) -> AccessTokenResult {
+    result: AccessTokenResult
+    body := EncodeForm(FormValues(form))
+    request := http.NewRequest(context, "POST", target, cast(io.Reader)NewStringReader(body))
+    result.error = request.error
+    if result.error != null {
+        return result
+    }
+    http.SetHeader(http.Headers(request.value), "Content-Type", "application/x-www-form-urlencoded")
+    response := http.Do(GoogleHTTPClient, request.value)
+    result.error = response.error
+    if result.error != null {
+        return result
+    }
+    stream := http.ResponseBody(response.value)
+    CloseAtReturn(stream)
+    bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 1048576))
+    status := http.StatusCode(response.value)
+    if status < 200 || status >= 300 {
+        result.error = errors.New(failure)
+        return result
+    }
+    payload: TokenPayload
+    result.error = json.Unmarshal(bytes.value, *payload)
+    if result.error != null {
+        return result
+    }
+    if payload.accessToken == "" {
+        result.error = errors.New("google oauth missing access token")
+        return result
+    }
+    result.value = payload.accessToken
+    return result
+}
+
+#scope_export
+HasVerifier :: (configuration: config.Config) -> bool {
+    return configuration.GoogleServiceAccountJSON != "" ||
+        (configuration.GoogleOAuthClientJSON != "" && configuration.GoogleOAuthRefreshToken != "")
+}
+AccessToken :: (context: ctx.Context, configuration: config.Config) -> AccessTokenResult {
+    if configuration.GoogleServiceAccountJSON != "" {
+        return ServiceAccountAccessToken(context, configuration.GoogleServiceAccountJSON)
+    }
+    return RefreshAccessToken(context, configuration.GoogleOAuthClientJSON, configuration.GoogleOAuthRefreshToken)
+}
+ServiceAccountAccessToken :: (context: ctx.Context, raw: string) -> AccessTokenResult {
+    result: AccessTokenResult
+    account: GoogleServiceAccount
+    result.error = json.Unmarshal(text.ToBytes(raw), *account)
+    if result.error != null {
+        return result
+    }
+    if account.TokenURI == "" {
+        account.TokenURI = "https://oauth2.googleapis.com/token"
+    }
+    block := DecodePEM(text.ToBytes(account.PrivateKey))
+    if block.value == null {
+        result.error = errors.New("invalid google private key")
+        return result
+    }
+    parsed := ParsePrivateKey(PEMBytes(block.value))
+    result.error = parsed.error
+    if result.error != null {
+        return result
+    }
+    key := AsRSAKey(parsed.value)
+    if !key.present {
+        result.error = errors.New("google private key must be rsa")
+        return result
+    }
+    now := clock.Unix(clock.Now())
+    header: Map(string, string)
+    MapInit(header)
+    MapSet(header, "alg", "RS256")
+    MapSet(header, "typ", "JWT")
+    claims: Map(string, Any)
+    MapInit(claims)
+    MapSet(claims, "iss", account.ClientEmail)
+    MapSet(claims, "scope", "https://www.googleapis.com/auth/androidpublisher")
+    MapSet(claims, "aud", account.TokenURI)
+    MapSet(claims, "iat", now)
+    MapSet(claims, "exp", now + 3600)
+    parts: [3]string
+    parts[0] = Base64JSON(header)
+    parts[1] = Base64JSON(claims)
+    message := Join(parts[0:2], ".")
+    digest := Sum256(text.ToBytes(message))
+    random: io.Reader
+    signature := Sign(random, key.value, SHA256(), digest[:])
+    result.error = signature.error
+    if result.error != null {
+        return result
+    }
+    parts[2] = EncodeBase64(RawURL(), signature.value)
+    form: Map(string, []string)
+    MapInit(form)
+    FormSet(form, "grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
+    FormSet(form, "assertion", Join(parts[:], "."))
+    return RequestToken(context, account.TokenURI, form, "google oauth rejected")
+}
+RefreshAccessToken :: (context: ctx.Context, rawClient: string, refreshToken: string) -> AccessTokenResult {
+    result: AccessTokenResult
+    file: GoogleOAuthClientFile
+    result.error = json.Unmarshal(text.ToBytes(rawClient), *file)
+    if result.error != null {
+        return result
+    }
+    client := file.Web
+    if client.ClientID == "" {
+        client = file.Installed
+    }
+    if client.ClientID == "" || client.ClientSecret == "" {
+        result.error = errors.New("invalid google oauth client")
+        return result
+    }
+    if client.TokenURI == "" {
+        client.TokenURI = "https://oauth2.googleapis.com/token"
+    }
+    form: Map(string, []string)
+    MapInit(form)
+    FormSet(form, "grant_type", "refresh_token")
+    FormSet(form, "client_id", client.ClientID)
+    FormSet(form, "client_secret", client.ClientSecret)
+    FormSet(form, "refresh_token", TrimSpace(refreshToken))
+    return RequestToken(context, client.TokenURI, form, "google oauth refresh rejected")
+}
+VerifyPurchase :: (context: ctx.Context, configuration: config.Config,
+    purchase: GooglePurchaseVerifyRequest) -> GooglePurchaseResult {
+    result: GooglePurchaseResult
+    if !HasVerifier(configuration) {
+        result.error = state.errPaymentUnavailable
+        return result
+    }
+    token := AccessToken(context, configuration)
+    if token.error != null {
+        result.error = state.errPaymentUnavailable
+        return result
+    }
+    body: io.Reader
+    request := http.NewRequest(context, "GET", Endpoint(purchase), body)
+    result.error = request.error
+    if result.error != null {
+        return result
+    }
+    http.SetHeader(http.Headers(request.value), "Authorization", Authorization(token.value))
+    response := http.Do(GoogleHTTPClient, request.value)
+    if response.error != null {
+        result.error = state.errPaymentUnavailable
+        return result
+    }
+    stream := http.ResponseBody(response.value)
+    CloseAtReturn(stream)
+    bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 1048576))
+    status := http.StatusCode(response.value)
+    if status < 200 || status >= 300 {
+        result.error = errors.New("google purchase rejected")
+        return result
+    }
+    payload: PurchasePayload
+    result.error = json.Unmarshal(bytes.value, *payload)
+    if result.error != null {
+        result.error = errors.New("invalid google purchase response")
+        return result
+    }
+    if payload.purchaseState != 0 {
+        result.error = errors.New("google purchase is not purchased")
+        return result
+    }
+    if payload.consumptionState == 1 {
+        result.error = errors.New("google purchase already consumed")
+        return result
+    }
+    reference := payload.orderID
+    if reference == "" {
+        reference = policy.ShortHash(purchase.PurchaseToken)
+    }
+    parts: [5]string
+    parts[0] = purchase.PackageName
+    parts[1] = ":"
+    parts[2] = purchase.ProductID
+    parts[3] = ":"
+    parts[4] = reference
+    result.value = Join(parts[:], "")
+    return result
+}
+ConsumePurchase :: (context: ctx.Context, configuration: config.Config,
+    purchase: GooglePurchaseVerifyRequest) -> Error {
+    if !HasVerifier(configuration) {
+        return state.errPaymentUnavailable
+    }
+    token := AccessToken(context, configuration)
+    if token.error != null {
+        return token.error
+    }
+    parts: [2]string
+    parts[0] = Endpoint(purchase)
+    parts[1] = ":consume"
+    body: io.Reader
+    request := http.NewRequest(context, "POST", Join(parts[:], ""), body)
+    if request.error != null {
+        return request.error
+    }
+    http.SetHeader(http.Headers(request.value), "Authorization", Authorization(token.value))
+    response := http.Do(GoogleHTTPClient, request.value)
+    if response.error != null {
+        return response.error
+    }
+    CloseAtReturn(http.ResponseBody(response.value))
+    status := http.StatusCode(response.value)
+    if status < 200 || status >= 300 {
+        return StatusError("google consume status %d", status)
+    }
+    return null
+}

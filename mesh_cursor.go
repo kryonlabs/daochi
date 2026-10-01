@@ -74,9 +74,13 @@ func MeshCursor_Decode(raw string) CursorResult {
 
 func MeshCursor_PeerKey(baseURL string, policy NodeSyncPolicy) string {
 	encoded := StdJsonGo_Marshal(policy)
-	var value_0 string = strings.TrimRight(baseURL, "/")
-	var value_1 string = StdTextGo_FromBytes(encoded.Value)
-	parts := [3]string{value_0, "\x00", value_1}
+	var value_0 [3]string
+	var value_1 string = strings.TrimRight(baseURL, "/")
+	value_0[0] = value_1
+	value_0[1] = "\x00"
+	var value_2 string = StdTextGo_FromBytes(encoded.Value)
+	value_0[2] = value_2
+	parts := value_0
 	_ = parts
 	return Signing_SHA256Hex(StdTextGo_ToBytes(strings.Join(parts[0:3:3], "")))
 }

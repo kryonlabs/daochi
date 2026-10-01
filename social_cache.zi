@@ -1,0 +1,95 @@
+#import "std/go_types"
+#import "sync_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+state :: #import "account_state";
+timestamp :: #import "timestamp";
+strings :: #system_library "go:strings";
+go_sql :: #system_library "go:database/sql";
+
+SnapshotWriteResult :: struct {
+    applied: isize
+    error: Error
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign strings;
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+
+#scope_export
+Upsert :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    item: SocialSnapshot) -> SnapshotWriteResult {
+    result: SnapshotWriteResult
+    kind := TrimSpace(item.Kind)
+    payload := cast([]u8)item.JSON
+    if kind == "" || kind.count > 96 {
+        result.error = errors.New("invalid social_cache kind")
+        return result
+    }
+    if payload.count == 0 {
+        payload = text.ToBytes("{}")
+    }
+    if !json.Valid(payload) {
+        result.error = errors.New("invalid social_cache json")
+        return result
+    }
+    same: isize
+    arguments: [3]Any
+    arguments[0] = userID
+    arguments[1] = kind
+    arguments[2] = text.FromBytes(payload)
+    destinations: [1]Any
+    destinations[0] = *same
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT EXISTS(SELECT 1 FROM server_social_snapshots WHERE user_id_hash=?1 AND kind=?2 AND json=?3)", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null || same != cast(isize)0 {
+        return result
+    }
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error != null {
+        return result
+    }
+    values: [5]Any
+    values[0] = userID
+    values[1] = kind
+    values[2] = text.FromBytes(payload)
+    values[3] = timestamp.NormalizeTime(item.UpdatedAt, "")
+    values[4] = version.value
+    written := sql.ExecTx(transaction, context,
+        "\nINSERT INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5)\nON CONFLICT(user_id_hash,kind) DO UPDATE SET\n\tjson=excluded.json,\n\tupdated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.json != server_social_snapshots.json", values[:])
+    result.error = written.error
+    if result.error == null {
+        result.applied = state.Affected(written.value)
+    }
+    return result
+}
+
+Set :: (database: *sql.Database, context: ctx.Context, userID: string,
+    kind: string, payload: []u8) -> SnapshotWriteResult {
+    result: SnapshotWriteResult
+    started := sql.Begin(database, context, null)
+    result.error = started.error
+    if result.error != null {
+        return result
+    }
+    transaction := started.value
+    RollbackAtReturn(transaction)
+    item: SocialSnapshot
+    item.Kind = kind
+    item.JSON = cast(RawMessage)payload
+    written := Upsert(transaction, context, userID, item)
+    result.error = written.error
+    if result.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    if result.error == null {
+        result.applied = written.applied
+    }
+    return result
+}

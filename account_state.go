@@ -85,3 +85,44 @@ func AccountState_Touch(transaction *Transaction, context Context, userID string
 	inserted := value_1
 	return inserted.Error
 }
+
+func AccountState_Upsert(transaction *Transaction, context Context, userID string, publicKey []uint8) Error {
+	var arguments [3]Any
+	arguments[0] = userID
+	arguments[1] = publicKey
+	var value_0 string = Timestamp_CanonicalNow()
+	arguments[2] = value_0
+	var value_1 string = "INSERT INTO server_users(user_id_hash,public_key) VALUES(?1,?2) ON CONFLICT(user_id_hash) DO UPDATE SET last_seen_at=?3"
+	updated := StdSqlGo_ExecTx(transaction, context, value_1, arguments[0:3:3])
+	if updated.Error != nil {
+		return updated.Error
+	}
+	var value_2 zir_2688387c33a72186_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
+	inserted := value_2
+	return inserted.Error
+}
+
+func AccountState_Register(database *Database, context Context, userID string, publicKey []uint8) Error {
+	opened := StdSqlGo_Begin(database, context, nil)
+	if opened.Error != nil {
+		return opened.Error
+	}
+	var arguments [1]Any
+	arguments[0] = userID
+	var value_0 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(opened.Value, context, "DELETE FROM server_account_tombstones WHERE user_id_hash=?1", arguments[0:1:1])
+	removed := value_0
+	if removed.Error != nil {
+		cleanup_return_0 := removed.Error
+		StdSqlGo_Rollback(opened.Value)
+		return cleanup_return_0
+	}
+	error := AccountState_Upsert(opened.Value, context, userID, publicKey)
+	if error != nil {
+		cleanup_return_1 := error
+		StdSqlGo_Rollback(opened.Value)
+		return cleanup_return_1
+	}
+	cleanup_return_2 := StdSqlGo_Commit(opened.Value)
+	StdSqlGo_Rollback(opened.Value)
+	return cleanup_return_2
+}

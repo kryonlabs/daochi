@@ -1,0 +1,261 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "protocol"
+config :: #import "config";
+ctx :: #import "std/context_go";
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+json :: #import "std/json_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+raw :: #import "sync_types";
+sorting :: #system_library "go:sort";
+go_http :: #system_library "go:net/http";
+go_io :: #system_library "go:io";
+numbers :: #system_library "go:strconv";
+strings :: #system_library "go:strings";
+format :: #system_library "go:fmt";
+big :: #system_library "go:math/big";
+builtin :: #system_library "go:builtin";
+
+WalletSubaddress :: struct {
+    Major: isize #go_tag "json:\"major\""
+    Minor: isize #go_tag "json:\"minor\""
+}
+
+WalletTransfer :: struct {
+    TxID: string #go_tag "json:\"txid\""
+    Amount: s64 #go_tag "json:\"amount\""
+    Confirmations: s64 #go_tag "json:\"confirmations\""
+    Height: s64 #go_tag "json:\"height\""
+    UnlockTime: s64 #go_tag "json:\"unlock_time\""
+    Locked: bool #go_tag "json:\"locked\""
+    DoubleSpendSeen: bool #go_tag "json:\"double_spend_seen\""
+    SubaddrIndex: WalletSubaddress #go_tag "json:\"subaddr_index\""
+}
+
+InvoicePaymentState :: struct {
+    PaymentID: string
+    SeenAtomic: s64
+    ConfirmedAtomic: s64
+}
+
+InvoicePaymentResult :: struct {
+    value: InvoicePaymentState
+    error: Error
+}
+
+WalletAddressResult :: struct {
+    address: string
+    index: isize
+    error: Error
+}
+
+TokenUnitsResult :: struct {
+    value: s64
+    error: Error
+}
+
+#scope_file
+RPCError :: struct {
+    #go_anonymous
+    code: isize #go_tag "json:\"code\""
+    message: string #go_tag "json:\"message\""
+}
+RPCResponse :: struct {
+    #go_anonymous
+    result: raw.RawMessage #go_tag "json:\"result\""
+    error: *RPCError #go_tag "json:\"error\""
+}
+RPCAddress :: struct {
+    #go_anonymous
+    address: string #go_tag "json:\"address\""
+    addressIndex: isize #go_tag "json:\"address_index\""
+}
+InvoiceTransfers :: struct {
+    #go_anonymous
+    incoming: []WalletTransfer #go_tag "json:\"in\""
+    pool: []WalletTransfer #go_tag "json:\"pool\""
+}
+BigInteger :: #type #foreign big "Int";
+NewInteger :: (value: s64) -> *BigInteger #foreign big "NewInt";
+Multiply :: (result: *BigInteger, left: *BigInteger, right: *BigInteger) -> *BigInteger #foreign big "(*Int).Mul";
+Divide :: (result: *BigInteger, left: *BigInteger, right: *BigInteger) -> *BigInteger #foreign big "(*Int).Div";
+FitsInteger :: (value: *BigInteger) -> bool #foreign big "(*Int).IsInt64";
+IntegerValue :: (value: *BigInteger) -> s64 #foreign big "(*Int).Int64";
+SetBasicAuth :: (request: *http.Request, user: string, password: string) #foreign go_http "(*Request).SetBasicAuth";
+CloseAtReturn :: (body: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
+StatusError :: (message: string, status: isize) -> Error #foreign format "Errorf";
+RPCMessageError :: (message: string, detail: string) -> Error #foreign format "Errorf";
+AllocateText :: (count: isize) -> []string #foreign builtin "make";
+AppendText :: (values: []string, value: string) -> []string #foreign builtin "append";
+IntegerText :: (value: isize) -> string #foreign numbers "Itoa";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+SortStrings :: (values: []string) #foreign sorting "Strings";
+
+CollectTransfers :: (state: *InvoicePaymentState, seen: Map(string, bool), identifiers: []string,
+    transfers: []WalletTransfer, configuration: config.Config, invoice: MoneroInvoiceResponse) -> []string {
+    for transfer: transfers {
+        if transfer.TxID == "" || transfer.Amount <= 0 ||
+            transfer.SubaddrIndex.Major != 0 || transfer.SubaddrIndex.Minor != invoice.AddressIndex {
+            continue
+        }
+        if MapGet(seen, transfer.TxID) {
+            continue
+        }
+        MapSet(seen, transfer.TxID, true)
+        state.SeenAtomic += transfer.Amount
+        identifiers = AppendText(identifiers, transfer.TxID)
+        if transfer.DoubleSpendSeen {
+            continue
+        }
+        if transfer.Confirmations >= ConfirmationsRequired(configuration) &&
+            !transfer.Locked && transfer.UnlockTime == 0 {
+            state.ConfirmedAtomic += transfer.Amount
+        }
+    }
+    return identifiers
+}
+
+#scope_export
+ValidRate :: (configuration: config.Config) -> bool {
+    return configuration.MoneroRateAtomicAmount > 0 && configuration.MoneroRateTokenUnits > 0
+}
+
+ConfirmationsRequired :: (configuration: config.Config) -> s64 {
+    if configuration.MoneroConfirmationsRequired > 0 {
+        return configuration.MoneroConfirmationsRequired
+    }
+    return 10
+}
+
+MinimumAtomicAmount :: (configuration: config.Config) -> s64 {
+    if configuration.MoneroMinimumAtomicAmount > 0 {
+        return configuration.MoneroMinimumAtomicAmount
+    }
+    return 1
+}
+
+TokenUnits :: (amount: s64, rateAtomic: s64, rateTokens: s64) -> TokenUnitsResult {
+    result: TokenUnitsResult
+    if amount <= 0 || rateAtomic <= 0 || rateTokens <= 0 {
+        result.error = errors.New("invalid monero conversion")
+        return result
+    }
+    value := NewInteger(0)
+    Multiply(value, NewInteger(amount), NewInteger(rateTokens))
+    Divide(value, value, NewInteger(rateAtomic))
+    if !FitsInteger(value) {
+        result.error = errors.New("monero conversion overflow")
+        return result
+    }
+    result.value = IntegerValue(value)
+    return result
+}
+
+Request :: (context: ctx.Context, configuration: config.Config, method: string,
+    parameters: Map(string, Any), output: Any, unavailable: Error) -> Error {
+    envelope: Map(string, Any)
+    MapInit(envelope)
+    MapSet(envelope, "jsonrpc", "2.0")
+    MapSet(envelope, "id", "0")
+    MapSet(envelope, "method", method)
+    MapSet(envelope, "params", parameters)
+    body := json.Marshal(envelope)
+    target: [2]string
+    target[0] = configuration.MoneroWalletRPCURL
+    target[1] = "/json_rpc"
+    request := http.NewRequest(context, "POST", Join(target[:], ""), io.FromBytes(body.value))
+    if request.error != null {
+        return request.error
+    }
+    http.SetHeader(http.Headers(request.value), "Content-Type", "application/json")
+    if configuration.MoneroWalletRPCUser != "" || configuration.MoneroWalletRPCPassword != "" {
+        SetBasicAuth(request.value, configuration.MoneroWalletRPCUser, configuration.MoneroWalletRPCPassword)
+    }
+    client := http.NewClient(cast(clock.Duration)15000000000)
+    response := http.Do(client, request.value)
+    if response.error != null {
+        return unavailable
+    }
+    stream := http.ResponseBody(response.value)
+    CloseAtReturn(stream)
+    bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 1048576))
+    status := http.StatusCode(response.value)
+    if status < 200 || status >= 300 {
+        return StatusError("monero rpc status %d", status)
+    }
+    wrapper: RPCResponse
+    decoded := json.Unmarshal(bytes.value, *wrapper)
+    if decoded != null {
+        return decoded
+    }
+    if wrapper.error != null {
+        return RPCMessageError("monero rpc error: %s", wrapper.error.message)
+    }
+    return json.Unmarshal(cast([]u8)wrapper.result, output)
+}
+
+CreateAddress :: (context: ctx.Context, configuration: config.Config, label: string, unavailable: Error) -> WalletAddressResult {
+    result: WalletAddressResult
+    if configuration.MoneroWalletRPCURL == "" {
+        result.error = unavailable
+        return result
+    }
+    parameters: Map(string, Any)
+    MapInit(parameters)
+    MapSet(parameters, "account_index", cast(isize)0)
+    MapSet(parameters, "label", label)
+    address: RPCAddress
+    result.error = Request(context, configuration, "create_address", parameters, *address, unavailable)
+    if result.error != null {
+        return result
+    }
+    if address.address == "" {
+        result.error = errors.New("monero rpc missing address")
+        return result
+    }
+    result.address = address.address
+    result.index = address.addressIndex
+    return result
+}
+
+InspectInvoice :: (context: ctx.Context, configuration: config.Config, invoice: MoneroInvoiceResponse,
+    unavailable: Error) -> InvoicePaymentResult {
+    result: InvoicePaymentResult
+    if configuration.MoneroWalletRPCURL == "" {
+        result.error = unavailable
+        return result
+    }
+    parameters: Map(string, Any)
+    MapInit(parameters)
+    MapSet(parameters, "in", true)
+    MapSet(parameters, "pending", true)
+    MapSet(parameters, "pool", true)
+    MapSet(parameters, "failed", false)
+    MapSet(parameters, "account_index", cast(isize)0)
+    indices: [1]isize
+    indices[0] = invoice.AddressIndex
+    MapSet(parameters, "subaddr_indices", indices[:])
+    transfers: InvoiceTransfers
+    result.error = Request(context, configuration, "get_transfers", parameters, *transfers, unavailable)
+    if result.error != null {
+        return result
+    }
+    seen: Map(string, bool)
+    MapInit(seen)
+    identifiers := AllocateText(cast(isize)0)
+    state: InvoicePaymentState
+    identifiers = CollectTransfers(*state, seen, identifiers, transfers.pool, configuration, invoice)
+    identifiers = CollectTransfers(*state, seen, identifiers, transfers.incoming, configuration, invoice)
+    if identifiers.count > 0 {
+        SortStrings(identifiers)
+        parts: [3]string
+        parts[0] = Join(identifiers, "+")
+        parts[1] = ":0:"
+        parts[2] = IntegerText(invoice.AddressIndex)
+        state.PaymentID = Join(parts[:], "")
+    }
+    result.value = state
+    return result
+}

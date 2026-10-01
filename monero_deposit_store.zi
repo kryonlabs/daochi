@@ -1,0 +1,419 @@
+#import "protocol"
+#import "std/go_types"
+#import "std/map_go"
+config :: #import "config";
+wallet :: #import "monero_wallet";
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+accounts :: #import "account_state";
+ids :: #import "resource_id";
+identity :: #import "identity";
+timestamp :: #import "timestamp";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
+errors :: #import "std/errors_go";
+go_sql :: #system_library "go:database/sql";
+format :: #system_library "go:fmt";
+strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+AddressResult :: struct {
+    value: MoneroAccountAddress
+    found: bool
+    error: Error
+}
+HeightResult :: struct {
+    value: s64
+    error: Error
+}
+OwnersResult :: struct {
+    value: Map([2]isize, string)
+    error: Error
+}
+DepositResult :: struct {
+    value: MoneroDeposit
+    error: Error
+}
+DepositsResult :: struct {
+    value: []MoneroDeposit
+    error: Error
+}
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+PaymentID :: (pattern: string, transactionID: string, account: isize, address: isize) -> string #foreign format "Sprintf";
+AppendDeposit :: (values: []MoneroDeposit, value: MoneroDeposit) -> []MoneroDeposit #foreign builtin "append";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+
+AddressSQL :: #string SQL
+SELECT m.account_id,COALESCE(u.alias,''),COALESCE(u.profile_icon,0),m.address,m.account_index,m.address_index,m.created_at
+FROM monero_account_addresses m
+LEFT JOIN server_users u ON u.user_id_hash=m.account_id
+WHERE m.account_id=?1 AND m.disabled_at=''
+SQL;
+DepositSQL :: #string SQL
+SELECT tx_id,account_id,amount_atomic,token_units,block_height,confirmations,status,first_seen_at,
+    confirmed_at,credited_at,receipt_id,account_index,address_index,unlock_time,locked,double_spend_seen,
+    rate_atomic_amount,rate_token_units
+FROM monero_deposits WHERE tx_id=?1 AND account_index=?2 AND address_index=?3
+SQL;
+DepositsSQL :: #string SQL
+SELECT tx_id,account_id,amount_atomic,token_units,block_height,confirmations,status,first_seen_at,
+    confirmed_at,credited_at,receipt_id,account_index,address_index,unlock_time,locked,double_spend_seen,
+    rate_atomic_amount,rate_token_units
+FROM monero_deposits WHERE account_id=?1 ORDER BY first_seen_at DESC LIMIT ?2
+SQL;
+InsertDepositSQL :: #string SQL
+INSERT INTO monero_deposits(tx_id,account_index,address_index,account_id,amount_atomic,block_height,
+    confirmations,unlock_time,locked,double_spend_seen,status,rate_atomic_amount,rate_token_units,token_units)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+ON CONFLICT(tx_id,account_index,address_index) DO UPDATE SET
+    amount_atomic=excluded.amount_atomic,
+    block_height=excluded.block_height,
+    confirmations=excluded.confirmations,
+    unlock_time=excluded.unlock_time,
+    locked=excluded.locked,
+    double_spend_seen=excluded.double_spend_seen,
+    status=CASE WHEN monero_deposits.status='credited' THEN 'credited' ELSE excluded.status END,
+    updated_at=CURRENT_TIMESTAMP
+SQL;
+
+DepositDestinations :: (value: *MoneroDeposit) -> [18]Any {
+    destinations: [18]Any
+    destinations[0] = *value.TxID
+    destinations[1] = *value.AccountID
+    destinations[2] = *value.AmountAtomic
+    destinations[3] = *value.TokenUnits
+    destinations[4] = *value.BlockHeight
+    destinations[5] = *value.Confirmations
+    destinations[6] = *value.Status
+    destinations[7] = *value.FirstSeenAt
+    destinations[8] = *value.ConfirmedAt
+    destinations[9] = *value.CreditedAt
+    destinations[10] = *value.ReceiptID
+    destinations[11] = *value.AccountIndex
+    destinations[12] = *value.AddressIndex
+    destinations[13] = *value.UnlockTime
+    destinations[14] = *value.Locked
+    destinations[15] = *value.DoubleSpendSeen
+    destinations[16] = *value.RateAtomic
+    destinations[17] = *value.RateTokenUnits
+    return destinations
+}
+
+AttachReceipt :: (database: *sql.Database, context: ctx.Context, value: *MoneroDeposit) -> Error {
+    if value.ReceiptID == "" {
+        return null
+    }
+    receipt := ledger.ByID(database, context, value.ReceiptID)
+    if receipt.error != null {
+        return receipt.error
+    }
+    if receipt.found {
+        value.Receipt = *receipt.value
+    }
+    return null
+}
+
+#scope_export
+AccountAddress :: (database: *sql.Database, context: ctx.Context, accountID: string) -> AddressResult {
+    result: AddressResult
+    arguments: [1]Any
+    arguments[0] = accountID
+    row := sql.QueryRow(database, context, AddressSQL, arguments[:])
+    value: MoneroAccountAddress
+    destinations: [7]Any
+    destinations[0] = *value.AccountID
+    destinations[1] = *value.Alias
+    destinations[2] = *value.ProfileIcon
+    destinations[3] = *value.Address
+    destinations[4] = *value.AccountIndex
+    destinations[5] = *value.AddressIndex
+    destinations[6] = *value.CreatedAt
+    result.error = sql.ScanRow(row, destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    result.value = value
+    result.found = result.error == null
+    return result
+}
+
+CreateAccountAddress :: (database: *sql.Database, context: ctx.Context, accountID: string,
+    configuration: config.Config, missingUser: Error, unavailable: Error) -> AddressResult {
+    result: AddressResult
+    if !identity.ValidUserID(accountID) {
+        result.error = errors.New("invalid account id")
+        return result
+    }
+    arguments: [1]Any
+    arguments[0] = accountID
+    row := sql.QueryRow(database, context, "SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)", arguments[:])
+    exists: isize
+    destinations: [1]Any
+    destinations[0] = *exists
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    if exists == cast(isize)0 {
+        result.error = missingUser
+        return result
+    }
+    resource := ids.New()
+    result.error = resource.error
+    if result.error != null {
+        return result
+    }
+    label: [2]string
+    label[0] = "daochi-account-"
+    label[1] = resource.value
+    allocation := wallet.CreateAddress(context, configuration, Join(label[:], ""), unavailable)
+    result.error = allocation.error
+    if result.error != null {
+        return result
+    }
+    values: [4]Any
+    values[0] = accountID
+    values[1] = allocation.index
+    values[2] = allocation.address
+    values[3] = resource.value
+    inserted := sql.Exec(database, context,
+        "INSERT INTO monero_account_addresses(account_id,account_index,address_index,address,allocation_id) VALUES(?1,0,?2,?3,?4)", values[:])
+    if inserted.error != null {
+        existing := AccountAddress(database, context, accountID)
+        if existing.error == null && existing.found {
+            return existing
+        }
+        result.error = inserted.error
+        return result
+    }
+    return AccountAddress(database, context, accountID)
+}
+
+ScanHeight :: (database: *sql.Database, context: ctx.Context) -> HeightResult {
+    result: HeightResult
+    arguments: [0]Any
+    row := sql.QueryRow(database, context, "SELECT last_height FROM monero_wallet_state WHERE wallet_id='default'", arguments[:])
+    destinations: [1]Any
+    destinations[0] = *result.value
+    result.error = sql.ScanRow(row, destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+    }
+    return result
+}
+
+SaveScanHeight :: (database: *sql.Database, context: ctx.Context, height: s64) -> Error {
+    if height <= 0 {
+        return null
+    }
+    arguments: [2]Any
+    arguments[0] = height
+    arguments[1] = timestamp.CanonicalNow()
+    updated := sql.Exec(database, context,
+        "INSERT INTO monero_wallet_state(wallet_id,last_height,updated_at) VALUES('default',?1,?2) ON CONFLICT(wallet_id) DO UPDATE SET last_height=MAX(monero_wallet_state.last_height,excluded.last_height),updated_at=excluded.updated_at", arguments[:])
+    return updated.error
+}
+
+AddressOwners :: (database: *sql.Database, context: ctx.Context) -> OwnersResult {
+    result: OwnersResult
+    arguments: [0]Any
+    query := sql.Query(database, context,
+        "SELECT account_index,address_index,account_id FROM monero_account_addresses WHERE disabled_at=''", arguments[:])
+    result.error = query.error
+    if result.error != null {
+        return result
+    }
+    CloseAtReturn(query.value)
+    owners: Map([2]isize, string)
+    MapInit(owners)
+    while sql.Next(query.value) {
+        indices: [2]isize
+        accountID: string
+        destinations: [3]Any
+        destinations[0] = *indices[0]
+        destinations[1] = *indices[1]
+        destinations[2] = *accountID
+        result.error = sql.ScanRows(query.value, destinations[:])
+        if result.error != null {
+            return result
+        }
+        MapSet(owners, indices, accountID)
+    }
+    result.value = owners
+    result.error = sql.RowsError(query.value)
+    return result
+}
+
+Deposit :: (database: *sql.Database, context: ctx.Context, transactionID: string, account: isize, address: isize) -> DepositResult {
+    result: DepositResult
+    arguments: [3]Any
+    arguments[0] = transactionID
+    arguments[1] = account
+    arguments[2] = address
+    row := sql.QueryRow(database, context, DepositSQL, arguments[:])
+    value: MoneroDeposit
+    destinations := DepositDestinations(*value)
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    result.error = AttachReceipt(database, context, *value)
+    if result.error == null {
+        result.value = value
+    }
+    return result
+}
+
+UpsertDeposit :: (database: *sql.Database, context: ctx.Context, accountID: string,
+    transfer: wallet.WalletTransfer, status: string, configuration: config.Config) -> DepositResult {
+    result: DepositResult
+    conversion := wallet.TokenUnits(transfer.Amount, configuration.MoneroRateAtomicAmount, configuration.MoneroRateTokenUnits)
+    arguments: [14]Any
+    arguments[0] = transfer.TxID
+    arguments[1] = transfer.SubaddrIndex.Major
+    arguments[2] = transfer.SubaddrIndex.Minor
+    arguments[3] = accountID
+    arguments[4] = transfer.Amount
+    arguments[5] = transfer.Height
+    arguments[6] = transfer.Confirmations
+    arguments[7] = transfer.UnlockTime
+    arguments[8] = transfer.Locked
+    arguments[9] = transfer.DoubleSpendSeen
+    arguments[10] = status
+    arguments[11] = configuration.MoneroRateAtomicAmount
+    arguments[12] = configuration.MoneroRateTokenUnits
+    arguments[13] = conversion.value
+    inserted := sql.Exec(database, context, InsertDepositSQL, arguments[:])
+    result.error = inserted.error
+    if result.error != null {
+        return result
+    }
+    return Deposit(database, context, transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
+}
+
+CreditDeposit :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
+    transactionID: string, account: isize, address: isize, issuerUnavailable: Error) -> ledger.CreditResult {
+    result: ledger.CreditResult
+    started := sql.Begin(database, context, null)
+    result.error = started.error
+    if result.error != null {
+        return result
+    }
+    transaction := started.value
+    RollbackAtReturn(transaction)
+    accountID: string
+    status: string
+    receiptID: string
+    units: s64
+    arguments: [3]Any
+    arguments[0] = transactionID
+    arguments[1] = account
+    arguments[2] = address
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT account_id,status,token_units,receipt_id FROM monero_deposits WHERE tx_id=?1 AND account_index=?2 AND address_index=?3", arguments[:])
+    destinations: [4]Any
+    destinations[0] = *accountID
+    destinations[1] = *status
+    destinations[2] = *units
+    destinations[3] = *receiptID
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    if receiptID != "" {
+        receipt := ledger.ByIDTx(transaction, context, receiptID)
+        result.error = receipt.error
+        if result.error != null {
+            return result
+        }
+        if !receipt.found {
+            result.error = errors.New("monero deposit receipt missing")
+            return result
+        }
+        result.value = receipt.value
+        result.error = sql.Commit(transaction)
+        return result
+    }
+    if status != "confirmed" || units <= 0 {
+        result.error = errors.New("monero deposit is not creditable")
+        return result
+    }
+    paymentID := PaymentID("%s:%d:%d", transactionID, account, address)
+    event: receipts.TokenEventInput
+    event.AccountID = accountID
+    event.EventType = "credit"
+    event.AmountDelta = units
+    event.SourceType = "monero_account"
+    event.SourceRef = paymentID
+    credited := ledger.CreditPaymentTx(transaction, context, signer, "monero_account", paymentID, event, issuerUnavailable)
+    result.error = credited.error
+    if result.error != null {
+        return result
+    }
+    values: [4]Any
+    values[0] = transactionID
+    values[1] = account
+    values[2] = address
+    values[3] = credited.value.ReceiptID
+    updated := sql.ExecTx(transaction, context,
+        "UPDATE monero_deposits SET status='credited',receipt_id=?4,confirmed_at=CASE WHEN confirmed_at='' THEN CURRENT_TIMESTAMP ELSE confirmed_at END,credited_at=CASE WHEN credited_at='' THEN CURRENT_TIMESTAMP ELSE credited_at END,updated_at=CURRENT_TIMESTAMP WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND receipt_id=''", values[:])
+    result.error = updated.error
+    if result.error != null {
+        return result
+    }
+    if accounts.Affected(updated.value) != cast(isize)1 {
+        result.error = errors.New("monero deposit settlement race")
+        return result
+    }
+    result.value = credited.value
+    result.created = credited.created
+    result.error = sql.Commit(transaction)
+    return result
+}
+
+Deposits :: (database: *sql.Database, context: ctx.Context, accountID: string, limit: isize) -> DepositsResult {
+    result: DepositsResult
+    if limit <= cast(isize)0 || limit > cast(isize)500 {
+        limit = cast(isize)100
+    }
+    arguments: [2]Any
+    arguments[0] = accountID
+    arguments[1] = limit
+    query := sql.Query(database, context, DepositsSQL, arguments[:])
+    result.error = query.error
+    if result.error != null {
+        return result
+    }
+    values: []MoneroDeposit
+    while sql.Next(query.value) {
+        item: MoneroDeposit
+        destinations := DepositDestinations(*item)
+        result.error = sql.ScanRows(query.value, destinations[:])
+        if result.error != null {
+            sql.CloseRows(query.value)
+            return result
+        }
+        values = AppendDeposit(values, item)
+    }
+    result.error = sql.CloseRows(query.value)
+    if result.error != null {
+        return result
+    }
+    result.error = sql.RowsError(query.value)
+    if result.error != null {
+        return result
+    }
+    for index: 0..values.count - 1 {
+        result.error = AttachReceipt(database, context, *values[index])
+        if result.error != null {
+            return result
+        }
+    }
+    result.value = values
+    return result
+}

@@ -154,7 +154,7 @@ func TestWaoziTokenCreditSpendAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	if creditPayload.Balance != 5000000 ||
-		creditPayload.Receipt.AssetID != waoziTokenAssetID ||
+		creditPayload.Receipt.AssetID != AssetID ||
 		!TokenReceipt_ValidSignature(publicKey, creditPayload.Receipt) {
 		t.Fatalf("unexpected credit payload: %#v", creditPayload)
 	}
@@ -375,7 +375,7 @@ func TestMoneroInvoiceReconcilerSettlesPendingInvoice(t *testing.T) {
 		Major:         0,
 		Minor:         invoice.AddressIndex,
 	})
-	if err := server.reconcileMoneroInvoices(context.Background(), 100); err != nil {
+	if err := MoneroInvoices_Pending(server.monero(), context.Background(), 100); err != nil {
 		t.Fatal(err)
 	}
 	paid := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/invoices/"+invoice.ID, identity.Token, nil)
@@ -431,7 +431,8 @@ func TestPermanentMoneroAddressPurchaseAndGift(t *testing.T) {
 	if giftAddress.Address != ownAddress.Address || giftAddress.AccountID != recipient.UserID {
 		t.Fatalf("gift address differs from permanent address: own=%#v gift=%#v", ownAddress, giftAddress)
 	}
-	mapping, found, err := store.MoneroAccountAddress(context.Background(), recipient.UserID)
+	addressResult := MoneroDepositStore_AccountAddress(store.db, context.Background(), recipient.UserID)
+	mapping, found, err := addressResult.Value, addressResult.Found, addressResult.Error
 	if err != nil || !found {
 		t.Fatalf("address mapping found=%v err=%v", found, err)
 	}
@@ -440,13 +441,13 @@ func TestPermanentMoneroAddressPurchaseAndGift(t *testing.T) {
 		TxID: "gift-to-alice", Amount: 2000000000000, Confirmations: 10,
 		Major: mapping.AccountIndex, Minor: mapping.AddressIndex,
 	})
-	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 10000000 {
 		t.Fatalf("gift balance=%d err=%v, want 10000000", balance, err)
@@ -477,15 +478,15 @@ func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
 	if address.Code != http.StatusOK {
 		t.Fatalf("address status=%d body=%s", address.Code, address.Body.String())
 	}
-	mapping, _, _ := store.MoneroAccountAddress(context.Background(), recipient.UserID)
+	mapping := MoneroDepositStore_AccountAddress(store.db, context.Background(), recipient.UserID).Value
 	wallet.setTransfer(moneroTransfer{
 		TxID: "locked-payment", Amount: 1000000000000, Confirmations: 10,
 		Major: mapping.AccountIndex, Minor: mapping.AddressIndex, Locked: true,
 	})
-	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, AssetID)
 	balance, _ := balanceResult.Value, balanceResult.Error
 	if balance != 0 {
 		t.Fatalf("locked deposit credited balance=%d", balance)
@@ -494,10 +495,10 @@ func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
 		TxID: "locked-payment", Amount: 1000000000000, Confirmations: 11,
 		Major: mapping.AccountIndex, Minor: mapping.AddressIndex,
 	})
-	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balanceResult2 := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, waoziTokenAssetID)
+	balanceResult2 := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, AssetID)
 	balance, _ = balanceResult2.Value, balanceResult2.Error
 	if balance != 5000000 {
 		t.Fatalf("unlocked deposit balance=%d, want 5000000", balance)
@@ -787,11 +788,11 @@ func TestSessionCheckinFieldsSyncRoundTrip(t *testing.T) {
 		t.Fatalf("v3 session checkin fields = %#v", got)
 	}
 
-	exported, err := store.ExportAccount(t.Context(), identity.UserID)
-	if err != nil {
-		t.Fatal(err)
+	exported := AccountExport_Export(store.db, t.Context(), identity.UserID)
+	if exported.Error != nil {
+		t.Fatal(exported.Error)
 	}
-	sessions := exported.Tables["sessions"]
+	sessions := exported.Value.Tables["sessions"]
 	if len(sessions) != 1 || sessions[0]["mood_before"] != int64(2) ||
 		sessions[0]["mood_after"] != int64(5) || sessions[0]["energy"] != int64(4) ||
 		sessions[0]["stress"] != int64(1) || sessions[0]["note"] != "calm and clear" ||
@@ -1068,8 +1069,8 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 		}},
 		Capabilities: []string{"encrypted-records"},
 		TokenPolicies: []TokenPolicy{{
-			AssetID:    waoziTokenAssetID,
-			Permission: tokenPermissionSpend,
+			AssetID:    AssetID,
+			Permission: "spend",
 		}},
 	}
 	prepared := AppRegistration_Prepare(manifest)
@@ -2649,7 +2650,7 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 	INSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,calc_version,value,label,local_date,updated_at)
 	SELECT ?1,'inbe','whm','streak',server_version,?2,9,'9',?3,'stale'
 	FROM server_sync_state WHERE user_id_hash=?1`,
-		alice.UserID, leaderboardStatsCalcVersion, yesterdayDate); err != nil {
+		alice.UserID, CalculationVersion, yesterdayDate); err != nil {
 		t.Fatal(err)
 	}
 

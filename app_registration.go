@@ -325,32 +325,35 @@ func AppRegistration_Verify(request SignedAppRegistrationRequest, nodeKey Public
 		result.Authentication = value_2
 		return result
 	}
-	var value_3 string = StdTextGo_FromBytes(encoded.Value)
-	parts := [2]string{"daochi-app-manifest-v1", value_3}
+	var value_3 [2]string
+	value_3[0] = "daochi-app-manifest-v1"
+	var value_4 string = StdTextGo_FromBytes(encoded.Value)
+	value_3[1] = value_4
+	parts := value_3
 	_ = parts
 	message := StdTextGo_ToBytes(strings.Join(parts[0:2:2], "\n"))
-	var value_4 AppManifest = request.Manifest
-	var value_5 []uint8 = message
-	var value_6 []uint8 = signature
-	var value_7 bool = Manifest_SignedByActiveKey(value_4, value_5, value_6, StdTimeGo_Unix(StdTimeGo_Now()))
-	if !value_7 {
-		var value_8 AuthenticationResult = Authentication_Failure(int(401), "manifest signature rejected")
-		result.Authentication = value_8
+	var value_5 AppManifest = request.Manifest
+	var value_6 []uint8 = message
+	var value_7 []uint8 = signature
+	var value_8 bool = Manifest_SignedByActiveKey(value_5, value_6, value_7, StdTimeGo_Unix(StdTimeGo_Now()))
+	if !value_8 {
+		var value_9 AuthenticationResult = Authentication_Failure(int(401), "manifest signature rejected")
+		result.Authentication = value_9
 		return result
 	}
 	decoded = Codec_DecodeBinaryField(request.ApprovalSignature)
 	signature = StdTextGo_ToBytes(decoded.Value)
 	if decoded.Error != "" || int64(len(signature)) != 64 {
-		var value_9 AuthenticationResult = Authentication_Failure(int(400), "invalid approval signature")
-		result.Authentication = value_9
+		var value_10 AuthenticationResult = Authentication_Failure(int(400), "invalid approval signature")
+		result.Authentication = value_10
 		return result
 	}
-	var value_10 []uint8 = StdTextGo_ToBytes(Signing_AppApprovalMessage("daochi-app-approval-v1", request.Manifest.AppID, hash))
-	approval := value_10
-	var value_11 bool = StdEd25519Go_Verify(nodeKey, approval, signature)
-	if !value_11 {
-		var value_12 AuthenticationResult = Authentication_Failure(int(401), "node approval rejected")
-		result.Authentication = value_12
+	var value_11 []uint8 = StdTextGo_ToBytes(Signing_AppApprovalMessage("daochi-app-approval-v1", request.Manifest.AppID, hash))
+	approval := value_11
+	var value_12 bool = StdEd25519Go_Verify(nodeKey, approval, signature)
+	if !value_12 {
+		var value_13 AuthenticationResult = Authentication_Failure(int(401), "node approval rejected")
+		result.Authentication = value_13
 		return result
 	}
 	result.Value = encoded.Value
@@ -385,7 +388,10 @@ func AppRegistration_Prepare(value AppManifest) ManifestEncodingResult {
 }
 
 func AppRegistration_PolicyString(value TokenPolicy) string {
-	parts := [2]string{value.AssetID, value.Permission}
+	var value_0 [2]string
+	value_0[0] = value.AssetID
+	value_0[1] = value.Permission
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:2:2], ":")
 }

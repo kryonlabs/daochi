@@ -1,0 +1,87 @@
+#import "std/go_types"
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+errors :: #import "std/errors_go";
+state :: #import "account_state";
+timestamp :: #import "timestamp";
+
+AliasResult :: struct {
+    value: string
+    error: Error
+}
+IconResult :: struct {
+    value: isize
+    error: Error
+}
+
+Alias :: (database: *sql.Database, context: ctx.Context, userID: string) -> AliasResult {
+    result: AliasResult
+    alias: sql.NullString
+    arguments: [1]Any
+    arguments[0] = userID
+    destinations: [1]Any
+    destinations[0] = *alias
+    row := sql.QueryRow(database, context, "SELECT alias FROM server_users WHERE user_id_hash=?1", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null || !sql.NullStringValid(alias) {
+        return result
+    }
+    result.value = sql.NullStringValue(alias)
+    return result
+}
+
+SetAlias :: (database: *sql.Database, context: ctx.Context, userID: string,
+    alias: string, missingUser: Error) -> Error {
+    arguments: [3]Any
+    arguments[0] = userID
+    arguments[1] = alias
+    arguments[2] = timestamp.CanonicalNow()
+    updated := sql.Exec(database, context,
+        "UPDATE server_users SET alias=?2,last_seen_at=?3 WHERE user_id_hash=?1", arguments[:])
+    if updated.error != null {
+        return updated.error
+    }
+    if state.Affected(updated.value) == cast(isize)0 {
+        return missingUser
+    }
+    return null
+}
+
+Icon :: (database: *sql.Database, context: ctx.Context, userID: string) -> IconResult {
+    result: IconResult
+    arguments: [1]Any
+    arguments[0] = userID
+    destinations: [1]Any
+    destinations[0] = *result.value
+    row := sql.QueryRow(database, context, "SELECT profile_icon FROM server_users WHERE user_id_hash=?1", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null {
+        result.value = cast(isize)0
+    }
+    return result
+}
+
+SetIcon :: (database: *sql.Database, context: ctx.Context, userID: string,
+    icon: isize, missingUser: Error) -> Error {
+    arguments: [3]Any
+    arguments[0] = userID
+    arguments[1] = icon
+    arguments[2] = timestamp.CanonicalNow()
+    updated := sql.Exec(database, context,
+        "UPDATE server_users SET profile_icon=?2,last_seen_at=?3 WHERE user_id_hash=?1", arguments[:])
+    if updated.error != null {
+        return updated.error
+    }
+    if state.Affected(updated.value) == cast(isize)0 {
+        return missingUser
+    }
+    return null
+}

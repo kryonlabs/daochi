@@ -22,7 +22,7 @@ type NodeIdentityResult struct {
 	Error Error
 }
 
-type PrivateKeyResult struct {
+type zir_e94080a3b50d4b7c_PrivateKeyResult struct {
 	Value PrivateKey
 	Error Error
 }
@@ -95,7 +95,10 @@ func NodeIdentity_DecodeHex(Value string) zir_91a8a532591b3577_HexResult {
 const MaximumInviteLifetimeSeconds = 86400
 
 func NodeIdentity_Concat(left string, right string) string {
-	parts := [2]string{left, right}
+	var value_0 [2]string
+	value_0[0] = left
+	value_0[1] = right
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:2:2], "")
 }
@@ -157,8 +160,8 @@ func NodeIdentity_New(privateKey PrivateKey) NodeIdentityResult {
 	return result
 }
 
-func NodeIdentity_LoadOrCreateKey(rawPath string) PrivateKeyResult {
-	var result PrivateKeyResult = PrivateKeyResult{}
+func NodeIdentity_LoadOrCreateKey(rawPath string) zir_e94080a3b50d4b7c_PrivateKeyResult {
+	var result zir_e94080a3b50d4b7c_PrivateKeyResult = zir_e94080a3b50d4b7c_PrivateKeyResult{}
 	path := strings.TrimSpace(rawPath)
 	if path == "" {
 		var value_0 Error = StdErrorsGo_New("empty node identity key path")
@@ -220,12 +223,24 @@ func NodeIdentity_LoadOrCreateKey(rawPath string) PrivateKeyResult {
 
 func NodeIdentity_InviteMessage(invite PairingInvite) []uint8 {
 	policy := StdJsonGo_Marshal(invite.Policy)
-	var value_0 string = strconv.FormatInt(int64(int64(invite.Version)), int(int(10)))
-	var value_1 string = NodeIdentity_SortedAddresses(invite.Addresses)
-	var value_2 string = strconv.FormatInt(int64(invite.ExpiresAt), int(int(10)))
-	var value_3 string = Signing_SHA256Hex(policy.Value)
-	var value_4 [12]string = [12]string{"daochi-pairing-invite-v1", value_0, invite.InviteID, invite.NodeID, invite.PublicKey, invite.DisplayName, value_1, invite.SpaceID, value_2, invite.Nonce, value_3, ""}
-	parts := value_4
+	var value_0 [12]string
+	value_0[0] = "daochi-pairing-invite-v1"
+	var value_1 string = strconv.FormatInt(int64(int64(invite.Version)), int(int(10)))
+	value_0[1] = value_1
+	value_0[2] = invite.InviteID
+	value_0[3] = invite.NodeID
+	value_0[4] = invite.PublicKey
+	value_0[5] = invite.DisplayName
+	var value_2 string = NodeIdentity_SortedAddresses(invite.Addresses)
+	value_0[6] = value_2
+	value_0[7] = invite.SpaceID
+	var value_3 string = strconv.FormatInt(int64(invite.ExpiresAt), int(int(10)))
+	value_0[8] = value_3
+	value_0[9] = invite.Nonce
+	var value_4 string = Signing_SHA256Hex(policy.Value)
+	value_0[10] = value_4
+	value_0[11] = ""
+	parts := value_0
 	_ = parts
 	return StdTextGo_ToBytes(strings.Join(parts[0:12:12], "\n"))
 }
@@ -236,12 +251,23 @@ func NodeIdentity_SignInvite(node NodeIdentity, invite *PairingInvite) {
 }
 
 func NodeIdentity_AcceptanceMessage(invite PairingInvite, acceptance PairingAcceptance) []uint8 {
-	var value_0 string = strconv.FormatInt(int64(int64(acceptance.Version)), int(int(10)))
-	var value_1 string = NodeIdentity_SortedAddresses(acceptance.Addresses)
-	var value_2 string = strconv.FormatInt(int64(acceptance.AcceptedAt), int(int(10)))
-	var value_3 string = Signing_SHA256Hex(StdTextGo_ToBytes(invite.Signature))
-	var value_4 [11]string = [11]string{"daochi-pairing-invite-v1-acceptance", value_0, acceptance.InviteID, acceptance.NodeID, acceptance.PublicKey, acceptance.DisplayName, value_1, value_2, acceptance.Nonce, value_3, ""}
-	parts := value_4
+	var value_0 [11]string
+	value_0[0] = "daochi-pairing-invite-v1-acceptance"
+	var value_1 string = strconv.FormatInt(int64(int64(acceptance.Version)), int(int(10)))
+	value_0[1] = value_1
+	value_0[2] = acceptance.InviteID
+	value_0[3] = acceptance.NodeID
+	value_0[4] = acceptance.PublicKey
+	value_0[5] = acceptance.DisplayName
+	var value_2 string = NodeIdentity_SortedAddresses(acceptance.Addresses)
+	value_0[6] = value_2
+	var value_3 string = strconv.FormatInt(int64(acceptance.AcceptedAt), int(int(10)))
+	value_0[7] = value_3
+	value_0[8] = acceptance.Nonce
+	var value_4 string = Signing_SHA256Hex(StdTextGo_ToBytes(invite.Signature))
+	value_0[9] = value_4
+	value_0[10] = ""
+	parts := value_0
 	_ = parts
 	return StdTextGo_ToBytes(strings.Join(parts[0:11:11], "\n"))
 }
@@ -416,12 +442,21 @@ func NodeIdentity_ValidName(name string) bool {
 
 func NodeIdentity_NameClaimMessage(claim NameClaim) []uint8 {
 	services := StdJsonGo_Marshal(claim.Services)
-	var value_0 string = strconv.FormatInt(int64(int64(claim.Version)), int(int(10)))
-	var value_1 string = strconv.FormatInt(int64(claim.Sequence), int(int(10)))
-	var value_2 string = strconv.FormatInt(int64(claim.ExpiresAt), int(int(10)))
-	var value_3 string = Signing_SHA256Hex(services.Value)
-	var value_4 [9]string = [9]string{"daochi-name-claim-v1", value_0, claim.SpaceID, claim.Name, claim.NodeID, value_1, value_2, value_3, ""}
-	parts := value_4
+	var value_0 [9]string
+	value_0[0] = "daochi-name-claim-v1"
+	var value_1 string = strconv.FormatInt(int64(int64(claim.Version)), int(int(10)))
+	value_0[1] = value_1
+	value_0[2] = claim.SpaceID
+	value_0[3] = claim.Name
+	value_0[4] = claim.NodeID
+	var value_2 string = strconv.FormatInt(int64(claim.Sequence), int(int(10)))
+	value_0[5] = value_2
+	var value_3 string = strconv.FormatInt(int64(claim.ExpiresAt), int(int(10)))
+	value_0[6] = value_3
+	var value_4 string = Signing_SHA256Hex(services.Value)
+	value_0[7] = value_4
+	value_0[8] = ""
+	parts := value_0
 	_ = parts
 	return StdTextGo_ToBytes(strings.Join(parts[0:9:9], "\n"))
 }

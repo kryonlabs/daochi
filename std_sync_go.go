@@ -3,7 +3,25 @@ package main
 
 import sync "sync"
 
+// #import std_go_types
 type Mutex = sync.Mutex
+
+type ConcurrentMap = sync.Map
+
+type LoadResult struct {
+	Value  Any
+	Loaded bool
+}
+
+func StdSyncGo_LoadOrStoreRaw(Mapping *ConcurrentMap, Key Any, Value Any) LoadResult {
+	var result LoadResult
+	result.Value, result.Loaded = (*sync.Map).LoadOrStore(Mapping, Key, Value)
+	return result
+}
+
+func StdSyncGo_LoadOrStore(mapping *ConcurrentMap, key Any, value Any) LoadResult {
+	return StdSyncGo_LoadOrStoreRaw(mapping, key, value)
+}
 
 func StdSyncGo_Lock(mutex *Mutex) {
 	(*sync.Mutex).Lock(mutex)

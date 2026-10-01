@@ -14,10 +14,17 @@ func Signing_CanonicalMessage(nonce []uint8, method string, path string, payload
 func Signing_CanonicalMessageWithContext(context string, nonce []uint8, method string, path string, payload []uint8) string {
 	sum := sha256.Sum256(payload)
 	_ = sum
-	var value_0 string = strings.ToUpper(method)
-	var value_1 string = hex.EncodeToString(sum[0:32:32])
-	var value_2 string = hex.EncodeToString(nonce)
-	parts := [6]string{context, value_0, path, value_1, value_2, ""}
+	var value_0 [6]string
+	value_0[0] = context
+	var value_1 string = strings.ToUpper(method)
+	value_0[1] = value_1
+	value_0[2] = path
+	var value_2 string = hex.EncodeToString(sum[0:32:32])
+	value_0[3] = value_2
+	var value_3 string = hex.EncodeToString(nonce)
+	value_0[4] = value_3
+	value_0[5] = ""
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:6:6], "\n")
 }
@@ -29,15 +36,29 @@ func Signing_SHA256Hex(value []uint8) string {
 }
 
 func Signing_NodeRequestMessage(context string, nodeID string, timestamp string, nonce string, method string, path string, body []uint8) string {
-	var value_0 string = strings.ToUpper(method)
-	var value_1 string = Signing_SHA256Hex(body)
-	parts := [8]string{context, nodeID, timestamp, nonce, value_0, path, value_1, ""}
+	var value_0 [8]string
+	value_0[0] = context
+	value_0[1] = nodeID
+	value_0[2] = timestamp
+	value_0[3] = nonce
+	var value_1 string = strings.ToUpper(method)
+	value_0[4] = value_1
+	value_0[5] = path
+	var value_2 string = Signing_SHA256Hex(body)
+	value_0[6] = value_2
+	value_0[7] = ""
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:8:8], "\n")
 }
 
 func Signing_AppApprovalMessage(context string, appID string, manifestHash string) string {
-	parts := [4]string{context, appID, manifestHash, ""}
+	var value_0 [4]string
+	value_0[0] = context
+	value_0[1] = appID
+	value_0[2] = manifestHash
+	value_0[3] = ""
+	parts := value_0
 	_ = parts
 	return strings.Join(parts[0:4:4], "\n")
 }

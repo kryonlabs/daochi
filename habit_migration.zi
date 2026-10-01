@@ -1,0 +1,491 @@
+#import "std/go_types"
+#import "sync_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+clock :: #import "std/time_go";
+state :: #import "account_state";
+timestamp :: #import "timestamp";
+identifiers :: #import "habit_id";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+MigrationResult :: struct {
+    changed: bool
+    error: Error
+}
+
+#scope_file
+MigrationStringsResult :: struct {
+    value: []string
+    error: Error
+}
+MigrationExistsResult :: struct {
+    value: isize
+    error: Error
+}
+StoredHabitOperation :: struct {
+    id: string
+    entityID: string
+    payload: string
+}
+StoredHabitOperationsResult :: struct {
+    value: []StoredHabitOperation
+    error: Error
+}
+LegacyHabit :: struct {
+    id: string
+    updatedAt: string
+    serverVersion: s64
+}
+LegacyHabitsResult :: struct {
+    value: []LegacyHabit
+    error: Error
+}
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+AppendString :: (values: []string, value: string) -> []string #foreign builtin "append";
+AllocateOperations :: (count: isize) -> []StoredHabitOperation #foreign builtin "make";
+AppendOperation :: (values: []StoredHabitOperation, value: StoredHabitOperation) -> []StoredHabitOperation #foreign builtin "append";
+AllocateHabits :: (count: isize) -> []LegacyHabit #foreign builtin "make";
+AppendHabit :: (values: []LegacyHabit, value: LegacyHabit) -> []LegacyHabit #foreign builtin "append";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+TrimSpace :: (value: string) -> string #foreign strings;
+ReplaceAll :: (value: string, old: string, replacement: string) -> string #foreign strings;
+Fields :: (value: string) -> []string #foreign strings;
+ToUpper :: (value: string) -> string #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+
+ReadStrings :: (rows: *sql.Rows) -> MigrationStringsResult {
+    result: MigrationStringsResult
+    CloseRowsAtReturn(rows)
+    values := AllocateStrings(cast(isize)0)
+    while sql.Next(rows) {
+        value: string
+        destinations: [1]Any = .[*value]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendString(values, value)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error == null {
+        result.value = values
+    }
+    return result
+}
+
+ReadOperations :: (rows: *sql.Rows) -> StoredHabitOperationsResult {
+    result: StoredHabitOperationsResult
+    CloseRowsAtReturn(rows)
+    values := AllocateOperations(cast(isize)0)
+    while sql.Next(rows) {
+        value: StoredHabitOperation
+        destinations: [3]Any = .[*value.id, *value.entityID, *value.payload]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendOperation(values, value)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error == null {
+        result.value = values
+    }
+    return result
+}
+
+ReadLegacyHabits :: (rows: *sql.Rows) -> LegacyHabitsResult {
+    result: LegacyHabitsResult
+    CloseRowsAtReturn(rows)
+    values := AllocateHabits(cast(isize)0)
+    while sql.Next(rows) {
+        value: LegacyHabit
+        destinations: [3]Any = .[*value.id, *value.updatedAt, *value.serverVersion]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendHabit(values, value)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error == null {
+        result.value = values
+    }
+    return result
+}
+
+Exists :: (transaction: *sql.Transaction, context: ctx.Context, query: string,
+    userID: string, id: string) -> MigrationExistsResult {
+    result: MigrationExistsResult
+    arguments: [2]Any = .[userID, id]
+    destinations: [1]Any = .[*result.value]
+    row := sql.QueryRowTx(transaction, context, query, arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    return result
+}
+
+#scope_export
+CleanupDays :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> MigrationResult {
+    result: MigrationResult
+    arguments: [1]Any = .[userID]
+    deleted := sql.ExecTx(transaction, context, CleanupQuery, arguments[:])
+    result.error = deleted.error
+    if result.error == null {
+        result.changed = state.Affected(deleted.value) > cast(isize)0
+    }
+    return result
+}
+
+Cleanup :: (database: *sql.Database, context: ctx.Context, userID: string) -> Error {
+    started := sql.Begin(database, context, null)
+    if started.error != null {
+        return started.error
+    }
+    transaction := started.value
+    RollbackAtReturn(transaction)
+    cleaned := CleanupDays(transaction, context, userID)
+    if cleaned.error != null {
+        return cleaned.error
+    }
+    if cleaned.changed {
+        version := state.NextVersion(transaction, context, userID)
+        if version.error != null {
+            return version.error
+        }
+    }
+    return sql.Commit(transaction)
+}
+
+MergeRows :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    keeperID: string, duplicateID: string) -> Error {
+    keeper := Exists(transaction, context, ExistsQuery, userID, keeperID)
+    if keeper.error != null {
+        return keeper.error
+    }
+    duplicate := Exists(transaction, context, ExistsQuery, userID, duplicateID)
+    if duplicate.error != null {
+        return duplicate.error
+    }
+    arguments: [3]Any = .[userID, duplicateID, keeperID]
+    if duplicate.value != 0 {
+        if keeper.value == 0 {
+            renamed := sql.ExecTx(transaction, context, RenameQuery, arguments[:])
+            if renamed.error != null {
+                return renamed.error
+            }
+        } else {
+            merged := sql.ExecTx(transaction, context, MergeHabitQuery, arguments[:])
+            if merged.error != null {
+                return merged.error
+            }
+            removed := sql.ExecTx(transaction, context, DeleteHabitQuery, arguments[:2])
+            if removed.error != null {
+                return removed.error
+            }
+        }
+    }
+    days := sql.ExecTx(transaction, context, MergeDaysQuery, arguments[:])
+    if days.error != null {
+        return days.error
+    }
+    deleted := sql.ExecTx(transaction, context, DeleteDaysQuery, arguments[:2])
+    return deleted.error
+}
+
+CanonicalizeOperations :: (transaction: *sql.Transaction, context: ctx.Context,
+    userID: string) -> MigrationResult {
+    result: MigrationResult
+    arguments: [1]Any = .[userID]
+    queried := sql.QueryTx(transaction, context, OperationsQuery, arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    operations := ReadOperations(queried.value)
+    result.error = operations.error
+    if result.error != null {
+        return result
+    }
+    changed := false
+    for operation: operations.value {
+        canonical := identifiers.ForRead(transaction, context, userID, operation.entityID)
+        result.error = canonical.error
+        if result.error != null {
+            return result
+        }
+        if !canonical.mapped {
+            continue
+        }
+        payload := identifiers.RewritePayload(cast(RawMessage)text.ToBytes(operation.payload), canonical.value)
+        values: [4]Any = .[userID, operation.id, canonical.value, text.FromBytes(cast([]u8)payload)]
+        updated := sql.ExecTx(transaction, context, UpdateOperationQuery, values[:])
+        result.error = updated.error
+        if result.error != null {
+            return result
+        }
+        // Preserve short-circuiting of the released affected-row query.
+        changed = changed || state.Affected(updated.value) > cast(isize)0
+    }
+    result.changed = changed
+    return result
+}
+
+CanonicalizeIDs :: (transaction: *sql.Transaction, context: ctx.Context,
+    userID: string) -> MigrationResult {
+    result: MigrationResult
+    arguments: [1]Any = .[userID]
+    queried := sql.QueryTx(transaction, context, AllIDsQuery, arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    identifiersToMigrate := ReadStrings(queried.value)
+    result.error = identifiersToMigrate.error
+    if result.error != null {
+        return result
+    }
+    changed := false
+    for oldID: identifiersToMigrate.value {
+        if oldID == "" || identifiers.IsCanonical(oldID) {
+            continue
+        }
+        canonical := identifiers.ForWrite(transaction, context, userID, oldID, "protocol-v3-canonical")
+        result.error = canonical.error
+        if result.error != null {
+            return result
+        }
+        if canonical.value == oldID {
+            continue
+        }
+        result.error = MergeRows(transaction, context, userID, canonical.value, oldID)
+        if result.error != null {
+            return result
+        }
+        changed = changed || canonical.mapped
+    }
+    operations := CanonicalizeOperations(transaction, context, userID)
+    result.error = operations.error
+    if result.error == null {
+        result.changed = changed || operations.changed
+    }
+    return result
+}
+
+DisplayName :: (id: string) -> string {
+    if id == "sun-salutation" {
+        return "Sun Salutation"
+    }
+    if id == "whm" {
+        return "Wim Hof"
+    }
+    if id == "meditation" {
+        return "Meditation"
+    }
+    if id == "yoga" {
+        return "Yoga"
+    }
+    name := TrimSpace(ReplaceAll(id, "-", " "))
+    if name == "" {
+        return "Habit"
+    }
+    parts := Fields(name)
+    for part, index: parts {
+        if part == "" {
+            continue
+        }
+        capitalized: [2]string = .[ToUpper(part[0:1]), part[1:]]
+        parts[index] = Join(capitalized[:], "")
+    }
+    return Join(parts, " ")
+}
+
+MaterializeDays :: (transaction: *sql.Transaction, context: ctx.Context,
+    userID: string) -> MigrationResult {
+    result: MigrationResult
+    arguments: [1]Any = .[userID]
+    queried := sql.QueryTx(transaction, context, LegacyDaysQuery, arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    habits := ReadLegacyHabits(queried.value)
+    result.error = habits.error
+    if result.error != null {
+        return result
+    }
+    changed := false
+    for habit, index: habits.value {
+        updatedAt := timestamp.NormalizeTime(habit.updatedAt, "")
+        if updatedAt == "" {
+            updatedAt = clock.Format(clock.UTC(clock.Now()), "2006-01-02T15:04:05Z07:00")
+        }
+        canonical := identifiers.ForWrite(transaction, context, userID, habit.id, "protocol-v3-orphan")
+        result.error = canonical.error
+        if result.error != null {
+            return result
+        }
+        values: [6]Any = .[userID, canonical.value, DisplayName(habit.id),
+            cast(isize)1000 + cast(isize)index, updatedAt, habit.serverVersion]
+        written := sql.ExecTx(transaction, context, RecoverHabitQuery, values[:])
+        result.error = written.error
+        if result.error != null {
+            return result
+        }
+        changed = changed || state.Affected(written.value) > cast(isize)0
+        result.error = MergeRows(transaction, context, userID, canonical.value, habit.id)
+        if result.error != null {
+            return result
+        }
+    }
+    result.changed = changed
+    return result
+}
+
+Account :: (database: *sql.Database, context: ctx.Context, userID: string) -> Error {
+    started := sql.Begin(database, context, null)
+    if started.error != null {
+        return started.error
+    }
+    transaction := started.value
+    RollbackAtReturn(transaction)
+    canonicalized := CanonicalizeIDs(transaction, context, userID)
+    if canonicalized.error != null {
+        return canonicalized.error
+    }
+    materialized := MaterializeDays(transaction, context, userID)
+    if materialized.error != null {
+        return materialized.error
+    }
+    cleaned := CleanupDays(transaction, context, userID)
+    if cleaned.error != null {
+        return cleaned.error
+    }
+    if canonicalized.changed || materialized.changed || cleaned.changed {
+        version := state.NextVersion(transaction, context, userID)
+        if version.error != null {
+            return version.error
+        }
+    }
+    return sql.Commit(transaction)
+}
+
+ForProtocol :: (database: *sql.Database, context: ctx.Context, userID: string,
+    protocol: isize) -> Error {
+    if protocol < cast(isize)3 {
+        return null
+    }
+    return Account(database, context, userID)
+}
+
+AllAccounts :: (database: *sql.Database, context: ctx.Context) -> Error {
+    arguments: [0]Any
+    queried := sql.Query(database, context, AllAccountsQuery, arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    users := ReadStrings(queried.value)
+    if users.error != null {
+        return users.error
+    }
+    for userID: users.value {
+        error := Account(database, context, userID)
+        if error != null {
+            return error
+        }
+    }
+    return null
+}
+
+SunSalutation :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> MigrationResult {
+    result: MigrationResult
+    oldID := "yoga"
+    newID := "sun-salutation"
+    marker := Exists(transaction, context, SunMarkerQuery, userID, oldID)
+    result.error = marker.error
+    if result.error != null || marker.value != 0 {
+        return result
+    }
+    activity: isize
+    deletedAt: s64
+    arguments: [3]Any = .[userID, oldID, newID]
+    destinations: [2]Any = .[*activity, *deletedAt]
+    row := sql.QueryRowTx(transaction, context, SunHabitQuery, arguments[:2])
+    scanned := sql.ScanRow(row, destinations[:])
+    if errors.Is(scanned, sql.NoRows()) {
+        written := sql.ExecTx(transaction, context, SunAbsentQuery, arguments[:])
+        result.error = written.error
+        return result
+    }
+    result.error = scanned
+    if result.error != null {
+        return result
+    }
+    if deletedAt != 0 || (activity & cast(isize)4) == cast(isize)0 {
+        written := sql.ExecTx(transaction, context, SunOtherQuery, arguments[:])
+        result.error = written.error
+        return result
+    }
+    existing := Exists(transaction, context, ExistsQuery, userID, newID)
+    result.error = existing.error
+    if result.error != null {
+        return result
+    }
+    if existing.value == 0 {
+        renamed := sql.ExecTx(transaction, context, RenameQuery, arguments[:])
+        result.error = renamed.error
+        if result.error != null {
+            return result
+        }
+        days := sql.ExecTx(transaction, context, SunRenameDaysQuery, arguments[:])
+        result.error = days.error
+        if result.error != null {
+            return result
+        }
+    } else {
+        days := sql.ExecTx(transaction, context, MergeDaysQuery, arguments[:])
+        result.error = days.error
+        if result.error != null {
+            return result
+        }
+        removedDays := sql.ExecTx(transaction, context, DeleteDaysQuery, arguments[:2])
+        result.error = removedDays.error
+        if result.error != null {
+            return result
+        }
+        removedHabit := sql.ExecTx(transaction, context, DeleteHabitQuery, arguments[:2])
+        result.error = removedHabit.error
+        if result.error != null {
+            return result
+        }
+    }
+    completed := sql.ExecTx(transaction, context, SunCompleteQuery, arguments[:])
+    result.error = completed.error
+    result.changed = result.error == null
+    return result
+}
+
+#scope_file
+
+CleanupQuery :: "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1\n  AND NOT EXISTS (\n\tSELECT 1 FROM server_habits h\n\tWHERE h.user_id_hash=server_habit_days.user_id_hash\n\t  AND h.id=server_habit_days.habit_id\n  )\n  AND (\n\t(completed=0 AND count=0)\n\tOR EXISTS (\n\t\tSELECT 1 FROM server_sync_ops op\n\t\tWHERE op.user_id_hash=server_habit_days.user_id_hash\n\t\t  AND op.entity_type='habit'\n\t\t  AND op.entity_id=server_habit_days.habit_id\n\t\t  AND op.op_type='delete'\n\t)\n  )";
+AllAccountsQuery :: "SELECT user_id_hash FROM server_users ORDER BY user_id_hash";
+AllIDsQuery :: "\nSELECT id\nFROM server_habits\nWHERE user_id_hash=?1\nORDER BY sort_order,id";
+OperationsQuery :: "\nSELECT op_id,entity_id,payload_json\nFROM server_sync_ops\nWHERE user_id_hash=?1\n  AND entity_type IN ('habit','habit_day')\nORDER BY server_version,op_id";
+UpdateOperationQuery :: "\nUPDATE server_sync_ops\nSET entity_id=?3,payload_json=?4\nWHERE user_id_hash=?1 AND op_id=?2";
+ExistsQuery :: "\nSELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)";
+RenameQuery :: "\nUPDATE server_habits\nSET id=?3\nWHERE user_id_hash=?1 AND id=?2";
+MergeHabitQuery :: "\nUPDATE server_habits\nSET name=CASE WHEN name='' THEN (SELECT name FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE name END,\n\tcolor_r=CASE WHEN color_r=0 THEN (SELECT color_r FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_r END,\n\tcolor_g=CASE WHEN color_g=0 THEN (SELECT color_g FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_g END,\n\tcolor_b=CASE WHEN color_b=0 THEN (SELECT color_b FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_b END,\n\tsync_mode=MAX(sync_mode,(SELECT sync_mode FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tsync_activity=(sync_activity | (SELECT sync_activity FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tcounter_enabled=MAX(counter_enabled,(SELECT counter_enabled FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tsort_order=MIN(sort_order,(SELECT sort_order FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tdeleted_at=CASE WHEN deleted_at=0 THEN 0 ELSE MIN(deleted_at,(SELECT deleted_at FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)) END,\n\tupdated_at=MAX(updated_at,(SELECT updated_at FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tserver_version=MAX(server_version,(SELECT server_version FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2))\nWHERE user_id_hash=?1 AND id=?3";
+DeleteHabitQuery :: "\nDELETE FROM server_habits\nWHERE user_id_hash=?1 AND id=?2";
+MergeDaysQuery :: "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nSELECT user_id_hash,?3,local_date,completed,count,updated_at,server_version\nFROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=MAX(server_habit_days.completed,excluded.completed),\n\tcount=MAX(server_habit_days.count,excluded.count),\n\tupdated_at=MAX(server_habit_days.updated_at,excluded.updated_at),\n\tserver_version=MAX(server_habit_days.server_version,excluded.server_version)";
+DeleteDaysQuery :: "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2";
+LegacyDaysQuery :: "\nSELECT hd.habit_id, MAX(hd.updated_at), MAX(hd.server_version)\nFROM server_habit_days hd\nWHERE hd.user_id_hash=?1\n  AND (hd.completed!=0 OR hd.count>0)\n  AND NOT EXISTS (\n\tSELECT 1 FROM server_habits h\n\tWHERE h.user_id_hash=hd.user_id_hash\n\t  AND h.id=hd.habit_id\n  )\n  AND NOT EXISTS (\n\tSELECT 1 FROM server_sync_ops op\n\tWHERE op.user_id_hash=hd.user_id_hash\n\t  AND op.entity_type='habit'\n\t  AND op.entity_id=hd.habit_id\n\t  AND op.op_type='delete'\n  )\nGROUP BY hd.habit_id\nORDER BY hd.habit_id";
+RecoverHabitQuery :: "\nINSERT INTO server_habits(user_id_hash,id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version)\nVALUES(?1,?2,?3,99,196,165,0,0,0,?4,0,?5,?6)\nON CONFLICT(user_id_hash,id) DO NOTHING";
+SunMarkerQuery :: "\nSELECT EXISTS(SELECT 1 FROM server_habit_id_migrations WHERE user_id_hash=?1 AND old_id=?2)";
+SunHabitQuery :: "\nSELECT sync_activity,deleted_at\nFROM server_habits\nWHERE user_id_hash=?1 AND id=?2";
+SunAbsentQuery :: "\nINSERT OR IGNORE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'not-present')";
+SunOtherQuery :: "\nINSERT OR IGNORE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'not-sun-salutation')";
+SunRenameDaysQuery :: "\nUPDATE server_habit_days\nSET habit_id=?3\nWHERE user_id_hash=?1 AND habit_id=?2";
+SunCompleteQuery :: "\nINSERT OR REPLACE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'protocol-v3')";

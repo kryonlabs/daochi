@@ -2024,7 +2024,7 @@ func TestSyncV2AppliesOpsIdempotentlyAndReturnsRemoteOps(t *testing.T) {
 	if len(read.Ops) != 1 || read.Ops[0].OpID != "client-a:1" || read.Ops[0].EntityType != "habit" {
 		t.Fatalf("remote ops = %#v", read.Ops)
 	}
-	if len(read.Changes.Habits) != 1 || !isCanonicalHabitID(read.Changes.Habits[0].ID) {
+	if len(read.Changes.Habits) != 1 || !HabitId_IsCanonical(read.Changes.Habits[0].ID) {
 		t.Fatalf("materialized changes = %#v", read.Changes.Habits)
 	}
 }
@@ -2065,7 +2065,7 @@ func TestAccountExportReturnsOnlyAuthenticatedAccountData(t *testing.T) {
 		t.Fatalf("export habits = %#v", payload.Tables["habits"])
 	}
 	id, _ := payload.Tables["habits"][0]["id"].(string)
-	if !isCanonicalHabitID(id) {
+	if !HabitId_IsCanonical(id) {
 		t.Fatalf("export habits = %#v", payload.Tables["habits"])
 	}
 	if len(payload.Tables["social_snapshots"]) != 1 {
@@ -2198,7 +2198,7 @@ func TestSyncV2CompactsAcknowledgedOpsAndFallsBackToSnapshot(t *testing.T) {
 	if len(stale.AcceptedOps) != 1 || stale.AcceptedOps[0] != "client-c:1" {
 		t.Fatalf("stale accepted ops = %#v", stale.AcceptedOps)
 	}
-	if len(stale.Changes.Habits) != 2 || !isCanonicalHabitID(stale.Changes.Habits[0].ID) || !isCanonicalHabitID(stale.Changes.Habits[1].ID) {
+	if len(stale.Changes.Habits) != 2 || !HabitId_IsCanonical(stale.Changes.Habits[0].ID) || !HabitId_IsCanonical(stale.Changes.Habits[1].ID) {
 		t.Fatalf("stale fallback snapshot = %#v", stale.Changes.Habits)
 	}
 	assertCount(t, store, "server_habits", 2)
@@ -2267,7 +2267,7 @@ func TestProtocolV3MaterializesLegacyOrphanHabitDays(t *testing.T) {
 	if decoded.Data == nil || len(decoded.Data.Habits) != 1 {
 		t.Fatalf("unexpected clean habits: %#v body=%s", decoded.Data, res.Body.String())
 	}
-	if !isCanonicalHabitID(decoded.Data.Habits[0].ID) || decoded.Data.Habits[0].Name != "Habit 8" {
+	if !HabitId_IsCanonical(decoded.Data.Habits[0].ID) || decoded.Data.Habits[0].Name != "Habit 8" {
 		t.Fatalf("legacy habit was not materialized with a readable name: %#v", decoded.Data.Habits[0])
 	}
 	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != decoded.Data.Habits[0].ID || decoded.Data.HabitDays[0].HabitName != "Habit 8" || decoded.Data.HabitDays[0].Count != 2 {
@@ -2303,7 +2303,7 @@ func TestProtocolV3AutoMigratesSunSalutationHabitIDAndKeepsLegacyClient(t *testi
 	if decoded.Data == nil || len(decoded.Data.Habits) != 1 {
 		t.Fatalf("unexpected clean habits: %#v body=%s", decoded.Data, res.Body.String())
 	}
-	if !isCanonicalHabitID(decoded.Data.Habits[0].ID) {
+	if !HabitId_IsCanonical(decoded.Data.Habits[0].ID) {
 		t.Fatalf("habit was not canonicalized: %#v", decoded.Data.Habits[0])
 	}
 	if len(decoded.Data.HabitDays) != 1 || decoded.Data.HabitDays[0].HabitID != decoded.Data.Habits[0].ID || decoded.Data.HabitDays[0].HabitName != "Yoga" {

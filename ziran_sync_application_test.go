@@ -34,7 +34,7 @@ func applicationSnapshot(t *testing.T, store *Store) map[string]any {
 		t.Fatal(rows.Error)
 	}
 	value["server_habit_id_migrations"] = rows.Value
-	for _, table := range []string{"server_users", "server_meditation_logs"} {
+	for _, table := range []string{"server_users", "server_meditation_logs", "server_habit_id_migrations"} {
 		for _, row := range value[table].([]map[string]any) {
 			for _, column := range []string{"created_at", "last_seen_at"} {
 				if stamp, ok := row[column].(string); ok && stamp != "" {

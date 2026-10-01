@@ -89,7 +89,7 @@ field names, Go storage types, order and reflection tags.
 | `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion request decoding, signature/user header selection, exported account-key parsing and transition helpers in `sync_request.zi`; sync/login/deletion orchestration, operational handlers, middleware and server construction remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; incremental snapshots, clean projections and operation reads in `sync_views.zi`; exact state hashing in `state_hash.zi`; transactional session/round, habit/day, meditation and encrypted-record writes, timestamp-guarded deletions and data replacement in `sync_writes.zi`; sync transaction orchestration, operation materialization and idempotent operation logging in `sync_application.zi`; canonical UUID creation, legacy identifier mappings and payload rewriting in `habit_id.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, operational statistics and legacy account migrations remain Go |
+| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; incremental snapshots, clean projections and operation reads in `sync_views.zi`; exact state hashing in `state_hash.zi`; transactional session/round, habit/day, meditation and encrypted-record writes, timestamp-guarded deletions and data replacement in `sync_writes.zi`; sync transaction orchestration, operation materialization and idempotent operation logging in `sync_application.zi`; canonical UUID creation, legacy identifier mappings and payload rewriting in `habit_id.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; legacy UUID merging, operation rewriting, orphan recovery/cleanup, protocol-gated migrations and bulk account migration in `habit_migration.zi`; schema and operational statistics remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Ziran | `sync_ws.zi`: authenticated upgrades, account and IP limits, reader worker, event/ping selection, deadlines and cancellation; `websocket.zi`: native handshakes and exact frame encoding/validation; `sync_hub.zi`: scoped subscriptions, bounded event delivery, counts and disconnect cleanup |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -536,8 +536,7 @@ account isolation, legacy-client ordering and concurrent version allocation.
 Scripted native SQL drivers compare query bytes, argument types, scan failures,
 late row/close errors, error and panic identity, rollback/close calls and
 connection reuse. Source and saved-IR verification run the same server suite.
-Schema migration, legacy account migrations and operational statistics remain
-unfinished.
+Schema migration and operational statistics remain unfinished.
 
 `sync_views.zi` owns all incremental snapshots, operation reads, clean data
 projections and change aggregation. It retains account isolation, exact SQL
@@ -598,7 +597,7 @@ Unicode trimming/lowercasing, per-account legacy mappings, operation identifier
 selection and native JSON payload rewriting. Existing mappings remain stable;
 new mappings participate in the caller transaction. Malformed JSON preserves
 the original bytes, and original `id`/`habit_id` fields retain their rewrite
-semantics. Legacy bulk migrations still remain Go.
+semantics. Bulk migrations use these same canonical primitives.
 
 Independent comparisons preserve the removed implementation at `2c6bd4d`.
 Real SQLite tests cover account isolation, nil/empty keys, replacement,
@@ -609,6 +608,26 @@ and panic identity, commit/rollback and connection reuse. UUID and payload
 cases cover malformed inputs, arbitrary string bytes, stable lookups and new
 UUID version/variant bits. Source and saved-IR verification run the complete
 server suite with race detection.
+
+`habit_migration.zi` owns protocol-gated and bulk account migrations, legacy
+habit/day merging, operation payload canonicalization, recovery of useful orphan
+habit days, empty/deleted orphan cleanup and the original Sun Salutation
+migration. Existing SQL merge rules, timestamp ordering, account isolation and
+version-allocation conditions remain intact. Old protocols return before
+accessing storage. Bulk migration closes the ordered account query before
+starting individual transactions, preserving single-connection operation.
+Native deferred cleanup also closes read cursors during panic unwinding; the
+original manually closed queries could retain those cursors on panic.
+
+Independent fixtures preserve the removed Go implementation at `44f0f91`.
+Comparisons cover duplicate/canonical habits, conflicting days, operation
+rewrites, recovered names, protocol boundaries, missing accounts, cancellation,
+write/commit rollback, repeat idempotency and all Sun Salutation branches.
+Scripted native drivers compare exact SQL and arguments, failure at each step,
+row iteration/scan/close errors, affected-row failures, panic identity and
+transaction/cursor cleanup. Dedicated panic cases verify that a single database
+connection remains reusable after row iteration panics. Source and saved-IR
+verification exercise the complete server suite with race detection.
 
 ## Compiler work exercised by this port
 

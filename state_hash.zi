@@ -1,0 +1,280 @@
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+io :: #import "std/io_go";
+native :: #system_library "go:database/sql";
+sha256 :: #system_library "go:crypto/sha256";
+hash :: #system_library "go:hash";
+hex :: #system_library "go:encoding/hex";
+format :: #system_library "go:fmt";
+builtin :: #system_library "go:builtin";
+
+HashResult :: struct {
+    value: string
+    error: Error
+}
+
+#scope_file
+Digest :: #type #foreign hash "Hash";
+New :: () -> Digest #foreign sha256 "New";
+Sum :: (digest: Digest, prefix: []u8) -> []u8 #foreign hash "(Hash).Sum";
+Encode :: (bytes: []u8) -> string #foreign hex "EncodeToString";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+AppendString :: (values: []string, value: string) -> []string #foreign builtin "append";
+WriteHabits :: (writer: io.Writer, pattern: string, id: string, name: string, colorR: isize, colorG: isize, colorB: isize, syncMode: isize, syncActivity: isize, counterEnabled: isize, sortOrder: isize, deletedAt: s64, updatedAt: string) #foreign format "Fprintf";
+WriteHabitDays :: (writer: io.Writer, pattern: string, habitID: string, localDate: isize, completed: isize, count: isize, updatedAt: string) #foreign format "Fprintf";
+WriteSessions :: (writer: io.Writer, pattern: string, id: string, startedAt: string, localDate: isize, topic: string, activity: isize, source: string, roundsHash: string, moodBefore: isize, moodAfter: isize, energy: isize, stress: isize, note: string, tags: string, deletedAt: s64, updatedAt: string) #foreign format "Fprintf";
+WriteRounds :: (writer: io.Writer, pattern: string, sessionID: string, roundIndex: isize, breaths: isize, holdSeconds: isize) #foreign format "Fprintf";
+WriteMeditations :: (writer: io.Writer, pattern: string, id: string, sessionID: string, durationSeconds: isize, completedAt: string) #foreign format "Fprintf";
+WriteSocial :: (writer: io.Writer, pattern: string, kind: string, payload: string, updatedAt: string) #foreign format "Fprintf";
+WriteRecords :: (writer: io.Writer, pattern: string, collection: string, id: string, keyID: string, nonce: string, ciphertext: string, updatedAt: string, deletedAt: s64, contentHash: string, schemaVersion: isize, parentID: string) #foreign format "Fprintf";
+
+#scope_export
+
+Habits :: (database: *sql.Database, context: ctx.Context, writer: io.Writer, userID: string) -> Error {
+    arguments: [1]Any = .[userID]
+    queried := sql.Query(database, context,
+        "\nSELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at\nFROM server_habits\nWHERE user_id_hash=?1\nORDER BY id", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    while sql.Next(rows) {
+        id: string
+        name: string
+        updatedAt: string
+        colorR: isize
+        colorG: isize
+        colorB: isize
+        syncMode: isize
+        syncActivity: isize
+        counterEnabled: isize
+        sortOrder: isize
+        deletedAt: s64
+        destinations: [11]Any = .[*id, *name, *colorR, *colorG, *colorB, *syncMode, *syncActivity, *counterEnabled, *sortOrder, *deletedAt, *updatedAt]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        WriteHabits(writer, "habit\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+            id, name, colorR, colorG, colorB, syncMode, syncActivity, counterEnabled, sortOrder, deletedAt, updatedAt)
+    }
+    return sql.RowsError(rows)
+}
+
+HabitDays :: (database: *sql.Database, context: ctx.Context, writer: io.Writer, userID: string) -> Error {
+    arguments: [1]Any = .[userID]
+    queried := sql.Query(database, context,
+        "\nSELECT habit_id,local_date,completed,count,updated_at\nFROM server_habit_days\nWHERE user_id_hash=?1\nORDER BY habit_id,local_date", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    while sql.Next(rows) {
+        habitID: string
+        updatedAt: string
+        localDate: isize
+        completed: isize
+        count: isize
+        destinations: [5]Any = .[*habitID, *localDate, *completed, *count, *updatedAt]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        WriteHabitDays(writer, "habit_day\t%s\t%d\t%d\t%d\t%s\n",
+            habitID, localDate, completed, count, updatedAt)
+    }
+    return sql.RowsError(rows)
+}
+
+Sessions :: (database: *sql.Database, context: ctx.Context, writer: io.Writer, userID: string) -> Error {
+    arguments: [1]Any = .[userID]
+    queried := sql.Query(database, context,
+        "\n\tSELECT id,started_at,local_date,topic,activity,source,rounds_hash,\n\t       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at\n\tFROM server_sessions\n\tWHERE user_id_hash=?1\n\tORDER BY id", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    sessionIDs := AllocateStrings(cast(isize)0)
+    while sql.Next(rows) {
+        id: string
+        startedAt: string
+        topic: string
+        source: string
+        roundsHash: string
+        note: string
+        tags: string
+        updatedAt: string
+        localDate: isize
+        activity: isize
+        moodBefore: isize
+        moodAfter: isize
+        energy: isize
+        stress: isize
+        deletedAt: s64
+        destinations: [15]Any = .[*id, *startedAt, *localDate, *topic, *activity, *source, *roundsHash, *moodBefore, *moodAfter, *energy, *stress, *note, *tags, *deletedAt, *updatedAt]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        WriteSessions(writer, "session\t%s\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%d\t%s\n",
+            id, startedAt, localDate, topic, activity, source, roundsHash, moodBefore, moodAfter, energy, stress, note, tags, deletedAt, updatedAt)
+        sessionIDs = AppendString(sessionIDs, id)
+    }
+    error := sql.RowsError(rows)
+    if error != null {
+        return error
+    }
+    error = sql.CloseRows(rows)
+    if error != null {
+        return error
+    }
+    for id: sessionIDs {
+        error = Rounds(database, context, writer, userID, id)
+        if error != null {
+            return error
+        }
+    }
+    return null
+}
+
+Rounds :: (database: *sql.Database, context: ctx.Context, writer: io.Writer, userID: string, sessionID: string) -> Error {
+    arguments: [2]Any = .[userID, sessionID]
+    queried := sql.Query(database, context,
+        "\nSELECT round_index,breaths,hold_seconds\nFROM server_session_rounds\nWHERE user_id_hash=?1 AND session_id=?2\nORDER BY round_index", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    while sql.Next(rows) {
+        roundIndex: isize
+        breaths: isize
+        holdSeconds: isize
+        destinations: [3]Any = .[*roundIndex, *breaths, *holdSeconds]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        WriteRounds(writer, "round\t%s\t%d\t%d\t%d\n",
+            sessionID, roundIndex, breaths, holdSeconds)
+    }
+    return sql.RowsError(rows)
+}
+
+Meditations :: (database: *sql.Database, context: ctx.Context, writer: io.Writer, userID: string) -> Error {
+    arguments: [1]Any = .[userID]
+    queried := sql.Query(database, context,
+        "\nSELECT id,session_id,duration_seconds,completed_at\nFROM server_meditation_logs\nWHERE user_id_hash=?1\nORDER BY id", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    while sql.Next(rows) {
+        id: string
+        sessionID: string
+        completedAt: string
+        durationSeconds: isize
+        destinations: [4]Any = .[*id, *sessionID, *durationSeconds, *completedAt]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        WriteMeditations(writer, "meditation_log\t%s\t%s\t%d\t%s\n",
+            id, sessionID, durationSeconds, completedAt)
+    }
+    return sql.RowsError(rows)
+}
+
+Social :: (database: *sql.Database, context: ctx.Context, writer: io.Writer, userID: string) -> Error {
+    arguments: [1]Any = .[userID]
+    queried := sql.Query(database, context,
+        "\nSELECT kind,json,updated_at\nFROM server_social_snapshots\nWHERE user_id_hash=?1\nORDER BY kind", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    while sql.Next(rows) {
+        kind: string
+        payload: string
+        updatedAt: string
+        destinations: [3]Any = .[*kind, *payload, *updatedAt]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        WriteSocial(writer, "social_cache\t%s\t%s\t%s\n",
+            kind, payload, updatedAt)
+    }
+    return sql.RowsError(rows)
+}
+
+Records :: (database: *sql.Database, context: ctx.Context, writer: io.Writer, userID: string) -> Error {
+    arguments: [1]Any = .[userID]
+    queried := sql.Query(database, context,
+        "\nSELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records\nWHERE user_id_hash=?1\nORDER BY collection,id", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    while sql.Next(rows) {
+        collection: string
+        id: string
+        keyID: string
+        nonce: string
+        ciphertext: string
+        updatedAt: string
+        contentHash: string
+        parentID: string
+        deletedAt: s64
+        schemaVersion: isize
+        destinations: [10]Any = .[*collection, *id, *keyID, *nonce, *ciphertext, *updatedAt, *deletedAt, *contentHash, *schemaVersion, *parentID]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        WriteRecords(writer, "encrypted_record\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
+            collection, id, keyID, nonce, ciphertext, updatedAt, deletedAt, contentHash, schemaVersion, parentID)
+    }
+    return sql.RowsError(rows)
+}
+
+State :: (database: *sql.Database, context: ctx.Context, userID: string) -> HashResult {
+    result: HashResult
+    digest := New()
+    writer := cast(io.Writer)digest
+    result.error = Habits(database, context, writer, userID)
+    if result.error != null {
+        return result
+    }
+    result.error = HabitDays(database, context, writer, userID)
+    if result.error != null {
+        return result
+    }
+    result.error = Sessions(database, context, writer, userID)
+    if result.error != null {
+        return result
+    }
+    result.error = Meditations(database, context, writer, userID)
+    if result.error != null {
+        return result
+    }
+    result.error = Social(database, context, writer, userID)
+    if result.error != null {
+        return result
+    }
+    result.error = Records(database, context, writer, userID)
+    if result.error != null {
+        return result
+    }
+    bytes: []u8
+    result.value = Encode(Sum(digest, bytes))
+    return result
+}

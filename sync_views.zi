@@ -1,0 +1,530 @@
+#import "std/go_types"
+#import "protocol"
+#import "sync_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+text :: #import "std/text_go";
+state :: #import "account_state";
+friends :: #import "friend_store";
+native :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+ChangesResult :: struct {
+    value: SyncChanges
+    version: s64
+    error: Error
+}
+CleanResult :: struct {
+    value: *CleanData
+    error: Error
+}
+HabitsResult :: struct {
+    value: []Habit
+    error: Error
+}
+HabitDaysResult :: struct {
+    value: []HabitDay
+    error: Error
+}
+CleanHabitDaysResult :: struct {
+    value: []CleanHabitDay
+    error: Error
+}
+SessionsResult :: struct {
+    value: []Session
+    error: Error
+}
+RoundsResult :: struct {
+    value: []SessionRound
+    error: Error
+}
+MeditationsResult :: struct {
+    value: []MeditationLog
+    error: Error
+}
+SocialSnapshotsResult :: struct {
+    value: []SocialSnapshot
+    error: Error
+}
+RecordsResult :: struct {
+    value: []EncryptedRecord
+    error: Error
+}
+OperationsResult :: struct {
+    value: []SyncOp
+    error: Error
+}
+
+#scope_file
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+AllocateClean :: () -> *CleanData #foreign builtin "new";
+AllocateHabits :: (count: isize) -> []Habit #foreign builtin "make";
+AppendHabit :: (values: []Habit, value: Habit) -> []Habit #foreign builtin "append";
+AllocateHabitDays :: (count: isize) -> []HabitDay #foreign builtin "make";
+AppendHabitDay :: (values: []HabitDay, value: HabitDay) -> []HabitDay #foreign builtin "append";
+AllocateCleanHabitDays :: (count: isize) -> []CleanHabitDay #foreign builtin "make";
+AppendCleanHabitDay :: (values: []CleanHabitDay, value: CleanHabitDay) -> []CleanHabitDay #foreign builtin "append";
+AllocateSessions :: (count: isize) -> []Session #foreign builtin "make";
+AppendSession :: (values: []Session, value: Session) -> []Session #foreign builtin "append";
+AllocateRounds :: (count: isize) -> []SessionRound #foreign builtin "make";
+AppendSessionRound :: (values: []SessionRound, value: SessionRound) -> []SessionRound #foreign builtin "append";
+AllocateMeditations :: (count: isize) -> []MeditationLog #foreign builtin "make";
+AppendMeditationLog :: (values: []MeditationLog, value: MeditationLog) -> []MeditationLog #foreign builtin "append";
+AllocateSocial :: (count: isize) -> []SocialSnapshot #foreign builtin "make";
+AppendSocialSnapshot :: (values: []SocialSnapshot, value: SocialSnapshot) -> []SocialSnapshot #foreign builtin "append";
+AllocateRecords :: (count: isize) -> []EncryptedRecord #foreign builtin "make";
+AppendEncryptedRecord :: (values: []EncryptedRecord, value: EncryptedRecord) -> []EncryptedRecord #foreign builtin "append";
+AllocateOperations :: (count: isize) -> []SyncOp #foreign builtin "make";
+AppendSyncOp :: (values: []SyncOp, value: SyncOp) -> []SyncOp #foreign builtin "append";
+
+ReadHabits :: (rows: *sql.Rows, withVersion: bool) -> HabitsResult {
+    result: HabitsResult
+    values := AllocateHabits(cast(isize)0)
+    while sql.Next(rows) {
+        item: Habit
+        version: s64
+        destinations: [12]Any = .[*item.ID, *item.Name, *item.ColorR, *item.ColorG, *item.ColorB, *item.SyncMode, *item.SyncActivity, *item.CounterEnabled, *item.SortOrder, *item.DeletedAt, *item.UpdatedAt, *version]
+        count := cast(isize)11
+        if withVersion {
+            count = cast(isize)12
+        }
+        result.error = sql.ScanRows(rows, destinations[:count])
+        if result.error != null {
+            return result
+        }
+        values = AppendHabit(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    result.value = values
+    return result
+}
+
+ReadHabitDays :: (rows: *sql.Rows) -> HabitDaysResult {
+    result: HabitDaysResult
+    values := AllocateHabitDays(cast(isize)0)
+    while sql.Next(rows) {
+        item: HabitDay
+        completed: isize
+        destinations: [5]Any = .[*item.HabitID, *item.LocalDate, *completed, *item.Count, *item.UpdatedAt]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        item.Completed = completed != cast(isize)0
+        if item.Count <= cast(isize)0 && item.Completed {
+            item.Count = cast(isize)1
+        }
+        values = AppendHabitDay(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    result.value = values
+    return result
+}
+
+ReadCleanHabitDays :: (rows: *sql.Rows) -> CleanHabitDaysResult {
+    result: CleanHabitDaysResult
+    values := AllocateCleanHabitDays(cast(isize)0)
+    while sql.Next(rows) {
+        item: CleanHabitDay
+        completed: isize
+        destinations: [6]Any = .[*item.HabitID, *item.HabitName, *item.LocalDate, *completed, *item.Count, *item.UpdatedAt]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        item.Completed = completed != cast(isize)0
+        if item.Count <= cast(isize)0 && item.Completed {
+            item.Count = cast(isize)1
+        }
+        values = AppendCleanHabitDay(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    result.value = values
+    return result
+}
+
+ReadSessions :: (rows: *sql.Rows) -> SessionsResult {
+    result: SessionsResult
+    values := AllocateSessions(cast(isize)0)
+    while sql.Next(rows) {
+        item: Session
+        destinations: [15]Any = .[*item.ID, *item.StartedAt, *item.LocalDate, *item.Topic, *item.Activity, *item.Source, *item.RoundsHash, *item.MoodBefore, *item.MoodAfter, *item.Energy, *item.Stress, *item.Note, *item.Tags, *item.DeletedAt, *item.UpdatedAt]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendSession(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error != null {
+        return result
+    }
+    result.value = values
+    return result
+}
+
+ReadRounds :: (rows: *sql.Rows) -> RoundsResult {
+    result: RoundsResult
+    values := AllocateRounds(cast(isize)0)
+    while sql.Next(rows) {
+        item: SessionRound
+        destinations: [3]Any = .[*item.RoundIndex, *item.Breaths, *item.HoldSeconds]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendSessionRound(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    result.value = values
+    return result
+}
+
+ReadMeditations :: (rows: *sql.Rows) -> MeditationsResult {
+    result: MeditationsResult
+    values := AllocateMeditations(cast(isize)0)
+    while sql.Next(rows) {
+        item: MeditationLog
+        destinations: [4]Any = .[*item.ID, *item.SessionID, *item.DurationSeconds, *item.CompletedAt]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendMeditationLog(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    result.value = values
+    return result
+}
+
+ReadSocial :: (rows: *sql.Rows) -> SocialSnapshotsResult {
+    result: SocialSnapshotsResult
+    values := AllocateSocial(cast(isize)0)
+    while sql.Next(rows) {
+        item: SocialSnapshot
+        payload: string
+        destinations: [3]Any = .[*item.Kind, *payload, *item.UpdatedAt]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        if payload == "" {
+            payload = "{}"
+        }
+        item.JSON = cast(RawMessage)text.ToBytes(payload)
+        values = AppendSocialSnapshot(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    result.value = values
+    return result
+}
+
+ReadRecords :: (rows: *sql.Rows) -> RecordsResult {
+    result: RecordsResult
+    values := AllocateRecords(cast(isize)0)
+    while sql.Next(rows) {
+        item: EncryptedRecord
+        destinations: [10]Any = .[*item.Collection, *item.ID, *item.KeyID, *item.Nonce, *item.Ciphertext, *item.UpdatedAt, *item.DeletedAt, *item.ContentHash, *item.SchemaVersion, *item.ParentID]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendEncryptedRecord(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    result.value = values
+    return result
+}
+
+ReadOperations :: (rows: *sql.Rows) -> OperationsResult {
+    result: OperationsResult
+    values := AllocateOperations(cast(isize)0)
+    while sql.Next(rows) {
+        item: SyncOp
+        payload: string
+        destinations: [9]Any = .[*item.OpID, *item.ClientID, *item.Seq, *item.EntityType, *item.EntityID, *item.LocalDate, *item.OpType, *payload, *item.CreatedAt]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        if payload != "" {
+            item.Payload = cast(RawMessage)text.ToBytes(payload)
+        }
+        values = AppendSyncOp(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    result.value = values
+    return result
+}
+
+ReadSessionQuery :: (database: *sql.Database, context: ctx.Context, userID: string,
+    query: string, arguments: []Any) -> SessionsResult {
+    result: SessionsResult
+    queried := sql.Query(database, context, query, arguments)
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    loaded := ReadSessions(rows)
+    result.error = loaded.error
+    if result.error != null {
+        return result
+    }
+    // Release the only database connection before reading session rounds.
+    sql.CloseRows(rows)
+    index: s64 = 0
+    while index < loaded.value.count {
+        rounds := SessionRounds(database, context, userID, loaded.value[index].ID)
+        result.error = rounds.error
+        if result.error != null {
+            return result
+        }
+        loaded.value[index].Rounds = rounds.value
+        index += 1
+    }
+    result.value = loaded.value
+    return result
+}
+
+#scope_export
+HabitsSince :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> HabitsResult {
+    arguments: [2]Any = .[userID, sinceVersion]
+    result: HabitsResult
+    queried := sql.Query(database, context,
+        "\nSELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version\nFROM (\n\tSELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at,server_version\n\tFROM server_habits\n\tWHERE user_id_hash=?1 AND server_version>?2\n\tUNION ALL\n\tSELECT hd.habit_id,\n\t       'Recovered ' || hd.habit_id,\n\t       99,196,165,\n\t       0,0,0,\n\t       1000,\n\t       0,\n\t       MAX(hd.updated_at),\n\t       MAX(hd.server_version)\n\tFROM server_habit_days hd\n\tWHERE hd.user_id_hash=?1\n\t  AND hd.server_version>?2\n\t  AND NOT EXISTS (\n\t\tSELECT 1 FROM server_habits h\n\t\tWHERE h.user_id_hash=hd.user_id_hash AND h.id=hd.habit_id\n\t  )\n\tGROUP BY hd.habit_id\n)\nORDER BY server_version,sort_order,id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadHabits(queried.value, true)
+}
+
+HabitDaysSince :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> HabitDaysResult {
+    arguments: [2]Any = .[userID, sinceVersion]
+    result: HabitDaysResult
+    queried := sql.Query(database, context,
+        "\nSELECT habit_id,local_date,completed,count,updated_at\nFROM server_habit_days\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,habit_id,local_date", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadHabitDays(queried.value)
+}
+
+SessionsSince :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> SessionsResult {
+    arguments: [2]Any = .[userID, sinceVersion]
+    return ReadSessionQuery(database, context, userID,
+        "\n\tSELECT id,started_at,local_date,topic,activity,source,rounds_hash,\n\t       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at\n\tFROM server_sessions\n\tWHERE user_id_hash=?1 AND server_version>?2\n\tORDER BY server_version,started_at,id", arguments[:])
+}
+
+SessionRounds :: (database: *sql.Database, context: ctx.Context, userID: string, sessionID: string) -> RoundsResult {
+    arguments: [2]Any = .[userID, sessionID]
+    result: RoundsResult
+    queried := sql.Query(database, context,
+        "\nSELECT round_index,breaths,hold_seconds\nFROM server_session_rounds\nWHERE user_id_hash=?1 AND session_id=?2\nORDER BY round_index", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadRounds(queried.value)
+}
+
+MeditationsSince :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> MeditationsResult {
+    arguments: [2]Any = .[userID, sinceVersion]
+    result: MeditationsResult
+    queried := sql.Query(database, context,
+        "\nSELECT id,session_id,duration_seconds,completed_at\nFROM server_meditation_logs\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,completed_at,id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadMeditations(queried.value)
+}
+
+SocialSince :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> SocialSnapshotsResult {
+    arguments: [2]Any = .[userID, sinceVersion]
+    result: SocialSnapshotsResult
+    queried := sql.Query(database, context,
+        "\nSELECT kind,json,updated_at\nFROM server_social_snapshots\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,kind", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadSocial(queried.value)
+}
+
+RecordsSince :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> RecordsResult {
+    arguments: [2]Any = .[userID, sinceVersion]
+    result: RecordsResult
+    queried := sql.Query(database, context,
+        "\nSELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,collection,id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadRecords(queried.value)
+}
+
+OperationsSince :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> OperationsResult {
+    arguments: [2]Any = .[userID, sinceVersion]
+    result: OperationsResult
+    queried := sql.Query(database, context,
+        "\nSELECT op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at\nFROM server_sync_ops\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,client_id,seq,op_id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadOperations(queried.value)
+}
+
+CleanHabits :: (database: *sql.Database, context: ctx.Context, userID: string) -> HabitsResult {
+    arguments: [1]Any = .[userID]
+    result: HabitsResult
+    queried := sql.Query(database, context,
+        "\nSELECT id,name,color_r,color_g,color_b,sync_mode,sync_activity,counter_enabled,sort_order,deleted_at,updated_at\nFROM server_habits\nWHERE user_id_hash=?1 AND deleted_at=0\nORDER BY sort_order,id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadHabits(queried.value, false)
+}
+
+CleanHabitDays :: (database: *sql.Database, context: ctx.Context, userID: string) -> CleanHabitDaysResult {
+    arguments: [1]Any = .[userID]
+    result: CleanHabitDaysResult
+    queried := sql.Query(database, context,
+        "\nSELECT hd.habit_id,h.name,hd.local_date,hd.completed,hd.count,hd.updated_at\nFROM server_habit_days hd\nJOIN server_habits h ON h.user_id_hash=hd.user_id_hash AND h.id=hd.habit_id\nWHERE hd.user_id_hash=?1\n  AND h.deleted_at=0\n  AND (hd.completed!=0 OR hd.count>0)\nORDER BY hd.local_date DESC,h.sort_order,hd.habit_id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadCleanHabitDays(queried.value)
+}
+
+CleanSessions :: (database: *sql.Database, context: ctx.Context, userID: string) -> SessionsResult {
+    arguments: [1]Any = .[userID]
+    return ReadSessionQuery(database, context, userID,
+        "\n\tSELECT id,started_at,local_date,topic,activity,source,rounds_hash,\n\t       mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at\n\tFROM server_sessions\n\tWHERE user_id_hash=?1 AND deleted_at=0\n\tORDER BY started_at DESC,id", arguments[:])
+}
+
+CleanMeditations :: (database: *sql.Database, context: ctx.Context, userID: string) -> MeditationsResult {
+    arguments: [1]Any = .[userID]
+    result: MeditationsResult
+    queried := sql.Query(database, context,
+        "\nSELECT id,session_id,duration_seconds,completed_at\nFROM server_meditation_logs\nWHERE user_id_hash=?1\nORDER BY completed_at DESC,id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(queried.value)
+    return ReadMeditations(queried.value)
+}
+
+Changes :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> ChangesResult {
+    result: ChangesResult
+    habits := HabitsSince(database, context, userID, sinceVersion)
+    result.value.Habits = habits.value
+    result.error = habits.error
+    if result.error != null {
+        return result
+    }
+    days := HabitDaysSince(database, context, userID, sinceVersion)
+    result.value.HabitDays = days.value
+    result.error = days.error
+    if result.error != null {
+        return result
+    }
+    sessions := SessionsSince(database, context, userID, sinceVersion)
+    result.value.Sessions = sessions.value
+    result.error = sessions.error
+    if result.error != null {
+        return result
+    }
+    meditations := MeditationsSince(database, context, userID, sinceVersion)
+    result.value.MeditationLogs = meditations.value
+    result.error = meditations.error
+    if result.error != null {
+        return result
+    }
+    social := SocialSince(database, context, userID, sinceVersion)
+    result.value.SocialCache = social.value
+    result.error = social.error
+    if result.error != null {
+        return result
+    }
+    records := RecordsSince(database, context, userID, sinceVersion)
+    result.value.EncryptedRecords = records.value
+    result.error = records.error
+    if result.error != null {
+        return result
+    }
+    version := state.CurrentVersion(database, context, userID)
+    result.error = version.error
+    if result.error == null {
+        result.version = version.value
+    }
+    return result
+}
+
+Clean :: (database: *sql.Database, context: ctx.Context, userID: string) -> CleanResult {
+    result: CleanResult
+    habits := CleanHabits(database, context, userID)
+    result.error = habits.error
+    if result.error != null {
+        return result
+    }
+    days := CleanHabitDays(database, context, userID)
+    result.error = days.error
+    if result.error != null {
+        return result
+    }
+    sessions := CleanSessions(database, context, userID)
+    result.error = sessions.error
+    if result.error != null {
+        return result
+    }
+    meditations := CleanMeditations(database, context, userID)
+    result.error = meditations.error
+    if result.error != null {
+        return result
+    }
+    social := friends.Authoritative(database, context, userID)
+    result.error = social.error
+    if result.error != null {
+        return result
+    }
+    records := RecordsSince(database, context, userID, 0)
+    result.error = records.error
+    if result.error != null {
+        return result
+    }
+    value := AllocateClean()
+    value.Habits = habits.value
+    value.HabitDays = days.value
+    value.Sessions = sessions.value
+    value.MeditationLogs = meditations.value
+    value.Social = social.value
+    value.EncryptedRecords = records.value
+    value.Friends = cast(RawMessage)text.ToBytes("{\"friends\":[]}")
+    value.FriendRequests = cast(RawMessage)text.ToBytes("{\"incoming\":[],\"outgoing\":[]}")
+    for item: social.value {
+        if item.Kind == "friends.list" {
+            value.Friends = item.JSON
+        } else if item.Kind == "friends.requests" {
+            value.FriendRequests = item.JSON
+        }
+    }
+    result.value = value
+    return result
+}

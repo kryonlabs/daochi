@@ -89,7 +89,7 @@ field names, Go storage types, order and reflection tags.
 | `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion request decoding, signature/user header selection, exported account-key parsing and transition helpers in `sync_request.zi`; sync/login/deletion orchestration, operational handlers, middleware and server construction remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, operational statistics, sync transactions, conflicts and projections remain Go |
+| `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; incremental snapshots, clean projections and operation reads in `sync_views.zi`; exact state hashing in `state_hash.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, operational statistics, sync writes, conflict resolution and legacy migrations remain Go |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Ziran | `sync_ws.zi`: authenticated upgrades, account and IP limits, reader worker, event/ping selection, deadlines and cancellation; `websocket.zi`: native handshakes and exact frame encoding/validation; `sync_hub.zi`: scoped subscriptions, bounded event delivery, counts and disconnect cleanup |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -536,8 +536,34 @@ account isolation, legacy-client ordering and concurrent version allocation.
 Scripted native SQL drivers compare query bytes, argument types, scan failures,
 late row/close errors, error and panic identity, rollback/close calls and
 connection reuse. Source and saved-IR verification run the same server suite.
-Core sync application, schema migration, projections and operational statistics
-remain unfinished.
+Core sync application, schema migration and operational statistics remain
+unfinished.
+
+`sync_views.zi` owns all incremental snapshots, operation reads, clean data
+projections and change aggregation. It retains account isolation, exact SQL
+ordering and version boundaries, deleted-record visibility, orphan-habit
+recovery, completed/count normalization, raw JSON bytes and allocated empty
+slices. Native query and scan errors retain the original nil versus partial
+results; change aggregation keeps already completed sections when a later query
+fails. Session queries close before loading their ordered round records so a
+single-connection database remains usable. Clean data still uses authoritative
+friendships and friend requests instead of cached social data.
+
+`state_hash.zi` owns the complete SHA-256 state hash: ordered habits, habit days,
+sessions, session rounds, meditation logs, social snapshots and encrypted
+records. It preserves the original tab/newline formatting, arbitrary string
+bytes, signed integer formatting, inclusion of deleted records, lowercase hex,
+and released behavior when an output writer returns an error. Database row
+iterators close on both ordinary returns and native panics. Production Store
+methods only forward to the generated functions; the removed Go implementations
+remain independent test oracles.
+
+Baseline comparisons cover real SQLite snapshots, exact wire and hash bytes,
+missing accounts, account isolation, version bounds, missing tables, cancellation,
+native query/scan/late-row/close failures, nested round queries, writer errors
+and panic identity. Native SQL traces also compare query bytes, argument values,
+row closure and connection reuse. Source and saved-IR verification run the same
+server suite with race detection.
 
 ## Compiler work exercised by this port
 

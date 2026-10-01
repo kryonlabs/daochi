@@ -3027,7 +3027,8 @@ func TestMigrateSessionCheckinColumns(t *testing.T) {
 	}
 
 	var session Session
-	rows, err := store.snapshotSessions(t.Context(), userID, 0)
+	snapshot := SyncViews_SessionsSince(store.db, t.Context(), userID, 0)
+	rows, err := snapshot.Value, snapshot.Error
 	if err != nil {
 		t.Fatal(err)
 	}

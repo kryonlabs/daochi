@@ -15,10 +15,6 @@ go_io :: #system_library "go:io";
 builtin :: #system_library "go:builtin";
 go_strings :: #system_library "go:strings";
 
-PublicStatsResult :: struct {
-    value: PublicStats
-    error: Error
-}
 ReadPublicStats :: #type (context: ctx.Context, databasePath: string) -> PublicStatsResult;
 
 #scope_file

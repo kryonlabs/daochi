@@ -1,0 +1,316 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "protocol"
+#import "types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+file :: #import "std/file_go";
+errors :: #import "std/errors_go";
+sorting :: #import "std/sort";
+scope :: #import "collection_scope";
+native :: #system_library "go:database/sql";
+filesystem :: #system_library "go:os";
+system :: #system_library "go:syscall";
+strings :: #system_library "go:strings";
+format :: #system_library "go:fmt";
+builtin :: #system_library "go:builtin";
+
+NodeUsageResult :: struct {
+    value: NodeUsage
+    error: Error
+}
+NodeStorageResult :: struct {
+    value: NodeStorageUsage
+    error: Error
+}
+AppStorageResult :: struct {
+    value: []AppStorageUsage
+    error: Error
+}
+StorageBytesResult :: struct {
+    value: s64
+    error: Error
+}
+
+operator < :: (left: AppStorageUsage, right: AppStorageUsage) -> bool {
+    if left.LogicalBytes != right.LogicalBytes {
+        return left.LogicalBytes > right.LogicalBytes
+    }
+    return Compare(left.AppID, right.AppID) < cast(isize)0
+}
+
+operator < :: (left: CollectionStorageUsage, right: CollectionStorageUsage) -> bool {
+    return Compare(left.Collection, right.Collection) < cast(isize)0
+}
+
+#scope_file
+FileInfo :: #type #foreign filesystem "FileInfo";
+FilesystemStats :: #type #foreign system "Statfs_t";
+FileStatResult :: struct {
+    value: FileInfo
+    error: Error
+}
+UsageQuery :: struct {
+    target: *isize
+    query: string
+    arguments: []Any
+}
+Stat :: (path: string) -> FileStatResult #go_results #foreign filesystem;
+Size :: (info: FileInfo) -> s64 #foreign filesystem "FileInfo.Size";
+Statfs :: (path: string, stats: *FilesystemStats) -> Error #foreign system;
+AvailableBlocks :: (stats: *FilesystemStats) -> u64 #go_field #foreign system "(*Statfs_t).Bavail";
+BlockSize :: (stats: *FilesystemStats) -> s64 #go_field #foreign system "(*Statfs_t).Bsize";
+Compare :: (left: string, right: string) -> isize #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+FormatGB :: (format: string, value: s64) -> string #foreign format "Sprintf";
+AllocateApps :: (length: isize, capacity: isize) -> []AppStorageUsage #foreign builtin "make";
+AllocateCollections :: (length: isize) -> []CollectionStorageUsage #foreign builtin "make";
+AppendApp :: (values: []AppStorageUsage, value: AppStorageUsage) -> []AppStorageUsage #foreign builtin "append";
+AppendCollection :: (values: []CollectionStorageUsage, value: CollectionStorageUsage) -> []CollectionStorageUsage #foreign builtin "append";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+
+WithSuffix :: (path: string, suffix: string) -> string {
+    parts: [2]string = .[path, suffix]
+    return Join(parts[:], "")
+}
+
+EmptyApp :: (id: string, displayName: string) -> AppStorageUsage {
+    app: AppStorageUsage
+    app.AppID = id
+    app.DisplayName = displayName
+    app.Collections = AllocateCollections(cast(isize)0)
+    return app
+}
+
+#scope_export
+FloorGB :: (bytes: s64) -> s64 {
+    if bytes <= 0 {
+        return 0
+    }
+    return bytes / 1073741824
+}
+
+UsedText :: (gb: s64) -> string {
+    if gb <= 0 {
+        return "under 1 GB"
+    }
+    return FormatGB("%d GB", gb)
+}
+
+FileSizeOrZero :: (path: string) -> s64 {
+    info := Stat(path)
+    if info.error != null {
+        return 0
+    }
+    return Size(info.value)
+}
+
+FileSetSize :: (path: string) -> StorageBytesResult {
+    result: StorageBytesResult
+    paths: [3]string = .[path, WithSuffix(path, "-wal"), WithSuffix(path, "-shm")]
+    total: s64 = 0
+    for name: paths {
+        info := Stat(name)
+        if info.error == null {
+            total += Size(info.value)
+        } else if !errors.Is(info.error, file.NotExist()) {
+            result.error = info.error
+            return result
+        }
+    }
+    result.value = total
+    return result
+}
+
+AvailableBytes :: (path: string) -> StorageBytesResult {
+    result: StorageBytesResult
+    directory := file.Dir(path)
+    if directory == "" {
+        directory = "."
+    }
+    stats: FilesystemStats
+    result.error = Statfs(directory, *stats)
+    if result.error == null {
+        result.value = cast(s64)AvailableBlocks(*stats) * BlockSize(*stats)
+    }
+    return result
+}
+
+Public :: (database: *sql.Database, context: ctx.Context, path: string) -> PublicStatsResult {
+    result: PublicStatsResult
+    stats: PublicStats
+    empty: [0]Any
+    destinations: [1]Any = .[*stats.UserCount]
+    row := sql.QueryRow(database, context, "SELECT COUNT(*) FROM server_users", empty[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    used := FileSetSize(path)
+    result.error = used.error
+    if result.error != null {
+        return result
+    }
+    stats.StorageUsedBytes = used.value
+    stats.StorageUsedGB = FloorGB(used.value)
+    stats.StorageUsedText = UsedText(stats.StorageUsedGB)
+    available := AvailableBytes(path)
+    result.error = available.error
+    if result.error != null {
+        return result
+    }
+    stats.AvailableBytes = available.value - 1073741824
+    if stats.AvailableBytes < 0 {
+        stats.AvailableBytes = 0
+    }
+    stats.AvailableGB = FloorGB(stats.AvailableBytes)
+    result.value = stats
+    return result
+}
+
+Usage :: (database: *sql.Database, context: ctx.Context, now: clock.Time) -> NodeUsageResult {
+    result: NodeUsageResult
+    cutoff := clock.Format(clock.Add(clock.UTC(now), cast(clock.Duration)-2592000000000000), "2006-01-02 15:04:05")
+    usage: NodeUsage
+    usage.RecentActivityWindowDays = cast(isize)30
+    arguments: [1]Any = .[cutoff]
+    empty: [0]Any
+    queries: [4]UsageQuery = .[
+        .{target = *usage.RegisteredUsers, query = "SELECT COUNT(*) FROM server_users", arguments = empty[:]},
+        .{target = *usage.ActiveUsers30d, query = "SELECT COUNT(*) FROM server_users WHERE last_seen_at>=?1", arguments = arguments[:]},
+        .{target = *usage.RegisteredClients, query = "SELECT COUNT(*) FROM server_clients", arguments = empty[:]},
+        .{target = *usage.ActiveClients30d, query = "SELECT COUNT(*) FROM server_clients WHERE last_seen_at>=?1", arguments = arguments[:]}
+    ]
+    for item: queries {
+        row := sql.QueryRow(database, context, item.query, item.arguments)
+        destinations: [1]Any = .[item.target]
+        result.error = sql.ScanRow(row, destinations[:])
+        if result.error != null {
+            return result
+        }
+    }
+    result.value = usage
+    return result
+}
+
+Apps :: (database: *sql.Database, context: ctx.Context) -> AppStorageResult {
+    result: AppStorageResult
+    loaded := scope.Load(database, context)
+    result.error = loaded.error
+    if result.error != null {
+        return result
+    }
+    matchers := loaded.value
+    empty: [0]Any
+    queried := sql.Query(database, context, CollectionStorageSQL, empty[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    appsByID: Map(string, AppStorageUsage)
+    MapInit(appsByID)
+    for matcher: matchers {
+        if !MapContains(appsByID, matcher.AppID) {
+            MapSet(appsByID, matcher.AppID, EmptyApp(matcher.AppID, matcher.DisplayName))
+        }
+    }
+    while sql.Next(rows) {
+        collection: string
+        count: isize
+        bytes: s64
+        destinations: [3]Any = .[*collection, *count, *bytes]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        matcher := scope.Best(collection, matchers)
+        appID := "unregistered"
+        displayName := "Unregistered collections"
+        prefix: string
+        if matcher != null {
+            appID = matcher.AppID
+            displayName = matcher.DisplayName
+            prefix = matcher.Prefix
+        }
+        if !MapContains(appsByID, appID) {
+            MapSet(appsByID, appID, EmptyApp(appID, displayName))
+        }
+        app := MapGet(appsByID, appID)
+        app.LogicalBytes += bytes
+        app.RecordBytes += bytes
+        app.RecordCount += count
+        item: CollectionStorageUsage
+        item.CollectionPrefix = prefix
+        item.Collection = collection
+        item.LogicalBytes = bytes
+        item.RecordBytes = bytes
+        item.RecordCount = count
+        app.Collections = AppendCollection(app.Collections, item)
+        MapSet(appsByID, appID, app)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error != null {
+        return result
+    }
+    apps := AllocateApps(cast(isize)0, cast(isize)MapCount(appsByID))
+    keys := MapKeys(appsByID)
+    for key: keys {
+        app := MapGet(appsByID, key)
+        sorting.Sort(app.Collections)
+        apps = AppendApp(apps, app)
+    }
+    sorting.Sort(apps)
+    result.value = apps
+    return result
+}
+
+Storage :: (database: *sql.Database, context: ctx.Context, path: string) -> NodeStorageResult {
+    result: NodeStorageResult
+    usage: NodeStorageUsage
+    if path != "" && path != ":memory:" {
+        usage.DatabaseFileBytes = FileSizeOrZero(path)
+        usage.DatabaseWALBytes = FileSizeOrZero(WithSuffix(path, "-wal"))
+        usage.DatabaseSHMBytes = FileSizeOrZero(WithSuffix(path, "-shm"))
+        usage.DatabaseTotalBytes = usage.DatabaseFileBytes + usage.DatabaseWALBytes + usage.DatabaseSHMBytes
+    }
+    empty: [0]Any
+    destinations: [1]Any = .[*usage.SQLitePageBytes]
+    row := sql.QueryRow(database, context, "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()", empty[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    apps := Apps(database, context)
+    result.error = apps.error
+    if result.error != null {
+        return result
+    }
+    usage.Apps = apps.value
+    for app: apps.value {
+        usage.EncryptedRecordBytes += app.RecordBytes
+        usage.LogicalBytes += app.LogicalBytes
+        if app.AppID == "unregistered" {
+            usage.UnassignedBytes += app.LogicalBytes
+        }
+    }
+    payloadCount: isize
+    payloadDestinations: [2]Any = .[*payloadCount, *usage.EncryptedPayloadBytes]
+    payloadRow := sql.QueryRow(database, context, PayloadStorageSQL, empty[:])
+    result.error = sql.ScanRow(payloadRow, payloadDestinations[:])
+    if result.error != null {
+        return result
+    }
+    usage.UnassignedEncryptedPayloads.LogicalBytes = usage.EncryptedPayloadBytes
+    usage.UnassignedEncryptedPayloads.Count = payloadCount
+    usage.UnassignedBytes += usage.EncryptedPayloadBytes
+    usage.LogicalBytes += usage.EncryptedPayloadBytes
+    result.value = usage
+    return result
+}
+
+#scope_file
+CollectionStorageSQL :: "\nSELECT collection,\n       COUNT(*),\n       COALESCE(SUM(LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)),0)\nFROM server_encrypted_records\nGROUP BY collection\nORDER BY collection";
+PayloadStorageSQL :: "\nSELECT COUNT(*), COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)\nFROM server_encrypted_payloads";

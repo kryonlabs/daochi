@@ -13,28 +13,23 @@ import (
 // #import std_map_go
 // #import protocol
 // #import types
-type PublicStatsResult struct {
-	Value PublicStats
-	Error Error
-}
-
 type ReadPublicStats func(Context, string) PublicStatsResult
 
 type CachedBytes func() []uint8
 
-type zir_d6432f2c25808066_WriteResult struct {
+type zir_522e4b50513da8ea_WriteResult struct {
 	Count int
 	Error Error
 }
 
-func Docs_Write(Writer Writer, Value []uint8) zir_d6432f2c25808066_WriteResult {
-	var result zir_d6432f2c25808066_WriteResult
+func Docs_Write(Writer Writer, Value []uint8) zir_522e4b50513da8ea_WriteResult {
+	var result zir_522e4b50513da8ea_WriteResult
 	result.Count, result.Error = (io.Writer).Write(Writer, Value)
 	return result
 }
 
-func Docs_WritePage(Writer Writer, Format string, Status string) zir_d6432f2c25808066_WriteResult {
-	var result zir_d6432f2c25808066_WriteResult
+func Docs_WritePage(Writer Writer, Format string, Status string) zir_522e4b50513da8ea_WriteResult {
+	var result zir_522e4b50513da8ea_WriteResult
 	result.Count, result.Error = fmt.Fprintf(Writer, Format, Status)
 	return result
 }

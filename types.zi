@@ -34,3 +34,8 @@ PublicStats :: struct {
     AvailableBytes: s64
     AvailableGB: s64
 }
+
+PublicStatsResult :: struct {
+    value: PublicStats
+    error: Error
+}

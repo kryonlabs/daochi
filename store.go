@@ -4,11 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"syscall"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -41,11 +36,6 @@ func (s *Store) ApplySync(ctx context.Context, req SyncRequest, publicKey []byte
 func (s *Store) ApplySyncDetailed(ctx context.Context, req SyncRequest, publicKey []byte) (SyncResult, []string, error) {
 	result := SyncApplication_Apply(s.db, ctx, req, publicKey, ErrSyncUserNotFound)
 	return result.Value, result.Accepted, result.Error
-}
-
-func currentUserVersionTx(ctx context.Context, tx *sql.Tx, userID string) (int64, error) {
-	result := AccountState_CurrentVersionTx(tx, ctx, userID)
-	return result.Value, result.Error
 }
 
 func (s *Store) RegisterUser(ctx context.Context, userID string, publicKey []byte) error {
@@ -180,27 +170,8 @@ func (s *Store) DeleteAccount(ctx context.Context, userID string) error {
 }
 
 func (s *Store) PublicStats(ctx context.Context, dbPath string) (PublicStats, error) {
-	var stats PublicStats
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_users`).Scan(&stats.UserCount); err != nil {
-		return PublicStats{}, err
-	}
-	used, err := sqliteFileSetSize(dbPath)
-	if err != nil {
-		return PublicStats{}, err
-	}
-	stats.StorageUsedBytes = used
-	stats.StorageUsedGB = bytesToFloorGB(used)
-	stats.StorageUsedText = storageUsedText(stats.StorageUsedGB)
-	available, err := diskAvailableBytes(dbPath)
-	if err != nil {
-		return PublicStats{}, err
-	}
-	stats.AvailableBytes = available - (1 << 30)
-	if stats.AvailableBytes < 0 {
-		stats.AvailableBytes = 0
-	}
-	stats.AvailableGB = bytesToFloorGB(stats.AvailableBytes)
-	return stats, nil
+	result := StoreStats_Public(s.db, ctx, dbPath)
+	return result.Value, result.Error
 }
 
 func (s *Store) ChangesSince(ctx context.Context, userID string, sinceVersion int64) (SyncChanges, int64, error) {
@@ -255,52 +226,9 @@ func (s *Store) StateHash(ctx context.Context, userID string) (string, error) {
 	return result.Value, result.Error
 }
 
-func upsertUser(ctx context.Context, tx *sql.Tx, userID string, publicKey []byte) error {
-	return AccountState_Upsert(tx, ctx, userID, publicKey)
-}
-
-func replaceUserData(ctx context.Context, tx *sql.Tx, userID string) error {
-	return SyncWrites_ReplaceData(tx, ctx, userID)
-}
-
-func upsertSession(ctx context.Context, tx *sql.Tx, userID string, session Session) (int, error) {
-	result := SyncWrites_UpsertSession(tx, ctx, userID, session)
-	return result.Applied, result.Error
-}
-
-func upsertSocialCache(ctx context.Context, tx *sql.Tx, userID string, item SocialSnapshot) (int, error) {
-	result := SocialCache_Upsert(tx, ctx, userID, item)
-	return result.Applied, result.Error
-}
-
 func (s *Store) SetSocialCacheJSON(ctx context.Context, userID, kind string, payload []byte) (int, error) {
 	result := SocialCache_Set(s.db, ctx, userID, kind, payload)
 	return result.Applied, result.Error
-}
-
-func upsertEncryptedRecord(ctx context.Context, tx *sql.Tx, userID string, item EncryptedRecord) (int, error) {
-	result := SyncWrites_UpsertRecord(tx, ctx, userID, item)
-	return result.Applied, result.Error
-}
-
-func deleteHabit(ctx context.Context, tx *sql.Tx, userID string, habit Habit) (int, error) {
-	result := SyncWrites_DeleteHabit(tx, ctx, userID, habit)
-	return result.Applied, result.Error
-}
-
-func deleteHabitDay(ctx context.Context, tx *sql.Tx, userID string, day HabitDay) (int, error) {
-	result := SyncWrites_DeleteHabitDay(tx, ctx, userID, day)
-	return result.Applied, result.Error
-}
-
-func deleteSession(ctx context.Context, tx *sql.Tx, userID string, session Session) (int, error) {
-	result := SyncWrites_DeleteSession(tx, ctx, userID, session)
-	return result.Applied, result.Error
-}
-
-func nextUserVersion(ctx context.Context, tx *sql.Tx, userID string) (int64, error) {
-	advanced := AccountState_NextVersion(tx, ctx, userID)
-	return advanced.Value, advanced.Error
 }
 
 func (s *Store) currentUserVersion(ctx context.Context, userID string) (int64, error) {
@@ -309,297 +237,20 @@ func (s *Store) currentUserVersion(ctx context.Context, userID string) (int64, e
 }
 
 func (s *Store) Health(ctx context.Context) error {
-	if err := s.db.PingContext(ctx); err != nil {
-		return err
-	}
-	var ok string
-	if err := s.db.QueryRowContext(ctx, `PRAGMA quick_check`).Scan(&ok); err != nil {
-		return err
-	}
-	if ok != "ok" {
-		return fmt.Errorf("sqlite quick_check: %s", ok)
-	}
-	var exists int
-	if err := s.db.QueryRowContext(ctx, `
-SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='server_users')`).Scan(&exists); err != nil {
-		return err
-	}
-	if exists == 0 {
-		return fmt.Errorf("schema not migrated")
-	}
-	return nil
+	return StoreDiagnostics_Health(s.db, ctx)
 }
 
 func (s *Store) NodeUsage(ctx context.Context, now time.Time) (NodeUsage, error) {
-	cutoff := now.UTC().Add(-30 * 24 * time.Hour).Format("2006-01-02 15:04:05")
-	usage := NodeUsage{RecentActivityWindowDays: 30}
-	queries := []struct {
-		target *int
-		query  string
-		args   []any
-	}{
-		{&usage.RegisteredUsers, `SELECT COUNT(*) FROM server_users`, nil},
-		{&usage.ActiveUsers30d, `SELECT COUNT(*) FROM server_users WHERE last_seen_at>=?1`, []any{cutoff}},
-		{&usage.RegisteredClients, `SELECT COUNT(*) FROM server_clients`, nil},
-		{&usage.ActiveClients30d, `SELECT COUNT(*) FROM server_clients WHERE last_seen_at>=?1`, []any{cutoff}},
-	}
-	for _, item := range queries {
-		if err := s.db.QueryRowContext(ctx, item.query, item.args...).Scan(item.target); err != nil {
-			return NodeUsage{}, err
-		}
-	}
-	return usage, nil
+	result := StoreStats_Usage(s.db, ctx, now)
+	return result.Value, result.Error
 }
 
 func (s *Store) NodeStorageUsage(ctx context.Context) (NodeStorageUsage, error) {
-	usage := NodeStorageUsage{}
-
-	if s.path != "" && s.path != ":memory:" {
-		usage.DatabaseFileBytes = fileSizeOrZero(s.path)
-		usage.DatabaseWALBytes = fileSizeOrZero(s.path + "-wal")
-		usage.DatabaseSHMBytes = fileSizeOrZero(s.path + "-shm")
-		usage.DatabaseTotalBytes = usage.DatabaseFileBytes + usage.DatabaseWALBytes + usage.DatabaseSHMBytes
-	}
-	if err := s.db.QueryRowContext(ctx, `SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&usage.SQLitePageBytes); err != nil {
-		return NodeStorageUsage{}, err
-	}
-
-	apps, err := s.appStorageUsage(ctx)
-	if err != nil {
-		return NodeStorageUsage{}, err
-	}
-	usage.Apps = apps
-	for _, app := range apps {
-		usage.EncryptedRecordBytes += app.RecordBytes
-		usage.LogicalBytes += app.LogicalBytes
-		if app.AppID == "unregistered" {
-			usage.UnassignedBytes += app.LogicalBytes
-		}
-	}
-
-	var payloadCount int
-	if err := s.db.QueryRowContext(ctx, `
-SELECT COUNT(*), COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)
-FROM server_encrypted_payloads`).Scan(&payloadCount, &usage.EncryptedPayloadBytes); err != nil {
-		return NodeStorageUsage{}, err
-	}
-	usage.UnassignedEncryptedPayloads = StorageBucketUsage{
-		LogicalBytes: usage.EncryptedPayloadBytes,
-		Count:        payloadCount,
-	}
-	usage.UnassignedBytes += usage.EncryptedPayloadBytes
-	usage.LogicalBytes += usage.EncryptedPayloadBytes
-
-	return usage, nil
-}
-
-type collectionStorageRow struct {
-	Collection string
-	Count      int
-	Bytes      int64
-}
-
-func (s *Store) appStorageUsage(ctx context.Context) ([]AppStorageUsage, error) {
-	loadedMatchers := CollectionScope_Load(s.db, ctx)
-	matchers, err := loadedMatchers.Value, loadedMatchers.Error
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx, `
-SELECT collection,
-       COUNT(*),
-       COALESCE(SUM(LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)),0)
-FROM server_encrypted_records
-GROUP BY collection
-ORDER BY collection`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	appsByID := map[string]*AppStorageUsage{}
-	for _, matcher := range matchers {
-		if _, ok := appsByID[matcher.AppID]; !ok {
-			appsByID[matcher.AppID] = &AppStorageUsage{
-				AppID:       matcher.AppID,
-				DisplayName: matcher.DisplayName,
-				Collections: []CollectionStorageUsage{},
-			}
-		}
-	}
-	for rows.Next() {
-		var row collectionStorageRow
-		if err := rows.Scan(&row.Collection, &row.Count, &row.Bytes); err != nil {
-			return nil, err
-		}
-		matcher := CollectionScope_Best(row.Collection, matchers)
-		appID := "unregistered"
-		displayName := "Unregistered collections"
-		collectionPrefix := ""
-		if matcher != nil {
-			appID = matcher.AppID
-			displayName = matcher.DisplayName
-			collectionPrefix = matcher.Prefix
-		}
-		app, ok := appsByID[appID]
-		if !ok {
-			app = &AppStorageUsage{
-				AppID:       appID,
-				DisplayName: displayName,
-				Collections: []CollectionStorageUsage{},
-			}
-			appsByID[appID] = app
-		}
-		app.LogicalBytes += row.Bytes
-		app.RecordBytes += row.Bytes
-		app.RecordCount += row.Count
-		app.Collections = append(app.Collections, CollectionStorageUsage{
-			CollectionPrefix: collectionPrefix,
-			Collection:       row.Collection,
-			LogicalBytes:     row.Bytes,
-			RecordBytes:      row.Bytes,
-			RecordCount:      row.Count,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	apps := make([]AppStorageUsage, 0, len(appsByID))
-	for _, app := range appsByID {
-		sort.Slice(app.Collections, func(i, j int) bool {
-			return app.Collections[i].Collection < app.Collections[j].Collection
-		})
-		apps = append(apps, *app)
-	}
-	sort.Slice(apps, func(i, j int) bool {
-		if apps[i].LogicalBytes != apps[j].LogicalBytes {
-			return apps[i].LogicalBytes > apps[j].LogicalBytes
-		}
-		return apps[i].AppID < apps[j].AppID
-	})
-	return apps, nil
-}
-
-func fileSizeOrZero(path string) int64 {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return info.Size()
+	result := StoreStats_Storage(s.db, ctx, s.path)
+	return result.Value, result.Error
 }
 
 func (s *Store) SyncDiagnosticReport(ctx context.Context, userID string) (SyncDiagnosticReport, error) {
-	version, err := s.currentUserVersion(ctx, userID)
-	if err != nil {
-		return SyncDiagnosticReport{}, err
-	}
-	hash, err := s.StateHash(ctx, userID)
-	if err != nil {
-		return SyncDiagnosticReport{}, err
-	}
-	_, compactedThrough, err := s.SyncOpsCompacted(ctx, userID, version)
-	if err != nil {
-		return SyncDiagnosticReport{}, err
-	}
-	counts, err := s.accountTableCounts(ctx, userID)
-	if err != nil {
-		return SyncDiagnosticReport{}, err
-	}
-	legacyClients, err := s.LegacyClients(ctx, userID, 3)
-	if err != nil {
-		return SyncDiagnosticReport{}, err
-	}
-	recentAudit, err := s.RecentSyncAudit(ctx, userID, 10)
-	if err != nil {
-		return SyncDiagnosticReport{}, err
-	}
-	recentPayloads, err := s.RecentEncryptedPayloads(ctx, userID, 5)
-	if err != nil {
-		return SyncDiagnosticReport{}, err
-	}
-	payloadBytes, err := s.EncryptedPayloadBytes(ctx, userID)
-	if err != nil {
-		return SyncDiagnosticReport{}, err
-	}
-	return SyncDiagnosticReport{
-		Status:                   "ok",
-		UserIDHash:               userID,
-		ServerVersion:            version,
-		StateHash:                hash,
-		CompactedThroughVersion:  compactedThrough,
-		TableCounts:              counts,
-		EncryptedPayloadBytes:    payloadBytes,
-		LegacyClients:            legacyClients,
-		ActiveWebSocketSupported: true,
-		RecentSyncAudit:          recentAudit,
-		RecentEncryptedPayloads:  recentPayloads,
-	}, nil
-}
-
-func (s *Store) accountTableCounts(ctx context.Context, userID string) (map[string]int, error) {
-	tables := []string{
-		"server_habits",
-		"server_habit_days",
-		"server_sessions",
-		"server_session_rounds",
-		"server_meditation_logs",
-		"server_social_snapshots",
-		"server_encrypted_records",
-		"server_sync_ops",
-		"server_clients",
-		"server_encrypted_payloads",
-		"server_sync_audit",
-	}
-	counts := make(map[string]int, len(tables))
-	for _, table := range tables {
-		var n int
-		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE user_id_hash=?1", userID).Scan(&n); err != nil {
-			return nil, err
-		}
-		counts[table] = n
-	}
-	return counts, nil
-}
-
-func sqliteFileSetSize(dbPath string) (int64, error) {
-	var total int64
-	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
-		info, err := os.Stat(path)
-		if err == nil {
-			total += info.Size()
-			continue
-		}
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		return 0, err
-	}
-	return total, nil
-}
-
-func diskAvailableBytes(path string) (int64, error) {
-	dir := filepath.Dir(path)
-	if dir == "" {
-		dir = "."
-	}
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dir, &stat); err != nil {
-		return 0, err
-	}
-	return int64(stat.Bavail) * int64(stat.Bsize), nil
-}
-
-func bytesToFloorGB(bytes int64) int64 {
-	if bytes <= 0 {
-		return 0
-	}
-	return bytes / (1 << 30)
-}
-
-func storageUsedText(gb int64) string {
-	if gb <= 0 {
-		return "under 1 GB"
-	}
-	return fmt.Sprintf("%d GB", gb)
+	result := StoreDiagnostics_Report(s.db, ctx, userID)
+	return result.Value, result.Error
 }

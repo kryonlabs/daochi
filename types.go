@@ -15,8 +15,6 @@ type AccountExportResponse struct {
 	Tables       __type_7f1b14325d38f3e4 "json:\"tables\""
 }
 
-type __type_6705e682df266aa4 = map[string]int
-
 type SyncDiagnosticReport struct {
 	Status                   string                  "json:\"status\""
 	UserIDHash               string                  "json:\"user_id_hash\""
@@ -38,4 +36,9 @@ type PublicStats struct {
 	StorageUsedText  string
 	AvailableBytes   int64
 	AvailableGB      int64
+}
+
+type PublicStatsResult struct {
+	Value PublicStats
+	Error Error
 }

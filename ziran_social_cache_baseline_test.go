@@ -68,3 +68,8 @@ func (s *Store) baselineSnapshotSet(ctx context.Context, userID, kind string, pa
 	}
 	return applied, nil
 }
+
+func nextUserVersion(ctx context.Context, tx *sql.Tx, userID string) (int64, error) {
+	advanced := AccountState_NextVersion(tx, ctx, userID)
+	return advanced.Value, advanced.Error
+}

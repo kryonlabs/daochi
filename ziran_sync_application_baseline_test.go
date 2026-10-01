@@ -500,3 +500,8 @@ func baselineApplicationBoolInt(v bool) int {
 	}
 	return 0
 }
+
+func currentUserVersionTx(ctx context.Context, tx *sql.Tx, userID string) (int64, error) {
+	result := AccountState_CurrentVersionTx(tx, ctx, userID)
+	return result.Value, result.Error
+}

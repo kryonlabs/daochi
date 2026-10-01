@@ -88,8 +88,8 @@ field names, Go storage types, order and reflection tags.
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Ziran | `sync_ws.zi`: authenticated upgrades, account and IP limits, reader worker, event/ping selection, deadlines and cancellation; `websocket.zi`: native handshakes and exact frame encoding/validation; `sync_hub.zi`: scoped subscriptions, bounded event delivery, counts and disconnect cleanup |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
-| `token_assets.go` | Ziran | `token_assets.zi`: native SQL upsert, released asset fields and error propagation |
-| `token_money.go` | Go with ported callers | Ledger, receipts, purchase verification, invoices, checkpoints |
+| `token_assets.go` | Ziran | `token_assets.zi`: native SQL seed/upsert, sorted asset listing, released fields, row cleanup and error propagation |
+| `token_money.go` | Partial Ziran | `token_ledger.zi`: balances, scoped ledger/receipt queries, atomic payment crediting, collision checks, idempotent spending and rollback; `token_receipt.zi`: validation, canonical bytes, hashes and Ed25519 signatures; `token_checkpoint.zi`: signed ledger checkpoints; purchase verification, invoices, payment HTTP handlers and recurring reconciliation remain Go |
 | `trust_handlers.go` | Ziran | `trust_http.zi`: operator access, signed pairing invitations/acceptances, outbound completion and retries, trusted-peer listing, trust-space creation and namespace registration/resolution |
 | `trust_store.go` | Ziran | `trust_store.zi`: schema, atomic pairing, peer policy/list queries, trust spaces, namespace signing/resolution and scoped mesh name replication; nonces in `node_nonce.zi`, public-key lookup in `peer_trust.zi` |
 | `types.go` | Ziran | All 77 original records and profile constants in `protocol.zi`, `manifest.zi`, `sync_types.zi` and `types.zi` |
@@ -188,6 +188,22 @@ and panic unwinding. Independent Go baseline fixtures compare every two-byte
 frame header, truncated and large payloads, arbitrary headers, write and
 upgrade errors, authentication, rate/connection limits, event delivery and
 panic cleanup. The existing server routes dispatch to the generated handler.
+
+`token_ledger.zi`, `token_receipt.zi` and `token_checkpoint.zi` own token-ledger
+storage, receipt encoding/signatures and checkpoints. Credits preserve payment
+identity, account/amount collision checks and atomic insertion of ledger and
+processed-payment rows. Spending preserves request hashes, nonce reuse checks,
+balance rejection and atomic ledger/nonce updates. Native transaction rollback
+runs at every return and during panic unwinding; failed commits retain the
+original result fields and release their connection. Asset, balance, receipt
+and ledger queries preserve scope filters, ordering, nullable sums, nil versus
+allocated results and SQL errors. Independent baseline fixtures compare exact
+canonical bytes and signatures, malformed byte strings, validation order,
+account/app filtering, receipt lookup, retries, collisions, hash-chain order,
+checkpoint roots, cancellation, malformed stored rows, failed writes and failed
+commits. Existing payment and deposit callers now use the generated functions
+directly. Native issuer-error creation, payment HTTP handlers, Google purchase
+verification, Monero invoices and recurring reconciliation still need porting.
 
 `types.zi` owns account export and diagnostic records. Their map fields keep
 the original `map[string][]map[string]any` and `map[string]int` Go types and

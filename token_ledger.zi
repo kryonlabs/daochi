@@ -1,0 +1,399 @@
+#import "protocol"
+#import "token_receipt"
+#import "std/go_types"
+receipts :: #import "token_receipt";
+ids :: #import "resource_id";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+ed :: #import "std/ed25519_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+go_sql :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+ReceiptResult :: struct {
+    value: TokenReceipt
+    found: bool
+    error: Error
+}
+ReceiptsResult :: struct {
+    value: []TokenReceipt
+    error: Error
+}
+BalanceResult :: struct {
+    value: s64
+    error: Error
+}
+CreditResult :: struct {
+    value: TokenReceipt
+    created: bool
+    error: Error
+}
+SpendResult :: struct {
+    value: TokenReceipt
+    balance: s64
+    created: bool
+    error: Error
+}
+
+#scope_file
+NullInteger :: #type #foreign go_sql "NullInt64";
+TransactionResult :: struct {
+    value: *sql.Transaction
+    error: Error
+}
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+QueryBalance :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string, assetID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryAppBalance :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string, assetID: string, appID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryBalanceTx :: (transaction: *sql.Transaction, context: ctx.Context, query: string, accountID: string, assetID: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
+QueryLedger :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string, assetID: string, since: s64) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+QueryAppLedger :: (database: *sql.Database, context: ctx.Context, query: string, accountID: string, assetID: string, appID: string, since: s64) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+QueryReceipt :: (database: *sql.Database, context: ctx.Context, query: string, id: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+QueryReceiptTx :: (transaction: *sql.Transaction, context: ctx.Context, query: string, id: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
+QueryPayment :: (transaction: *sql.Transaction, context: ctx.Context, query: string, provider: string, id: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
+QueryNonce :: (transaction: *sql.Transaction, context: ctx.Context, query: string, accountID: string, appID: string, key: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
+QueryPrevious :: (transaction: *sql.Transaction, context: ctx.Context, query: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
+ScanBalance :: (row: *sql.Row, balance: *NullInteger) -> Error #foreign go_sql "(*Row).Scan";
+ScanID :: (row: *sql.Row, id: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanPayment :: (row: *sql.Row, accountID: *string, assetID: *string, amount: *s64) -> Error #foreign go_sql "(*Row).Scan";
+ScanNonce :: (row: *sql.Row, id: *string, hash: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanPrevious :: (row: *sql.Row, sequence: *NullInteger, hash: *sql.NullString) -> Error #foreign go_sql "(*Row).Scan";
+IntegerValid :: (value: NullInteger) -> bool #go_field #foreign go_sql "NullInt64.Valid";
+IntegerValue :: (value: NullInteger) -> s64 #go_field #foreign go_sql "NullInt64.Int64";
+ScanReceipt :: (row: *sql.Row, id: *string, issuer: *string, asset: *string, account: *string, app: *string, event: *string, amount: *s64, sequence: *s64, previous: *string, hash: *string, created: *string, source: *string, reference: *string, signature: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanReceiptRows :: (rows: *sql.Rows, id: *string, issuer: *string, asset: *string, account: *string, app: *string, event: *string, amount: *s64, sequence: *s64, previous: *string, hash: *string, created: *string, source: *string, reference: *string, signature: *string) -> Error #foreign go_sql "(*Rows).Scan";
+InsertPayment :: (transaction: *sql.Transaction, context: ctx.Context, query: string, provider: string, paymentID: string, accountID: string, assetID: string, amount: s64, receiptID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertNonce :: (transaction: *sql.Transaction, context: ctx.Context, query: string, accountID: string, appID: string, key: string, receiptID: string, hash: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+InsertReceipt :: (transaction: *sql.Transaction, context: ctx.Context, query: string, id: string, issuer: string, asset: string, account: string, app: string, event: string, amount: s64, sequence: s64, previous: string, hash: string, signature: string, created: string, source: string, reference: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+AppendReceipt :: (values: []TokenReceipt, value: TokenReceipt) -> []TokenReceipt #foreign builtin "append";
+KeyLength :: (value: ed.PrivateKey) -> isize #foreign builtin "len";
+
+ByIDSQL :: #string SQL
+SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
+    previous_hash,event_hash,created_at,source_type,source_ref,signature
+FROM token_ledger
+WHERE receipt_id=?1
+SQL;
+BalanceSQL :: #string SQL
+SELECT SUM(amount_delta)
+FROM token_ledger
+WHERE account_id=?1 AND asset_id=?2
+SQL;
+AppBalanceSQL :: #string SQL
+SELECT SUM(amount_delta)
+FROM token_ledger
+WHERE account_id=?1 AND asset_id=?2 AND app_id=?3
+SQL;
+LedgerSQL :: #string SQL
+SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
+    previous_hash,event_hash,created_at,source_type,source_ref,signature
+FROM token_ledger
+WHERE account_id=?1 AND asset_id=?2 AND ledger_seq>?3
+ORDER BY ledger_seq
+SQL;
+AppLedgerSQL :: #string SQL
+SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
+    previous_hash,event_hash,created_at,source_type,source_ref,signature
+FROM token_ledger
+WHERE account_id=?1 AND asset_id=?2 AND app_id=?3 AND ledger_seq>?4
+ORDER BY ledger_seq
+SQL;
+
+ReadBalance :: (row: *sql.Row) -> BalanceResult {
+    result: BalanceResult
+    nullable: NullInteger
+    result.error = ScanBalance(row, *nullable)
+    if result.error == null && IntegerValid(nullable) {
+        result.value = IntegerValue(nullable)
+    }
+    return result
+}
+
+ReadReceipt :: (row: *sql.Row) -> ReceiptResult {
+    result: ReceiptResult
+    item: TokenReceipt
+    result.error = ScanReceipt(row, *item.ReceiptID, *item.IssuerID, *item.AssetID,
+        *item.AccountID, *item.AppID, *item.EventType, *item.AmountDelta,
+        *item.LedgerSeq, *item.PreviousHash, *item.EventHash, *item.CreatedAt,
+        *item.SourceType, *item.SourceRef, *item.Signature)
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null {
+        return result
+    }
+    result.value = item
+    result.found = true
+    return result
+}
+
+ReadReceipts :: (rows: *sql.Rows) -> ReceiptsResult {
+    result: ReceiptsResult
+    CloseAtReturn(rows)
+    values: []TokenReceipt
+    while sql.Next(rows) {
+        item: TokenReceipt
+        result.error = ScanReceiptRows(rows, *item.ReceiptID, *item.IssuerID,
+            *item.AssetID, *item.AccountID, *item.AppID, *item.EventType,
+            *item.AmountDelta, *item.LedgerSeq, *item.PreviousHash,
+            *item.EventHash, *item.CreatedAt, *item.SourceType,
+            *item.SourceRef, *item.Signature)
+        if result.error != null {
+            return result
+        }
+        values = AppendReceipt(values, item)
+    }
+    result.value = values
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+#scope_export
+Balance :: (database: *sql.Database, context: ctx.Context, accountID: string, assetID: string) -> BalanceResult {
+    return ReadBalance(QueryBalance(database, context, BalanceSQL, accountID, assetID))
+}
+
+AppBalance :: (database: *sql.Database, context: ctx.Context, accountID: string, assetID: string, appID: string) -> BalanceResult {
+    return ReadBalance(QueryAppBalance(database, context, AppBalanceSQL, accountID, assetID, appID))
+}
+
+BalanceTx :: (transaction: *sql.Transaction, context: ctx.Context, accountID: string, assetID: string) -> BalanceResult {
+    return ReadBalance(QueryBalanceTx(transaction, context, BalanceSQL, accountID, assetID))
+}
+
+List :: (database: *sql.Database, context: ctx.Context, accountID: string, assetID: string, since: s64) -> ReceiptsResult {
+    queried := QueryLedger(database, context, LedgerSQL, accountID, assetID, since)
+    if queried.error != null {
+        result: ReceiptsResult
+        result.error = queried.error
+        return result
+    }
+    return ReadReceipts(queried.value)
+}
+
+AppList :: (database: *sql.Database, context: ctx.Context, accountID: string, assetID: string, appID: string, since: s64) -> ReceiptsResult {
+    queried := QueryAppLedger(database, context, AppLedgerSQL, accountID, assetID, appID, since)
+    if queried.error != null {
+        result: ReceiptsResult
+        result.error = queried.error
+        return result
+    }
+    return ReadReceipts(queried.value)
+}
+
+ByID :: (database: *sql.Database, context: ctx.Context, id: string) -> ReceiptResult {
+    return ReadReceipt(QueryReceipt(database, context, ByIDSQL, id))
+}
+
+ByIDTx :: (transaction: *sql.Transaction, context: ctx.Context, id: string) -> ReceiptResult {
+    return ReadReceipt(QueryReceiptTx(transaction, context, ByIDSQL, id))
+}
+
+Insert :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.PrivateKey, input: TokenEventInput, unavailable: Error) -> ReceiptResult {
+    result: ReceiptResult
+    if KeyLength(signer) != cast(isize)64 {
+        result.error = unavailable
+        return result
+    }
+    result.error = receipts.Validate(input)
+    if result.error != null {
+        return result
+    }
+    sequence: NullInteger
+    previous: sql.NullString
+    result.error = ScanPrevious(QueryPrevious(transaction, context,
+        "SELECT ledger_seq,event_hash\nFROM token_ledger\nORDER BY ledger_seq DESC\nLIMIT 1"),
+        *sequence, *previous)
+    if result.error != null && !errors.Is(result.error, sql.NoRows()) {
+        return result
+    }
+    generated := ids.New()
+    result.error = generated.error
+    if result.error != null {
+        return result
+    }
+    payload: ReceiptPayload
+    payload.ReceiptID = generated.value
+    payload.IssuerID = receipts.IssuerID
+    payload.AssetID = receipts.AssetID
+    payload.AccountID = input.AccountID
+    payload.AppID = input.AppID
+    payload.EventType = input.EventType
+    payload.AmountDelta = input.AmountDelta
+    payload.LedgerSeq = 1
+    if IntegerValid(sequence) {
+        payload.LedgerSeq = IntegerValue(sequence) + 1
+    }
+    payload.PreviousHash = sql.NullStringValue(previous)
+    payload.CreatedAt = clock.Format(clock.UTC(clock.Now()), "2006-01-02T15:04:05Z07:00")
+    payload.SourceType = input.SourceType
+    payload.SourceRef = input.SourceRef
+    payload.EventHash = receipts.Hash(payload)
+    receipt := receipts.FromPayload(payload, ed.Sign(signer, receipts.Canonical(payload)))
+    written := InsertReceipt(transaction, context,
+        "INSERT INTO token_ledger(receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,previous_hash,event_hash,signature,created_at,source_type,source_ref)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        receipt.ReceiptID, receipt.IssuerID, receipt.AssetID, receipt.AccountID,
+        receipt.AppID, receipt.EventType, receipt.AmountDelta, receipt.LedgerSeq,
+        receipt.PreviousHash, receipt.EventHash, receipt.Signature,
+        receipt.CreatedAt, receipt.SourceType, receipt.SourceRef)
+    result.error = written.error
+    if result.error == null {
+        result.value = receipt
+        result.found = true
+    }
+    return result
+}
+
+CreditPaymentTx :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.PrivateKey, provider: string, paymentID: string, input: TokenEventInput, unavailable: Error) -> CreditResult {
+    result: CreditResult
+    receiptID: string
+    result.error = ScanID(QueryPayment(transaction, context,
+        "SELECT receipt_id\nFROM token_processed_payments\nWHERE provider=?1 AND provider_payment_id=?2", provider, paymentID), *receiptID)
+    if result.error == null {
+        accountID: string
+        assetID: string
+        amount: s64
+        result.error = ScanPayment(QueryPayment(transaction, context,
+            "SELECT account_id,asset_id,amount\nFROM token_processed_payments\nWHERE provider=?1 AND provider_payment_id=?2", provider, paymentID), *accountID, *assetID, *amount)
+        if result.error != null {
+            return result
+        }
+        if accountID != input.AccountID || assetID != receipts.AssetID || amount != input.AmountDelta {
+            result.error = errors.New("provider payment id collision")
+            return result
+        }
+        existing := ByIDTx(transaction, context, receiptID)
+        result.error = existing.error
+        if result.error != null {
+            return result
+        }
+        if !existing.found {
+            result.error = errors.New("processed payment receipt missing")
+            return result
+        }
+        result.value = existing.value
+        return result
+    }
+    if !errors.Is(result.error, sql.NoRows()) {
+        return result
+    }
+    inserted := Insert(transaction, context, signer, input, unavailable)
+    result.error = inserted.error
+    if result.error != null {
+        return result
+    }
+    written := InsertPayment(transaction, context,
+        "INSERT INTO token_processed_payments(provider,provider_payment_id,account_id,asset_id,amount,receipt_id)\nVALUES(?1,?2,?3,?4,?5,?6)",
+        provider, paymentID, input.AccountID, receipts.AssetID, input.AmountDelta, inserted.value.ReceiptID)
+    result.error = written.error
+    if result.error == null {
+        result.value = inserted.value
+        result.created = true
+    }
+    return result
+}
+
+CreditPayment :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, provider: string, paymentID: string, input: TokenEventInput, unavailable: Error) -> CreditResult {
+    result: CreditResult
+    if provider == "" || paymentID == "" {
+        result.error = errors.New("provider payment id required")
+        return result
+    }
+    begun := Begin(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    RollbackAtReturn(begun.value)
+    result = CreditPaymentTx(begun.value, context, signer, provider, paymentID, input, unavailable)
+    if result.error == null {
+        result.error = sql.Commit(begun.value)
+    }
+    return result
+}
+
+Spend :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, input: TokenEventInput, key: string, unavailable: Error) -> SpendResult {
+    result: SpendResult
+    if input.AmountDelta >= 0 {
+        result.error = errors.New("spend amount must be negative")
+        return result
+    }
+    begun := Begin(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    requestHash := receipts.SpendRequestHash(input)
+    receiptID: string
+    previousHash: string
+    result.error = ScanNonce(QueryNonce(transaction, context,
+        "SELECT receipt_id,request_hash\nFROM token_spend_nonces\nWHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3",
+        input.AccountID, input.AppID, key), *receiptID, *previousHash)
+    if result.error == null {
+        if previousHash != "" && previousHash != requestHash {
+            result.error = errors.New("idempotency key reused for different spend")
+            return result
+        }
+        existing := ByIDTx(transaction, context, receiptID)
+        result.error = existing.error
+        if result.error != null {
+            return result
+        }
+        if !existing.found {
+            result.error = errors.New("spend receipt missing")
+            return result
+        }
+        balance := BalanceTx(transaction, context, input.AccountID, receipts.AssetID)
+        result.error = balance.error
+        if result.error != null {
+            return result
+        }
+        result.value = existing.value
+        result.balance = balance.value
+        result.error = sql.Commit(transaction)
+        return result
+    }
+    if !errors.Is(result.error, sql.NoRows()) {
+        return result
+    }
+    balance := BalanceTx(transaction, context, input.AccountID, receipts.AssetID)
+    result.error = balance.error
+    if result.error != null {
+        return result
+    }
+    if balance.value + input.AmountDelta < 0 {
+        result.balance = balance.value
+        result.error = errors.New("insufficient balance")
+        return result
+    }
+    inserted := Insert(transaction, context, signer, input, unavailable)
+    result.error = inserted.error
+    if result.error != null {
+        return result
+    }
+    written := InsertNonce(transaction, context,
+        "INSERT INTO token_spend_nonces(account_id,app_id,idempotency_key,receipt_id,request_hash)\nVALUES(?1,?2,?3,?4,?5)",
+        input.AccountID, input.AppID, key, inserted.value.ReceiptID, requestHash)
+    result.error = written.error
+    if result.error != null {
+        return result
+    }
+    result.value = inserted.value
+    result.balance = balance.value + input.AmountDelta
+    result.created = true
+    result.error = sql.Commit(transaction)
+    return result
+}

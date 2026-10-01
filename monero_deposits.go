@@ -391,7 +391,8 @@ WHERE tx_id=?1 AND account_index=?2 AND address_index=?3`, txID, major, minor).S
 		return TokenReceipt{}, false, err
 	}
 	if receiptID != "" {
-		receipt, found, err := tokenReceiptByIDTx(ctx, tx, receiptID)
+		receiptResult := TokenLedger_ByIDTx(tx, ctx, receiptID)
+		receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 		if err != nil {
 			return TokenReceipt{}, false, err
 		}
@@ -404,10 +405,11 @@ WHERE tx_id=?1 AND account_index=?2 AND address_index=?3`, txID, major, minor).S
 		return TokenReceipt{}, false, errors.New("monero deposit is not creditable")
 	}
 	paymentID := fmt.Sprintf("%s:%d:%d", txID, major, minor)
-	receipt, created, err := creditTokenPaymentTx(ctx, tx, signer, "monero_account", paymentID, tokenEventInput{
+	paymentResult := TokenLedger_CreditPaymentTx(tx, ctx, signer, "monero_account", paymentID, TokenEventInput{
 		AccountID: accountID, EventType: "credit", AmountDelta: tokenUnits,
 		SourceType: "monero_account", SourceRef: paymentID,
-	})
+	}, errTokenIssuerReadOnly)
+	receipt, created, err := paymentResult.Value, paymentResult.Created, paymentResult.Error
 	if err != nil {
 		return TokenReceipt{}, false, err
 	}
@@ -465,7 +467,8 @@ FROM monero_deposits WHERE account_id=?1 ORDER BY first_seen_at DESC LIMIT ?2`, 
 		if out[i].ReceiptID == "" {
 			continue
 		}
-		receipt, found, err := s.TokenReceipt(ctx, out[i].ReceiptID)
+		receiptResult := TokenLedger_ByID(s.db, ctx, out[i].ReceiptID)
+		receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 		if err != nil {
 			return nil, err
 		}
@@ -490,7 +493,8 @@ func scanMoneroDeposit(ctx context.Context, store *Store, row moneroDepositScann
 		return MoneroDeposit{}, err
 	}
 	if store != nil && out.ReceiptID != "" {
-		receipt, found, err := store.TokenReceipt(ctx, out.ReceiptID)
+		receiptResult := TokenLedger_ByID(store.db, ctx, out.ReceiptID)
+		receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 		if err != nil {
 			return MoneroDeposit{}, err
 		}

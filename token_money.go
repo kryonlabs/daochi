@@ -28,7 +28,6 @@ import (
 const (
 	waoziIssuerID           = "waozi"
 	waoziTokenAssetID       = "waozi:token"
-	tokenReceiptContext     = "ksync-token-receipt-v1"
 	tokenPermissionSpend    = "spend"
 	tokenPermissionPurchase = "purchase"
 )
@@ -47,452 +46,9 @@ var googleHTTPClient = &http.Client{Timeout: 20 * time.Second}
 // so tests can point it at a fake server.
 var googlePlayAPIBaseURL = "https://androidpublisher.googleapis.com/androidpublisher/v3"
 
-type tokenEventInput struct {
-	AccountID   string
-	AppID       string
-	EventType   string
-	AmountDelta int64
-	SourceType  string
-	SourceRef   string
-}
-
-type tokenReceiptPayload struct {
-	ReceiptID    string `json:"receipt_id"`
-	IssuerID     string `json:"issuer_id"`
-	AssetID      string `json:"asset_id"`
-	AccountID    string `json:"account_id"`
-	AppID        string `json:"app_id,omitempty"`
-	EventType    string `json:"event_type"`
-	AmountDelta  int64  `json:"amount_delta"`
-	LedgerSeq    int64  `json:"ledger_seq"`
-	PreviousHash string `json:"previous_hash"`
-	EventHash    string `json:"event_hash"`
-	CreatedAt    string `json:"created_at"`
-	SourceType   string `json:"source_type"`
-	SourceRef    string `json:"source_ref"`
-}
-
 type moneroInvoiceRecord struct {
 	AccountID string
 	Invoice   MoneroInvoiceResponse
-}
-
-func (s *Store) TokenAssets(ctx context.Context) ([]TokenAsset, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT issuer_id,asset_id,display_name,decimals,status
-FROM token_assets
-ORDER BY issuer_id,asset_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []TokenAsset
-	for rows.Next() {
-		var item TokenAsset
-		if err := rows.Scan(&item.IssuerID, &item.AssetID, &item.DisplayName, &item.Decimals, &item.Status); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) TokenBalance(ctx context.Context, accountID, assetID string) (int64, error) {
-	var balance sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
-SELECT SUM(amount_delta)
-FROM token_ledger
-WHERE account_id=?1 AND asset_id=?2`, accountID, assetID).Scan(&balance)
-	if err != nil {
-		return 0, err
-	}
-	if !balance.Valid {
-		return 0, nil
-	}
-	return balance.Int64, nil
-}
-
-func (s *Store) TokenAppBalance(ctx context.Context, accountID, assetID, appID string) (int64, error) {
-	var balance sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
-SELECT SUM(amount_delta)
-FROM token_ledger
-WHERE account_id=?1 AND asset_id=?2 AND app_id=?3`, accountID, assetID, appID).Scan(&balance)
-	if err != nil {
-		return 0, err
-	}
-	if !balance.Valid {
-		return 0, nil
-	}
-	return balance.Int64, nil
-}
-
-func (s *Store) TokenLedger(ctx context.Context, accountID, assetID string, since int64) ([]TokenReceipt, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
-	previous_hash,event_hash,created_at,source_type,source_ref,signature
-FROM token_ledger
-WHERE account_id=?1 AND asset_id=?2 AND ledger_seq>?3
-ORDER BY ledger_seq`, accountID, assetID, since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []TokenReceipt
-	for rows.Next() {
-		item, err := scanTokenReceipt(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) TokenAppLedger(ctx context.Context, accountID, assetID, appID string, since int64) ([]TokenReceipt, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
-	previous_hash,event_hash,created_at,source_type,source_ref,signature
-FROM token_ledger
-WHERE account_id=?1 AND asset_id=?2 AND app_id=?3 AND ledger_seq>?4
-ORDER BY ledger_seq`, accountID, assetID, appID, since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []TokenReceipt
-	for rows.Next() {
-		item, err := scanTokenReceipt(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) TokenReceipt(ctx context.Context, receiptID string) (TokenReceipt, bool, error) {
-	row := s.db.QueryRowContext(ctx, `
-SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
-	previous_hash,event_hash,created_at,source_type,source_ref,signature
-FROM token_ledger
-WHERE receipt_id=?1`, receiptID)
-	receipt, err := scanTokenReceipt(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return TokenReceipt{}, false, nil
-	}
-	if err != nil {
-		return TokenReceipt{}, false, err
-	}
-	return receipt, true, nil
-}
-
-type tokenReceiptScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanTokenReceipt(row tokenReceiptScanner) (TokenReceipt, error) {
-	var item TokenReceipt
-	err := row.Scan(&item.ReceiptID, &item.IssuerID, &item.AssetID, &item.AccountID,
-		&item.AppID, &item.EventType, &item.AmountDelta, &item.LedgerSeq,
-		&item.PreviousHash, &item.EventHash, &item.CreatedAt, &item.SourceType,
-		&item.SourceRef, &item.Signature)
-	return item, err
-}
-
-func (s *Store) CreditTokenPayment(ctx context.Context, signer ed25519.PrivateKey, provider, providerPaymentID string, input tokenEventInput) (TokenReceipt, bool, error) {
-	if provider == "" || providerPaymentID == "" {
-		return TokenReceipt{}, false, errors.New("provider payment id required")
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return TokenReceipt{}, false, err
-	}
-	defer tx.Rollback()
-	receipt, created, err := creditTokenPaymentTx(ctx, tx, signer, provider, providerPaymentID, input)
-	if err != nil {
-		return TokenReceipt{}, false, err
-	}
-	return receipt, created, tx.Commit()
-}
-
-func creditTokenPaymentTx(ctx context.Context, tx *sql.Tx, signer ed25519.PrivateKey, provider, providerPaymentID string, input tokenEventInput) (TokenReceipt, bool, error) {
-	var existingReceiptID string
-	err := tx.QueryRowContext(ctx, `
-SELECT receipt_id
-FROM token_processed_payments
-WHERE provider=?1 AND provider_payment_id=?2`, provider, providerPaymentID).Scan(&existingReceiptID)
-	if err == nil {
-		var existingAccountID, existingAssetID string
-		var existingAmount int64
-		if err := tx.QueryRowContext(ctx, `
-SELECT account_id,asset_id,amount
-FROM token_processed_payments
-WHERE provider=?1 AND provider_payment_id=?2`, provider, providerPaymentID).Scan(
-			&existingAccountID, &existingAssetID, &existingAmount); err != nil {
-			return TokenReceipt{}, false, err
-		}
-		if existingAccountID != input.AccountID || existingAssetID != waoziTokenAssetID || existingAmount != input.AmountDelta {
-			return TokenReceipt{}, false, errors.New("provider payment id collision")
-		}
-		receipt, found, err := tokenReceiptByIDTx(ctx, tx, existingReceiptID)
-		if err != nil {
-			return TokenReceipt{}, false, err
-		}
-		if !found {
-			return TokenReceipt{}, false, errors.New("processed payment receipt missing")
-		}
-		return receipt, false, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return TokenReceipt{}, false, err
-	}
-
-	receipt, err := insertTokenEventTx(ctx, tx, signer, input)
-	if err != nil {
-		return TokenReceipt{}, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_processed_payments(provider,provider_payment_id,account_id,asset_id,amount,receipt_id)
-VALUES(?1,?2,?3,?4,?5,?6)`, provider, providerPaymentID, input.AccountID,
-		waoziTokenAssetID, input.AmountDelta, receipt.ReceiptID); err != nil {
-		return TokenReceipt{}, false, err
-	}
-	return receipt, true, nil
-}
-
-func (s *Store) SpendTokens(ctx context.Context, signer ed25519.PrivateKey, input tokenEventInput, idempotencyKey string) (TokenReceipt, int64, bool, error) {
-	if input.AmountDelta >= 0 {
-		return TokenReceipt{}, 0, false, errors.New("spend amount must be negative")
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return TokenReceipt{}, 0, false, err
-	}
-	defer tx.Rollback()
-
-	requestHash := tokenSpendRequestHash(input)
-	var existingReceiptID string
-	var existingRequestHash string
-	err = tx.QueryRowContext(ctx, `
-SELECT receipt_id,request_hash
-FROM token_spend_nonces
-WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3`,
-		input.AccountID, input.AppID, idempotencyKey).Scan(&existingReceiptID, &existingRequestHash)
-	if err == nil {
-		if existingRequestHash != "" && existingRequestHash != requestHash {
-			return TokenReceipt{}, 0, false, errors.New("idempotency key reused for different spend")
-		}
-		receipt, found, err := tokenReceiptByIDTx(ctx, tx, existingReceiptID)
-		if err != nil {
-			return TokenReceipt{}, 0, false, err
-		}
-		if !found {
-			return TokenReceipt{}, 0, false, errors.New("spend receipt missing")
-		}
-		balance, err := tokenBalanceTx(ctx, tx, input.AccountID, waoziTokenAssetID)
-		if err != nil {
-			return TokenReceipt{}, 0, false, err
-		}
-		return receipt, balance, false, tx.Commit()
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return TokenReceipt{}, 0, false, err
-	}
-
-	balance, err := tokenBalanceTx(ctx, tx, input.AccountID, waoziTokenAssetID)
-	if err != nil {
-		return TokenReceipt{}, 0, false, err
-	}
-	if balance+input.AmountDelta < 0 {
-		return TokenReceipt{}, balance, false, errors.New("insufficient balance")
-	}
-	receipt, err := insertTokenEventTx(ctx, tx, signer, input)
-	if err != nil {
-		return TokenReceipt{}, 0, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_spend_nonces(account_id,app_id,idempotency_key,receipt_id,request_hash)
-VALUES(?1,?2,?3,?4,?5)`, input.AccountID, input.AppID, idempotencyKey, receipt.ReceiptID, requestHash); err != nil {
-		return TokenReceipt{}, 0, false, err
-	}
-	balance += input.AmountDelta
-	return receipt, balance, true, tx.Commit()
-}
-
-func tokenSpendRequestHash(input tokenEventInput) string {
-	payload, _ := json.Marshal(input)
-	return Signing_SHA256Hex(payload)
-}
-
-func insertTokenEventTx(ctx context.Context, tx *sql.Tx, signer ed25519.PrivateKey, input tokenEventInput) (TokenReceipt, error) {
-	if len(signer) != ed25519.PrivateKeySize {
-		return TokenReceipt{}, errTokenIssuerReadOnly
-	}
-	if err := validateTokenEventInput(input); err != nil {
-		return TokenReceipt{}, err
-	}
-	var previousHash sql.NullString
-	var previousSeq sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `
-SELECT ledger_seq,event_hash
-FROM token_ledger
-ORDER BY ledger_seq DESC
-LIMIT 1`).Scan(&previousSeq, &previousHash); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return TokenReceipt{}, err
-	}
-	ledgerSeq := int64(1)
-	if previousSeq.Valid {
-		ledgerSeq = previousSeq.Int64 + 1
-	}
-	resource := ResourceId_New()
-	receiptID, err := resource.Value, resource.Error
-	if err != nil {
-		return TokenReceipt{}, err
-	}
-	createdAt := time.Now().UTC().Format(time.RFC3339)
-	payload := tokenReceiptPayload{
-		ReceiptID:    receiptID,
-		IssuerID:     waoziIssuerID,
-		AssetID:      waoziTokenAssetID,
-		AccountID:    input.AccountID,
-		AppID:        input.AppID,
-		EventType:    input.EventType,
-		AmountDelta:  input.AmountDelta,
-		LedgerSeq:    ledgerSeq,
-		PreviousHash: previousHash.String,
-		CreatedAt:    createdAt,
-		SourceType:   input.SourceType,
-		SourceRef:    input.SourceRef,
-	}
-	eventHash := hashTokenReceiptPayload(payload)
-	payload.EventHash = eventHash
-	signature := ed25519.Sign(signer, canonicalTokenReceiptPayload(payload))
-	receipt := tokenReceiptFromPayload(payload, signature)
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_ledger(receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,
-	ledger_seq,previous_hash,event_hash,signature,created_at,source_type,source_ref)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)`,
-		receipt.ReceiptID, receipt.IssuerID, receipt.AssetID, receipt.AccountID,
-		receipt.AppID, receipt.EventType, receipt.AmountDelta, receipt.LedgerSeq,
-		receipt.PreviousHash, receipt.EventHash, receipt.Signature, receipt.CreatedAt,
-		receipt.SourceType, receipt.SourceRef); err != nil {
-		return TokenReceipt{}, err
-	}
-	return receipt, nil
-}
-
-func validateTokenEventInput(input tokenEventInput) error {
-	if !Identity_ValidUserID(input.AccountID) {
-		return errors.New("invalid account_id")
-	}
-	if input.AppID != "" && !Identity_ValidNamespace(input.AppID) {
-		return errors.New("invalid app_id")
-	}
-	if input.EventType != "credit" && input.EventType != "debit" {
-		return errors.New("invalid event_type")
-	}
-	if input.AmountDelta == 0 {
-		return errors.New("amount required")
-	}
-	if input.EventType == "credit" && input.AmountDelta < 0 {
-		return errors.New("credit amount must be positive")
-	}
-	if input.EventType == "debit" && input.AmountDelta > 0 {
-		return errors.New("debit amount must be negative")
-	}
-	if !Identity_ValidNamespace(input.SourceType) || strings.TrimSpace(input.SourceRef) == "" || len(input.SourceRef) > 256 {
-		return errors.New("invalid source")
-	}
-	return nil
-}
-
-func tokenReceiptByIDTx(ctx context.Context, tx *sql.Tx, receiptID string) (TokenReceipt, bool, error) {
-	row := tx.QueryRowContext(ctx, `
-SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,
-	previous_hash,event_hash,created_at,source_type,source_ref,signature
-FROM token_ledger
-WHERE receipt_id=?1`, receiptID)
-	receipt, err := scanTokenReceipt(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return TokenReceipt{}, false, nil
-	}
-	if err != nil {
-		return TokenReceipt{}, false, err
-	}
-	return receipt, true, nil
-}
-
-func tokenBalanceTx(ctx context.Context, tx *sql.Tx, accountID, assetID string) (int64, error) {
-	var balance sql.NullInt64
-	err := tx.QueryRowContext(ctx, `
-SELECT SUM(amount_delta)
-FROM token_ledger
-WHERE account_id=?1 AND asset_id=?2`, accountID, assetID).Scan(&balance)
-	if err != nil {
-		return 0, err
-	}
-	if !balance.Valid {
-		return 0, nil
-	}
-	return balance.Int64, nil
-}
-
-func tokenReceiptFromPayload(payload tokenReceiptPayload, signature []byte) TokenReceipt {
-	return TokenReceipt{
-		ReceiptID:    payload.ReceiptID,
-		IssuerID:     payload.IssuerID,
-		AssetID:      payload.AssetID,
-		AccountID:    payload.AccountID,
-		AppID:        payload.AppID,
-		EventType:    payload.EventType,
-		AmountDelta:  payload.AmountDelta,
-		LedgerSeq:    payload.LedgerSeq,
-		PreviousHash: payload.PreviousHash,
-		EventHash:    payload.EventHash,
-		CreatedAt:    payload.CreatedAt,
-		SourceType:   payload.SourceType,
-		SourceRef:    payload.SourceRef,
-		Signature:    hex.EncodeToString(signature),
-	}
-}
-
-func canonicalTokenReceiptPayload(payload tokenReceiptPayload) []byte {
-	data, _ := json.Marshal(payload)
-	return append([]byte(tokenReceiptContext+"\n"), data...)
-}
-
-func hashTokenReceiptPayload(payload tokenReceiptPayload) string {
-	payload.EventHash = ""
-	sum := sha256.Sum256(canonicalTokenReceiptPayload(payload))
-	return hex.EncodeToString(sum[:])
-}
-
-func validTokenReceiptSignature(publicKey ed25519.PublicKey, receipt TokenReceipt) bool {
-	if len(publicKey) != ed25519.PublicKeySize {
-		return false
-	}
-	signature, err := hex.DecodeString(receipt.Signature)
-	if err != nil || len(signature) != ed25519.SignatureSize {
-		return false
-	}
-	payload := tokenReceiptPayload{
-		ReceiptID:    receipt.ReceiptID,
-		IssuerID:     receipt.IssuerID,
-		AssetID:      receipt.AssetID,
-		AccountID:    receipt.AccountID,
-		AppID:        receipt.AppID,
-		EventType:    receipt.EventType,
-		AmountDelta:  receipt.AmountDelta,
-		LedgerSeq:    receipt.LedgerSeq,
-		PreviousHash: receipt.PreviousHash,
-		EventHash:    receipt.EventHash,
-		CreatedAt:    receipt.CreatedAt,
-		SourceType:   receipt.SourceType,
-		SourceRef:    receipt.SourceRef,
-	}
-	return receipt.EventHash == hashTokenReceiptPayload(payload) &&
-		ed25519.Verify(publicKey, canonicalTokenReceiptPayload(payload), signature)
 }
 
 func (s *Server) tokenIssuerStatus() string {
@@ -522,7 +78,8 @@ func hasMoneroTokenProduct(products map[string]TokenProduct) bool {
 }
 
 func (s *Server) handleTokenAssets(w http.ResponseWriter, r *http.Request) {
-	assets, err := s.store.TokenAssets(r.Context())
+	assetsResult := TokenAssets_List(s.store.db, r.Context())
+	assets, err := assetsResult.Value, assetsResult.Error
 	if err != nil {
 		slog.Error("list token assets", "error", err)
 		Response_Error(w, http.StatusInternalServerError, "token assets failed")
@@ -566,9 +123,11 @@ func (s *Server) handleTokenBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	var balance int64
 	if appScoped {
-		balance, err = s.store.TokenAppBalance(r.Context(), userID, waoziTokenAssetID, appID)
+		appBalanceResult := TokenLedger_AppBalance(s.store.db, r.Context(), userID, waoziTokenAssetID, appID)
+		balance, err = appBalanceResult.Value, appBalanceResult.Error
 	} else {
-		balance, err = s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
+		balanceResult := TokenLedger_Balance(s.store.db, r.Context(), userID, waoziTokenAssetID)
+		balance, err = balanceResult.Value, balanceResult.Error
 	}
 	if err != nil {
 		slog.Error("token balance", "user", LogSafety_LogText(userID), "error", err)
@@ -596,9 +155,11 @@ func (s *Server) handleTokenLedger(w http.ResponseWriter, r *http.Request) {
 	}
 	var events []TokenReceipt
 	if appScoped {
-		events, err = s.store.TokenAppLedger(r.Context(), userID, waoziTokenAssetID, appID, since)
+		appLedgerResult := TokenLedger_AppList(s.store.db, r.Context(), userID, waoziTokenAssetID, appID, since)
+		events, err = appLedgerResult.Value, appLedgerResult.Error
 	} else {
-		events, err = s.store.TokenLedger(r.Context(), userID, waoziTokenAssetID, since)
+		ledgerResult := TokenLedger_List(s.store.db, r.Context(), userID, waoziTokenAssetID, since)
+		events, err = ledgerResult.Value, ledgerResult.Error
 	}
 	if err != nil {
 		slog.Error("token ledger", "user", LogSafety_LogText(userID), "error", err)
@@ -619,7 +180,8 @@ func (s *Server) handleTokenReceipt(w http.ResponseWriter, r *http.Request) {
 		Response_Error(w, http.StatusTooManyRequests, "too many receipt requests")
 		return
 	}
-	receipt, found, err := s.store.TokenReceipt(r.Context(), receiptID)
+	receiptResult := TokenLedger_ByID(s.store.db, r.Context(), receiptID)
+	receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 	if err != nil {
 		slog.Error("token receipt", "receipt", LogSafety_LogText(receiptID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "token receipt failed")
@@ -678,14 +240,15 @@ func (s *Server) handleTokenSpend(w http.ResponseWriter, r *http.Request) {
 	if req.Metadata != "" {
 		sourceRef += ":" + shortHash(req.Metadata)
 	}
-	receipt, balance, _, err := s.store.SpendTokens(r.Context(), signer, tokenEventInput{
+	spendResult := TokenLedger_Spend(s.store.db, r.Context(), signer, TokenEventInput{
 		AccountID:   userID,
 		AppID:       req.AppID,
 		EventType:   "debit",
 		AmountDelta: -req.Amount,
 		SourceType:  "spend",
 		SourceRef:   sourceRef,
-	}, req.IdempotencyKey)
+	}, req.IdempotencyKey, errTokenIssuerReadOnly)
+	receipt, balance, _, err := spendResult.Value, spendResult.Balance, spendResult.Created, spendResult.Error
 	if err != nil {
 		if strings.Contains(err.Error(), "insufficient balance") {
 			Response_Error(w, http.StatusConflict, "insufficient balance")
@@ -755,14 +318,15 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 		writePaymentError(w, err)
 		return
 	}
-	receipt, _, err := s.store.CreditTokenPayment(r.Context(), signer, "google_play", paymentID, tokenEventInput{
+	paymentResult := TokenLedger_CreditPayment(s.store.db, r.Context(), signer, "google_play", paymentID, TokenEventInput{
 		AccountID:   userID,
 		AppID:       req.AppID,
 		EventType:   "credit",
 		AmountDelta: product.TokenUnits,
 		SourceType:  "google_play",
 		SourceRef:   paymentID,
-	})
+	}, errTokenIssuerReadOnly)
+	receipt, _, err := paymentResult.Value, paymentResult.Created, paymentResult.Error
 	if err != nil {
 		slog.Error("google token credit", "user", LogSafety_LogText(userID), "payment", LogSafety_LogText(paymentID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "token credit failed")
@@ -771,7 +335,8 @@ func (s *Server) handleGooglePurchaseVerify(w http.ResponseWriter, r *http.Reque
 	if err := consumeGooglePlayPurchase(r.Context(), s.cfg, req); err != nil {
 		slog.Warn("google purchase consume failed after token credit", "user", LogSafety_LogText(userID), "payment", LogSafety_LogText(paymentID), "error", err)
 	}
-	balance, err := s.store.TokenBalance(r.Context(), userID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(s.store.db, r.Context(), userID, waoziTokenAssetID)
+	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusInternalServerError, "token balance failed")
 		return
@@ -874,14 +439,15 @@ func (s *Server) trySettleOrExpireMoneroInvoice(ctx context.Context, userID stri
 	// A fully-covered invoice settles even after expiry: funds arriving
 	// late must never disappear into an expired row.
 	if payment.ConfirmedAtomic >= invoice.AtomicAmount {
-		receipt, _, err := s.store.CreditTokenPayment(ctx, signer, "monero", payment.PaymentID, tokenEventInput{
+		paymentResult := TokenLedger_CreditPayment(s.store.db, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
 			AccountID:   userID,
 			AppID:       invoice.AppID,
 			EventType:   "credit",
 			AmountDelta: invoice.TokenUnits,
 			SourceType:  "monero",
 			SourceRef:   payment.PaymentID,
-		})
+		}, errTokenIssuerReadOnly)
+		receipt, _, err := paymentResult.Value, paymentResult.Created, paymentResult.Error
 		if err != nil {
 			return MoneroInvoiceResponse{}, err
 		}
@@ -927,14 +493,15 @@ func (s *Server) reconcileMoneroExpiredInvoices(ctx context.Context, limit int) 
 			continue
 		}
 		if payment.ConfirmedAtomic >= item.Invoice.AtomicAmount {
-			receipt, _, err := s.store.CreditTokenPayment(ctx, signer, "monero", payment.PaymentID, tokenEventInput{
+			paymentResult := TokenLedger_CreditPayment(s.store.db, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
 				AccountID:   item.AccountID,
 				AppID:       item.Invoice.AppID,
 				EventType:   "credit",
 				AmountDelta: item.Invoice.TokenUnits,
 				SourceType:  "monero",
 				SourceRef:   payment.PaymentID,
-			})
+			}, errTokenIssuerReadOnly)
+			receipt, _, err := paymentResult.Value, paymentResult.Created, paymentResult.Error
 			if err != nil {
 				slog.Warn("expired monero invoice credit failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", err)
 				continue
@@ -1008,7 +575,8 @@ func (s *Server) reconcileMoneroInvoices(ctx context.Context, limit int) error {
 }
 
 func (s *Server) handleTokenCheckpointLatest(w http.ResponseWriter, r *http.Request) {
-	checkpoint, found, err := s.store.LatestTokenCheckpoint(r.Context())
+	checkpointResult := TokenCheckpoint_Latest(s.store.db, r.Context())
+	checkpoint, found, err := checkpointResult.Value, checkpointResult.Found, checkpointResult.Error
 	if err != nil {
 		slog.Error("token checkpoint", "error", err)
 		Response_Error(w, http.StatusInternalServerError, "token checkpoint failed")
@@ -1052,19 +620,21 @@ func (s *Server) handleAdminManualCredit(w http.ResponseWriter, r *http.Request)
 	if req.SourceRef == "" {
 		req.SourceRef = "manual:" + time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	receipt, _, err := s.store.CreditTokenPayment(r.Context(), signer, "admin", req.SourceRef, tokenEventInput{
+	paymentResult := TokenLedger_CreditPayment(s.store.db, r.Context(), signer, "admin", req.SourceRef, TokenEventInput{
 		AccountID:   req.AccountID,
 		AppID:       req.AppID,
 		EventType:   "credit",
 		AmountDelta: req.Amount,
 		SourceType:  "admin",
 		SourceRef:   req.SourceRef,
-	})
+	}, errTokenIssuerReadOnly)
+	receipt, _, err := paymentResult.Value, paymentResult.Created, paymentResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	balance, err := s.store.TokenBalance(r.Context(), req.AccountID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(s.store.db, r.Context(), req.AccountID, waoziTokenAssetID)
+	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusInternalServerError, "token balance failed")
 		return
@@ -1081,7 +651,8 @@ func (s *Server) handleAdminTokenCheckpoint(w http.ResponseWriter, r *http.Reque
 		Response_Error(w, http.StatusServiceUnavailable, "token issuer unavailable")
 		return
 	}
-	checkpoint, err := s.store.CreateTokenCheckpoint(r.Context(), signer)
+	checkpointResult := TokenCheckpoint_Create(s.store.db, r.Context(), signer, errTokenIssuerReadOnly)
+	checkpoint, err := checkpointResult.Value, checkpointResult.Error
 	if err != nil {
 		slog.Error("create token checkpoint", "error", err)
 		Response_Error(w, http.StatusInternalServerError, "token checkpoint failed")
@@ -1507,7 +1078,8 @@ WHERE account_id=?1 AND id=?2 AND provider='monero'`, accountID, id).Scan(
 		return MoneroInvoiceResponse{}, false, err
 	}
 	if receiptID != "" {
-		receipt, found, err := s.TokenReceipt(ctx, receiptID)
+		receiptResult := TokenLedger_ByID(s.db, ctx, receiptID)
+		receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 		if err != nil {
 			return MoneroInvoiceResponse{}, false, err
 		}
@@ -1545,7 +1117,8 @@ LIMIT ?1`, limit)
 			return nil, err
 		}
 		if receiptID != "" {
-			receipt, found, err := s.TokenReceipt(ctx, receiptID)
+			receiptResult := TokenLedger_ByID(s.db, ctx, receiptID)
+			receipt, found, err := receiptResult.Value, receiptResult.Found, receiptResult.Error
 			if err != nil {
 				return nil, err
 			}
@@ -1755,68 +1328,4 @@ func moneroRPC(ctx context.Context, cfg Config, method string, params map[string
 		return fmt.Errorf("monero rpc error: %s", wrapper.Error.Message)
 	}
 	return json.Unmarshal(wrapper.Result, out)
-}
-
-func (s *Store) CreateTokenCheckpoint(ctx context.Context, signer ed25519.PrivateKey) (TokenCheckpoint, error) {
-	if len(signer) != ed25519.PrivateKeySize {
-		return TokenCheckpoint{}, errTokenIssuerReadOnly
-	}
-	rows, err := s.db.QueryContext(ctx, `
-SELECT ledger_seq,event_hash
-FROM token_ledger
-WHERE issuer_id=?1 AND asset_id=?2
-ORDER BY ledger_seq`, waoziIssuerID, waoziTokenAssetID)
-	if err != nil {
-		return TokenCheckpoint{}, err
-	}
-	defer rows.Close()
-	root := bytes.NewBuffer(nil)
-	var seq int64
-	for rows.Next() {
-		var hash string
-		if err := rows.Scan(&seq, &hash); err != nil {
-			return TokenCheckpoint{}, err
-		}
-		root.WriteString(hash)
-		root.WriteByte('\n')
-	}
-	if err := rows.Err(); err != nil {
-		return TokenCheckpoint{}, err
-	}
-	sum := sha256.Sum256(root.Bytes())
-	ledgerRoot := hex.EncodeToString(sum[:])
-	message := []byte(fmt.Sprintf("ksync-token-checkpoint-v1\n%s\n%s\n%d\n%s\n",
-		waoziIssuerID, waoziTokenAssetID, seq, ledgerRoot))
-	signature := hex.EncodeToString(ed25519.Sign(signer, message))
-	_, err = s.db.ExecContext(ctx, `
-INSERT INTO token_checkpoints(ledger_seq,issuer_id,asset_id,ledger_root,signature)
-VALUES(?1,?2,?3,?4,?5)
-ON CONFLICT(ledger_seq) DO UPDATE SET
-	ledger_root=excluded.ledger_root,
-	signature=excluded.signature,
-	created_at=CURRENT_TIMESTAMP`, seq, waoziIssuerID, waoziTokenAssetID, ledgerRoot, signature)
-	if err != nil {
-		return TokenCheckpoint{}, err
-	}
-	checkpoint, found, err := s.LatestTokenCheckpoint(ctx)
-	if err != nil || !found {
-		return TokenCheckpoint{}, err
-	}
-	return checkpoint, nil
-}
-
-func (s *Store) LatestTokenCheckpoint(ctx context.Context) (TokenCheckpoint, bool, error) {
-	var out TokenCheckpoint
-	err := s.db.QueryRowContext(ctx, `
-SELECT ledger_seq,issuer_id,asset_id,ledger_root,signature,created_at
-FROM token_checkpoints
-ORDER BY ledger_seq DESC
-LIMIT 1`).Scan(&out.LedgerSeq, &out.IssuerID, &out.AssetID, &out.LedgerRoot, &out.Signature, &out.CreatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return TokenCheckpoint{}, false, nil
-	}
-	if err != nil {
-		return TokenCheckpoint{}, false, err
-	}
-	return out, true, nil
 }

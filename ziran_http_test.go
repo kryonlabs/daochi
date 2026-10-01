@@ -146,6 +146,10 @@ func registryHTTPFixture(t *testing.T) (*Server, string, ed25519.PrivateKey) {
 	}
 	if _, err := store.db.Exec(`
 UPDATE server_apps SET created_at='fixture',updated_at='fixture';
+UPDATE server_app_collections SET created_at='fixture';
+CREATE TRIGGER collection_clock_insert AFTER INSERT ON server_app_collections BEGIN
+ UPDATE server_app_collections SET created_at='fixture' WHERE app_id=NEW.app_id AND collection_prefix=NEW.collection_prefix;
+END;
 CREATE TRIGGER app_clock_insert AFTER INSERT ON server_apps BEGIN
  UPDATE server_apps SET created_at='fixture',updated_at='fixture' WHERE app_id=NEW.app_id;
 END;

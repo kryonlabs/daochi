@@ -59,7 +59,8 @@ func TestExpiredMoneroInvoiceLatePaymentCredited(t *testing.T) {
 	if err := server.reconcileMoneroExpiredInvoices(context.Background(), 50); err != nil {
 		t.Fatal(err)
 	}
-	balance, err := store.TokenBalance(context.Background(), identity.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, waoziTokenAssetID)
+	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 5000000 {
 		t.Fatalf("late payment balance=%d err=%v, want 5000000", balance, err)
 	}
@@ -82,7 +83,8 @@ func TestMoneroInvoicePartialPaymentsAccumulate(t *testing.T) {
 	if err := server.reconcileMoneroInvoices(context.Background(), 100); err != nil {
 		t.Fatal(err)
 	}
-	balance, err := store.TokenBalance(context.Background(), identity.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, waoziTokenAssetID)
+	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 5000000 {
 		t.Fatalf("top-up balance=%d err=%v, want 5000000", balance, err)
 	}
@@ -109,7 +111,8 @@ func TestMoneroExpiredInvoicePartialFundsReportedStuck(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	balance, err := store.TokenBalance(context.Background(), identity.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), identity.UserID, waoziTokenAssetID)
+	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 0 {
 		t.Fatalf("partial expired invoice must not credit: balance=%d err=%v", balance, err)
 	}

@@ -1,0 +1,112 @@
+#import "protocol"
+#import "std/go_types"
+receipts :: #import "token_receipt";
+signing :: #import "signing";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+ed :: #import "std/ed25519_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+go_sql :: #system_library "go:database/sql";
+go_bytes :: #system_library "go:bytes";
+go_hex :: #system_library "go:encoding/hex";
+go_format :: #system_library "go:fmt";
+builtin :: #system_library "go:builtin";
+
+CheckpointResult :: struct {
+    value: TokenCheckpoint
+    found: bool
+    error: Error
+}
+
+#scope_file
+Buffer :: #type #foreign go_bytes "Buffer";
+RowsResult :: struct {
+    value: *sql.Rows
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+WriteResult :: struct {
+    count: isize
+    error: Error
+}
+KeyLength :: (key: ed.PrivateKey) -> isize #foreign builtin "len";
+QueryRows :: (database: *sql.Database, context: ctx.Context, query: string, issuerID: string, assetID: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+QueryLatest :: (database: *sql.Database, context: ctx.Context, query: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
+ScanHash :: (rows: *sql.Rows, sequence: *s64, hash: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanLatest :: (row: *sql.Row, sequence: *s64, issuerID: *string, assetID: *string, root: *string, signature: *string, created: *string) -> Error #foreign go_sql "(*Row).Scan";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+NewBuffer :: (value: []u8) -> *Buffer #foreign go_bytes;
+WriteString :: (buffer: *Buffer, value: string) -> WriteResult #go_results #foreign go_bytes "(*Buffer).WriteString";
+WriteByte :: (buffer: *Buffer, value: u8) -> Error #foreign go_bytes "(*Buffer).WriteByte";
+Bytes :: (buffer: *Buffer) -> []u8 #foreign go_bytes "(*Buffer).Bytes";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+FormatMessage :: (format: string, issuerID: string, assetID: string, sequence: s64, root: string) -> string #foreign go_format "Sprintf";
+Insert :: (database: *sql.Database, context: ctx.Context, query: string, sequence: s64, issuerID: string, assetID: string, root: string, signature: string) -> ExecResult #go_results #foreign go_sql "(*DB).ExecContext";
+
+#scope_export
+Latest :: (database: *sql.Database, context: ctx.Context) -> CheckpointResult {
+    result: CheckpointResult
+    item: TokenCheckpoint
+    result.error = ScanLatest(QueryLatest(database, context,
+        "SELECT ledger_seq,issuer_id,asset_id,ledger_root,signature,created_at\nFROM token_checkpoints\nORDER BY ledger_seq DESC\nLIMIT 1"),
+        *item.LedgerSeq, *item.IssuerID, *item.AssetID, *item.LedgerRoot,
+        *item.Signature, *item.CreatedAt)
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error == null {
+        result.value = item
+        result.found = true
+    }
+    return result
+}
+
+Create :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, unavailable: Error) -> CheckpointResult {
+    result: CheckpointResult
+    if KeyLength(signer) != cast(isize)64 {
+        result.error = unavailable
+        return result
+    }
+    queried := QueryRows(database, context,
+        "SELECT ledger_seq,event_hash\nFROM token_ledger\nWHERE issuer_id=?1 AND asset_id=?2\nORDER BY ledger_seq",
+        receipts.IssuerID, receipts.AssetID)
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    initial: []u8
+    buffer := NewBuffer(initial)
+    sequence: s64
+    while sql.Next(rows) {
+        hash: string
+        result.error = ScanHash(rows, *sequence, *hash)
+        if result.error != null {
+            return result
+        }
+        WriteString(buffer, hash)
+        WriteByte(buffer, cast(u8)10)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error != null {
+        return result
+    }
+    root := signing.SHA256Hex(Bytes(buffer))
+    message := text.ToBytes(FormatMessage("ksync-token-checkpoint-v1\n%s\n%s\n%d\n%s\n",
+        receipts.IssuerID, receipts.AssetID, sequence, root))
+    signature := EncodeHex(ed.Sign(signer, message))
+    written := Insert(database, context,
+        "INSERT INTO token_checkpoints(ledger_seq,issuer_id,asset_id,ledger_root,signature)\nVALUES(?1,?2,?3,?4,?5)\nON CONFLICT(ledger_seq) DO UPDATE SET\nledger_root=excluded.ledger_root,\nsignature=excluded.signature,\ncreated_at=CURRENT_TIMESTAMP",
+        sequence, receipts.IssuerID, receipts.AssetID, root, signature)
+    result.error = written.error
+    if result.error != null {
+        return result
+    }
+    return Latest(database, context)
+}

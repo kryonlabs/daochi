@@ -4,18 +4,61 @@ package main
 import sql "database/sql"
 
 // #import std_go_types
-type zir_7c100c35610e9bbb_ExecResult struct {
+// #import protocol
+type AssetsResult struct {
+	Value []TokenAsset
+	Error Error
+}
+
+type zir_633f42e568181bb2_ExecResult struct {
 	Value Result
 	Error Error
 }
 
-func TokenAssets_Execute(Database *Database, Context Context, Query string) zir_7c100c35610e9bbb_ExecResult {
-	var result zir_7c100c35610e9bbb_ExecResult
+type zir_c6ad07e29a44374e_RowsResult struct {
+	Value *Rows
+	Error Error
+}
+
+func TokenAssets_Query(Database *Database, Context Context, Query string) zir_c6ad07e29a44374e_RowsResult {
+	var result zir_c6ad07e29a44374e_RowsResult
+	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query)
+	return result
+}
+
+func TokenAssets_Execute(Database *Database, Context Context, Query string) zir_633f42e568181bb2_ExecResult {
+	var result zir_633f42e568181bb2_ExecResult
 	result.Value, result.Error = (*sql.DB).ExecContext(Database, Context, Query)
 	return result
 }
 
 const SeedQuery = "INSERT INTO token_assets(issuer_id,asset_id,display_name,decimals,status)\nVALUES('waozi','waozi:token','Chi',6,'active')\nON CONFLICT(asset_id) DO UPDATE SET\n    issuer_id=excluded.issuer_id,\n    display_name=excluded.display_name,\n    decimals=excluded.decimals,\n    status=excluded.status,\n    updated_at=CURRENT_TIMESTAMP\n"
+
+func TokenAssets_List(database *Database, context Context) AssetsResult {
+	var result AssetsResult = AssetsResult{}
+	var value_0 string = "SELECT issuer_id,asset_id,display_name,decimals,status\nFROM token_assets\nORDER BY issuer_id,asset_id"
+	queried := TokenAssets_Query(database, context, value_0)
+	result.Error = queried.Error
+	if result.Error != nil {
+		return result
+	}
+	rows := queried.Value
+	defer (*sql.Rows).Close(rows)
+	var values []TokenAsset = nil
+	for StdSqlGo_Next(rows) {
+		var item TokenAsset = TokenAsset{}
+		var value_1 Error = (*sql.Rows).Scan(rows, &(item.IssuerID), &(item.AssetID), &(item.DisplayName), &(item.Decimals), &(item.Status))
+		result.Error = value_1
+		if result.Error != nil {
+			return result
+		}
+		values = append(values, item)
+	}
+	result.Value = values
+	var value_2 Error = StdSqlGo_RowsError(rows)
+	result.Error = value_2
+	return result
+}
 
 func TokenAssets_Seed(database *Database, context Context) Error {
 	var value_0 string = "INSERT INTO token_assets(issuer_id,asset_id,display_name,decimals,status)\nVALUES('waozi','waozi:token','Chi',6,'active')\nON CONFLICT(asset_id) DO UPDATE SET\n    issuer_id=excluded.issuer_id,\n    display_name=excluded.display_name,\n    decimals=excluded.decimals,\n    status=excluded.status,\n    updated_at=CURRENT_TIMESTAMP\n"

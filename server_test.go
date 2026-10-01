@@ -155,7 +155,7 @@ func TestWaoziTokenCreditSpendAndIdempotency(t *testing.T) {
 	}
 	if creditPayload.Balance != 5000000 ||
 		creditPayload.Receipt.AssetID != waoziTokenAssetID ||
-		!validTokenReceiptSignature(publicKey, creditPayload.Receipt) {
+		!TokenReceipt_ValidSignature(publicKey, creditPayload.Receipt) {
 		t.Fatalf("unexpected credit payload: %#v", creditPayload)
 	}
 
@@ -169,7 +169,7 @@ func TestWaoziTokenCreditSpendAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	if spendPayload.Balance != 3000000 || spendPayload.Receipt.AmountDelta != -2000000 ||
-		!validTokenReceiptSignature(publicKey, spendPayload.Receipt) {
+		!TokenReceipt_ValidSignature(publicKey, spendPayload.Receipt) {
 		t.Fatalf("unexpected spend payload: %#v", spendPayload)
 	}
 
@@ -261,7 +261,7 @@ func TestTokenProductsAndMoneroInvoiceSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	if paidInvoice.Status != "paid" || paidInvoice.PaymentID != "tx-small:0:7" ||
-		paidInvoice.Receipt == nil || !validTokenReceiptSignature(publicKey, *paidInvoice.Receipt) {
+		paidInvoice.Receipt == nil || !TokenReceipt_ValidSignature(publicKey, *paidInvoice.Receipt) {
 		t.Fatalf("unexpected paid invoice: %#v", paidInvoice)
 	}
 
@@ -446,7 +446,8 @@ func TestPermanentMoneroAddressPurchaseAndGift(t *testing.T) {
 	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balance, err := store.TokenBalance(context.Background(), recipient.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, waoziTokenAssetID)
+	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil || balance != 10000000 {
 		t.Fatalf("gift balance=%d err=%v, want 10000000", balance, err)
 	}
@@ -484,7 +485,8 @@ func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
 	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balance, _ := store.TokenBalance(context.Background(), recipient.UserID, waoziTokenAssetID)
+	balanceResult := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, waoziTokenAssetID)
+	balance, _ := balanceResult.Value, balanceResult.Error
 	if balance != 0 {
 		t.Fatalf("locked deposit credited balance=%d", balance)
 	}
@@ -495,7 +497,8 @@ func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
 	if err := server.reconcileMoneroAccountDeposits(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	balance, _ = store.TokenBalance(context.Background(), recipient.UserID, waoziTokenAssetID)
+	balanceResult2 := TokenLedger_Balance(store.db, context.Background(), recipient.UserID, waoziTokenAssetID)
+	balance, _ = balanceResult2.Value, balanceResult2.Error
 	if balance != 5000000 {
 		t.Fatalf("unlocked deposit balance=%d, want 5000000", balance)
 	}
@@ -509,25 +512,27 @@ func TestProcessedPaymentCollisionRejected(t *testing.T) {
 	}
 	first := strings.Repeat("a", 64)
 	second := strings.Repeat("b", 64)
-	_, _, err = store.CreditTokenPayment(context.Background(), privateKey, "monero", "tx:0:7", tokenEventInput{
+	paymentResult := TokenLedger_CreditPayment(store.db, context.Background(), privateKey, "monero", "tx:0:7", TokenEventInput{
 		AccountID:   first,
 		AppID:       "inbe",
 		EventType:   "credit",
 		AmountDelta: 5000000,
 		SourceType:  "monero",
 		SourceRef:   "tx:0:7",
-	})
+	}, errTokenIssuerReadOnly)
+	_, _, err = paymentResult.Value, paymentResult.Created, paymentResult.Error
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = store.CreditTokenPayment(context.Background(), privateKey, "monero", "tx:0:7", tokenEventInput{
+	paymentResult2 := TokenLedger_CreditPayment(store.db, context.Background(), privateKey, "monero", "tx:0:7", TokenEventInput{
 		AccountID:   second,
 		AppID:       "inbe",
 		EventType:   "credit",
 		AmountDelta: 5000000,
 		SourceType:  "monero",
 		SourceRef:   "tx:0:7",
-	})
+	}, errTokenIssuerReadOnly)
+	_, _, err = paymentResult2.Value, paymentResult2.Created, paymentResult2.Error
 	if err == nil || !strings.Contains(err.Error(), "collision") {
 		t.Fatalf("expected collision, got %v", err)
 	}

@@ -1,0 +1,139 @@
+#import "protocol"
+#import "std/go_types"
+identity :: #import "identity";
+signing :: #import "signing";
+json :: #import "std/json_go";
+ed :: #import "std/ed25519_go";
+errors :: #import "std/errors_go";
+text :: #import "std/text_go";
+go_strings :: #system_library "go:strings";
+go_hex :: #system_library "go:encoding/hex";
+builtin :: #system_library "go:builtin";
+
+TokenEventInput :: struct {
+    AccountID: string
+    AppID: string
+    EventType: string
+    AmountDelta: s64
+    SourceType: string
+    SourceRef: string
+}
+ReceiptPayload :: struct {
+    ReceiptID: string #go_tag "json:\"receipt_id\""
+    IssuerID: string #go_tag "json:\"issuer_id\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    AccountID: string #go_tag "json:\"account_id\""
+    AppID: string #go_tag "json:\"app_id,omitempty\""
+    EventType: string #go_tag "json:\"event_type\""
+    AmountDelta: s64 #go_tag "json:\"amount_delta\""
+    LedgerSeq: s64 #go_tag "json:\"ledger_seq\""
+    PreviousHash: string #go_tag "json:\"previous_hash\""
+    EventHash: string #go_tag "json:\"event_hash\""
+    CreatedAt: string #go_tag "json:\"created_at\""
+    SourceType: string #go_tag "json:\"source_type\""
+    SourceRef: string #go_tag "json:\"source_ref\""
+}
+IssuerID :: "waozi";
+AssetID :: "waozi:token";
+
+#scope_file
+BytesResult :: struct {
+    value: []u8
+    error: Error
+}
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+DecodeHex :: (value: string) -> BytesResult #go_results #foreign go_hex "DecodeString";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+KeyLength :: (value: ed.PublicKey) -> isize #foreign builtin "len";
+
+#scope_export
+Validate :: (input: TokenEventInput) -> Error {
+    if !identity.ValidUserID(input.AccountID) {
+        return errors.New("invalid account_id")
+    }
+    if input.AppID != "" && !identity.ValidNamespace(input.AppID) {
+        return errors.New("invalid app_id")
+    }
+    if input.EventType != "credit" && input.EventType != "debit" {
+        return errors.New("invalid event_type")
+    }
+    if input.AmountDelta == 0 {
+        return errors.New("amount required")
+    }
+    if input.EventType == "credit" && input.AmountDelta < 0 {
+        return errors.New("credit amount must be positive")
+    }
+    if input.EventType == "debit" && input.AmountDelta > 0 {
+        return errors.New("debit amount must be negative")
+    }
+    if !identity.ValidNamespace(input.SourceType) || TrimSpace(input.SourceRef) == "" || input.SourceRef.count > 256 {
+        return errors.New("invalid source")
+    }
+    return null
+}
+
+SpendRequestHash :: (input: TokenEventInput) -> string {
+    return signing.SHA256Hex(json.Marshal(input).value)
+}
+
+Canonical :: (payload: ReceiptPayload) -> []u8 {
+    encoded := json.Marshal(payload)
+    parts: [2]string = .["ksync-token-receipt-v1\n", text.FromBytes(encoded.value)]
+    return text.ToBytes(Join(parts[:], ""))
+}
+
+Hash :: (payload: ReceiptPayload) -> string {
+    payload.EventHash = ""
+    return signing.SHA256Hex(Canonical(payload))
+}
+
+FromPayload :: (payload: ReceiptPayload, signature: []u8) -> TokenReceipt {
+    result: TokenReceipt
+    result.ReceiptID = payload.ReceiptID
+    result.IssuerID = payload.IssuerID
+    result.AssetID = payload.AssetID
+    result.AccountID = payload.AccountID
+    result.AppID = payload.AppID
+    result.EventType = payload.EventType
+    result.AmountDelta = payload.AmountDelta
+    result.LedgerSeq = payload.LedgerSeq
+    result.PreviousHash = payload.PreviousHash
+    result.EventHash = payload.EventHash
+    result.CreatedAt = payload.CreatedAt
+    result.SourceType = payload.SourceType
+    result.SourceRef = payload.SourceRef
+    result.Signature = EncodeHex(signature)
+    return result
+}
+
+Payload :: (receipt: TokenReceipt) -> ReceiptPayload {
+    result: ReceiptPayload
+    result.ReceiptID = receipt.ReceiptID
+    result.IssuerID = receipt.IssuerID
+    result.AssetID = receipt.AssetID
+    result.AccountID = receipt.AccountID
+    result.AppID = receipt.AppID
+    result.EventType = receipt.EventType
+    result.AmountDelta = receipt.AmountDelta
+    result.LedgerSeq = receipt.LedgerSeq
+    result.PreviousHash = receipt.PreviousHash
+    result.EventHash = receipt.EventHash
+    result.CreatedAt = receipt.CreatedAt
+    result.SourceType = receipt.SourceType
+    result.SourceRef = receipt.SourceRef
+    return result
+}
+
+ValidSignature :: (publicKey: ed.PublicKey, receipt: TokenReceipt) -> bool {
+    if KeyLength(publicKey) != cast(isize)32 {
+        return false
+    }
+    signature := DecodeHex(receipt.Signature)
+    if signature.error != null || signature.value.count != 64 {
+        return false
+    }
+    payload := Payload(receipt)
+    return receipt.EventHash == Hash(payload) &&
+        ed.Verify(publicKey, Canonical(payload), signature.value)
+}

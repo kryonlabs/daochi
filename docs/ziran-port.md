@@ -86,7 +86,7 @@ field names, Go storage types, order and reflection tags.
 | `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
 | `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
-| `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion request decoding, signature/user header selection, exported account-key parsing and transition helpers in `sync_request.zi`; sync/login/deletion orchestration, operational handlers, middleware and server construction remain Go |
+| `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion request decoding, signature/user header selection, exported account-key parsing and transition helpers in `sync_request.zi`; health, readiness, node information, metrics, live connection counts and account diagnostics HTTP handling in `operational_http.zi`; shared advertised capabilities in `node_info.zi`; sync/login/deletion orchestration, middleware, route wiring and server construction remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
 | `store.go` | Ziran implementation; Go adapters | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; incremental snapshots, clean projections and operation reads in `sync_views.zi`; exact state hashing in `state_hash.zi`; transactional session/round, habit/day, meditation and encrypted-record writes, timestamp-guarded deletions and data replacement in `sync_writes.zi`; sync transaction orchestration, operation materialization and idempotent operation logging in `sync_application.zi`; canonical UUID creation, legacy identifier mappings and payload rewriting in `habit_id.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; legacy UUID merging, operation rewriting, orphan recovery/cleanup, protocol-gated migrations and bulk account migration in `habit_migration.zi`; schema initialization and upgrades in `store_schema.zi`, database opening and ordered initialization in `store_open.zi`; public filesystem statistics, recent account/client usage and app/collection storage totals in `store_stats.zi`; health checks, table counts and account diagnostics in `store_diagnostics.zi`; Store type, forwarding methods and SQLite driver registration remain Go |
@@ -675,7 +675,26 @@ entry panics preserve database/sql's original retained-connection behavior;
 application row iterators release their owned connections on panic. Source and
 saved-IR checks run the full server suite with race detection.
 
-Seven handwritten production Go files remain, totaling 1,875 lines, including
+`operational_http.zi` owns health, readiness, node metadata, metrics and signed-in
+account diagnostics HTTP handling. Readiness preserves secret/verifier checks,
+issuer status, direct-purchase prerequisite order and database-error reporting.
+Node metadata retains known-peer nil/empty normalization, hexadecimal node keys,
+trimmed base URLs, protocol bounds and ordered advertised capabilities from
+`node_info.zi`. Metrics preserve optional admin authentication, live connection
+counts, database-failure fallbacks, logging and the stamped build version.
+Diagnostic requests preserve bearer/header checks, authentication counters,
+account-scoped report queries and error redaction. The remaining server methods
+only wire these handlers to their native dependencies.
+
+Independent fixtures retain the original handlers at `6cd0e7e`. Comparisons
+cover exact response bytes/headers/status, logs and counter changes, configured
+and public metrics access, legacy admin headers, missing/mismatched credentials,
+missing accounts, cancelled/closed databases, individual table failures, live
+subscriptions, Unicode/arbitrary string bytes, peer list shapes, typed-nil
+verifiers, readiness failure precedence and response/logger panics. Source and
+saved-IR verification run the complete server suite with race detection.
+
+Seven handwritten production Go files remain, totaling 1,752 lines, including
 forwarding adapters. Server construction and request orchestration, process
 startup, Store wiring, authentication error conversion and verifier integration
 still require porting. The Go regression tests and the final CLI, deployment
@@ -784,12 +803,13 @@ Protocol fields now support checked Go reflection tags, including JSON names
 and omission rules. Opaque foreign Go type declarations preserve imported
 type identity, interface values, zero values and custom JSON methods in source
 and saved IR. Go primitives now provide method calls, multiple results,
-HTTP field access, error interfaces and mutex synchronization. Network and
-database code still needs broader interface operations, reusable variadic SQL
-arguments, cancellation/deadline operations and worker lifecycle support.
-These are reusable compiler/runtime capabilities to implement upstream in
-Ziran as the corresponding application code moves; wrapping existing Go
-application functions does not complete their port.
+HTTP field access, error interfaces, mutex synchronization, variadic SQL
+arguments, cancellation/deadlines, native channel selection and worker callbacks.
+Remaining server work includes sync/login/deletion orchestration, middleware,
+native response-writer/interface integration, verifier integration and startup
+supervision. Add missing reusable compiler/runtime capabilities upstream in
+Ziran as that application code moves; wrapping existing Go application functions
+does not complete their port.
 
 Completion requires auditing every remaining production module, the test
 coverage, CLI and deployment paths, and compatibility with released clients.

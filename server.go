@@ -17,39 +17,13 @@ import (
 )
 
 const (
-	daochiSignatureContext          = "daochi-sync-v1"
-	legacySyncSignatureContext      = "ksync-sync-v1"
-	legacyInbeSignatureContext      = "inbe-sync-v1"
-	nodeUsageRecentWindowDays       = 30
-	webSocketConnectionLimitPerUser = 8
+	daochiSignatureContext     = "daochi-sync-v1"
+	legacySyncSignatureContext = "ksync-sync-v1"
+	legacyInbeSignatureContext = "inbe-sync-v1"
 )
 
 var errSignedTxReplay = errors.New("signed transaction replay")
 var errAppScopeNotOwned = errors.New("app does not own collection scope")
-
-var serverCapabilities = []string{
-	"aliases",
-	"friends",
-	"v3-typed-sync",
-	"v4-encrypted-records",
-	"v4-dual-write-transition",
-	"v5-encrypted-primary",
-	"v5-private-hierarchy",
-	"v5-dual-read",
-	"v5-legacy-encrypted-collections",
-	"protocol-v1-v5-valid-through-2027-09-01",
-	"protocol-previous-version-grace-days-365",
-	"v6-signed-transactions",
-	"v6-signed-app-manifests",
-	"profile-stats",
-	"pub-relay",
-	"node-mesh-encrypted-records",
-	"node-identity-v1",
-	"node-pairing-v1",
-	"trust-space-names-v1",
-	"monero-account-addresses",
-	"monero-gifts",
-}
 
 type Server struct {
 	cfg        Config
@@ -81,6 +55,18 @@ func NewServer(cfg Config, store *Store, verifier Verifier) *Server {
 		limiter:    RateLimit_New(),
 		metrics:    &ServerMetrics{},
 		node:       node.Value,
+	}
+}
+
+func (s *Server) operations() Operations {
+	return Operations{
+		Database:          s.store.db,
+		Path:              s.store.path,
+		Configuration:     &s.cfg,
+		Identity:          &s.node,
+		Notifications:     s.syncHub,
+		Counters:          s.metrics,
+		VerifierAvailable: s.verifier != nil,
 	}
 }
 
@@ -341,130 +327,28 @@ func (s *Server) Routes() http.Handler {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	Response_JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	OperationalHttp_Health(w, r)
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	checks := map[string]string{
-		"database":     "ok",
-		"token_secret": "ok",
-		"verifier":     "ok",
-		"token_issuer": TokenPolicy_IssuerStatus(s.cfg),
-	}
-	status := http.StatusOK
-	if s.cfg.TokenSecretEphemeral || len(s.cfg.TokenSecret) < 32 {
-		checks["token_secret"] = "ephemeral"
-		status = http.StatusServiceUnavailable
-	}
-	if s.verifier == nil {
-		checks["verifier"] = "missing"
-		status = http.StatusServiceUnavailable
-	}
-	if s.cfg.TokenDirectPurchasesEnabled {
-		checks["token_direct_purchases"] = "ok"
-		if TokenPolicy_IssuerStatus(s.cfg) != "ok" {
-			checks["token_direct_purchases"] = "issuer_private_key_missing"
-			status = http.StatusServiceUnavailable
-		} else if !TokenPolicy_HasMoneroProduct(s.cfg.TokenProducts) && !MoneroWallet_ValidRate(s.cfg) {
-			checks["token_direct_purchases"] = "monero_rate_or_product_missing"
-			status = http.StatusServiceUnavailable
-		} else if strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
-			checks["token_direct_purchases"] = "monero_wallet_rpc_missing"
-			status = http.StatusServiceUnavailable
-		}
-	}
-	if err := s.store.Health(r.Context()); err != nil {
-		checks["database"] = err.Error()
-		status = http.StatusServiceUnavailable
-	}
-	Response_JSON(w, status, map[string]any{
-		"status": statusText(status == http.StatusOK),
-		"checks": checks,
-	})
+	OperationalHttp_Ready(s.operations(), w, r)
 }
 
 func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
-	knownNodes := s.cfg.KnownNodes
-	if knownNodes == nil {
-		knownNodes = []NodePeer{}
-	}
-	usage, err := s.nodeUsage(r.Context())
-	if err != nil {
-		slog.Error("load node usage", "error", err)
-		Response_Error(w, http.StatusInternalServerError, "node usage failed")
-		return
-	}
-	storage, err := s.store.NodeStorageUsage(r.Context())
-	if err != nil {
-		slog.Error("load node storage usage", "error", err)
-		Response_Error(w, http.StatusInternalServerError, "node storage usage failed")
-		return
-	}
-	Response_JSON(w, http.StatusOK, map[string]any{
-		"status":          "ok",
-		"node_id":         s.node.ID,
-		"node_public_key": hex.EncodeToString(s.node.PublicKey),
-		"node_name":       s.cfg.NodeDisplayName,
-		"base_url":        strings.TrimSpace(s.cfg.BaseURL),
-		"capabilities":    serverCapabilities,
-		"known_nodes":     knownNodes,
-		"usage":           usage,
-		"storage":         storage,
-		"protocol": map[string]int{
-			"min_supported": MinSupportedProtocol,
-			"latest":        LatestProtocol,
-		},
-	})
+	OperationalHttp_Node(s.operations(), w, r)
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	// Metrics expose user counts, traffic, and topology; when an admin
-	// token is configured, require it. Deployments without one keep the
-	// historical public endpoint (health checks use /healthz and /readyz).
-	if s.cfg.AdminToken != "" && !HttpAuth_RequireAdmin(w, r, s.cfg.AdminToken) {
-		return
-	}
-	usage, err := s.nodeUsage(r.Context())
-	if err != nil {
-		slog.Error("load metrics usage", "error", err)
-		usage = NodeUsage{RecentActivityWindowDays: nodeUsageRecentWindowDays}
-		stats := SyncHub_Stats(s.syncHub)
-		usage.ConnectedUsers = stats.Users
-		usage.ConnectedWebSocketClients = stats.Connections
-		usage.WebSocketConnectionLimitPerUser = webSocketConnectionLimitPerUser
-	}
-	storage, err := s.store.NodeStorageUsage(r.Context())
-	if err != nil {
-		slog.Error("load metrics storage usage", "error", err)
-	}
-	Metrics_Prometheus(s.metrics, w, usage, storage, BuildVersion)
+	OperationalHttp_Metrics(s.operations(), w, r)
 }
 
 func (s *Server) nodeUsage(ctx context.Context) (NodeUsage, error) {
-	usage, err := s.store.NodeUsage(ctx, time.Now())
-	if err != nil {
-		return NodeUsage{}, err
-	}
-	stats := SyncHub_Stats(s.syncHub)
-	usage.ConnectedUsers = stats.Users
-	usage.ConnectedWebSocketClients = stats.Connections
-	usage.RecentActivityWindowDays = nodeUsageRecentWindowDays
-	usage.WebSocketConnectionLimitPerUser = webSocketConnectionLimitPerUser
-	return usage, nil
+	result := OperationalHttp_Usage(s.operations(), ctx)
+	return result.Value, result.Error
 }
 
 func (s *Server) handleSyncDiagnostics(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
-	if !ok {
-		return
-	}
-	report, err := s.store.SyncDiagnosticReport(r.Context(), userID)
-	if err != nil {
-		slog.Error("sync diagnostics", "user", LogSafety_LogText(userID), "error", err)
-		Response_Error(w, http.StatusInternalServerError, "diagnostics failed")
-		return
-	}
-	Response_JSON(w, http.StatusOK, report)
+	OperationalHttp_Diagnostics(s.operations(), w, r)
 }
 
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
@@ -689,7 +573,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	response := SyncResponse{
 		ProtocolVersion:      req.ProtocolVersion,
 		Status:               "ok",
-		ServerCapabilities:   serverCapabilities,
+		ServerCapabilities:   NodeInfo_Capabilities(),
 		TransitionMode:       SyncRequest_TransitionMode(req),
 		Applied:              result,
 		AccountAlias:         accountAlias,
@@ -934,7 +818,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 	response := SyncResponse{
 		ProtocolVersion:      LatestProtocol,
 		Status:               "ok",
-		ServerCapabilities:   serverCapabilities,
+		ServerCapabilities:   NodeInfo_Capabilities(),
 		TransitionMode:       "encrypted_payload",
 		AccountAlias:         accountAlias,
 		ProfileIcon:          profileIcon,
@@ -1028,13 +912,6 @@ func syncChangesResult(changes SyncChanges) SyncResult {
 		SocialCache:      len(changes.SocialCache),
 		EncryptedRecords: len(changes.EncryptedRecords),
 	}
-}
-
-func statusText(ok bool) string {
-	if ok {
-		return "ok"
-	}
-	return "not_ready"
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

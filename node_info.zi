@@ -1,0 +1,17 @@
+// The advertised capability order is shared by node and sync responses.
+#scope_export
+Capabilities :: () -> []string {
+    return capabilities[:]
+}
+
+#scope_file
+capabilities: [21]string = .[
+    "aliases", "friends", "v3-typed-sync", "v4-encrypted-records",
+    "v4-dual-write-transition", "v5-encrypted-primary", "v5-private-hierarchy",
+    "v5-dual-read", "v5-legacy-encrypted-collections",
+    "protocol-v1-v5-valid-through-2027-09-01",
+    "protocol-previous-version-grace-days-365", "v6-signed-transactions",
+    "v6-signed-app-manifests", "profile-stats", "pub-relay",
+    "node-mesh-encrypted-records", "node-identity-v1", "node-pairing-v1",
+    "trust-space-names-v1", "monero-account-addresses", "monero-gifts"
+];

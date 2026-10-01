@@ -1,0 +1,179 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "protocol"
+config :: #import "config";
+identity :: #import "node_identity";
+info :: #import "node_info";
+hub :: #import "sync_hub";
+stats :: #import "store_stats";
+diagnostics :: #import "store_diagnostics";
+metrics :: #import "metrics";
+policy :: #import "token_policy";
+wallet :: #import "monero_wallet";
+auth :: #import "http_auth";
+response :: #import "response";
+logs :: #import "log_safety";
+version :: #import "version";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+logging :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+Operations :: struct {
+    database: *sql.Database
+    path: string
+    configuration: *config.Config
+    identity: *identity.NodeIdentity
+    notifications: *hub.SyncHub
+    counters: *metrics.ServerMetrics
+    verifierAvailable: bool
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign strings;
+EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
+AllocatePeers :: (count: isize) -> []NodePeer #foreign builtin "make";
+PeersNil :: (values: []NodePeer) -> bool #foreign builtin "is_nil";
+LogError :: (message: string, key: string, error: Error) #foreign logging "Error";
+LogAccountError :: (message: string, userKey: string, user: string, errorKey: string, error: Error) #foreign logging "Error";
+
+LiveUsage :: (operations: Operations, usage: NodeUsage) -> NodeUsage {
+    connected := hub.Stats(operations.notifications)
+    usage.ConnectedUsers = connected.users
+    usage.ConnectedWebSocketClients = connected.connections
+    usage.RecentActivityWindowDays = cast(isize)30
+    usage.WebSocketConnectionLimitPerUser = cast(isize)8
+    return usage
+}
+
+#scope_export
+Usage :: (operations: Operations, context: ctx.Context) -> stats.NodeUsageResult {
+    result := stats.Usage(operations.database, context, clock.Now())
+    if result.error == null {
+        result.value = LiveUsage(operations, result.value)
+    }
+    return result
+}
+
+Health :: (writer: http.ResponseWriter, request: *http.Request) {
+    value: Map(string, string)
+    MapSet(value, "status", "ok")
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Ready :: (operations: Operations, writer: http.ResponseWriter, request: *http.Request) {
+    configuration := <<operations.configuration
+    checks: Map(string, string)
+    MapSet(checks, "database", "ok")
+    MapSet(checks, "token_secret", "ok")
+    MapSet(checks, "verifier", "ok")
+    MapSet(checks, "token_issuer", policy.IssuerStatus(configuration))
+    status: isize = cast(isize)200
+    if configuration.TokenSecretEphemeral || configuration.TokenSecret.count < 32 {
+        MapSet(checks, "token_secret", "ephemeral")
+        status = cast(isize)503
+    }
+    if !operations.verifierAvailable {
+        MapSet(checks, "verifier", "missing")
+        status = cast(isize)503
+    }
+    if configuration.TokenDirectPurchasesEnabled {
+        MapSet(checks, "token_direct_purchases", "ok")
+        if policy.IssuerStatus(configuration) != "ok" {
+            MapSet(checks, "token_direct_purchases", "issuer_private_key_missing")
+            status = cast(isize)503
+        } else if !policy.HasMoneroProduct(configuration.TokenProducts) && !wallet.ValidRate(configuration) {
+            MapSet(checks, "token_direct_purchases", "monero_rate_or_product_missing")
+            status = cast(isize)503
+        } else if TrimSpace(configuration.MoneroWalletRPCURL) == "" {
+            MapSet(checks, "token_direct_purchases", "monero_wallet_rpc_missing")
+            status = cast(isize)503
+        }
+    }
+    error := diagnostics.Health(operations.database, http.Context(request))
+    if error != null {
+        MapSet(checks, "database", errors.Message(error))
+        status = cast(isize)503
+    }
+    statusText := "not_ready"
+    if status == cast(isize)200 {
+        statusText = "ok"
+    }
+    value: Map(string, Any)
+    MapSet(value, "status", statusText)
+    MapSet(value, "checks", checks)
+    response.JSON(writer, status, value)
+}
+
+Node :: (operations: Operations, writer: http.ResponseWriter, request: *http.Request) {
+    configuration := <<operations.configuration
+    knownNodes := operations.configuration.KnownNodes
+    if PeersNil(knownNodes) {
+        knownNodes = AllocatePeers(cast(isize)0)
+    }
+    usage := Usage(operations, http.Context(request))
+    if usage.error != null {
+        LogError("load node usage", "error", usage.error)
+        response.Error(writer, cast(isize)500, "node usage failed")
+        return
+    }
+    storage := stats.Storage(operations.database, http.Context(request), operations.path)
+    if storage.error != null {
+        LogError("load node storage usage", "error", storage.error)
+        response.Error(writer, cast(isize)500, "node storage usage failed")
+        return
+    }
+    protocol: Map(string, isize)
+    MapSet(protocol, "min_supported", MinSupportedProtocol)
+    MapSet(protocol, "latest", LatestProtocol)
+    value: Map(string, Any)
+    MapSet(value, "status", "ok")
+    MapSet(value, "node_id", operations.identity.ID)
+    MapSet(value, "node_public_key", EncodeHex(cast([]u8)operations.identity.PublicKey))
+    MapSet(value, "node_name", configuration.NodeDisplayName)
+    MapSet(value, "base_url", TrimSpace(configuration.BaseURL))
+    MapSet(value, "capabilities", info.Capabilities())
+    MapSet(value, "known_nodes", knownNodes)
+    MapSet(value, "usage", usage.value)
+    MapSet(value, "storage", storage.value)
+    MapSet(value, "protocol", protocol)
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Metrics :: (operations: Operations, writer: http.ResponseWriter, request: *http.Request) {
+    configuration := <<operations.configuration
+    if configuration.AdminToken != "" && !auth.RequireAdmin(writer, request, configuration.AdminToken) {
+        return
+    }
+    usage := Usage(operations, http.Context(request))
+    if usage.error != null {
+        LogError("load metrics usage", "error", usage.error)
+        empty: NodeUsage
+        usage.value = LiveUsage(operations, empty)
+    }
+    storage := stats.Storage(operations.database, http.Context(request), operations.path)
+    if storage.error != null {
+        LogError("load metrics storage usage", "error", storage.error)
+    }
+    metrics.Prometheus(operations.counters, writer, usage.value, storage.value, version.BuildVersion)
+}
+
+Diagnostics :: (operations: Operations, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(operations.database, request, operations.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        auth.Respond(writer, operations.counters, user.authentication)
+        return
+    }
+    report := diagnostics.Report(operations.database, http.Context(request), user.value)
+    if report.error != null {
+        LogAccountError("sync diagnostics", "user", logs.LogText(user.value), "error", report.error)
+        response.Error(writer, cast(isize)500, "diagnostics failed")
+        return
+    }
+    response.JSON(writer, cast(isize)200, report.value)
+}

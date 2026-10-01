@@ -10,8 +10,6 @@ import (
 // #import std_go_types
 // #import std_map_go
 // #import types
-type __type_6705e682df266aa4 = map[string]int
-
 type TableCountsResult struct {
 	Value __type_6705e682df266aa4
 	Error Error

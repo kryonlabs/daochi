@@ -86,7 +86,7 @@ field names, Go storage types, order and reflection tags.
 | `node_auth.go` | Ziran | `node_auth.zi`: random nonces, exact request signatures, native HTTP fields/escaped paths, time windows, trusted-peer lookup and single-use consumption |
 | `node_identity.go` | Ziran | `node_identity.zi`: copied native key material, private key-file persistence, pairing records/messages/signatures/validation and namespace claim records/messages/name grammar |
 | `rate_limit.go` | Ziran | `rate_limit.zi`: concurrent request windows and eviction; `client_address.zi`: native HTTP/IP access, loopback-only proxy trust and address normalization |
-| `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion, operational handlers, middleware and server construction remain Go |
+| `server.go` | Partial Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion request decoding, signature/user header selection, exported account-key parsing and transition helpers in `sync_request.zi`; sync/login/deletion orchestration, operational handlers, middleware and server construction remain Go |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
 | `store.go` | Partial Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; schema, operational statistics, sync transactions, conflicts and projections remain Go |
@@ -174,6 +174,18 @@ cover Unicode/byte strings, malformed remote addresses, header precedence and
 exact rejection status/body. Existing Go consumers use these generated helpers
 directly; their remaining application handlers still need porting. Comparisons preserve
 nil/empty body results, error text, context identity, encoded bytes and cleanup.
+
+`sync_request.zi` owns sync, login and account-deletion request decoding,
+normalization, user/signature header precedence, encrypted-envelope detection,
+exported account-key parsing, public-key validation and payload limits. It
+preserves partial records on JSON type errors, the original body bytes, nil
+versus allocated empty slices, Unicode trimming, validation order and released
+signature contexts and key-file formats. Meditation duration normalization
+updates the caller's existing slice. Independent Go fixtures compare malformed
+and overflowing JSON, duplicate fields, header precedence, exact limits, all
+released key headers and binary encodings, protocol transitions, native panic
+identity and request-body closure. Maintained server callers use the generated
+functions directly; handler orchestration remains unfinished.
 
 `sync_types.zi` owns sync requests, responses, changes, snapshots and operation
 records. Its `RawMessage` declaration aliases `encoding/json.RawMessage`,

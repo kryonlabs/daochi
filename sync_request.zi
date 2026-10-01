@@ -1,0 +1,361 @@
+#import "std/go_types"
+#import "protocol"
+#import "sync_types"
+body :: #import "http_body";
+auth :: #import "http_auth";
+identity :: #import "identity";
+codec :: #import "codec";
+records :: #import "encrypted_record";
+http :: #import "std/http_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+strconv :: #system_library "go:strconv";
+builtin :: #system_library "go:builtin";
+
+SyncRequestResult :: struct {
+    body: []u8
+    value: SyncRequest
+    error: Error
+}
+
+LoginRequestResult :: struct {
+    body: []u8
+    value: LoginRequest
+    error: Error
+}
+
+DeleteRequestResult :: struct {
+    body: []u8
+    value: DeleteRequest
+    error: Error
+}
+
+DeleteWithKeyRequestResult :: struct {
+    value: DeleteWithKeyRequest
+    error: Error
+}
+
+RequestSignature :: struct {
+    value: string
+    context: string
+}
+
+ExportedAccountKey :: struct {
+    publicID: string
+    privateKey: []u8
+}
+
+ExportedAccountKeyResult :: struct {
+    value: ExportedAccountKey
+    error: Error
+}
+
+PayloadLimitResult :: struct {
+    value: isize
+    error: Error
+}
+
+#scope_file
+KeyValuePair :: struct {
+    key: string
+    value: string
+    found: bool
+}
+
+EnvelopeHeader :: struct {
+    V: isize #go_tag "json:\"v\""
+    Nonce: string #go_tag "json:\"nonce\""
+    Ciphertext: string #go_tag "json:\"ciphertext\""
+}
+
+TrimSpace :: (value: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+Split :: (value: string, separator: string) -> []string #foreign strings;
+ReplaceAll :: (value: string, old: string, replacement: string) -> string #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+Cut :: (value: string, separator: string) -> KeyValuePair #go_results #foreign strings;
+Atoi :: (value: string) -> PayloadLimitResult #go_results #foreign strconv;
+AllocateHabits :: (count: isize) -> []Habit #foreign builtin "make";
+AllocateHabitDays :: (count: isize) -> []HabitDay #foreign builtin "make";
+AllocateSessions :: (count: isize) -> []Session #foreign builtin "make";
+AllocateMeditations :: (count: isize) -> []MeditationLog #foreign builtin "make";
+AllocateSocial :: (count: isize) -> []SocialSnapshot #foreign builtin "make";
+AllocateRecords :: (count: isize) -> []EncryptedRecord #foreign builtin "make";
+
+#scope_export
+ApplyHeaderUser :: (request: *http.Request, bodyUser: *string) -> Error {
+    header := auth.UserHeader(request)
+    if header.value == "" {
+        return errors.New("missing X-Daochi-User")
+    }
+    if bodyUser.* == "" {
+        bodyUser.* = header.value
+        return null
+    }
+    bodyUser.* = ToLower(TrimSpace(bodyUser.*))
+    if bodyUser.* != header.value {
+        parts: [2]string = .[header.name, " does not match user_id_hash"]
+        return errors.New(Join(parts[:], ""))
+    }
+    return null
+}
+
+SignatureHeader :: (request: *http.Request) -> RequestSignature {
+    result: RequestSignature
+    result.context = "ksync-sync-v1"
+    headers := http.Headers(request)
+    names: [3]string = .["X-Daochi-Signature", "X-Ksync-Signature", "X-Inbe-Signature"]
+    contexts: [3]string = .["daochi-sync-v1", "ksync-sync-v1", "inbe-sync-v1"]
+    index: s64 = 0
+    while index < names.count {
+        value := TrimSpace(http.HeaderValue(headers, names[index]))
+        if value != "" {
+            result.value = value
+            result.context = contexts[index]
+            return result
+        }
+        index += 1
+    }
+    return result
+}
+
+ParseSync :: (bytes: []u8) -> SyncRequestResult {
+    result: SyncRequestResult
+    if json.Unmarshal(bytes, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.UserIDHash = ToLower(TrimSpace(result.value.UserIDHash))
+    result.value.AppID = TrimSpace(result.value.AppID)
+    result.value.PublicKey = TrimSpace(result.value.PublicKey)
+    result.value.ClientID = TrimSpace(result.value.ClientID)
+    index: s64 = 0
+    while index < result.value.EncryptedRecords.count {
+        item := *result.value.EncryptedRecords[index]
+        item.Collection = TrimSpace(item.Collection)
+        item.ID = TrimSpace(item.ID)
+        item.KeyID = TrimSpace(item.KeyID)
+        item.Nonce = TrimSpace(item.Nonce)
+        item.UpdatedAt = TrimSpace(item.UpdatedAt)
+        item.ContentHash = ToLower(TrimSpace(item.ContentHash))
+        item.ParentID = TrimSpace(item.ParentID)
+        index += 1
+    }
+    return result
+}
+
+ReadSync :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> SyncRequestResult {
+    result: SyncRequestResult
+    read := body.ReadJSON(writer, request, limit)
+    if read.error != null {
+        result.error = read.error
+        return result
+    }
+    result = ParseSync(read.value)
+    result.body = read.value
+    return result
+}
+
+IsEncryptedEnvelope :: (bytes: []u8) -> bool {
+    envelope: EnvelopeHeader
+    if !json.Valid(bytes) || json.Unmarshal(bytes, *envelope) != null {
+        return false
+    }
+    return (envelope.V == cast(isize)1 || envelope.V == cast(isize)2) &&
+        TrimSpace(envelope.Nonce) != "" && TrimSpace(envelope.Ciphertext) != ""
+}
+
+EmptyChanges :: () -> SyncChanges {
+    result: SyncChanges
+    result.Habits = AllocateHabits(cast(isize)0)
+    result.HabitDays = AllocateHabitDays(cast(isize)0)
+    result.Sessions = AllocateSessions(cast(isize)0)
+    result.MeditationLogs = AllocateMeditations(cast(isize)0)
+    result.SocialCache = AllocateSocial(cast(isize)0)
+    result.EncryptedRecords = AllocateRecords(cast(isize)0)
+    return result
+}
+
+ReadLogin :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> LoginRequestResult {
+    result: LoginRequestResult
+    read := body.ReadJSON(writer, request, limit)
+    if read.error != null {
+        result.error = read.error
+        return result
+    }
+    if json.Unmarshal(read.value, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.UserIDHash = ToLower(TrimSpace(result.value.UserIDHash))
+    result.value.PublicKey = TrimSpace(result.value.PublicKey)
+    result.value.ClientID = TrimSpace(result.value.ClientID)
+    result.body = read.value
+    return result
+}
+
+ReadDelete :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> DeleteRequestResult {
+    result: DeleteRequestResult
+    read := body.ReadJSON(writer, request, limit)
+    if read.error != null {
+        result.error = read.error
+        return result
+    }
+    if json.Unmarshal(read.value, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.UserIDHash = ToLower(TrimSpace(result.value.UserIDHash))
+    result.body = read.value
+    return result
+}
+
+ReadDeleteWithKey :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) -> DeleteWithKeyRequestResult {
+    result: DeleteWithKeyRequestResult
+    read := body.ReadJSON(writer, request, limit)
+    if read.error != null {
+        result.error = read.error
+        return result
+    }
+    if json.Unmarshal(read.value, *result.value) != null {
+        result.error = errors.New("invalid json")
+        return result
+    }
+    result.value.UserIDHash = ToLower(TrimSpace(result.value.UserIDHash))
+    result.value.ExportedKey = TrimSpace(result.value.ExportedKey)
+    if !identity.ValidUserID(result.value.UserIDHash) {
+        result.error = errors.New("invalid user_id_hash")
+        return result
+    }
+    if result.value.ExportedKey == "" {
+        result.error = errors.New("exported_key required")
+    }
+    return result
+}
+
+NormalizeMeditationDurations :: (logs: []MeditationLog) {
+    index: s64 = 0
+    while index < logs.count {
+        if logs[index].DurationSeconds == cast(isize)0 && logs[index].Duration != cast(isize)0 {
+            logs[index].DurationSeconds = logs[index].Duration
+        }
+        index += 1
+    }
+}
+
+ParseExportedKey :: (value: string) -> ExportedAccountKeyResult {
+    result: ExportedAccountKeyResult
+    lines := Split(ReplaceAll(value, "\r\n", "\n"), "\n")
+    if lines.count == 0 {
+        result.error = errors.New("invalid account key file")
+        return result
+    }
+    header := TrimSpace(lines[0])
+    if header != "ksync-account-key-v1" && header != "lyra-account-key-v1" &&
+        header != "account-key-v1" && header != "inbe-sync-key-v1" {
+        result.error = errors.New("invalid account key file")
+        return result
+    }
+    algorithmOK := false
+    publicID := ""
+    privateKeyText := ""
+    for line: lines[1:] {
+        part := Cut(TrimSpace(line), "=")
+        if !part.found {
+            continue
+        }
+        key := TrimSpace(part.key)
+        if key == "algorithm" {
+            algorithmOK = TrimSpace(part.value) == "ML-DSA-44"
+        } else if key == "public_id" {
+            publicID = ToLower(TrimSpace(part.value))
+        } else if key == "private_key" {
+            privateKeyText = TrimSpace(part.value)
+        }
+    }
+    if !algorithmOK {
+        result.error = errors.New("account key algorithm must be ML-DSA-44")
+        return result
+    }
+    if publicID != "" && !identity.ValidUserID(publicID) {
+        result.error = errors.New("invalid public_id")
+        return result
+    }
+    decoded := codec.DecodeBinaryField(privateKeyText)
+    if decoded.error != "" {
+        result.error = errors.New("invalid private_key")
+        return result
+    }
+    if decoded.value.count != codec.mlDSA44PrivateKeySize {
+        result.error = errors.New("wrong private_key size")
+        return result
+    }
+    result.value.publicID = publicID
+    result.value.privateKey = text.ToBytes(decoded.value)
+    return result
+}
+
+EncryptedPayloadLimit :: (request: *http.Request, configuredMax: isize) -> PayloadLimitResult {
+    result: PayloadLimitResult
+    result.value = configuredMax
+    names: [2]string = .["X-Daochi-Limit", "X-Ksync-Limit"]
+    value := auth.HeaderAlias(request, names[:])
+    if value != "" {
+        parsed := Atoi(value)
+        if parsed.error != null || parsed.value <= cast(isize)0 {
+            result.value = cast(isize)0
+            result.error = errors.New("invalid X-Daochi-Limit")
+            return result
+        }
+        result.value = parsed.value
+    }
+    if configuredMax > cast(isize)0 && (result.value == cast(isize)0 || result.value > configuredMax) {
+        result.value = configuredMax
+    }
+    return result
+}
+
+TransitionMode :: (request: SyncRequest) -> string {
+    if request.ProtocolVersion >= cast(isize)5 {
+        return "encrypted_primary"
+    }
+    if request.ProtocolVersion >= cast(isize)4 {
+        return "dual_write"
+    }
+    return ""
+}
+
+IncludeLegacyPrivateData :: (request: SyncRequest) -> bool {
+    return request.ProtocolVersion < cast(isize)5 || request.IncludeLegacyData
+}
+
+HasLocalChanges :: (request: SyncRequest) -> bool {
+    return request.FullSyncRequested || request.MeditationLogs.count > 0 ||
+        request.Habits.count > 0 || request.HabitDays.count > 0 ||
+        request.Sessions.count > 0 || request.EncryptedRecords.count > 0 || request.Ops.count > 0
+}
+
+PublicKey :: (request: SyncRequest) -> json.JSONResult {
+    result: json.JSONResult
+    if TrimSpace(request.PublicKey) == "" {
+        return result
+    }
+    decoded := codec.DecodeBinaryField(request.PublicKey)
+    if decoded.error != "" {
+        result.error = errors.New("invalid public_key")
+        return result
+    }
+    if decoded.value.count != codec.mlDSA44PublicKeySize {
+        result.error = errors.New("wrong public_key size")
+        return result
+    }
+    key := text.ToBytes(decoded.value)
+    if records.ValidateAccountKey(request.UserIDHash, key) != null {
+        result.error = errors.New("public_key does not match user_id_hash")
+        return result
+    }
+    result.value = key
+    return result
+}

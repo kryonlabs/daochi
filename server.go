@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -511,18 +510,19 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if isEncryptedSyncEnvelope(body) {
+	if SyncRequest_IsEncryptedEnvelope(body) {
 		if s.handleEncryptedSyncEnvelope(w, r, body) {
 			syncOK = true
 		}
 		return
 	}
-	req, err := parseSyncRequestBody(body)
+	parsed := SyncRequest_ParseSync(body)
+	req, err := parsed.Value, parsed.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
+	if err := SyncRequest_ApplyHeaderUser(r, &req.UserIDHash); err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -539,7 +539,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		Response_Error(w, http.StatusUnauthorized, "token user mismatch")
 		return
 	}
-	publicKey, err := syncRequestPublicKey(req)
+	decodedKey := SyncRequest_PublicKey(req)
+	publicKey, err := decodedKey.Value, decodedKey.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -561,7 +562,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 		signedTx = &tx
 	}
-	normalizeMeditationDurations(req.MeditationLogs)
+	SyncRequest_NormalizeMeditationDurations(req.MeditationLogs)
 
 	baseHash, err := s.store.StateHash(r.Context(), req.UserIDHash)
 	if err != nil {
@@ -615,7 +616,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if fullSnapshotRequired && syncRequestHasLocalChanges(req) {
+	if fullSnapshotRequired && SyncRequest_HasLocalChanges(req) {
 		result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
 		if err != nil {
 			slog.Error("apply stale sync uploads", "user", LogSafety_LogText(req.UserIDHash), "error", err)
@@ -689,7 +690,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		ProtocolVersion:      req.ProtocolVersion,
 		Status:               "ok",
 		ServerCapabilities:   serverCapabilities,
-		TransitionMode:       syncTransitionMode(req),
+		TransitionMode:       SyncRequest_TransitionMode(req),
 		Applied:              result,
 		AccountAlias:         accountAlias,
 		ProfileIcon:          profileIcon,
@@ -711,7 +712,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			EffectiveSinceServerVersion: sinceVersion,
 			ClientClock:                 req.ClientClock,
 			CompactedThroughVersion:     compactedThrough,
-			HasLocalChanges:             syncRequestHasLocalChanges(req),
+			HasLocalChanges:             SyncRequest_HasLocalChanges(req),
 			AcceptedOps:                 len(acceptedOps),
 			RemoteOps:                   len(remoteOps),
 			AppliedInput:                result,
@@ -745,7 +746,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			Response_Error(w, http.StatusInternalServerError, "clean data failed")
 			return
 		}
-		if !includeLegacyPrivateData(req) {
+		if !SyncRequest_IncludeLegacyPrivateData(req) {
 			response.Data.Habits = []Habit{}
 			response.Data.HabitDays = []CleanHabitDay{}
 			response.Data.Sessions = []Session{}
@@ -855,7 +856,8 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		}
 		sinceVersion = parsed
 	}
-	limit, err := encryptedPayloadLimit(r, s.cfg.EncryptedPayloadMaxReturn)
+	payloadLimit := SyncRequest_EncryptedPayloadLimit(r, s.cfg.EncryptedPayloadMaxReturn)
+	limit, err := payloadLimit.Value, payloadLimit.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return false
@@ -939,7 +941,7 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 		ServerVersion:        serverVersion,
 		ServerClock:          serverVersion,
 		ChangesComplete:      true,
-		Changes:              emptySyncChanges(),
+		Changes:              SyncRequest_EmptyChanges(),
 		EncryptedPayloads:    payloads,
 		MinSupportedProtocol: MinSupportedProtocol,
 		ServerLatestProtocol: LatestProtocol,
@@ -951,63 +953,6 @@ func (s *Server) handleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Requ
 	}
 	Response_JSON(w, http.StatusOK, response)
 	return true
-}
-
-func encryptedPayloadLimit(r *http.Request, configuredMax int) (int, error) {
-	limit := configuredMax
-	if text := HttpAuth_HeaderAlias(r, []string{"X-Daochi-Limit", "X-Ksync-Limit"}); text != "" {
-		parsed, err := strconv.Atoi(text)
-		if err != nil || parsed <= 0 {
-			return 0, errors.New("invalid X-Daochi-Limit")
-		}
-		limit = parsed
-	}
-	if configuredMax > 0 && (limit == 0 || limit > configuredMax) {
-		limit = configuredMax
-	}
-	return limit, nil
-}
-
-func syncTransitionMode(req SyncRequest) string {
-	if req.ProtocolVersion >= 5 {
-		return "encrypted_primary"
-	}
-	if req.ProtocolVersion >= 4 {
-		return "dual_write"
-	}
-	return ""
-}
-
-func includeLegacyPrivateData(req SyncRequest) bool {
-	return req.ProtocolVersion < 5 || req.IncludeLegacyData
-}
-
-func syncRequestHasLocalChanges(req SyncRequest) bool {
-	return req.FullSyncRequested ||
-		len(req.MeditationLogs) > 0 ||
-		len(req.Habits) > 0 ||
-		len(req.HabitDays) > 0 ||
-		len(req.Sessions) > 0 ||
-		len(req.EncryptedRecords) > 0 ||
-		len(req.Ops) > 0
-}
-
-func syncRequestPublicKey(req SyncRequest) ([]byte, error) {
-	if strings.TrimSpace(req.PublicKey) == "" {
-		return nil, nil
-	}
-	publicKeyField := Codec_DecodeBinaryField(req.PublicKey)
-	publicKey := []byte(publicKeyField.Value)
-	if publicKeyField.Error != "" {
-		return nil, errors.New("invalid public_key")
-	}
-	if len(publicKey) != mlDSA44PublicKeySize {
-		return nil, errors.New("wrong public_key size")
-	}
-	if err := EncryptedRecord_ValidateAccountKey(req.UserIDHash, publicKey); err != nil {
-		return nil, errors.New("public_key does not match user_id_hash")
-	}
-	return publicKey, nil
 }
 
 func (s *Server) validateSyncRequest(ctx context.Context, req SyncRequest) error {
@@ -1093,12 +1038,13 @@ func statusText(ok bool) string {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	body, req, err := readLoginRequest(w, r, s.cfg.MaxBodyBytes)
+	read := SyncRequest_ReadLogin(w, r, s.cfg.MaxBodyBytes)
+	body, req, err := read.Body, read.Value, read.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
+	if err := SyncRequest_ApplyHeaderUser(r, &req.UserIDHash); err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1111,7 +1057,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Response_Error(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
-	signature, context := requestSignatureHeader(r)
+	signed := SyncRequest_SignatureHeader(r)
+	signature, context := signed.Value, signed.Context
 	publicKey, err := s.authenticateSignature(r.Context(), req.UserIDHash, req.PublicKey, signature, context, r.Method, r.URL.Path, body)
 	if err != nil {
 		s.writeAuthError(w, err)
@@ -1156,16 +1103,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
-	body, req, err := readDeleteRequest(w, r, s.cfg.MaxBodyBytes)
+	read := SyncRequest_ReadDelete(w, r, s.cfg.MaxBodyBytes)
+	body, req, err := read.Body, read.Value, read.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := applyHeaderUser(r, &req.UserIDHash); err != nil {
+	if err := SyncRequest_ApplyHeaderUser(r, &req.UserIDHash); err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	signature, context := requestSignatureHeader(r)
+	signed := SyncRequest_SignatureHeader(r)
+	signature, context := signed.Value, signed.Context
 	_, err = s.authenticateSignature(r.Context(), req.UserIDHash, "", signature, context, r.Method, r.URL.Path, body)
 	if err != nil {
 		s.writeAuthError(w, err)
@@ -1180,7 +1129,8 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Request) {
-	req, err := readDeleteWithKeyRequest(w, r, s.cfg.MaxBodyBytes)
+	read := SyncRequest_ReadDeleteWithKey(w, r, s.cfg.MaxBodyBytes)
+	req, err := read.Value, read.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -1201,7 +1151,8 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 		Response_Error(w, http.StatusNotFound, "sync account not found")
 		return
 	}
-	exportedKey, err := parseExportedSyncKey(req.ExportedKey)
+	parsed := SyncRequest_ParseExportedKey(req.ExportedKey)
+	exportedKey, err := parsed.Value, parsed.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -1274,207 +1225,6 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 		return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
 	}
 	return publicKey, nil
-}
-
-func applyHeaderUser(r *http.Request, bodyUser *string) error {
-	userHeader := HttpAuth_UserHeader(r)
-	headerUser, headerName := userHeader.Value, userHeader.Name
-	if headerUser == "" {
-		return errors.New("missing X-Daochi-User")
-	}
-	if *bodyUser == "" {
-		*bodyUser = headerUser
-		return nil
-	}
-	*bodyUser = strings.ToLower(strings.TrimSpace(*bodyUser))
-	if *bodyUser != headerUser {
-		return errors.New(headerName + " does not match user_id_hash")
-	}
-	return nil
-}
-
-func requestSignatureHeader(r *http.Request) (string, string) {
-	if value := strings.TrimSpace(r.Header.Get("X-Daochi-Signature")); value != "" {
-		return value, daochiSignatureContext
-	}
-	if value := strings.TrimSpace(r.Header.Get("X-Ksync-Signature")); value != "" {
-		return value, legacySyncSignatureContext
-	}
-	if value := strings.TrimSpace(r.Header.Get("X-Inbe-Signature")); value != "" {
-		return value, legacyInbeSignatureContext
-	}
-	return "", legacySyncSignatureContext
-}
-
-func readSyncRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, SyncRequest, error) {
-	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
-	body, err := bodyResult.Value, bodyResult.Error
-	if err != nil {
-		return nil, SyncRequest{}, err
-	}
-	req, err := parseSyncRequestBody(body)
-	return body, req, err
-}
-
-func parseSyncRequestBody(body []byte) (SyncRequest, error) {
-	var req SyncRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	req.AppID = strings.TrimSpace(req.AppID)
-	req.PublicKey = strings.TrimSpace(req.PublicKey)
-	req.ClientID = strings.TrimSpace(req.ClientID)
-	for i := range req.EncryptedRecords {
-		req.EncryptedRecords[i].Collection = strings.TrimSpace(req.EncryptedRecords[i].Collection)
-		req.EncryptedRecords[i].ID = strings.TrimSpace(req.EncryptedRecords[i].ID)
-		req.EncryptedRecords[i].KeyID = strings.TrimSpace(req.EncryptedRecords[i].KeyID)
-		req.EncryptedRecords[i].Nonce = strings.TrimSpace(req.EncryptedRecords[i].Nonce)
-		req.EncryptedRecords[i].UpdatedAt = strings.TrimSpace(req.EncryptedRecords[i].UpdatedAt)
-		req.EncryptedRecords[i].ContentHash = strings.ToLower(strings.TrimSpace(req.EncryptedRecords[i].ContentHash))
-		req.EncryptedRecords[i].ParentID = strings.TrimSpace(req.EncryptedRecords[i].ParentID)
-	}
-	return req, nil
-}
-
-func isEncryptedSyncEnvelope(body []byte) bool {
-	var envelope struct {
-		V          int    `json:"v"`
-		Nonce      string `json:"nonce"`
-		Ciphertext string `json:"ciphertext"`
-	}
-	if !json.Valid(body) || json.Unmarshal(body, &envelope) != nil {
-		return false
-	}
-	return (envelope.V == 1 || envelope.V == 2) &&
-		strings.TrimSpace(envelope.Nonce) != "" &&
-		strings.TrimSpace(envelope.Ciphertext) != ""
-}
-
-func emptySyncChanges() SyncChanges {
-	return SyncChanges{
-		Habits:           []Habit{},
-		HabitDays:        []HabitDay{},
-		Sessions:         []Session{},
-		MeditationLogs:   []MeditationLog{},
-		SocialCache:      []SocialSnapshot{},
-		EncryptedRecords: []EncryptedRecord{},
-	}
-}
-
-func readLoginRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, LoginRequest, error) {
-	var req LoginRequest
-	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
-	body, err := bodyResult.Value, bodyResult.Error
-	if err != nil {
-		return nil, req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	req.PublicKey = strings.TrimSpace(req.PublicKey)
-	req.ClientID = strings.TrimSpace(req.ClientID)
-	return body, req, nil
-}
-
-func readDeleteRequest(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, DeleteRequest, error) {
-	var req DeleteRequest
-	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
-	body, err := bodyResult.Value, bodyResult.Error
-	if err != nil {
-		return nil, req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	return body, req, nil
-}
-
-func readDeleteWithKeyRequest(w http.ResponseWriter, r *http.Request, maxBody int64) (DeleteWithKeyRequest, error) {
-	var req DeleteWithKeyRequest
-	bodyResult := HttpBody_ReadJSON(w, r, maxBody)
-	body, err := bodyResult.Value, bodyResult.Error
-	if err != nil {
-		return req, err
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, errors.New("invalid json")
-	}
-	req.UserIDHash = strings.ToLower(strings.TrimSpace(req.UserIDHash))
-	req.ExportedKey = strings.TrimSpace(req.ExportedKey)
-	if !Identity_ValidUserID(req.UserIDHash) {
-		return req, errors.New("invalid user_id_hash")
-	}
-	if req.ExportedKey == "" {
-		return req, errors.New("exported_key required")
-	}
-	return req, nil
-}
-
-func normalizeMeditationDurations(logs []MeditationLog) {
-	for i := range logs {
-		if logs[i].DurationSeconds == 0 && logs[i].Duration != 0 {
-			logs[i].DurationSeconds = logs[i].Duration
-		}
-	}
-}
-
-type exportedSyncKey struct {
-	PublicID   string
-	PrivateKey []byte
-}
-
-const (
-	accountKeyHeader       = "ksync-account-key-v1"
-	legacyAccountKeyHeader = "lyra-account-key-v1"
-	legacyUkuKeyHeader     = "account-key-v1"
-	legacyInbeKeyHeader    = "inbe-sync-key-v1"
-)
-
-func parseExportedSyncKey(text string) (exportedSyncKey, error) {
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	if len(lines) == 0 {
-		return exportedSyncKey{}, errors.New("invalid account key file")
-	}
-	header := strings.TrimSpace(lines[0])
-	if header != accountKeyHeader && header != legacyAccountKeyHeader &&
-		header != legacyUkuKeyHeader && header != legacyInbeKeyHeader {
-		return exportedSyncKey{}, errors.New("invalid account key file")
-	}
-	algorithmOK := false
-	publicID := ""
-	privateKeyText := ""
-	for _, line := range lines[1:] {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if !ok {
-			continue
-		}
-		switch strings.TrimSpace(key) {
-		case "algorithm":
-			algorithmOK = strings.TrimSpace(value) == "ML-DSA-44"
-		case "public_id":
-			publicID = strings.ToLower(strings.TrimSpace(value))
-		case "private_key":
-			privateKeyText = strings.TrimSpace(value)
-		}
-	}
-	if !algorithmOK {
-		return exportedSyncKey{}, errors.New("account key algorithm must be ML-DSA-44")
-	}
-	if publicID != "" && !Identity_ValidUserID(publicID) {
-		return exportedSyncKey{}, errors.New("invalid public_id")
-	}
-	privateKeyField := Codec_DecodeBinaryField(privateKeyText)
-	privateKey := []byte(privateKeyField.Value)
-	if privateKeyField.Error != "" {
-		return exportedSyncKey{}, errors.New("invalid private_key")
-	}
-	if len(privateKey) != mlDSA44PrivateKeySize {
-		return exportedSyncKey{}, errors.New("wrong private_key size")
-	}
-	return exportedSyncKey{PublicID: publicID, PrivateKey: privateKey}, nil
 }
 
 type authError struct {

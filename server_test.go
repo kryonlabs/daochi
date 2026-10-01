@@ -3475,7 +3475,8 @@ func TestParseExportedSyncKey(t *testing.T) {
 		"inbe-sync-key-v1",
 	} {
 		keyText := header + "\nalgorithm=ML-DSA-44\npublic_id=" + publicID + "\nprivate_key=" + hex.EncodeToString(privateKey) + "\n"
-		parsed, err := parseExportedSyncKey(keyText)
+		result := SyncRequest_ParseExportedKey(keyText)
+		parsed, err := result.Value, result.Error
 		if err != nil {
 			t.Fatalf("%s parse: %v", header, err)
 		}

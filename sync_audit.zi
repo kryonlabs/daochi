@@ -1,0 +1,132 @@
+#import "std/go_types"
+#import "protocol"
+#import "sync_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+builtin :: #system_library "go:builtin";
+native :: #system_library "go:database/sql";
+
+SyncAuditResult :: struct {
+    value: []SyncAuditEntry
+    error: Error
+}
+
+SyncLogsResult :: struct {
+    value: []SyncLog
+    error: Error
+}
+
+#scope_file
+AllocateAudit :: (count: isize) -> []SyncAuditEntry #foreign builtin "make";
+AppendAudit :: (values: []SyncAuditEntry, value: SyncAuditEntry) -> []SyncAuditEntry #foreign builtin "append";
+AllocateLogs :: (count: isize) -> []SyncLog #foreign builtin "make";
+AppendLog :: (values: []SyncLog, value: SyncLog) -> []SyncLog #foreign builtin "append";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+
+BoolInt :: (value: bool) -> isize {
+    if value {
+        return cast(isize)1
+    }
+    return cast(isize)0
+}
+
+#scope_export
+Record :: (database: *sql.Database, context: ctx.Context, entry: SyncAuditEntry) -> Error {
+    encoded := json.Marshal(entry.Applied)
+    if encoded.error != null {
+        return encoded.error
+    }
+    arguments: [13]Any = .[entry.UserIDHash, entry.ClientID, entry.AppID, entry.ProtocolVersion,
+        entry.SinceServerVersion, entry.ClientClock, entry.ServerVersion,
+        text.FromBytes(encoded.value), entry.RemoteOps, BoolInt(entry.FullSnapshotRequired),
+        entry.SnapshotReason, BoolInt(entry.EncryptedPayload), entry.EncryptedPayloadBytes]
+    written := sql.Exec(database, context, "\nINSERT INTO server_sync_audit(\n\tuser_id_hash,client_id,app_id,protocol_version,since_server_version,client_clock,\n\tserver_version,applied_json,remote_ops,full_snapshot_required,snapshot_reason,\n\tencrypted_payload,encrypted_payload_bytes)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", arguments[:])
+    return written.error
+}
+
+Recent :: (database: *sql.Database, context: ctx.Context, userID: string, limit: isize) -> SyncAuditResult {
+    result: SyncAuditResult
+    if limit <= cast(isize)0 || limit > cast(isize)50 {
+        limit = cast(isize)10
+    }
+    arguments: [2]Any = .[userID, limit]
+    queried := sql.Query(database, context, "\nSELECT id,user_id_hash,client_id,app_id,protocol_version,since_server_version,client_clock,\n       server_version,applied_json,remote_ops,full_snapshot_required,snapshot_reason,\n       encrypted_payload,encrypted_payload_bytes,created_at\nFROM server_sync_audit\nWHERE user_id_hash=?1\nORDER BY id DESC\nLIMIT ?2", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    values := AllocateAudit(cast(isize)0)
+    while sql.Next(rows) {
+        item: SyncAuditEntry
+        applied: string
+        fullSnapshot: isize
+        encryptedPayload: isize
+        destinations: [15]Any = .[*item.ID, *item.UserIDHash, *item.ClientID, *item.AppID,
+            *item.ProtocolVersion, *item.SinceServerVersion, *item.ClientClock,
+            *item.ServerVersion, *applied, *item.RemoteOps, *fullSnapshot,
+            *item.SnapshotReason, *encryptedPayload, *item.EncryptedPayloadBytes, *item.CreatedAt]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        json.Unmarshal(text.ToBytes(applied), *item.Applied)
+        item.FullSnapshotRequired = fullSnapshot != cast(isize)0
+        item.EncryptedPayload = encryptedPayload != cast(isize)0
+        values = AppendAudit(values, item)
+    }
+    result.value = values
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Logs :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> SyncLogsResult {
+    result: SyncLogsResult
+    arguments: [2]Any = .[userID, sinceVersion]
+    queried := sql.Query(database, context, "\nSELECT server_version,entity_type,entity_id,local_date,op_type,payload_json,created_at\nFROM server_sync_ops\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,client_id,seq,op_id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    values := AllocateLogs(cast(isize)0)
+    while sql.Next(rows) {
+        item: SyncLog
+        payload: string
+        destinations: [7]Any = .[*item.ServerVersion, *item.EntityType, *item.EntityID,
+            *item.LocalDate, *item.OpType, *payload, *item.CreatedAt]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        item.Kind = "op"
+        if payload != "" {
+            item.Payload = cast(RawMessage)text.ToBytes(payload)
+        }
+        values = AppendLog(values, item)
+    }
+    result.value = values
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Deletes :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64) -> SyncLogsResult {
+    result: SyncLogsResult
+    logs := Logs(database, context, userID, sinceVersion)
+    result.error = logs.error
+    if result.error != null {
+        return result
+    }
+    result.value = AllocateLogs(cast(isize)0)
+    for item: logs.value {
+        if item.OpType == "delete" {
+            item.Kind = "delete"
+            result.value = AppendLog(result.value, item)
+        }
+    }
+    return result
+}

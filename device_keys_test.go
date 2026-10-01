@@ -109,7 +109,7 @@ func TestLegacyWritePolicyUsesRollingWindow(t *testing.T) {
 		t.Fatalf("recent legacy client policy required=%v epoch=%d", required, epoch)
 	}
 
-	oldTimestamp := Timestamp_CanonicalTimestamp(time.Now().Add(-legacyWriteWindow - time.Hour))
+	oldTimestamp := Timestamp_CanonicalTimestamp(time.Now().Add(-LegacyWriteWindow - time.Hour))
 	if _, err := store.db.ExecContext(ctx, `
 UPDATE server_clients SET last_sync_at=?3
 WHERE user_id_hash=?1 AND client_id=?2`, identity.UserID, "legacy-client-1", oldTimestamp); err != nil {

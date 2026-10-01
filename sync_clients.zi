@@ -1,0 +1,163 @@
+#import "std/go_types"
+#import "protocol"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+timestamp :: #import "timestamp";
+state :: #import "account_state";
+native :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+LegacyWriteWindow :: 15552000000000000;
+ClientActiveRetention :: 7776000000000000;
+
+LegacyClientsResult :: struct {
+    value: []string
+    error: Error
+}
+
+LegacyWritePolicyResult :: struct {
+    required: bool
+    epoch: s64
+    error: Error
+}
+
+SyncCompactionResult :: struct {
+    compacted: bool
+    through: s64
+    error: Error
+}
+
+#scope_file
+ClientClockFloor :: #type #foreign native "NullInt64";
+FloorValid :: (value: ClientClockFloor) -> bool #go_field #foreign native "NullInt64.Valid";
+FloorValue :: (value: ClientClockFloor) -> s64 #go_field #foreign native "NullInt64.Int64";
+AllocateClients :: (count: isize) -> []string #foreign builtin "make";
+AppendClient :: (values: []string, value: string) -> []string #foreign builtin "append";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+
+#scope_export
+RecordLogin :: (database: *sql.Database, context: ctx.Context, userID: string, clientID: string) -> Error {
+    arguments: [3]Any = .[userID, clientID, timestamp.CanonicalNow()]
+    written := sql.Exec(database, context, "\nINSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_login_at)\nVALUES(?1,?2,?3,?3)\nON CONFLICT(user_id_hash,client_id) DO UPDATE SET\n\tlast_seen_at=excluded.last_seen_at,\n\tlast_login_at=excluded.last_login_at", arguments[:])
+    return written.error
+}
+
+RecordSync :: (database: *sql.Database, context: ctx.Context, userID: string,
+    clientID: string, sinceVersion: s64, serverVersion: s64, protocolVersion: isize, clientClock: s64) -> Error {
+    arguments: [7]Any = .[userID, clientID, timestamp.CanonicalNow(), sinceVersion,
+        serverVersion, protocolVersion, clientClock]
+    written := sql.Exec(database, context, "\nINSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_sync_at,last_since_server_version,last_seen_server_version,protocol_version,last_client_clock)\nVALUES(?1,?2,?3,?3,?4,?5,?6,?7)\nON CONFLICT(user_id_hash,client_id) DO UPDATE SET\n\tlast_seen_at=excluded.last_seen_at,\n\tlast_sync_at=excluded.last_sync_at,\n\tlast_since_server_version=excluded.last_since_server_version,\n\tlast_seen_server_version=excluded.last_seen_server_version,\n\tprotocol_version=excluded.protocol_version,\n\tlast_client_clock=excluded.last_client_clock", arguments[:])
+    return written.error
+}
+
+Legacy :: (database: *sql.Database, context: ctx.Context, userID: string, minimum: isize) -> LegacyClientsResult {
+    result: LegacyClientsResult
+    arguments: [2]Any = .[userID, minimum]
+    queried := sql.Query(database, context, "\nSELECT client_id\nFROM server_clients\nWHERE user_id_hash=?1 AND protocol_version<?2\nORDER BY last_seen_at DESC,client_id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    values := AllocateClients(cast(isize)0)
+    while sql.Next(rows) {
+        id: string
+        destinations: [1]Any = .[*id]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendClient(values, id)
+    }
+    result.value = values
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+LegacyWritePolicy :: (database: *sql.Database, context: ctx.Context, userID: string) -> LegacyWritePolicyResult {
+    result: LegacyWritePolicyResult
+    cutoff := timestamp.CanonicalTimestamp(clock.Add(clock.Now(), cast(clock.Duration)(-LegacyWriteWindow)))
+    arguments: [3]Any = .[userID, cast(isize)LatestProtocol, cutoff]
+    latest: sql.NullString
+    destinations: [1]Any = .[*latest]
+    row := sql.QueryRow(database, context, "\nSELECT MAX(last_sync_at)\nFROM server_clients\nWHERE user_id_hash=?1 AND protocol_version<?2 AND last_sync_at>=?3", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    if !sql.NullStringValid(latest) || sql.NullStringValue(latest) == "" {
+        return result
+    }
+    parsed := clock.Parse(timestamp.CanonicalTimestampLayout, sql.NullStringValue(latest))
+    result.error = parsed.error
+    if result.error == null {
+        result.required = true
+        result.epoch = clock.Unix(parsed.value)
+    }
+    return result
+}
+
+Compacted :: (database: *sql.Database, context: ctx.Context, userID: string, clientClock: s64) -> SyncCompactionResult {
+    result: SyncCompactionResult
+    arguments: [1]Any = .[userID]
+    through: s64
+    destinations: [1]Any = .[*through]
+    row := sql.QueryRow(database, context, "\nSELECT compacted_through_version\nFROM server_sync_compaction\nWHERE user_id_hash=?1", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null {
+        return result
+    }
+    result.through = through
+    result.compacted = through > 0 && clientClock < through
+    return result
+}
+
+Compact :: (database: *sql.Database, context: ctx.Context, userID: string) -> Error {
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    current := state.CurrentVersionTx(transaction, context, userID)
+    if current.error != null {
+        return current.error
+    }
+    if current.value <= 0 {
+        return sql.Commit(transaction)
+    }
+    cutoff := timestamp.CanonicalTimestamp(clock.Add(clock.UTC(clock.Now()), cast(clock.Duration)(-ClientActiveRetention)))
+    arguments: [2]Any = .[userID, cutoff]
+    floor: ClientClockFloor
+    destinations: [1]Any = .[*floor]
+    row := sql.QueryRowTx(transaction, context, "\nSELECT MIN(last_client_clock)\nFROM server_clients\nWHERE user_id_hash=?1\n  AND protocol_version>=2\n\tAND last_client_clock>0\n\tAND last_seen_at>=?2", arguments[:])
+    error := sql.ScanRow(row, destinations[:])
+    if error != null {
+        return error
+    }
+    if !FloorValid(floor) || FloorValue(floor) <= 0 {
+        return sql.Commit(transaction)
+    }
+    through := FloorValue(floor)
+    if through > current.value {
+        through = current.value
+    }
+    values: [2]Any = .[userID, through]
+    deleted := sql.ExecTx(transaction, context, "\nDELETE FROM server_sync_ops\nWHERE user_id_hash=?1 AND server_version<=?2", values[:])
+    if deleted.error != null {
+        return deleted.error
+    }
+    updated := sql.ExecTx(transaction, context, "\nINSERT INTO server_sync_compaction(user_id_hash,compacted_through_version,updated_at)\nVALUES(?1,?2,CURRENT_TIMESTAMP)\nON CONFLICT(user_id_hash) DO UPDATE SET\n\tcompacted_through_version=MAX(server_sync_compaction.compacted_through_version,excluded.compacted_through_version),\n\tupdated_at=CURRENT_TIMESTAMP", values[:])
+    if updated.error != null {
+        return updated.error
+    }
+    return sql.Commit(transaction)
+}

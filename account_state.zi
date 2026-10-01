@@ -2,9 +2,11 @@
 ctx :: #import "std/context_go";
 sql :: #import "std/sql_go";
 timestamp :: #import "timestamp";
+errors :: #import "std/errors_go";
 go_sql :: #system_library "go:database/sql";
 
 #scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
 ExecResult :: struct {
     value: sql.Result
     error: Error
@@ -24,6 +26,31 @@ TombstoneResult :: struct {
 VersionResult :: struct {
     value: s64
     error: Error
+}
+
+CurrentVersion :: (database: *sql.Database, context: ctx.Context, userID: string) -> VersionResult {
+    result: VersionResult
+    arguments: [1]Any = .[userID]
+    row := sql.QueryRow(database, context,
+        "\nSELECT server_version\nFROM server_sync_state\nWHERE user_id_hash=?1", arguments[:])
+    result.error = ScanVersion(row, *result.value)
+    if errors.Is(result.error, sql.NoRows()) {
+        result.value = 0
+        result.error = null
+    }
+    return result
+}
+
+CurrentVersionTx :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> VersionResult {
+    result: VersionResult
+    row := QueryVersion(transaction, context,
+        "\nSELECT server_version\nFROM server_sync_state\nWHERE user_id_hash=?1", userID)
+    result.error = ScanVersion(row, *result.value)
+    if errors.Is(result.error, sql.NoRows()) {
+        result.value = 0
+        result.error = null
+    }
+    return result
 }
 
 NextVersion :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> VersionResult {
@@ -100,7 +127,7 @@ Register :: (database: *sql.Database, context: ctx.Context, userID: string, publ
     if opened.error != null {
         return opened.error
     }
-    defer sql.Rollback(opened.value)
+    RollbackAtReturn(opened.value)
     arguments: [1]Any
     arguments[0] = userID
     removed := sql.ExecTx(opened.value, context,
@@ -111,6 +138,31 @@ Register :: (database: *sql.Database, context: ctx.Context, userID: string, publ
     error := Upsert(opened.value, context, userID, publicKey)
     if error != null {
         return error
+    }
+    return sql.Commit(opened.value)
+}
+
+Delete :: (database: *sql.Database, context: ctx.Context, userID: string) -> Error {
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    RollbackAtReturn(opened.value)
+    arguments: [1]Any = .[userID]
+    tombstone := sql.ExecTx(opened.value, context,
+        "\nINSERT INTO server_account_tombstones(user_id_hash,deleted_at)\nVALUES(?1,CURRENT_TIMESTAMP)\nON CONFLICT(user_id_hash) DO UPDATE SET deleted_at=CURRENT_TIMESTAMP", arguments[:])
+    if tombstone.error != null {
+        return tombstone.error
+    }
+    disabled := sql.ExecTx(opened.value, context,
+        "\nUPDATE monero_account_addresses SET disabled_at=CURRENT_TIMESTAMP\nWHERE account_id=?1 AND disabled_at=''", arguments[:])
+    if disabled.error != null {
+        return disabled.error
+    }
+    deleted := sql.ExecTx(opened.value, context,
+        "DELETE FROM server_users WHERE user_id_hash=?1", arguments[:])
+    if deleted.error != null {
+        return deleted.error
     }
     return sql.Commit(opened.value)
 }

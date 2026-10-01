@@ -4,7 +4,7 @@ package main
 import sql "database/sql"
 
 // #import std_go_types
-type zir_2688387c33a72186_ExecResult struct {
+type zir_e892aa6a1dc88d44_ExecResult struct {
 	Value Result
 	Error Error
 }
@@ -14,32 +14,64 @@ type TombstoneResult struct {
 	Error Error
 }
 
-type zir_36dbc7eb84b27f76_VersionResult struct {
+type zir_f8e639d96ed3eb34_VersionResult struct {
 	Value int64
 	Error Error
 }
 
-func AccountState_UpdateSeen(Transaction *Transaction, Context Context, Query string, UserID string, Seen string) zir_2688387c33a72186_ExecResult {
-	var result zir_2688387c33a72186_ExecResult
+func AccountState_UpdateSeen(Transaction *Transaction, Context Context, Query string, UserID string, Seen string) zir_e892aa6a1dc88d44_ExecResult {
+	var result zir_e892aa6a1dc88d44_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID, Seen)
 	return result
 }
 
-func AccountState_EnsureSync(Transaction *Transaction, Context Context, Query string, UserID string) zir_2688387c33a72186_ExecResult {
-	var result zir_2688387c33a72186_ExecResult
+func AccountState_EnsureSync(Transaction *Transaction, Context Context, Query string, UserID string) zir_e892aa6a1dc88d44_ExecResult {
+	var result zir_e892aa6a1dc88d44_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID)
 	return result
 }
 
-func AccountState_NextVersion(transaction *Transaction, context Context, userID string) zir_36dbc7eb84b27f76_VersionResult {
-	var result zir_36dbc7eb84b27f76_VersionResult = zir_36dbc7eb84b27f76_VersionResult{}
-	var value_0 zir_2688387c33a72186_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
+func AccountState_CurrentVersion(database *Database, context Context, userID string) zir_f8e639d96ed3eb34_VersionResult {
+	var result zir_f8e639d96ed3eb34_VersionResult = zir_f8e639d96ed3eb34_VersionResult{}
+	var value_0 [1]Any
+	value_0[0] = userID
+	arguments := value_0
+	_ = arguments
+	var value_1 *Row = StdSqlGo_QueryRow(database, context, "\nSELECT server_version\nFROM server_sync_state\nWHERE user_id_hash=?1", arguments[0:1:1])
+	row := value_1
+	var value_2 Error = (*sql.Row).Scan(row, &(result.Value))
+	result.Error = value_2
+	var value_3 Error = result.Error
+	if StdErrorsGo_Is(value_3, StdSqlGo_NoRows()) {
+		result.Value = 0
+		result.Error = nil
+	}
+	return result
+}
+
+func AccountState_CurrentVersionTx(transaction *Transaction, context Context, userID string) zir_f8e639d96ed3eb34_VersionResult {
+	var result zir_f8e639d96ed3eb34_VersionResult = zir_f8e639d96ed3eb34_VersionResult{}
+	var value_0 *Row = (*sql.Tx).QueryRowContext(transaction, context, "\nSELECT server_version\nFROM server_sync_state\nWHERE user_id_hash=?1", userID)
+	row := value_0
+	var value_1 Error = (*sql.Row).Scan(row, &(result.Value))
+	result.Error = value_1
+	var value_2 Error = result.Error
+	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+		result.Value = 0
+		result.Error = nil
+	}
+	return result
+}
+
+func AccountState_NextVersion(transaction *Transaction, context Context, userID string) zir_f8e639d96ed3eb34_VersionResult {
+	var result zir_f8e639d96ed3eb34_VersionResult = zir_f8e639d96ed3eb34_VersionResult{}
+	var value_0 zir_e892aa6a1dc88d44_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
 	inserted := value_0
 	result.Error = inserted.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_1 zir_2688387c33a72186_ExecResult = AccountState_EnsureSync(transaction, context, "UPDATE server_sync_state SET server_version=server_version+1 WHERE user_id_hash=?1", userID)
+	var value_1 zir_e892aa6a1dc88d44_ExecResult = AccountState_EnsureSync(transaction, context, "UPDATE server_sync_state SET server_version=server_version+1 WHERE user_id_hash=?1", userID)
 	updated := value_1
 	result.Error = updated.Error
 	if result.Error != nil {
@@ -72,7 +104,7 @@ func AccountState_Tombstoned(database *Database, context Context, userID string)
 }
 
 func AccountState_Touch(transaction *Transaction, context Context, userID string, missingUser Error) Error {
-	var value_0 zir_2688387c33a72186_ExecResult = AccountState_UpdateSeen(transaction, context, "UPDATE server_users SET last_seen_at=?2 WHERE user_id_hash=?1", userID, Timestamp_CanonicalNow())
+	var value_0 zir_e892aa6a1dc88d44_ExecResult = AccountState_UpdateSeen(transaction, context, "UPDATE server_users SET last_seen_at=?2 WHERE user_id_hash=?1", userID, Timestamp_CanonicalNow())
 	updated := value_0
 	if updated.Error != nil {
 		return updated.Error
@@ -81,7 +113,7 @@ func AccountState_Touch(transaction *Transaction, context Context, userID string
 	if affected.Error != nil || int(affected.Value) == int(0) {
 		return missingUser
 	}
-	var value_1 zir_2688387c33a72186_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
+	var value_1 zir_e892aa6a1dc88d44_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
 	inserted := value_1
 	return inserted.Error
 }
@@ -97,7 +129,7 @@ func AccountState_Upsert(transaction *Transaction, context Context, userID strin
 	if updated.Error != nil {
 		return updated.Error
 	}
-	var value_2 zir_2688387c33a72186_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
+	var value_2 zir_e892aa6a1dc88d44_ExecResult = AccountState_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", userID)
 	inserted := value_2
 	return inserted.Error
 }
@@ -107,22 +139,45 @@ func AccountState_Register(database *Database, context Context, userID string, p
 	if opened.Error != nil {
 		return opened.Error
 	}
+	defer (*sql.Tx).Rollback(opened.Value)
 	var arguments [1]Any
 	arguments[0] = userID
 	var value_0 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(opened.Value, context, "DELETE FROM server_account_tombstones WHERE user_id_hash=?1", arguments[0:1:1])
 	removed := value_0
 	if removed.Error != nil {
-		cleanup_return_0 := removed.Error
-		StdSqlGo_Rollback(opened.Value)
-		return cleanup_return_0
+		return removed.Error
 	}
 	error := AccountState_Upsert(opened.Value, context, userID, publicKey)
 	if error != nil {
-		cleanup_return_1 := error
-		StdSqlGo_Rollback(opened.Value)
-		return cleanup_return_1
+		return error
 	}
-	cleanup_return_2 := StdSqlGo_Commit(opened.Value)
-	StdSqlGo_Rollback(opened.Value)
-	return cleanup_return_2
+	return StdSqlGo_Commit(opened.Value)
+}
+
+func AccountState_Delete(database *Database, context Context, userID string) Error {
+	opened := StdSqlGo_Begin(database, context, nil)
+	if opened.Error != nil {
+		return opened.Error
+	}
+	defer (*sql.Tx).Rollback(opened.Value)
+	var value_0 [1]Any
+	value_0[0] = userID
+	arguments := value_0
+	_ = arguments
+	var value_1 string = "\nINSERT INTO server_account_tombstones(user_id_hash,deleted_at)\nVALUES(?1,CURRENT_TIMESTAMP)\nON CONFLICT(user_id_hash) DO UPDATE SET deleted_at=CURRENT_TIMESTAMP"
+	tombstone := StdSqlGo_ExecTx(opened.Value, context, value_1, arguments[0:1:1])
+	if tombstone.Error != nil {
+		return tombstone.Error
+	}
+	var value_2 string = "\nUPDATE monero_account_addresses SET disabled_at=CURRENT_TIMESTAMP\nWHERE account_id=?1 AND disabled_at=''"
+	disabled := StdSqlGo_ExecTx(opened.Value, context, value_2, arguments[0:1:1])
+	if disabled.Error != nil {
+		return disabled.Error
+	}
+	var value_3 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(opened.Value, context, "DELETE FROM server_users WHERE user_id_hash=?1", arguments[0:1:1])
+	deleted := value_3
+	if deleted.Error != nil {
+		return deleted.Error
+	}
+	return StdSqlGo_Commit(opened.Value)
 }

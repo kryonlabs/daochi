@@ -53,6 +53,40 @@ func socialHTTPFixture(t *testing.T) (*Server, []string) {
 	return server, users
 }
 
+func socialHTTPResponseTimes(t *testing.T, endpoint string, response []byte, started, finished time.Time) []byte {
+	t.Helper()
+	if len(response) == 0 || endpoint != "create" && endpoint != "accept" && endpoint != "decline" {
+		return response
+	}
+	var decoded struct {
+		Request FriendRequest `json:"request"`
+	}
+	if err := json.Unmarshal(response, &decoded); err != nil {
+		t.Fatal("successful friend response is not valid JSON", err)
+	}
+	fields := map[string]string{"updated_at": decoded.Request.UpdatedAt}
+	if endpoint == "create" {
+		if decoded.Request.CreatedAt != decoded.Request.UpdatedAt {
+			t.Fatal("new friend request creation and update times differ")
+		}
+		fields["created_at"] = decoded.Request.CreatedAt
+	}
+	for field, value := range fields {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil || parsed.UTC().Format(time.RFC3339) != value ||
+			parsed.Before(started.Truncate(time.Second)) || parsed.After(finished.Truncate(time.Second)) {
+			t.Fatalf("friend response %s is not the request's current UTC timestamp: %q", field, value)
+		}
+		original := []byte(`"` + field + `":"` + value + `"`)
+		if bytes.Count(response, original) != 1 {
+			t.Fatalf("friend response has an unexpected %s field", field)
+		}
+		normalized := []byte(`"` + field + `":"2026-01-01T00:00:00Z"`)
+		response = bytes.Replace(response, original, normalized, 1)
+	}
+	return response
+}
+
 func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 	type endpoint struct {
 		name, method, path, body string
@@ -150,6 +184,7 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 						writer.panicValue = failure
 					}
 					observed := observation{}
+					started := time.Now()
 					func() {
 						defer func() { observed.panicValue = recover() }()
 						original := rand.Reader
@@ -157,7 +192,11 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 						defer func() { rand.Reader = original }()
 						handler(server, writer, request)
 					}()
+					finished := time.Now()
 					observed.status, observed.header, observed.body, observed.closed = writer.status, writer.header, writer.data, body.closed
+					if observed.status == http.StatusOK {
+						observed.body = socialHTTPResponseTimes(t, endpoint.name, observed.body, started, finished)
+					}
 					if err := server.store.db.Ping(); err != nil {
 						t.Fatal("HTTP path retained the database connection", err)
 					}

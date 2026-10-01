@@ -1,0 +1,216 @@
+#import "std/go_types"
+#import "sync_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+text :: #import "std/text_go";
+state :: #import "account_state";
+timestamp :: #import "timestamp";
+native :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+strings :: #system_library "go:strings";
+
+PayloadWriteResult :: struct {
+    version: s64
+    error: Error
+}
+
+PayloadsResult :: struct {
+    value: []EncryptedPayload
+    truncated: bool
+    error: Error
+}
+
+PayloadBytesResult :: struct {
+    value: s64
+    error: Error
+}
+
+EncryptedPayloadPruneResult :: struct {
+    Deleted: s64
+}
+
+PayloadPruneOutcome :: struct {
+    value: EncryptedPayloadPruneResult
+    error: Error
+}
+
+#scope_file
+PayloadByteTotal :: #type #foreign native "NullInt64";
+TotalValid :: (value: PayloadByteTotal) -> bool #go_field #foreign native "NullInt64.Valid";
+TotalValue :: (value: PayloadByteTotal) -> s64 #go_field #foreign native "NullInt64.Int64";
+AllocatePayloads :: (count: isize) -> []EncryptedPayload #foreign builtin "make";
+AppendPayload :: (values: []EncryptedPayload, value: EncryptedPayload) -> []EncryptedPayload #foreign builtin "append";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+
+ReadPayloads :: (rows: *sql.Rows, failIncomplete: bool) -> PayloadsResult {
+    result: PayloadsResult
+    values := AllocatePayloads(cast(isize)0)
+    while sql.Next(rows) {
+        item: EncryptedPayload
+        payload: string
+        destinations: [5]Any = .[*item.ID, *item.ClientID, *payload, *item.CreatedAt, *item.ServerVersion]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        item.Payload = cast(RawMessage)text.ToBytes(payload)
+        values = AppendPayload(values, item)
+    }
+    result.error = sql.RowsError(rows)
+    if failIncomplete && result.error != null {
+        return result
+    }
+    result.value = values
+    return result
+}
+
+#scope_export
+Store :: (database: *sql.Database, context: ctx.Context, userID: string,
+    clientID: string, payload: []u8, missingUser: Error) -> PayloadWriteResult {
+    result: PayloadWriteResult
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    result.error = state.Touch(transaction, context, userID, missingUser)
+    if result.error != null {
+        return result
+    }
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error != null {
+        return result
+    }
+    arguments: [5]Any = .[userID, clientID, text.FromBytes(payload), version.value, timestamp.CanonicalNow()]
+    written := sql.ExecTx(transaction, context, "\nINSERT INTO server_encrypted_payloads(user_id_hash,client_id,payload_json,server_version,created_at)\nVALUES(?1,?2,?3,?4,?5)", arguments[:])
+    result.error = written.error
+    if result.error != null {
+        return result
+    }
+    result.version = version.value
+    result.error = sql.Commit(transaction)
+    return result
+}
+
+Since :: (database: *sql.Database, context: ctx.Context, userID: string, sinceVersion: s64, limit: isize) -> PayloadsResult {
+    result: PayloadsResult
+    queryLimit := limit
+    limitClause := ""
+    if queryLimit > cast(isize)0 {
+        queryLimit += cast(isize)1
+        limitClause = " LIMIT ?3"
+    }
+    parts: [2]string = .["\nSELECT id,client_id,payload_json,created_at,server_version\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,id", limitClause]
+    query := Join(parts[:], "")
+    queried: sql.QueryResult
+    if queryLimit > cast(isize)0 {
+        arguments: [3]Any = .[userID, sinceVersion, queryLimit]
+        queried = sql.Query(database, context, query, arguments[:])
+    } else {
+        arguments: [2]Any = .[userID, sinceVersion]
+        queried = sql.Query(database, context, query, arguments[:])
+    }
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    result = ReadPayloads(rows, true)
+    if result.error != null {
+        return result
+    }
+    if limit > cast(isize)0 && result.value.count > cast(s64)limit {
+        result.truncated = true
+        result.value = result.value[:limit]
+    }
+    return result
+}
+
+Recent :: (database: *sql.Database, context: ctx.Context, userID: string, limit: isize) -> PayloadsResult {
+    result: PayloadsResult
+    if limit <= cast(isize)0 || limit > cast(isize)50 {
+        limit = cast(isize)10
+    }
+    arguments: [2]Any = .[userID, limit]
+    queried := sql.Query(database, context, "\nSELECT id,client_id,payload_json,created_at,server_version\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1\nORDER BY id DESC\nLIMIT ?2", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    return ReadPayloads(rows, false)
+}
+
+Bytes :: (database: *sql.Database, context: ctx.Context, userID: string) -> PayloadBytesResult {
+    result: PayloadBytesResult
+    total: PayloadByteTotal
+    arguments: [1]Any = .[userID]
+    destinations: [1]Any = .[*total]
+    row := sql.QueryRow(database, context, "\nSELECT SUM(LENGTH(payload_json))\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error == null && TotalValid(total) {
+        result.value = TotalValue(total)
+    }
+    return result
+}
+
+Prune :: (database: *sql.Database, context: ctx.Context, userID: string,
+    maxAge: clock.Duration, maxBytes: s64) -> PayloadPruneOutcome {
+    result: PayloadPruneOutcome
+    if cast(s64)maxAge <= 0 && maxBytes <= 0 {
+        return result
+    }
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    if cast(s64)maxAge > 0 {
+        cutoff := timestamp.CanonicalTimestamp(clock.Add(clock.UTC(clock.Now()), cast(clock.Duration)(-cast(s64)maxAge)))
+        arguments: [2]Any = .[userID, cutoff]
+        deleted := sql.ExecTx(transaction, context, "\nDELETE FROM server_encrypted_payloads\nWHERE user_id_hash=?1 AND created_at<?2", arguments[:])
+        result.error = deleted.error
+        if result.error != null {
+            return result
+        }
+        affected := sql.RowsAffected(deleted.value)
+        result.value.Deleted += affected.value
+    }
+    if maxBytes > 0 {
+        arguments: [1]Any = .[userID]
+        while true {
+            total: PayloadByteTotal
+            destinations: [1]Any = .[*total]
+            row := sql.QueryRowTx(transaction, context, "\nSELECT SUM(LENGTH(payload_json))\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1", arguments[:])
+            result.error = sql.ScanRow(row, destinations[:])
+            if result.error != null {
+                return result
+            }
+            if !TotalValid(total) || TotalValue(total) <= maxBytes {
+                break
+            }
+            deleted := sql.ExecTx(transaction, context, "\nDELETE FROM server_encrypted_payloads\nWHERE id=(\n\tSELECT id\n\tFROM server_encrypted_payloads\n\tWHERE user_id_hash=?1\n\tORDER BY server_version,id\n\tLIMIT 1\n)", arguments[:])
+            result.error = deleted.error
+            if result.error != null {
+                return result
+            }
+            affected := sql.RowsAffected(deleted.value)
+            if affected.value == 0 {
+                break
+            }
+            result.value.Deleted += affected.value
+        }
+    }
+    result.error = sql.Commit(transaction)
+    return result
+}

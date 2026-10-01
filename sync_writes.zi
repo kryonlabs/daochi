@@ -1,0 +1,180 @@
+#import "std/go_types"
+#import "protocol"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+state :: #import "account_state";
+timestamp :: #import "timestamp";
+
+SyncWriteResult :: struct {
+    applied: isize
+    error: Error
+}
+
+ReplaceData :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> Error {
+    queries: [8]string = .[
+        "DELETE FROM server_session_rounds WHERE user_id_hash=?1",
+        "DELETE FROM server_sessions WHERE user_id_hash=?1",
+        "DELETE FROM server_habit_days WHERE user_id_hash=?1",
+        "DELETE FROM server_habits WHERE user_id_hash=?1",
+        "DELETE FROM server_meditation_logs WHERE user_id_hash=?1",
+        "DELETE FROM server_social_snapshots WHERE user_id_hash=?1",
+        "DELETE FROM server_encrypted_records WHERE user_id_hash=?1",
+        "DELETE FROM server_encrypted_payloads WHERE user_id_hash=?1",
+    ]
+    arguments: [1]Any = .[userID]
+    for query: queries {
+        removed := sql.ExecTx(transaction, context, query, arguments[:])
+        if removed.error != null {
+            return removed.error
+        }
+    }
+    version := state.NextVersion(transaction, context, userID)
+    return version.error
+}
+
+UpsertSession :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, session: Session) -> SyncWriteResult {
+    result: SyncWriteResult
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error != null {
+        return result
+    }
+    arguments: [17]Any = .[
+        userID, session.ID, timestamp.NormalizeTime(session.StartedAt, ""), session.LocalDate,
+        session.Topic, session.Activity, session.Source, session.RoundsHash, session.MoodBefore,
+        session.MoodAfter, session.Energy, session.Stress, session.Note, session.Tags,
+        session.DeletedAt, timestamp.NormalizeTime(session.UpdatedAt, ""), version.value,
+    ]
+    written := sql.ExecTx(transaction, context,
+        "\n\tINSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,\n\t\trounds_hash,mood_before,mood_after,energy,stress,note,tags,deleted_at,updated_at,server_version)\n\tVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)\n\tON CONFLICT(user_id_hash,id) DO UPDATE SET\n\t\tstarted_at=excluded.started_at,\n\t\tlocal_date=excluded.local_date,\n\t\ttopic=excluded.topic,\n\t\tactivity=excluded.activity,\n\t\tsource=excluded.source,\n\t\trounds_hash=excluded.rounds_hash,\n\t\tmood_before=excluded.mood_before,\n\t\tmood_after=excluded.mood_after,\n\t\tenergy=excluded.energy,\n\t\tstress=excluded.stress,\n\t\tnote=excluded.note,\n\t\ttags=excluded.tags,\n\t\tdeleted_at=excluded.deleted_at,\n\t\tupdated_at=excluded.updated_at,\n\t\tserver_version=excluded.server_version\n\tWHERE excluded.updated_at >= server_sessions.updated_at", arguments[:])
+    result.error = written.error
+    if result.error != null {
+        return result
+    }
+    applied := state.Affected(written.value)
+    if applied == cast(isize)0 || session.Rounds.count == 0 {
+        result.applied = applied
+        return result
+    }
+    identifiers: [2]Any = .[userID, session.ID]
+    cleared := sql.ExecTx(transaction, context,
+        "DELETE FROM server_session_rounds WHERE user_id_hash=?1 AND session_id=?2", identifiers[:])
+    result.error = cleared.error
+    if result.error != null {
+        return result
+    }
+    for round: session.Rounds {
+        values: [5]Any = .[userID, session.ID, round.RoundIndex, round.Breaths, round.HoldSeconds]
+        inserted := sql.ExecTx(transaction, context,
+            "\nINSERT INTO server_session_rounds(user_id_hash,session_id,round_index,breaths,hold_seconds)\nVALUES(?1,?2,?3,?4,?5)", values[:])
+        result.error = inserted.error
+        if result.error != null {
+            return result
+        }
+    }
+    result.applied = applied
+    return result
+}
+
+UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, item: EncryptedRecord) -> SyncWriteResult {
+    result: SyncWriteResult
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error != null {
+        return result
+    }
+    arguments: [12]Any = .[
+        userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
+        timestamp.NormalizeTime(item.UpdatedAt, ""), item.DeletedAt, item.ContentHash,
+        item.SchemaVersion, item.ParentID, version.value,
+    ]
+    written := sql.ExecTx(transaction, context,
+        "\nINSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n\tkey_id=excluded.key_id,\n\tnonce=excluded.nonce,\n\tciphertext=excluded.ciphertext,\n\tupdated_at=excluded.updated_at,\n\tdeleted_at=excluded.deleted_at,\n\tcontent_hash=excluded.content_hash,\n\tschema_version=excluded.schema_version,\n\tparent_id=excluded.parent_id,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at", arguments[:])
+    result.error = written.error
+    if result.error == null {
+        result.applied = state.Affected(written.value)
+    }
+    return result
+}
+
+DeleteHabit :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, habit: Habit) -> SyncWriteResult {
+    result: SyncWriteResult
+    updatedAt := timestamp.NormalizeTime(habit.UpdatedAt, "")
+    arguments: [3]Any = .[userID, habit.ID, updatedAt]
+    removed := sql.ExecTx(transaction, context,
+        "\nDELETE FROM server_habits\nWHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3", arguments[:])
+    result.error = removed.error
+    if result.error != null {
+        return result
+    }
+    applied := state.Affected(removed.value)
+    if applied == cast(isize)0 {
+        return result
+    }
+    identifiers: [2]Any = .[userID, habit.ID]
+    children := sql.ExecTx(transaction, context,
+        "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2", identifiers[:])
+    result.error = children.error
+    if result.error != null {
+        return result
+    }
+    applied += state.Affected(children.value)
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error == null {
+        result.applied = applied
+    }
+    return result
+}
+
+DeleteHabitDay :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, day: HabitDay) -> SyncWriteResult {
+    result: SyncWriteResult
+    updatedAt := timestamp.NormalizeTime(day.UpdatedAt, "")
+    arguments: [4]Any = .[userID, day.HabitID, day.LocalDate, updatedAt]
+    removed := sql.ExecTx(transaction, context,
+        "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2 AND local_date=?3 AND updated_at<=?4", arguments[:])
+    result.error = removed.error
+    if result.error != null {
+        return result
+    }
+    applied := state.Affected(removed.value)
+    if applied == cast(isize)0 {
+        return result
+    }
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error == null {
+        result.applied = applied
+    }
+    return result
+}
+
+DeleteSession :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, session: Session) -> SyncWriteResult {
+    result: SyncWriteResult
+    updatedAt := timestamp.NormalizeTime(session.UpdatedAt, session.StartedAt)
+    arguments: [3]Any = .[userID, session.ID, updatedAt]
+    removed := sql.ExecTx(transaction, context,
+        "\nDELETE FROM server_sessions\nWHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3", arguments[:])
+    result.error = removed.error
+    if result.error != null {
+        return result
+    }
+    applied := state.Affected(removed.value)
+    if applied == cast(isize)0 {
+        return result
+    }
+    identifiers: [2]Any = .[userID, session.ID]
+    children := sql.ExecTx(transaction, context,
+        "\nDELETE FROM server_session_rounds\nWHERE user_id_hash=?1 AND session_id=?2", identifiers[:])
+    result.error = children.error
+    if result.error != null {
+        return result
+    }
+    applied += state.Affected(children.value)
+    version := state.NextVersion(transaction, context, userID)
+    result.error = version.error
+    if result.error == null {
+        result.applied = applied
+    }
+    return result
+}

@@ -1,0 +1,16 @@
+rate :: #import "rate_limit";
+metrics :: #import "metrics";
+clock :: #import "std/time_go";
+atomic :: #import "std/atomic_go";
+
+Allow :: (limiter: *rate.RateLimiter, counters: *metrics.ServerMetrics,
+    key: string, limit: isize, window: clock.Duration) -> bool {
+    if limiter == null {
+        return true
+    }
+    allowed := rate.Allow(limiter, key, limit, window)
+    if !allowed {
+        atomic.Add(*counters.rateLimitedRequests, cast(u64)1)
+    }
+    return allowed
+}

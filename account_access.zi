@@ -1,0 +1,247 @@
+#import "std/go_types"
+#import "std/map_go"
+#import "protocol"
+config :: #import "config";
+auth :: #import "authentication";
+signature :: #import "account_signature";
+challenge :: #import "challenge";
+requests :: #import "sync_request";
+rate :: #import "request_rate";
+limiting :: #import "rate_limit";
+metrics :: #import "metrics";
+address :: #import "client_address";
+identity :: #import "identity";
+accounts :: #import "account_keys";
+state :: #import "account_state";
+clients :: #import "sync_clients";
+profile :: #import "account_profile";
+token :: #import "token";
+http_auth :: #import "http_auth";
+response :: #import "response";
+logs :: #import "log_safety";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+sql :: #import "std/sql_go";
+clock :: #import "std/time_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+time :: #system_library "go:time";
+logging :: #system_library "go:log/slog";
+
+PrivateKeySignatureResult :: struct {
+    value: []u8
+    error: Error
+}
+SignPrivateKey :: #type (message: []u8, key: []u8) -> PrivateKeySignatureResult;
+
+AccountAccess :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    challenges: *challenge.ChallengeStore
+    limiter: *limiting.RateLimiter
+    counters: *metrics.ServerMetrics
+    verify: auth.VerifySignature
+    sign: SignPrivateKey
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+Join :: (parts: []string, separator: string) -> string #foreign strings;
+EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
+Seconds :: (duration: clock.Duration) -> float64 #foreign time "Duration.Seconds";
+LogError :: (message: string, key: string, error: Error) #foreign logging "Error";
+LogAccountError :: (message: string, userKey: string, user: string, errorKey: string, error: Error) #foreign logging "Error";
+LogClientError :: (message: string, userKey: string, user: string, clientKey: string, client: string, errorKey: string, error: Error) #foreign logging "Error";
+LogAccountTextError :: (message: string, userKey: string, user: string, errorKey: string, error: string) #foreign logging "Error";
+
+Allow :: (access: AccountAccess, prefix: string, subject: string, limit: isize,
+    window: clock.Duration) -> bool {
+    parts: [2]string = .[prefix, subject]
+    return rate.Allow(access.limiter, access.counters, Join(parts[:], ""), limit, window)
+}
+
+RequestSignature :: (access: AccountAccess, request: *http.Request, user: string,
+    publicKey: string, body: []u8) -> signature.AccountSignatureResult {
+    signed := requests.SignatureHeader(request)
+    return signature.Authenticate(access.database, access.challenges, access.verify,
+        http.Context(request), user, publicKey, signed.value, signed.context,
+        http.Method(request), url.Path(http.RequestURL(request)), body)
+}
+
+Deleted :: (writer: http.ResponseWriter) {
+    value: Map(string, string)
+    MapSet(value, "status", "deleted")
+    response.JSON(writer, cast(isize)200, value)
+}
+
+#scope_export
+Challenge :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Request) {
+    user := ToLower(TrimSpace(url.Value(url.Query(http.RequestURL(request)), "user_id")))
+    if !identity.ValidUserID(user) {
+        response.Error(writer, cast(isize)400, "invalid user_id")
+        return
+    }
+    window := cast(clock.Duration)60000000000
+    if !Allow(access, "challenge:ip:", address.FromRequest(request), cast(isize)60, window) ||
+        !Allow(access, "challenge:user:", user, cast(isize)20, window) {
+        response.Error(writer, cast(isize)429, "rate limit exceeded")
+        return
+    }
+    issued := challenge.Issue(access.challenges, user)
+    if issued.Error != null {
+        LogError("issue challenge", "error", issued.Error)
+        response.Error(writer, cast(isize)500, "challenge failed")
+        return
+    }
+    value: ChallengeResponse
+    value.UserIDHash = user
+    value.Nonce = EncodeHex(issued.Nonce)
+    value.ExpiresIn = cast(s64)Seconds(access.configuration.ChallengeTTL)
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Login :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Request) {
+    read := requests.ReadLogin(writer, request, access.configuration.MaxBodyBytes)
+    if read.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(read.error))
+        return
+    }
+    value := read.value
+    error := requests.ApplyHeaderUser(request, *value.UserIDHash)
+    if error != null {
+        response.Error(writer, cast(isize)400, errors.Message(error))
+        return
+    }
+    if !identity.ValidClientID(value.ClientID) {
+        response.Error(writer, cast(isize)400, "invalid client_id")
+        return
+    }
+    window := cast(clock.Duration)60000000000
+    if !Allow(access, "login:ip:", address.FromRequest(request), cast(isize)40, window) ||
+        !Allow(access, "login:user:", value.UserIDHash, cast(isize)20, window) {
+        response.Error(writer, cast(isize)429, "rate limit exceeded")
+        return
+    }
+    authenticated := RequestSignature(access, request, value.UserIDHash, value.PublicKey, read.body)
+    if authenticated.authentication.error != null || authenticated.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, access.counters, authenticated.authentication)
+        return
+    }
+    context := http.Context(request)
+    error = state.Register(access.database, context, value.UserIDHash, authenticated.value)
+    if error != null {
+        LogAccountError("register sync user", "user", logs.LogText(value.UserIDHash), "error", error)
+        response.Error(writer, cast(isize)500, "login failed")
+        return
+    }
+    error = clients.RecordLogin(access.database, context, value.UserIDHash, value.ClientID)
+    if error != null {
+        LogClientError("record login client", "user", logs.LogText(value.UserIDHash), "client", logs.LogText(value.ClientID), "error", error)
+        response.Error(writer, cast(isize)500, "login failed")
+        return
+    }
+    issued := token.IssueAuthToken(access.configuration.TokenSecret, value.UserIDHash,
+        clock.Unix(clock.Add(clock.Now(), access.configuration.TokenTTL)))
+    if issued.error != "" {
+        LogAccountTextError("issue auth token", "user", logs.LogText(value.UserIDHash), "error", issued.error)
+        response.Error(writer, cast(isize)500, "login failed")
+        return
+    }
+    alias := profile.Alias(access.database, context, value.UserIDHash)
+    if alias.error != null {
+        LogAccountError("load account alias", "user", logs.LogText(value.UserIDHash), "error", alias.error)
+        response.Error(writer, cast(isize)500, "alias failed")
+        return
+    }
+    icon := profile.Icon(access.database, context, value.UserIDHash)
+    if icon.error != null {
+        LogAccountError("load profile icon", "user", logs.LogText(value.UserIDHash), "error", icon.error)
+        response.Error(writer, cast(isize)500, "profile icon failed")
+        return
+    }
+    result: LoginResponse
+    result.Status = "ok"
+    result.AuthToken = issued.value
+    result.ExpiresIn = cast(s64)Seconds(access.configuration.TokenTTL)
+    result.ServerTime = clock.Unix(clock.Now())
+    result.AccountAlias = alias.value
+    result.ProfileIcon = icon.value
+    response.JSON(writer, cast(isize)200, result)
+}
+
+Delete :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Request) {
+    read := requests.ReadDelete(writer, request, access.configuration.MaxBodyBytes)
+    if read.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(read.error))
+        return
+    }
+    value := read.value
+    error := requests.ApplyHeaderUser(request, *value.UserIDHash)
+    if error != null {
+        response.Error(writer, cast(isize)400, errors.Message(error))
+        return
+    }
+    authenticated := RequestSignature(access, request, value.UserIDHash, "", read.body)
+    if authenticated.authentication.error != null || authenticated.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, access.counters, authenticated.authentication)
+        return
+    }
+    error = state.Delete(access.database, http.Context(request), value.UserIDHash)
+    if error != null {
+        LogAccountError("delete account", "user", logs.LogText(value.UserIDHash), "error", error)
+        response.Error(writer, cast(isize)500, "delete failed")
+        return
+    }
+    Deleted(writer)
+}
+
+DeleteWithKey :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Request) {
+    read := requests.ReadDeleteWithKey(writer, request, access.configuration.MaxBodyBytes)
+    if read.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(read.error))
+        return
+    }
+    value := read.value
+    window := cast(clock.Duration)3600000000000
+    if !Allow(access, "delete-key:ip:", address.FromRequest(request), cast(isize)8, window) ||
+        !Allow(access, "delete-key:user:", value.UserIDHash, cast(isize)4, window) {
+        response.Error(writer, cast(isize)429, "rate limit exceeded")
+        return
+    }
+    account := accounts.PublicKey(access.database, http.Context(request), value.UserIDHash)
+    if account.error != null {
+        LogAccountError("load account key", "user", logs.LogText(value.UserIDHash), "error", account.error)
+        response.Error(writer, cast(isize)500, "delete failed")
+        return
+    }
+    if !account.found {
+        response.Error(writer, cast(isize)404, "sync account not found")
+        return
+    }
+    exported := requests.ParseExportedKey(value.ExportedKey)
+    if exported.error != null {
+        response.Error(writer, cast(isize)400, errors.Message(exported.error))
+        return
+    }
+    if exported.value.publicID != "" && exported.value.publicID != value.UserIDHash {
+        response.Error(writer, cast(isize)400, "exported key public_id does not match user_id_hash")
+        return
+    }
+    parts: [3]string = .["inbe-delete-account-v1\n", value.UserIDHash, "\n"]
+    message := text.ToBytes(Join(parts[:], ""))
+    signed := access.sign(message, exported.value.privateKey)
+    if signed.error != null || !access.verify(account.value, message, signed.value) {
+        response.Error(writer, cast(isize)401, "exported key does not match sync account")
+        return
+    }
+    error := state.Delete(access.database, http.Context(request), value.UserIDHash)
+    if error != null {
+        LogAccountError("delete account with key", "user", logs.LogText(value.UserIDHash), "error", error)
+        response.Error(writer, cast(isize)500, "delete failed")
+        return
+    }
+    Deleted(writer)
+}

@@ -1,0 +1,88 @@
+#import "std/go_types"
+auth :: #import "authentication";
+challenge :: #import "challenge";
+accounts :: #import "account_keys";
+identity :: #import "identity";
+codec :: #import "codec";
+records :: #import "encrypted_record";
+signing :: #import "signing";
+text :: #import "std/text_go";
+constant_time :: #import "std/constant_time";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+strings :: #system_library "go:strings";
+
+AccountSignatureResult :: struct {
+    value: []u8
+    authentication: auth.AuthenticationResult
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+
+Failure :: (status: isize, message: string) -> AccountSignatureResult {
+    result: AccountSignatureResult
+    result.authentication = auth.Failure(status, message)
+    return result
+}
+
+#scope_export
+Authenticate :: (database: *sql.Database, challenges: *challenge.ChallengeStore,
+    verify: auth.VerifySignature, context: ctx.Context, userID: string,
+    publicKeyText: string, signatureText: string, signatureContext: string,
+    method: string, path: string, signedPayload: []u8) -> AccountSignatureResult {
+    userID = ToLower(TrimSpace(userID))
+    if !identity.ValidUserID(userID) {
+        return Failure(cast(isize)400, "invalid user_id_hash")
+    }
+    consumed := challenge.Consume(challenges, userID)
+    if !consumed.Found {
+        return Failure(cast(isize)400, "missing or expired challenge")
+    }
+    account := accounts.PublicKey(database, context, userID)
+    if account.error != null {
+        result: AccountSignatureResult
+        result.authentication = auth.NativeFailure(account.error)
+        return result
+    }
+    publicKey := account.value
+    if !account.found {
+        if publicKeyText == "" {
+            return Failure(cast(isize)400, "public_key required for first sync")
+        }
+        field := codec.DecodeBinaryField(publicKeyText)
+        publicKey = text.ToBytes(field.value)
+        if field.error != "" {
+            return Failure(cast(isize)400, "invalid public_key")
+        }
+        if publicKey.count != codec.mlDSA44PublicKeySize {
+            return Failure(cast(isize)400, "wrong public_key size")
+        }
+        if records.ValidateAccountKey(userID, publicKey) != null {
+            return Failure(cast(isize)400, "public_key does not match user_id_hash")
+        }
+    } else if publicKeyText != "" {
+        field := codec.DecodeBinaryField(publicKeyText)
+        supplied := text.ToBytes(field.value)
+        if field.error != "" || !constant_time.ConstantTimeEqual(supplied, publicKey) {
+            return Failure(cast(isize)400, "public_key does not match registered user")
+        }
+    }
+    signatureField := codec.DecodeBinaryField(signatureText)
+    signature := text.ToBytes(signatureField.value)
+    if signatureField.error != "" {
+        return Failure(cast(isize)400, "invalid signature")
+    }
+    if signature.count != codec.mlDSA44SignatureSize {
+        return Failure(cast(isize)400, "wrong signature size")
+    }
+    message := signing.CanonicalMessageWithContext(signatureContext, consumed.Nonce,
+        method, path, signedPayload)
+    if !verify(publicKey, text.ToBytes(message), signature) {
+        return Failure(cast(isize)401, "signature rejected")
+    }
+    result: AccountSignatureResult
+    result.value = publicKey
+    return result
+}

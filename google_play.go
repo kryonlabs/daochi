@@ -89,8 +89,6 @@ type SignatureResult struct {
 
 type __type_f70dc01c9cc634ef = map[string][]string
 
-type __type_9ff0571749a9f227 = map[string]string
-
 func GooglePlay_RawURL() *zir_b554ab8e6713f587_Encoding {
 	return base64.RawURLEncoding
 }

@@ -4186,7 +4186,7 @@ func TestAllowedCORSOrigin(t *testing.T) {
 		"http://127.0.0.1",
 	}
 	for _, origin := range allowed {
-		if got := allowedCORSOrigin(origin); got != origin {
+		if got := Middleware_AllowedOrigin(origin); got != origin {
 			t.Fatalf("expected %q to be allowed, got %q", origin, got)
 		}
 	}
@@ -4197,7 +4197,7 @@ func TestAllowedCORSOrigin(t *testing.T) {
 		"",
 	}
 	for _, origin := range denied {
-		if got := allowedCORSOrigin(origin); got != "" {
+		if got := Middleware_AllowedOrigin(origin); got != "" {
 			t.Fatalf("expected %q to be denied, got %q", origin, got)
 		}
 	}

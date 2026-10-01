@@ -27,14 +27,14 @@ type SyncCompletion struct {
 	Transaction SignedTxEnvelope
 }
 
-type FinishCallback func(*SyncCompletion, Synchronization, *Request)
+type zir_88e9bac24ed1cd0d_FinishCallback func(*SyncCompletion, Synchronization, *Request)
 
 type zir_f42dd54e2a1e2480_IntegerResult struct {
 	Value int64
 	Error Error
 }
 
-func SyncHttp_FinishAtReturn(Callback FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
+func SyncHttp_FinishAtReturn(Callback zir_88e9bac24ed1cd0d_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
 	Callback(Completion, Sync, Request)
 }
 
@@ -122,7 +122,7 @@ func SyncHttp_ProjectClean(value *SyncResponse, request SyncRequest) {
 func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Request) {
 	StdAtomicGo_Add(&(sync.Counters.SyncRequests), 1)
 	var completion SyncCompletion = SyncCompletion{}
-	var value_3 FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
+	var value_3 zir_88e9bac24ed1cd0d_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
 		SyncHttp_Finish(value_0, value_1, value_2)
 	}
 	defer SyncHttp_FinishAtReturn(value_3, &(completion), sync, request)

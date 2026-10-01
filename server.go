@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
 )
@@ -421,104 +418,12 @@ func (s *Server) writeAuthError(w http.ResponseWriter, err error) {
 	Response_Error(w, http.StatusInternalServerError, "authentication failed")
 }
 
-type metricsResponseWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (w *metricsResponseWriter) WriteHeader(status int) {
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *metricsResponseWriter) Write(data []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	return w.ResponseWriter.Write(data)
-}
-
-func (w *metricsResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	hijacker, ok := w.ResponseWriter.(http.Hijacker)
-	if !ok {
-		return nil, nil, errors.New("hijack unsupported")
-	}
-	if w.status == 0 {
-		w.status = http.StatusSwitchingProtocols
-	}
-	return hijacker.Hijack()
-}
-
 func (s *Server) withCommonHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		mw := &metricsResponseWriter{ResponseWriter: w}
-		defer func() {
-			status := mw.status
-			if status == 0 {
-				status = http.StatusOK
-			}
-			Metrics_RecordHTTP(s.metrics, r.Method, r.URL.Path, status, time.Since(start))
-		}()
-		w = mw
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Cache-Control", "no-store")
-		if origin := allowedCORSOrigin(r.Header.Get("Origin")); origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Daochi-User, X-Daochi-Signature, X-Daochi-Client, X-Daochi-Since-Version, X-Daochi-Limit, X-Daochi-Admin, X-Ksync-User, X-Ksync-Signature, X-Ksync-Client, X-Ksync-Since-Version, X-Ksync-Limit, X-Ksync-Admin, X-Inbe-User, X-Inbe-Signature")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return Middleware_New(&s.metrics, next)
 }
 
 func (s *Server) allowRequest(r *http.Request, key string, limit int, window time.Duration) bool {
 	return RequestRate_Allow(s.limiter, s.metrics, key, limit, window)
-}
-
-func allowedCORSOrigin(origin string) string {
-	u, err := url.Parse(origin)
-	if err != nil || u.Scheme == "" || u.Host == "" || u.Path != "" ||
-		u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-		return ""
-	}
-	if origin == "https://daochi.pages.dev" ||
-		origin == "https://daochi.kryonlabs.com" ||
-		origin == "https://daochi.net" ||
-		origin == "https://www.daochi.net" ||
-		origin == "https://inbe.waozi.xyz" ||
-		origin == "https://uku.waozi.xyz" {
-		return origin
-	}
-	if u.Scheme == "chrome-extension" && validChromeExtensionID(u.Host) {
-		return origin
-	}
-	if u.Scheme != "http" {
-		return ""
-	}
-	switch u.Hostname() {
-	case "localhost", "127.0.0.1", "0.0.0.0", "::1":
-		return origin
-	default:
-		return ""
-	}
-}
-
-func validChromeExtensionID(id string) bool {
-	if len(id) != 32 {
-		return false
-	}
-	for _, r := range id {
-		if r < 'a' || r > 'p' {
-			return false
-		}
-	}
-	return true
 }
 
 func (s *Server) syncSocket() SyncSocket {

@@ -30,10 +30,10 @@ type Frame struct {
 	Error   Error
 }
 
-type Hijacker = http.Hijacker
+type zir_6cdc28462cfc0851_Hijacker = http.Hijacker
 
-type HijackerResult struct {
-	Value   Hijacker
+type zir_cc9dcb6f3173cd4e_HijackerResult struct {
+	Value   zir_6cdc28462cfc0851_Hijacker
 	Present bool
 }
 
@@ -70,13 +70,13 @@ func Websocket_Decode(Encoding *zir_50b2af4b05b6a4ca_Encoding, Value string) zir
 	return result
 }
 
-func Websocket_AsHijacker(Value Any) HijackerResult {
-	var result HijackerResult
-	result.Value, result.Present = Value.(Hijacker)
+func Websocket_AsHijacker(Value Any) zir_cc9dcb6f3173cd4e_HijackerResult {
+	var result zir_cc9dcb6f3173cd4e_HijackerResult
+	result.Value, result.Present = Value.(zir_6cdc28462cfc0851_Hijacker)
 	return result
 }
 
-func Websocket_Hijack(Value Hijacker) AcceptedSocket {
+func Websocket_Hijack(Value zir_6cdc28462cfc0851_Hijacker) AcceptedSocket {
 	var result AcceptedSocket
 	result.Connection, result.Buffer, result.Error = (http.Hijacker).Hijack(Value)
 	return result

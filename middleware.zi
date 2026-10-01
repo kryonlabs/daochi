@@ -1,0 +1,162 @@
+#import "std/go_types"
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+metrics :: #import "metrics";
+socket :: #import "websocket";
+go_http :: #system_library "go:net/http";
+go_url :: #system_library "go:net/url";
+go_time :: #system_library "go:time";
+builtin :: #system_library "go:builtin";
+
+Handler :: #type #foreign go_http "Handler";
+Middleware :: struct {
+    next: Handler
+    metrics: **metrics.ServerMetrics
+}
+CapturedWriter :: struct {
+    writer: http.ResponseWriter
+    status: isize
+}
+WriteResult :: struct {
+    count: isize
+    error: Error
+}
+
+#scope_file
+Hijacker :: #type #foreign go_http "Hijacker";
+UserInfo :: #type #foreign go_url "Userinfo";
+HijackerResult :: struct {
+    value: Hijacker
+    present: bool
+}
+FinishCallback :: #type (writer: *CapturedWriter, counters: **metrics.ServerMetrics,
+    request: *http.Request, start: clock.Time) -> void;
+FinishAtReturn :: (callback: FinishCallback, writer: *CapturedWriter,
+    counters: **metrics.ServerMetrics, request: *http.Request,
+    start: clock.Time) #go_defer #foreign builtin "call";
+AllocateMiddleware :: () -> *Middleware #foreign builtin "new";
+AllocateWriter :: () -> *CapturedWriter #foreign builtin "new";
+Serve :: (handler: Handler, writer: http.ResponseWriter,
+    request: *http.Request) #foreign go_http "Handler.ServeHTTP";
+WriteRaw :: (writer: http.ResponseWriter, bytes: []u8) -> WriteResult #go_results #foreign go_http "ResponseWriter.Write";
+AsHijacker :: (value: Any) -> HijackerResult #go_results #foreign builtin "assert";
+HijackRaw :: (hijacker: Hijacker) -> socket.AcceptedSocket #go_results #foreign go_http "Hijacker.Hijack";
+RawQuery :: (value: *url.URL) -> string #go_field #foreign go_url "(*URL).RawQuery";
+Fragment :: (value: *url.URL) -> string #go_field #foreign go_url "(*URL).Fragment";
+User :: (value: *url.URL) -> *UserInfo #go_field #foreign go_url "(*URL).User";
+Hostname :: (value: *url.URL) -> string #foreign go_url "(*URL).Hostname";
+Since :: (start: clock.Time) -> clock.Duration #foreign go_time;
+
+Finish :: (writer: *CapturedWriter, counters: **metrics.ServerMetrics,
+    request: *http.Request, start: clock.Time) {
+    status := writer.status
+    if status == 0 {
+        status = 200
+    }
+    metrics.RecordHTTP(<<counters, http.Method(request),
+        url.Path(http.RequestURL(request)), status, Since(start))
+}
+
+#scope_export
+New :: (counters: **metrics.ServerMetrics, next: Handler) -> Handler {
+    middleware := AllocateMiddleware()
+    middleware.next = next
+    middleware.metrics = counters
+    return cast(Handler)middleware
+}
+
+Header :: (writer: *CapturedWriter) -> http.Header #go_method "Header" {
+    return http.ResponseHeaders(writer.writer)
+}
+
+WriteHeader :: (writer: *CapturedWriter, status: isize) #go_method "WriteHeader" {
+    writer.status = status
+    http.WriteHeader(writer.writer, status)
+}
+
+Write :: (writer: *CapturedWriter, bytes: []u8) -> WriteResult #go_method "Write" #go_results {
+    if writer.status == 0 {
+        writer.status = 200
+    }
+    return WriteRaw(writer.writer, bytes)
+}
+
+Hijack :: (writer: *CapturedWriter) -> socket.AcceptedSocket #go_method "Hijack" #go_results {
+    hijacker := AsHijacker(cast(Any)writer.writer)
+    if !hijacker.present {
+        result: socket.AcceptedSocket
+        result.error = errors.New("hijack unsupported")
+        return result
+    }
+    if writer.status == 0 {
+        writer.status = 101
+    }
+    return HijackRaw(hijacker.value)
+}
+
+ServeHTTP :: (middleware: *Middleware, output: http.ResponseWriter,
+    request: *http.Request) #go_method "ServeHTTP" {
+    start := clock.Now()
+    writer := AllocateWriter()
+    writer.writer = output
+    FinishAtReturn(Finish, writer, middleware.metrics, request, start)
+    http.SetHeader(Header(writer), "X-Content-Type-Options", "nosniff")
+    http.SetHeader(Header(writer), "Cache-Control", "no-store")
+    origin := AllowedOrigin(http.HeaderValue(http.Headers(request), "Origin"))
+    if origin != "" {
+        http.SetHeader(Header(writer), "Access-Control-Allow-Origin", origin)
+        http.SetHeader(Header(writer), "Vary", "Origin")
+    }
+    http.SetHeader(Header(writer), "Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+    http.SetHeader(Header(writer), "Access-Control-Allow-Headers", "Authorization, Content-Type, X-Daochi-User, X-Daochi-Signature, X-Daochi-Client, X-Daochi-Since-Version, X-Daochi-Limit, X-Daochi-Admin, X-Ksync-User, X-Ksync-Signature, X-Ksync-Client, X-Ksync-Since-Version, X-Ksync-Limit, X-Ksync-Admin, X-Inbe-User, X-Inbe-Signature")
+    if http.Method(request) == "OPTIONS" {
+        WriteHeader(writer, cast(isize)204)
+        return
+    }
+    Serve(middleware.next, cast(http.ResponseWriter)writer, request)
+}
+
+AllowedOrigin :: (origin: string) -> string {
+    parsed := url.Parse(origin)
+    if parsed.error != null {
+        return ""
+    }
+    value := parsed.value
+    if url.Scheme(value) == "" || url.Host(value) == "" || url.Path(value) != "" ||
+        RawQuery(value) != "" || Fragment(value) != "" || User(value) != null {
+        return ""
+    }
+    if origin == "https://daochi.pages.dev" ||
+        origin == "https://daochi.kryonlabs.com" ||
+        origin == "https://daochi.net" ||
+        origin == "https://www.daochi.net" ||
+        origin == "https://inbe.waozi.xyz" ||
+        origin == "https://uku.waozi.xyz" {
+        return origin
+    }
+    if url.Scheme(value) == "chrome-extension" && ValidExtensionID(url.Host(value)) {
+        return origin
+    }
+    if url.Scheme(value) != "http" {
+        return ""
+    }
+    host := Hostname(value)
+    if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "::1" {
+        return origin
+    }
+    return ""
+}
+
+ValidExtensionID :: (value: string) -> bool {
+    if value.count != 32 {
+        return false
+    }
+    for byte: value {
+        if byte < #char "a" || byte > #char "p" {
+            return false
+        }
+    }
+    return true
+}

@@ -2,8 +2,8 @@
 
 The target is a complete port of Daochi's first-party code to Ziran. This is
 an incremental implementation: the running server currently combines generated
-Go from canonical `.zi` files with a small handwritten entry and crypto
-boundary. Caller changes alone do not count as a completed module.
+Go from canonical `.zi` files with a small handwritten entry and database
+driver registration. Caller changes alone do not count as a completed module.
 
 The goal is Daochi's complete port. Ziran's existing C compiler/bootstrap is
 allowed to remain; upstream changes are made only when Daochi needs a language,
@@ -77,7 +77,7 @@ field names, Go storage types, order and reflection tags.
 | `docs.go` | Ziran | `docs.zi`: public HTML, typed OpenAPI map builders, cached JSON and both HTTP handlers; public statistics remain a storage dependency |
 | `inspect.go` | Ziran | `inspect.zi`: read-only database access, native flag parsing, summary/user/doctor commands, warnings, ordered queries, byte-preserving redaction and output |
 | `log_safety.go` | Ziran | `log_safety.zi`: byte-preserving CR/LF removal |
-| `main.go` | Ziran; Go entry bridge | Startup, inspection dispatch, worker supervision and HTTP lifecycle in `startup.zi`; native entry and verifier-factory adaptation remain Go |
+| `main.go` | Ziran; Go entry bridge | Startup, inspection dispatch, worker supervision and HTTP lifecycle in `startup.zi`; the native entry invokes the canonical verifier and signer directly |
 | `mesh.go` | Ziran | `mesh.zi`: HTTP export/import, signed/token authentication, approved-scope checks, configured/trusted peer selection, signed outbound requests, pagination, cursor persistence and the cancellable recurring worker; wire records, cursors and scope predicates in `mesh_types.zi`, `mesh_cursor.zi` and `mesh_policy.zi`; native authentication error conversion is supplied by the caller |
 | `mesh_apps.go` | Ziran | `mesh_apps.zi`: scoped signed registry export/import, manifest decoding, signature verification, version queries, downgrade/fork rejection and per-app transactions; native authentication error conversion remains supplied by the Go caller |
 | `mesh_store.go` | Ziran | `mesh_store.zi`: encrypted-record export/import, stable change ordering, account tombstones, conflicts, deletion propagation, cursor persistence and atomic rollback; collection ownership in `collection_scope.zi`, record validation in `encrypted_record.zi` |
@@ -98,9 +98,9 @@ field names, Go storage types, order and reflection tags.
 | `trust_handlers.go` | Ziran | `trust_http.zi`: operator access, signed pairing invitations/acceptances, outbound completion and retries, trusted-peer listing, trust-space creation and namespace registration/resolution |
 | `trust_store.go` | Ziran | `trust_store.zi`: schema, atomic pairing, peer policy/list queries, trust spaces, namespace signing/resolution and scoped mesh name replication; nonces in `node_nonce.zi`, public-key lookup in `peer_trust.zi` |
 | `types.go` | Ziran | All 77 original records and profile constants in `protocol.zi`, `manifest.zi`, `sync_types.zi` and `types.zi` |
-| `verifier.go` | Ziran | Callback record, construction and shared unavailable error in `verifier.zi`; the signing bridge remains Go |
-| `verifier_nocgo.go` | Go | Unsupported-build error path |
-| `verifier_oqs.go` | Go | ML-DSA-44 foreign-library boundary and resource ownership |
+| `verifier.go` | Ziran | Callback record, construction and shared unavailable error in `verifier.zi`; direct signing in `ml_dsa44.zi` |
+| `verifier_nocgo.go` | Ziran | Unsupported-build availability checks and exact error identity in `ml_dsa44.zi` |
+| `verifier_oqs.go` | Ziran | `ml_dsa44.zi`: native header bindings, allocation, length checks, verification, signing, keypair generation and deferred cleanup |
 | `version.go` | Ziran | `version.zi`: default build version, stamped through Makefile and Docker linker arguments |
 
 `identity.zi` is a new canonical module extracted from `server.go`. Generated
@@ -807,14 +807,30 @@ and native panic cleanup. CLI subprocesses compare inspection output and startup
 fatal messages, exercise key creation and argument-read timing, serve the real
 health endpoint and exit cleanly on SIGINT/SIGTERM. Child environments omit both
 display variables and isolate configuration from the developer's environment.
-The ten-line Go entry bridge adapts the remaining native crypto factory and
-invokes canonical startup; it is still counted as unported code.
+The five-line Go entry bridge invokes canonical startup with the Ziran verifier
+factory and signer.
 
-Five handwritten production Go files remain, totaling 140 lines, including
-forwarding adapters. The native entry/verifier-factory bridge, SQLite driver
-registration and the liboqs/signing provider still require porting. The Go
-regression tests and the final CLI, deployment and released-client compatibility
-audit also remain.
+`ml_dsa44.zi` owns the liboqs provider's availability checks, verifier callback,
+algorithm selection, buffer allocation, size validation, signing, verification,
+keypair generation and native signature-object cleanup. Header bindings retain
+liboqs's C layout and declarations; every successful object allocation has a
+deferred free. Creation of a verifier still does not allocate a native object.
+Unavailable builds preserve the original sentinel error and nil results. The
+committed generated cgo companion carries `-loqs`, keeping ordinary Go and
+container builds linked to the same native dependency.
+
+An independent copy of the original Go/C provider under `testdata/ml_dsa44`
+cross-verifies signatures and keys in both directions and compares input
+validation. A separate injected native library compares exact result bytes,
+nil values, error identity and allocation/call/free traces for unavailable
+allocation, native size mismatches, signing/verification/keypair failures and
+unexpected signature lengths. An isolated no-cgo build compares the unavailable
+path. All child environments omit display variables. Released Go tests retain
+their old provider calls through test-only adapters.
+
+Two handwritten production Go files remain, totaling nine lines: the native
+entry bridge and SQLite driver registration. The Go regression test port and
+the final CLI, deployment and released-client compatibility audit also remain.
 
 ## Compiler work exercised by this port
 
@@ -933,6 +949,16 @@ storage without copying their backing data. It preserves Store path strings
 and shallow NodeIdentity values without weakening portable borrow checking;
 it does not extend foreign C allocation lifetimes.
 
+Native `go:C/<relative-header>` bindings now include the library header without
+redeclaring its ABI. Checked scalar and pointer calls, field/constant access and
+deferred cleanup generate separate cgo companions. No-cgo companions expose
+opaque C pointers and fail explicitly when called; the checked `cgo_enabled`
+builtin lets canonical application code select its unavailable path first.
+Ordinary procedures remain available in both builds. Upstream source and
+saved-IR tests exercise header-owned layout, imported native types, strict
+cgo pointer checking, failed operations, panic cleanup and portable entry
+pruning. Daochi uses this capability for the liboqs provider.
+
 ## Next dependencies
 
 Protocol fields now support checked Go reflection tags, including JSON names
@@ -941,8 +967,8 @@ type identity, interface values, zero values and custom JSON methods in source
 and saved IR. Go primitives now provide method calls, multiple results,
 HTTP field access, error interfaces, mutex synchronization, variadic SQL
 arguments, cancellation/deadlines, native channel selection and worker callbacks.
-Remaining server work includes the native entry bridge, ML-DSA-44 integration
-and native driver registration. Add missing reusable compiler/runtime
+Remaining server work includes the native entry bridge and driver registration.
+Add missing reusable compiler/runtime
 capabilities upstream in Ziran as that application code moves; wrapping existing
 Go application functions does not complete their port.
 

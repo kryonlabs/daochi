@@ -17,6 +17,7 @@ def main():
     env = os.environ.copy()
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
+    env["LDLIBS"] = "-loqs"
     build = repo / "build"
     build.mkdir(exist_ok=True)
     env.setdefault("XDG_CACHE_HOME", str(build / "package-cache"))

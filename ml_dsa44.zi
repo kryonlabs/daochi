@@ -1,0 +1,124 @@
+#import "std/go_types"
+codec :: #import "codec";
+verifier :: #import "verifier";
+access :: #import "account_access";
+text :: #import "std/text_go";
+oqs :: #system_library "go:C/oqs/oqs.h";
+builtin :: #system_library "go:builtin";
+
+MLDSA44KeyPairResult :: struct {
+    publicKey: []u8
+    privateKey: []u8
+    error: Error
+}
+
+#scope_file
+NativeSignature :: #type #foreign oqs "OQS_SIG";
+NativeCharacter :: #type #foreign oqs "char";
+NativeAvailable :: () -> bool #foreign builtin "cgo_enabled";
+AllocateBytes :: (length: isize) -> []u8 #foreign builtin "make";
+AppendByte :: (value: []u8, byte: u8) -> []u8 #foreign builtin "append";
+RetainBytes :: (value: []u8) -> []u8 #foreign builtin "retain";
+AlgorithmName :: () -> string #go_field #foreign oqs "OQS_SIG_alg_ml_dsa_44";
+Success :: () -> s32 #go_field #foreign oqs "OQS_SUCCESS";
+NewSignature :: (name: *NativeCharacter) -> *NativeSignature #foreign oqs "OQS_SIG_new";
+FreeAtReturn :: (signature: *NativeSignature) #go_defer #foreign oqs "OQS_SIG_free";
+PublicKeySize :: (signature: *NativeSignature) -> usize #go_field #foreign oqs "(*OQS_SIG).length_public_key";
+PrivateKeySize :: (signature: *NativeSignature) -> usize #go_field #foreign oqs "(*OQS_SIG).length_secret_key";
+SignatureSize :: (signature: *NativeSignature) -> usize #go_field #foreign oqs "(*OQS_SIG).length_signature";
+VerifyNative :: (handle: *NativeSignature, message: *u8, messageLength: usize,
+    signature: *u8, signatureLength: usize, publicKey: *u8) -> s32 #foreign oqs "OQS_SIG_verify";
+SignNative :: (handle: *NativeSignature, signature: *u8, signatureLength: *usize,
+    message: *u8, messageLength: usize, privateKey: *u8) -> s32 #foreign oqs "OQS_SIG_sign";
+KeyPairNative :: (handle: *NativeSignature, publicKey: *u8,
+    privateKey: *u8) -> s32 #foreign oqs "OQS_SIG_keypair";
+
+Algorithm :: () -> []u8 {
+    return AppendByte(text.ToBytes(AlgorithmName()), cast(u8)0)
+}
+
+#scope_export
+New :: () -> verifier.VerifierResult {
+    result: verifier.VerifierResult
+    if !NativeAvailable() {
+        result.error = verifier.ErrVerifierUnavailable
+        return result
+    }
+    result.value = verifier.New(Verify)
+    return result
+}
+
+Verify :: (publicKey: []u8, message: []u8, signature: []u8) -> bool {
+    if !NativeAvailable() || publicKey.count != codec.mlDSA44PublicKeySize ||
+        signature.count != codec.mlDSA44SignatureSize || message.count == 0 {
+        return false
+    }
+    algorithm := Algorithm()
+    handle := NewSignature(cast(*NativeCharacter)*algorithm[0])
+    if handle == null {
+        return false
+    }
+    FreeAtReturn(handle)
+    if PublicKeySize(handle) != cast(usize)codec.mlDSA44PublicKeySize ||
+        SignatureSize(handle) != cast(usize)signature.count {
+        return false
+    }
+    return VerifyNative(handle, *message[0], cast(usize)message.count, *signature[0],
+        cast(usize)signature.count, *publicKey[0]) == Success()
+}
+
+Sign :: (message: []u8, privateKey: []u8) -> access.PrivateKeySignatureResult {
+    result: access.PrivateKeySignatureResult
+    result.error = verifier.ErrVerifierUnavailable
+    if !NativeAvailable() || privateKey.count != codec.mlDSA44PrivateKeySize ||
+        message.count == 0 {
+        return result
+    }
+    signature := AllocateBytes(cast(isize)codec.mlDSA44SignatureSize)
+    signatureLength: usize = cast(usize)signature.count
+    algorithm := Algorithm()
+    handle := NewSignature(cast(*NativeCharacter)*algorithm[0])
+    if handle == null {
+        return result
+    }
+    FreeAtReturn(handle)
+    if PrivateKeySize(handle) != cast(usize)codec.mlDSA44PrivateKeySize ||
+        SignatureSize(handle) > signatureLength {
+        return result
+    }
+    status := SignNative(handle, *signature[0], *signatureLength, *message[0],
+        cast(usize)message.count, *privateKey[0])
+    if status != Success() || signatureLength != cast(usize)codec.mlDSA44SignatureSize {
+        return result
+    }
+    result.value = RetainBytes(signature[:cast(s64)signatureLength])
+    result.error = null
+    return result
+}
+
+KeyPair :: () -> MLDSA44KeyPairResult {
+    result: MLDSA44KeyPairResult
+    result.error = verifier.ErrVerifierUnavailable
+    if !NativeAvailable() {
+        return result
+    }
+    publicKey := AllocateBytes(cast(isize)codec.mlDSA44PublicKeySize)
+    privateKey := AllocateBytes(cast(isize)codec.mlDSA44PrivateKeySize)
+    algorithm := Algorithm()
+    handle := NewSignature(cast(*NativeCharacter)*algorithm[0])
+    if handle == null {
+        return result
+    }
+    FreeAtReturn(handle)
+    if PublicKeySize(handle) != cast(usize)codec.mlDSA44PublicKeySize ||
+        PrivateKeySize(handle) != cast(usize)codec.mlDSA44PrivateKeySize {
+        return result
+    }
+    if KeyPairNative(handle, *publicKey[0], *privateKey[0]) != Success() {
+        return result
+    }
+    result.publicKey = publicKey
+    result.privateKey = privateKey
+    result.error = null
+    return result
+}

@@ -128,20 +128,18 @@ const ListSQL = "\nSELECT account_id,app_id,device_key_id,client_id,public_key,c
 
 func DeviceKeys_RecordNonce(transaction *Transaction, context Context, accountID string, nonce string, replay Error) Error {
 	cutoff := Timestamp_CanonicalTimestamp(StdTimeGo_Add(StdTimeGo_Now(), Duration(-1800000000000)))
-	var value_0 zir_0291b470ede4d422_ExecResult = DeviceKeys_DeleteNonces(transaction, context, "DELETE FROM server_device_registration_nonces WHERE created_at<?1", cutoff)
-	deleted := value_0
+	deleted := DeviceKeys_DeleteNonces(transaction, context, "DELETE FROM server_device_registration_nonces WHERE created_at<?1", cutoff)
 	if deleted.Error != nil {
 		return deleted.Error
 	}
-	var value_1 zir_0291b470ede4d422_ExecResult = DeviceKeys_InsertNonce(transaction, context, "INSERT INTO server_device_registration_nonces(account_id,nonce,created_at) VALUES(?1,?2,?3)", accountID, nonce, Timestamp_CanonicalNow())
-	inserted := value_1
-	var value_2 bool = inserted.Error != nil
-	var value_3 bool = value_2
-	if value_3 {
-		var value_4 bool = strings.Contains(StdErrorsGo_Message(inserted.Error), "UNIQUE")
-		value_3 = value_4
+	inserted := DeviceKeys_InsertNonce(transaction, context, "INSERT INTO server_device_registration_nonces(account_id,nonce,created_at) VALUES(?1,?2,?3)", accountID, nonce, Timestamp_CanonicalNow())
+	var value_0 bool = inserted.Error != nil
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = strings.Contains(StdErrorsGo_Message(inserted.Error), "UNIQUE")
+		value_1 = value_2
 	}
-	if value_3 {
+	if value_1 {
 		return replay
 	}
 	return inserted.Error
@@ -318,8 +316,7 @@ func DeviceKeys_Register(database *Database, context Context, device DeviceKey, 
 		return error
 	}
 	var value_0 string = "\nINSERT INTO server_device_keys(account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at)\nVALUES(?1,?2,?3,?4,?5,?6,?6,'')\nON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET\n client_id=excluded.client_id,\n public_key=excluded.public_key,\n last_used_at=excluded.last_used_at,\n revoked_at=''\n"
-	var value_1 zir_0291b470ede4d422_ExecResult = DeviceKeys_InsertDevice(transaction, context, value_0, device.AccountID, device.AppID, device.KeyID, device.ClientID, device.PublicKey, Timestamp_CanonicalNow())
-	inserted := value_1
+	inserted := DeviceKeys_InsertDevice(transaction, context, value_0, device.AccountID, device.AppID, device.KeyID, device.ClientID, device.PublicKey, Timestamp_CanonicalNow())
 	if inserted.Error != nil {
 		return inserted.Error
 	}
@@ -337,9 +334,7 @@ func DeviceKeys_Revoke(database *Database, context Context, accountID string, re
 	if error != nil {
 		return error
 	}
-	var value_0 string = "\nUPDATE server_device_keys SET revoked_at=?4\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n"
-	var value_1 zir_0291b470ede4d422_ExecResult = DeviceKeys_RevokeDevice(transaction, context, value_0, accountID, request.AppID, request.KeyID, Timestamp_CanonicalNow())
-	revoked := value_1
+	revoked := DeviceKeys_RevokeDevice(transaction, context, "\nUPDATE server_device_keys SET revoked_at=?4\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n", accountID, request.AppID, request.KeyID, Timestamp_CanonicalNow())
 	if revoked.Error != nil {
 		return revoked.Error
 	}
@@ -358,10 +353,8 @@ func DeviceKeys_Active(database *Database, context Context, accountID string, ap
 	var device DeviceKey = DeviceKey{}
 	var value_0 string = "\nSELECT account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at\nFROM server_device_keys\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n"
 	row := (*sql.DB).QueryRowContext(database, context, value_0, accountID, appID, keyID)
-	var value_1 Error = (*sql.Row).Scan(row, &(device.AccountID), &(device.AppID), &(device.KeyID), &(device.ClientID), &(device.PublicKey), &(device.CreatedAt), &(device.LastUsedAt), &(device.RevokedAt))
-	error := value_1
-	var value_2 Error = error
-	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+	error := (*sql.Row).Scan(row, &(device.AccountID), &(device.AppID), &(device.KeyID), &(device.ClientID), &(device.PublicKey), &(device.CreatedAt), &(device.LastUsedAt), &(device.RevokedAt))
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		return result
 	}
 	result.Value = device
@@ -371,9 +364,7 @@ func DeviceKeys_Active(database *Database, context Context, accountID string, ap
 }
 
 func DeviceKeys_Touch(database *Database, context Context, accountID string, appID string, keyID string) Error {
-	var value_0 string = "\nUPDATE server_device_keys SET last_used_at=?4\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n"
-	var value_1 zir_0291b470ede4d422_ExecResult = DeviceKeys_TouchDevice(database, context, value_0, accountID, appID, keyID, Timestamp_CanonicalNow())
-	touched := value_1
+	touched := DeviceKeys_TouchDevice(database, context, "\nUPDATE server_device_keys SET last_used_at=?4\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n", accountID, appID, keyID, Timestamp_CanonicalNow())
 	return touched.Error
 }
 
@@ -390,15 +381,13 @@ func DeviceKeys_List(database *Database, context Context, accountID string) Devi
 	var devices []DeviceKey = nil
 	for StdSqlGo_Next(rows) {
 		var device DeviceKey = DeviceKey{}
-		var value_1 Error = (*sql.Rows).Scan(rows, &(device.AccountID), &(device.AppID), &(device.KeyID), &(device.ClientID), &(device.PublicKey), &(device.CreatedAt), &(device.LastUsedAt), &(device.RevokedAt))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(device.AccountID), &(device.AppID), &(device.KeyID), &(device.ClientID), &(device.PublicKey), &(device.CreatedAt), &(device.LastUsedAt), &(device.RevokedAt))
 		if result.Error != nil {
 			return result
 		}
 		devices = append(devices, device)
 	}
 	result.Value = devices
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }

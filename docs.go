@@ -72,8 +72,7 @@ func Docs_Handle(writer ResponseWriter, request *Request, databasePath string, r
 		}
 		totalGB := usedGB + stats.AvailableGB
 		var value_1 string = "<footer class=\"status\" aria-label=\"Users: %d; Storage: %d/%d GB\">\n<span><strong>Users</strong> %d</span>\n<span><strong>Storage</strong> %d/%d GB</span>\n</footer>"
-		var value_2 string = fmt.Sprintf(value_1, int64(stats.UserCount), int64(usedGB), int64(totalGB), int64(stats.UserCount), int64(usedGB), int64(totalGB))
-		statusHTML = value_2
+		statusHTML = fmt.Sprintf(value_1, int64(stats.UserCount), int64(usedGB), int64(totalGB), int64(stats.UserCount), int64(usedGB), int64(totalGB))
 	}
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Content-Type", "text/html; charset=utf-8")
 	StdHttpGo_WriteHeader(writer, int(200))

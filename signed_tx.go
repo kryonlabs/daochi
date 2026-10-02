@@ -45,29 +45,26 @@ func SignedTx_ReadHeader(request *Request) SignedHeaderResult {
 	var result SignedHeaderResult = SignedHeaderResult{}
 	value := strings.TrimSpace(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "X-Daochi-Tx"))
 	if value == "" {
-		var value_0 AuthenticationResult = Authentication_Failure(int(401), "signed transaction required")
-		result.Authentication = value_0
+		result.Authentication = Authentication_Failure(int(401), "signed transaction required")
 		return result
 	}
 	raw := value
-	var value_1 bool = strings.HasPrefix(value, "{")
-	if !value_1 {
+	var value_0 bool = strings.HasPrefix(value, "{")
+	if !value_0 {
 		decoded := Codec_DecodeBase64(value, true, false)
 		if decoded.Error != "" {
 			decoded = Codec_DecodeBase64(value, true, true)
 		}
 		if decoded.Error != "" {
-			var value_2 AuthenticationResult = Authentication_Failure(int(400), "invalid signed transaction")
-			result.Authentication = value_2
+			result.Authentication = Authentication_Failure(int(400), "invalid signed transaction")
 			return result
 		}
 		raw = decoded.Value
 	}
 	var tx SignedTxEnvelope = SignedTxEnvelope{}
-	var value_3 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(raw), &(tx))
-	if value_3 != nil {
-		var value_4 AuthenticationResult = Authentication_Failure(int(400), "invalid signed transaction")
-		result.Authentication = value_4
+	var value_1 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(raw), &(tx))
+	if value_1 != nil {
+		result.Authentication = Authentication_Failure(int(400), "invalid signed transaction")
 		return result
 	}
 	Transaction_Normalize(&(tx))
@@ -151,8 +148,7 @@ func SignedTx_Verify(database *Database, context Context, request *Request, body
 		}
 		return Authentication_NativeFailure(recorded)
 	}
-	var value_13 AuthenticationResult = Authentication_NativeFailure(DeviceKeys_Touch(database, context, tx.AccountID, tx.AppID, tx.DeviceKeyID))
-	return value_13
+	return Authentication_NativeFailure(DeviceKeys_Touch(database, context, tx.AccountID, tx.AppID, tx.DeviceKeyID))
 }
 
 func SignedTx_VerifyDevice(database *Database, context Context, tx SignedTxEnvelope, message []uint8) AuthenticationResult {
@@ -184,27 +180,23 @@ func SignedTx_VerifyDevice(database *Database, context Context, tx SignedTxEnvel
 }
 
 func SignedTx_Record(database *Database, context Context, tx SignedTxEnvelope, replay Error) Error {
-	var value_0 zir_773b400a7b2b4942_ExecResult = SignedTx_DeleteExpired(database, context, "DELETE FROM server_signed_transactions WHERE expires_at<?1", int64(StdTimeGo_Unix(StdTimeGo_Now())))
-	deleted := value_0
+	deleted := SignedTx_DeleteExpired(database, context, "DELETE FROM server_signed_transactions WHERE expires_at<?1", int64(StdTimeGo_Unix(StdTimeGo_Now())))
 	if deleted.Error != nil {
 		return deleted.Error
 	}
-	var value_1 string = "INSERT INTO server_signed_transactions(account_id,tx_id,app_id,nonce,expires_at) VALUES(?1,?2,?3,?4,?5)"
-	var value_2 zir_773b400a7b2b4942_ExecResult = SignedTx_Insert(database, context, value_1, tx.AccountID, tx.TxID, tx.AppID, tx.Nonce, int64(tx.ExpiresAt))
-	inserted := value_2
-	var value_3 bool = inserted.Error != nil
-	var value_4 bool = value_3
-	if value_4 {
-		var value_5 bool = strings.Contains(StdErrorsGo_Message(inserted.Error), "UNIQUE")
-		value_4 = value_5
+	inserted := SignedTx_Insert(database, context, "INSERT INTO server_signed_transactions(account_id,tx_id,app_id,nonce,expires_at) VALUES(?1,?2,?3,?4,?5)", tx.AccountID, tx.TxID, tx.AppID, tx.Nonce, int64(tx.ExpiresAt))
+	var value_0 bool = inserted.Error != nil
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = strings.Contains(StdErrorsGo_Message(inserted.Error), "UNIQUE")
+		value_1 = value_2
 	}
-	if value_4 {
+	if value_1 {
 		return replay
 	}
 	return inserted.Error
 }
 
 func SignedTx_Forget(database *Database, context Context, tx SignedTxEnvelope) {
-	var value_0 string = "DELETE FROM server_signed_transactions WHERE account_id=?1 AND tx_id=?2 AND app_id=?3 AND nonce=?4"
-	SignedTx_Delete(database, context, value_0, tx.AccountID, tx.TxID, tx.AppID, tx.Nonce)
+	SignedTx_Delete(database, context, "DELETE FROM server_signed_transactions WHERE account_id=?1 AND tx_id=?2 AND app_id=?3 AND nonce=?4", tx.AccountID, tx.TxID, tx.AppID, tx.Nonce)
 }

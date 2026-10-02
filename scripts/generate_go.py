@@ -15,6 +15,19 @@ def project_flags(repo):
     return ["--project", "--locked"]
 
 
+def generate_go(ziran, repo, sources, output, env, source_root=None):
+    """Keep the public library surface and obtain the native entry from zi2go."""
+    arguments = [ziran, "build", *project_flags(repo), "--target=go", "--pkg", "main"]
+    if source_root is not None:
+        arguments.extend(["--root", str(source_root)])
+    subprocess.run([*arguments, "--no-main", "-o", str(output), *sources],
+                   cwd=repo, env=env, check=True)
+    with tempfile.TemporaryDirectory(prefix="entry-go-", dir=repo / "build") as entry:
+        subprocess.run([*arguments, "--exe", "--entry", "main:Main", "-o", entry, *sources],
+                       cwd=repo, env=env, check=True)
+        shutil.copyfile(Path(entry) / "ziran_entry.go", Path(output) / "ziran_entry.go")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
@@ -32,10 +45,7 @@ def main():
     build.mkdir(exist_ok=True)
     env.setdefault("XDG_CACHE_HOME", str(build / "package-cache"))
     with tempfile.TemporaryDirectory(prefix="zi-go-", dir=build) as output:
-        subprocess.run([
-            args.ziran, "build", *project_flags(repo), "--target=go",
-            "--no-main", "--pkg", "main", "-o", output, *sources,
-        ], cwd=repo, env=env, check=True)
+        generate_go(args.ziran, repo, sources, output, env)
         generated = sorted(Path(output).glob("*.go"))
         subprocess.run(["gofmt", "-w", *(str(path) for path in generated)],
                        cwd=repo, env=env, check=True)

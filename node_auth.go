@@ -34,11 +34,10 @@ func NodeAuth_RandomHex(count int) string {
 func NodeAuth_Sign(nodeID string, key PrivateKey, request *Request, body []uint8) {
 	timestamp := strconv.FormatInt(int64(StdTimeGo_Unix(StdTimeGo_Now())), int(int(10)))
 	nonce := NodeAuth_RandomHex(int(16))
-	var value_0 string = Signing_NodeRequestMessage("daochi-node-request-v1", nodeID, timestamp, nonce, StdHttpGo_Method(request), StdUrlGo_EscapedPath(StdHttpGo_RequestURL(request)), body)
-	message := value_0
+	message := Signing_NodeRequestMessage("daochi-node-request-v1", nodeID, timestamp, nonce, StdHttpGo_Method(request), StdUrlGo_EscapedPath(StdHttpGo_RequestURL(request)), body)
 	signature := StdEd25519Go_Sign(key, StdTextGo_ToBytes(message))
-	var value_1 string = StdTextGo_FromBytes(signature)
-	encoded := Codec_EncodeBase64(value_1, true, false)
+	var value_0 string = StdTextGo_FromBytes(signature)
+	encoded := Codec_EncodeBase64(value_0, true, false)
 	header := StdHttpGo_Headers(request)
 	StdHttpGo_SetHeader(header, "X-Daochi-Node-ID", nodeID)
 	StdHttpGo_SetHeader(header, "X-Daochi-Node-Time", timestamp)
@@ -75,10 +74,9 @@ func NodeAuth_Verify(database *Database, context Context, request *Request, body
 	if signature.Error != "" || int64(len(signature.Value)) != 64 {
 		return StdErrorsGo_New("invalid node signature")
 	}
-	var value_2 string = Signing_NodeRequestMessage("daochi-node-request-v1", nodeID, timestampText, nonce, StdHttpGo_Method(request), StdUrlGo_EscapedPath(StdHttpGo_RequestURL(request)), body)
-	message := value_2
-	var value_3 bool = StdEd25519Go_Verify(peer.Value, StdTextGo_ToBytes(message), StdTextGo_ToBytes(signature.Value))
-	if !value_3 {
+	message := Signing_NodeRequestMessage("daochi-node-request-v1", nodeID, timestampText, nonce, StdHttpGo_Method(request), StdUrlGo_EscapedPath(StdHttpGo_RequestURL(request)), body)
+	var value_2 bool = StdEd25519Go_Verify(peer.Value, StdTextGo_ToBytes(message), StdTextGo_ToBytes(signature.Value))
+	if !value_2 {
 		return StdErrorsGo_New("invalid node signature")
 	}
 	return NodeNonce_Consume(database, context, nodeID, nonce, timestamp.Value+300)

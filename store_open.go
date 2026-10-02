@@ -43,6 +43,7 @@ func StoreOpen_Initialize(database *Database, context Context) Error {
 }
 
 func StoreOpen_Open(path string) StoreOpenResult {
+	SqliteDriver_Initialize()
 	var value_0 [2]string
 	value_0[0] = path
 	value_0[1] = "?_busy_timeout=5000&_foreign_keys=on"
@@ -54,8 +55,7 @@ func StoreOpen_Open(path string) StoreOpenResult {
 	}
 	database := opened.Value
 	(*sql.DB).SetMaxOpenConns(database, int(int(1)))
-	var value_1 *Database = database
-	error := StoreOpen_Initialize(value_1, StdContextGo_Background())
+	error := StoreOpen_Initialize(database, StdContextGo_Background())
 	if error != nil {
 		(*sql.DB).Close(database)
 		var result StoreOpenResult = StoreOpenResult{}

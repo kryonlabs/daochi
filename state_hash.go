@@ -164,9 +164,7 @@ func StateHash_Sessions(database *Database, context Context, writer Writer, user
 	if error != nil {
 		return error
 	}
-	for it_index := int64(0); it_index < int64(len(sessionIDs)); it_index++ {
-		id := sessionIDs[it_index]
-		_ = id
+	for _, id := range sessionIDs {
 		error = StateHash_Rounds(database, context, writer, userID, id)
 		if error != nil {
 			return error
@@ -320,38 +318,31 @@ func StateHash_State(database *Database, context Context, userID string) HashRes
 	var result HashResult = HashResult{}
 	digest := sha256.New()
 	writer := Writer(digest)
-	var value_0 Error = StateHash_Habits(database, context, writer, userID)
-	result.Error = value_0
+	result.Error = StateHash_Habits(database, context, writer, userID)
 	if result.Error != nil {
 		return result
 	}
-	var value_1 Error = StateHash_HabitDays(database, context, writer, userID)
-	result.Error = value_1
+	result.Error = StateHash_HabitDays(database, context, writer, userID)
 	if result.Error != nil {
 		return result
 	}
-	var value_2 Error = StateHash_Sessions(database, context, writer, userID)
-	result.Error = value_2
+	result.Error = StateHash_Sessions(database, context, writer, userID)
 	if result.Error != nil {
 		return result
 	}
-	var value_3 Error = StateHash_Meditations(database, context, writer, userID)
-	result.Error = value_3
+	result.Error = StateHash_Meditations(database, context, writer, userID)
 	if result.Error != nil {
 		return result
 	}
-	var value_4 Error = StateHash_Social(database, context, writer, userID)
-	result.Error = value_4
+	result.Error = StateHash_Social(database, context, writer, userID)
 	if result.Error != nil {
 		return result
 	}
-	var value_5 Error = StateHash_Records(database, context, writer, userID)
-	result.Error = value_5
+	result.Error = StateHash_Records(database, context, writer, userID)
 	if result.Error != nil {
 		return result
 	}
 	var bytes []uint8 = nil
-	var value_6 string = hex.EncodeToString((hash.Hash).Sum(digest, bytes))
-	result.Value = value_6
+	result.Value = hex.EncodeToString((hash.Hash).Sum(digest, bytes))
 	return result
 }

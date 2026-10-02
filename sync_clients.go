@@ -87,16 +87,14 @@ func SyncClients_Legacy(database *Database, context Context, userID string, mini
 		value_2[0] = &(id)
 		destinations := value_2
 		_ = destinations
-		var value_3 Error = StdSqlGo_ScanRows(rows, destinations[0:1:1])
-		result.Error = value_3
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:1:1])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, id)
 	}
 	result.Value = values
-	var value_4 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_4
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -116,26 +114,24 @@ func SyncClients_LegacyWritePolicy(database *Database, context Context, userID s
 	_ = destinations
 	var value_2 string = "\nSELECT MAX(last_sync_at)\nFROM server_clients\nWHERE user_id_hash=?1 AND protocol_version<?2 AND last_sync_at>=?3"
 	row := StdSqlGo_QueryRow(database, context, value_2, arguments[0:3:3])
-	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_3
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 	if result.Error != nil {
 		return result
 	}
-	var value_4 bool = StdSqlGo_NullStringValid(latest)
-	var value_5 bool = !value_4
-	if !value_5 {
-		var value_6 bool = StdSqlGo_NullStringValue(latest) == ""
-		value_5 = value_6
+	var value_3 bool = StdSqlGo_NullStringValid(latest)
+	var value_4 bool = !value_3
+	if !value_4 {
+		var value_5 bool = StdSqlGo_NullStringValue(latest) == ""
+		value_4 = value_5
 	}
-	if value_5 {
+	if value_4 {
 		return result
 	}
 	parsed := StdTimeGo_Parse("2006-01-02T15:04:05.000000000Z07:00", StdSqlGo_NullStringValue(latest))
 	result.Error = parsed.Error
 	if result.Error == nil {
 		result.Required = true
-		var value_7 int64 = StdTimeGo_Unix(parsed.Value)
-		result.Epoch = value_7
+		result.Epoch = StdTimeGo_Unix(parsed.Value)
 	}
 	return result
 }
@@ -151,12 +147,9 @@ func SyncClients_Compacted(database *Database, context Context, userID string, c
 	value_1[0] = &(through)
 	destinations := value_1
 	_ = destinations
-	var value_2 *Row = StdSqlGo_QueryRow(database, context, "\nSELECT compacted_through_version\nFROM server_sync_compaction\nWHERE user_id_hash=?1", arguments[0:1:1])
-	row := value_2
-	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_3
-	var value_4 Error = result.Error
-	if StdErrorsGo_Is(value_4, StdSqlGo_NoRows()) {
+	row := StdSqlGo_QueryRow(database, context, "\nSELECT compacted_through_version\nFROM server_sync_compaction\nWHERE user_id_hash=?1", arguments[0:1:1])
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	if StdErrorsGo_Is(result.Error, StdSqlGo_NoRows()) {
 		result.Error = nil
 		return result
 	}
@@ -182,49 +175,47 @@ func SyncClients_Compact(database *Database, context Context, userID string) Err
 	if current.Value <= 0 {
 		return StdSqlGo_Commit(transaction)
 	}
-	var value_0 string = Timestamp_CanonicalTimestamp(StdTimeGo_Add(StdTimeGo_UTC(StdTimeGo_Now()), Duration(-7776000000000000)))
-	cutoff := value_0
-	var value_1 [2]Any
-	value_1[0] = userID
-	value_1[1] = cutoff
-	arguments := value_1
+	cutoff := Timestamp_CanonicalTimestamp(StdTimeGo_Add(StdTimeGo_UTC(StdTimeGo_Now()), Duration(-7776000000000000)))
+	var value_0 [2]Any
+	value_0[0] = userID
+	value_0[1] = cutoff
+	arguments := value_0
 	_ = arguments
 	var floor ClientClockFloor = *new(ClientClockFloor)
-	var value_2 [1]Any
-	value_2[0] = &(floor)
-	destinations := value_2
+	var value_1 [1]Any
+	value_1[0] = &(floor)
+	destinations := value_1
 	_ = destinations
-	var value_3 string = "\nSELECT MIN(last_client_clock)\nFROM server_clients\nWHERE user_id_hash=?1\n  AND protocol_version>=2\n\tAND last_client_clock>0\n\tAND last_seen_at>=?2"
-	row := StdSqlGo_QueryRowTx(transaction, context, value_3, arguments[0:2:2])
+	var value_2 string = "\nSELECT MIN(last_client_clock)\nFROM server_clients\nWHERE user_id_hash=?1\n  AND protocol_version>=2\n\tAND last_client_clock>0\n\tAND last_seen_at>=?2"
+	row := StdSqlGo_QueryRowTx(transaction, context, value_2, arguments[0:2:2])
 	error := StdSqlGo_ScanRow(row, destinations[0:1:1])
 	if error != nil {
 		return error
 	}
-	var value_4 bool = SyncClients_FloorValid(floor)
-	var value_5 bool = !value_4
-	if !value_5 {
-		var value_6 bool = SyncClients_FloorValue(floor) <= 0
-		value_5 = value_6
+	var value_3 bool = SyncClients_FloorValid(floor)
+	var value_4 bool = !value_3
+	if !value_4 {
+		var value_5 bool = SyncClients_FloorValue(floor) <= 0
+		value_4 = value_5
 	}
-	if value_5 {
+	if value_4 {
 		return StdSqlGo_Commit(transaction)
 	}
 	through := SyncClients_FloorValue(floor)
 	if through > current.Value {
 		through = current.Value
 	}
-	var value_7 [2]Any
-	value_7[0] = userID
-	value_7[1] = through
-	values := value_7
+	var value_6 [2]Any
+	value_6[0] = userID
+	value_6[1] = through
+	values := value_6
 	_ = values
-	var value_8 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_sync_ops\nWHERE user_id_hash=?1 AND server_version<=?2", values[0:2:2])
-	deleted := value_8
+	deleted := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_sync_ops\nWHERE user_id_hash=?1 AND server_version<=?2", values[0:2:2])
 	if deleted.Error != nil {
 		return deleted.Error
 	}
-	var value_9 string = "\nINSERT INTO server_sync_compaction(user_id_hash,compacted_through_version,updated_at)\nVALUES(?1,?2,CURRENT_TIMESTAMP)\nON CONFLICT(user_id_hash) DO UPDATE SET\n\tcompacted_through_version=MAX(server_sync_compaction.compacted_through_version,excluded.compacted_through_version),\n\tupdated_at=CURRENT_TIMESTAMP"
-	updated := StdSqlGo_ExecTx(transaction, context, value_9, values[0:2:2])
+	var value_7 string = "\nINSERT INTO server_sync_compaction(user_id_hash,compacted_through_version,updated_at)\nVALUES(?1,?2,CURRENT_TIMESTAMP)\nON CONFLICT(user_id_hash) DO UPDATE SET\n\tcompacted_through_version=MAX(server_sync_compaction.compacted_through_version,excluded.compacted_through_version),\n\tupdated_at=CURRENT_TIMESTAMP"
+	updated := StdSqlGo_ExecTx(transaction, context, value_7, values[0:2:2])
 	if updated.Error != nil {
 		return updated.Error
 	}

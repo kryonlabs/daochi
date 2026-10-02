@@ -119,8 +119,7 @@ func Middleware_Hijack(writer *CapturedWriter) AcceptedSocket {
 	hijacker := Middleware_AsHijacker(Any(writer.Writer))
 	if !hijacker.Present {
 		var result AcceptedSocket = AcceptedSocket{}
-		var value_0 Error = StdErrorsGo_New("hijack unsupported")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("hijack unsupported")
 		return result
 	}
 	if writer.Status == 0 {
@@ -199,17 +198,16 @@ func Middleware_AllowedOrigin(origin string) string {
 		return ""
 	}
 	var value_11 bool = origin == "https://daochi.pages.dev" || origin == "https://daochi.kryonlabs.com" || origin == "https://daochi.net"
-	var value_12 bool = value_11 || origin == "https://www.daochi.net" || origin == "https://inbe.waozi.xyz" || origin == "https://uku.waozi.xyz"
-	if value_12 {
+	if value_11 || origin == "https://www.daochi.net" || origin == "https://inbe.waozi.xyz" || origin == "https://uku.waozi.xyz" {
 		return origin
 	}
-	var value_13 bool = StdUrlGo_Scheme(value) == "chrome-extension"
-	var value_14 bool = value_13
-	if value_14 {
-		var value_15 bool = Middleware_ValidExtensionID(StdUrlGo_Host(value))
-		value_14 = value_15
+	var value_12 bool = StdUrlGo_Scheme(value) == "chrome-extension"
+	var value_13 bool = value_12
+	if value_13 {
+		var value_14 bool = Middleware_ValidExtensionID(StdUrlGo_Host(value))
+		value_13 = value_14
 	}
-	if value_14 {
+	if value_13 {
 		return origin
 	}
 	if StdUrlGo_Scheme(value) != "http" {

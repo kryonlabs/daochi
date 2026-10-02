@@ -130,8 +130,7 @@ func MeshStore_OrderedChanges(records []MeshEncryptedRecord, deletions []MeshEnc
 	}
 	index = 0
 	for index < int64(len(deletions)) {
-		var value_0 []MeshChange = append(changes, MeshChange{Sequence: (deletions[index]).MeshVersion, Deletion: &(deletions[index])})
-		changes = value_0
+		changes = append(changes, MeshChange{Sequence: (deletions[index]).MeshVersion, Deletion: &(deletions[index])})
 		index++
 	}
 	if count < 2 {
@@ -188,21 +187,19 @@ func MeshStore_Tombstoned(transaction *Transaction, context Context, userID stri
 		return result
 	}
 	var deleted int = 0
-	var value_3 *Row = (*sql.Tx).QueryRowContext(transaction, context, "SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)", userID)
-	row := value_3
-	var value_4 Error = (*sql.Row).Scan(row, &(deleted))
-	result.Error = value_4
+	row := (*sql.Tx).QueryRowContext(transaction, context, "SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)", userID)
+	result.Error = (*sql.Row).Scan(row, &(deleted))
 	if result.Error != nil {
 		return result
 	}
 	result.Value = deleted != int(0)
-	var value_5 *__type_c922d3f56b74fd5a = &(*(cache))
-	var value_6 string = userID
-	var value_7 bool = result.Value
-	if (*value_5) == nil {
-		(*value_5) = make(__type_c922d3f56b74fd5a)
+	var value_3 *__type_c922d3f56b74fd5a = &(*(cache))
+	var value_4 string = userID
+	var value_5 bool = result.Value
+	if (*value_3) == nil {
+		(*value_3) = make(__type_c922d3f56b74fd5a)
 	}
-	(*value_5)[value_6] = value_7
+	(*value_3)[value_4] = value_5
 	return result
 }
 
@@ -215,8 +212,7 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 	}
 	var value_0 bool = MeshPolicy_IncludesData(&(meshPolicy), "encrypted_records")
 	if !value_0 {
-		var value_1 []MeshEncryptedRecord = make([]MeshEncryptedRecord, int(0), int(0))
-		result.Records = value_1
+		result.Records = make([]MeshEncryptedRecord, int(0), int(0))
 		return result
 	}
 	matchers := CollectionScope_Load(database, context)
@@ -224,8 +220,8 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 	if result.Error != nil {
 		return result
 	}
-	var value_2 string = "SELECT e.seq,e.op,e.user_id_hash,e.collection,e.record_id,e.deleted_at,\n       r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,\n       r.content_hash,r.schema_version,r.parent_id,u.public_key,u.created_at,u.last_seen_at\nFROM server_mesh_changes e\nLEFT JOIN server_encrypted_records r\n  ON e.op!='delete' AND r.user_id_hash=e.user_id_hash AND r.collection=e.collection AND r.id=e.record_id\nLEFT JOIN server_users u ON u.user_id_hash=e.user_id_hash\nWHERE e.seq>?1\nORDER BY e.seq\n"
-	queried := MeshStore_QueryExport(database, context, value_2, int64(decoded.Value.Seq))
+	var value_1 string = "SELECT e.seq,e.op,e.user_id_hash,e.collection,e.record_id,e.deleted_at,\n       r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,\n       r.content_hash,r.schema_version,r.parent_id,u.public_key,u.created_at,u.last_seen_at\nFROM server_mesh_changes e\nLEFT JOIN server_encrypted_records r\n  ON e.op!='delete' AND r.user_id_hash=e.user_id_hash AND r.collection=e.collection AND r.id=e.record_id\nLEFT JOIN server_users u ON u.user_id_hash=e.user_id_hash\nWHERE e.seq>?1\nORDER BY e.seq\n"
+	queried := MeshStore_QueryExport(database, context, value_1, int64(decoded.Value.Seq))
 	result.Error = queried.Error
 	if result.Error != nil {
 		return result
@@ -256,18 +252,16 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 		var publicKey []uint8 = nil
 		var created NullString = *new(NullString)
 		var seen NullString = *new(NullString)
-		var value_3 Error = (*sql.Rows).Scan(rows, &(sequence), &(operation), &(userID), &(collection), &(id), &(deleted), &(recordID), &(keyID), &(nonce), &(ciphertext), &(updated), &(recordDeleted), &(hash), &(schema), &(parent), &(publicKey), &(created), &(seen))
-		result.Error = value_3
+		result.Error = (*sql.Rows).Scan(rows, &(sequence), &(operation), &(userID), &(collection), &(id), &(deleted), &(recordID), &(keyID), &(nonce), &(ciphertext), &(updated), &(recordDeleted), &(hash), &(schema), &(parent), &(publicKey), &(created), &(seen))
 		if result.Error != nil {
 			return result
 		}
-		var value_4 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, collection)
-		if !value_4 {
+		var value_2 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, collection)
+		if !value_2 {
 			continue
 		}
 		if operation == "delete" {
-			var value_5 MeshEncryptedRecordDeletion = MeshEncryptedRecordDeletion{UserIDHash: userID, Collection: collection, ID: id, DeletedAt: deleted, MeshVersion: sequence}
-			deletions = append(deletions, value_5)
+			deletions = append(deletions, MeshEncryptedRecordDeletion{UserIDHash: userID, Collection: collection, ID: id, DeletedAt: deleted, MeshVersion: sequence})
 			lastSequence = sequence
 			emitted++
 			if emitted == limit {
@@ -275,42 +269,32 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 			}
 			continue
 		}
-		var value_6 bool = StdSqlGo_NullStringValid(recordID)
-		var value_7 bool = !value_6
-		if !value_7 {
-			var value_8 bool = StdSqlGo_NullStringValid(created)
-			value_7 = !value_8
+		var value_3 bool = StdSqlGo_NullStringValid(recordID)
+		var value_4 bool = !value_3
+		if !value_4 {
+			var value_5 bool = StdSqlGo_NullStringValid(created)
+			value_4 = !value_5
 		}
-		if value_7 {
+		if value_4 {
 			continue
 		}
 		var item MeshEncryptedRecord = MeshEncryptedRecord{}
 		item.UserIDHash = userID
-		var value_9 string = StdSqlGo_NullStringValue(created)
-		item.CreatedAt = value_9
-		var value_10 string = StdSqlGo_NullStringValue(seen)
-		item.LastSeenAt = value_10
+		item.CreatedAt = StdSqlGo_NullStringValue(created)
+		item.LastSeenAt = StdSqlGo_NullStringValue(seen)
 		item.MeshVersion = sequence
 		item.Record.Collection = collection
 		item.Record.ID = id
-		var value_11 string = StdSqlGo_NullStringValue(keyID)
-		item.Record.KeyID = value_11
-		var value_12 string = StdSqlGo_NullStringValue(nonce)
-		item.Record.Nonce = value_12
-		var value_13 string = StdSqlGo_NullStringValue(ciphertext)
-		item.Record.Ciphertext = value_13
-		var value_14 string = StdSqlGo_NullStringValue(updated)
-		item.Record.UpdatedAt = value_14
-		var value_15 int64 = MeshStore_IntegerValue(recordDeleted)
-		item.Record.DeletedAt = value_15
-		var value_16 string = StdSqlGo_NullStringValue(hash)
-		item.Record.ContentHash = value_16
-		var value_17 int64 = MeshStore_IntegerValue(schema)
-		item.Record.SchemaVersion = int(value_17)
-		var value_18 string = StdSqlGo_NullStringValue(parent)
-		item.Record.ParentID = value_18
-		var value_19 string = hex.EncodeToString(publicKey)
-		item.PublicKey = value_19
+		item.Record.KeyID = StdSqlGo_NullStringValue(keyID)
+		item.Record.Nonce = StdSqlGo_NullStringValue(nonce)
+		item.Record.Ciphertext = StdSqlGo_NullStringValue(ciphertext)
+		item.Record.UpdatedAt = StdSqlGo_NullStringValue(updated)
+		item.Record.DeletedAt = MeshStore_IntegerValue(recordDeleted)
+		item.Record.ContentHash = StdSqlGo_NullStringValue(hash)
+		var value_6 int64 = MeshStore_IntegerValue(schema)
+		item.Record.SchemaVersion = int(value_6)
+		item.Record.ParentID = StdSqlGo_NullStringValue(parent)
+		item.PublicKey = hex.EncodeToString(publicKey)
 		records = append(records, item)
 		lastSequence = sequence
 		emitted++
@@ -318,8 +302,7 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 			break
 		}
 	}
-	var value_20 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_20
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error != nil {
 		return result
 	}
@@ -363,17 +346,15 @@ func MeshStore_ImportEncryptedBatch(database *Database, context Context, meshPol
 	defer (*sql.Tx).Rollback(transaction)
 	var tombstones __type_c922d3f56b74fd5a = *new(__type_c922d3f56b74fd5a)
 	var applied int = 0
-	for it_index := int64(0); it_index < int64(len(changes)); it_index++ {
-		change := changes[it_index]
+	for _, change := range changes {
 		if change.Deletion != nil {
 			var value_1 bool = Identity_ValidUserID(change.Deletion.UserIDHash)
 			if !value_1 {
-				var value_2 Error = StdErrorsGo_New("invalid mesh deletion user_id_hash")
-				result.Error = value_2
+				result.Error = StdErrorsGo_New("invalid mesh deletion user_id_hash")
 				return result
 			}
-			var value_3 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, change.Deletion.Collection)
-			if !value_3 {
+			var value_2 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, change.Deletion.Collection)
+			if !value_2 {
 				continue
 			}
 			deleted := MeshStore_Tombstoned(transaction, context, change.Deletion.UserIDHash, &(tombstones))
@@ -395,31 +376,27 @@ func MeshStore_ImportEncryptedBatch(database *Database, context Context, meshPol
 			continue
 		}
 		item := *(change.Record)
-		var value_4 bool = Identity_ValidUserID(item.UserIDHash)
-		if !value_4 {
-			var value_5 Error = StdErrorsGo_New("invalid mesh user_id_hash")
-			result.Error = value_5
+		var value_3 bool = Identity_ValidUserID(item.UserIDHash)
+		if !value_3 {
+			result.Error = StdErrorsGo_New("invalid mesh user_id_hash")
 			return result
 		}
 		key := MeshStore_DecodeHex(strings.TrimSpace(item.PublicKey))
 		if key.Error != nil || int64(len(key.Value)) == 0 {
-			var value_6 Error = StdErrorsGo_New("invalid mesh public_key")
-			result.Error = value_6
+			result.Error = StdErrorsGo_New("invalid mesh public_key")
 			return result
 		}
-		var value_7 Error = EncryptedRecord_ValidateAccountKey(item.UserIDHash, key.Value)
-		result.Error = value_7
+		result.Error = EncryptedRecord_ValidateAccountKey(item.UserIDHash, key.Value)
 		if result.Error != nil {
 			return result
 		}
-		var value_8 bool = EncryptedRecord_ValidForProtocol(item.Record, 5)
-		if !value_8 {
-			var value_9 Error = StdErrorsGo_New("invalid mesh encrypted record")
-			result.Error = value_9
+		var value_4 bool = EncryptedRecord_ValidForProtocol(item.Record, 5)
+		if !value_4 {
+			result.Error = StdErrorsGo_New("invalid mesh encrypted record")
 			return result
 		}
-		var value_10 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, item.Record.Collection)
-		if !value_10 {
+		var value_5 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, item.Record.Collection)
+		if !value_5 {
 			continue
 		}
 		deleted := MeshStore_Tombstoned(transaction, context, item.UserIDHash, &(tombstones))
@@ -431,8 +408,7 @@ func MeshStore_ImportEncryptedBatch(database *Database, context Context, meshPol
 		if deleted.Value {
 			continue
 		}
-		var value_11 Error = MeshStore_UpsertUser(transaction, context, item, key.Value)
-		result.Error = value_11
+		result.Error = MeshStore_UpsertUser(transaction, context, item, key.Value)
 		if result.Error != nil {
 			return result
 		}
@@ -444,8 +420,7 @@ func MeshStore_ImportEncryptedBatch(database *Database, context Context, meshPol
 		}
 		applied += changed.Value
 	}
-	var value_12 Error = StdSqlGo_Commit(transaction)
-	result.Error = value_12
+	result.Error = StdSqlGo_Commit(transaction)
 	if result.Error == nil {
 		result.Value = applied
 	}
@@ -461,14 +436,11 @@ func MeshStore_ApplyDeletion(transaction *Transaction, context Context, deletion
 		value_1 = !value_2
 	}
 	if value_1 {
-		var value_3 Error = StdErrorsGo_New("invalid mesh deletion target")
-		result.Error = value_3
+		result.Error = StdErrorsGo_New("invalid mesh deletion target")
 		return result
 	}
 	deleted := Timestamp_NormalizeTime(deletion.DeletedAt, "")
-	var value_4 string = "DELETE FROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4\n"
-	var value_5 zir_6be7d93d8f1ad09a_ExecResult = MeshStore_DeleteRecord(transaction, context, value_4, deletion.UserIDHash, deletion.Collection, deletion.ID, deleted)
-	written := value_5
+	written := MeshStore_DeleteRecord(transaction, context, "DELETE FROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4\n", deletion.UserIDHash, deletion.Collection, deletion.ID, deleted)
 	result.Error = written.Error
 	if result.Error != nil {
 		return result
@@ -488,11 +460,9 @@ func MeshStore_ApplyDeletion(transaction *Transaction, context Context, deletion
 func MeshStore_LoadCursor(database *Database, context Context, peerKey string) CursorTextResult {
 	var result CursorTextResult = CursorTextResult{}
 	var value string = ""
-	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT cursor FROM node_sync_cursors WHERE peer_key=?1", peerKey)
-	row := value_0
+	row := (*sql.DB).QueryRowContext(database, context, "SELECT cursor FROM node_sync_cursors WHERE peer_key=?1", peerKey)
 	error := (*sql.Row).Scan(row, &(value))
-	var value_1 Error = error
-	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		return result
 	}
 	result.Error = error
@@ -519,8 +489,7 @@ func MeshStore_UpsertUser(transaction *Transaction, context Context, item MeshEn
 	if written.Error != nil {
 		return written.Error
 	}
-	var value_1 zir_6be7d93d8f1ad09a_ExecResult = MeshStore_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", item.UserIDHash)
-	synced := value_1
+	synced := MeshStore_EnsureSync(transaction, context, "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)", item.UserIDHash)
 	return synced.Error
 }
 
@@ -530,33 +499,30 @@ func MeshStore_UpsertRecord(transaction *Transaction, context Context, userID st
 	var existing EncryptedRecord = EncryptedRecord{}
 	var value_0 string = "SELECT key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3\n"
 	row := (*sql.Tx).QueryRowContext(transaction, context, value_0, userID, item.Collection, item.ID)
-	var value_1 Error = (*sql.Row).Scan(row, &(existing.KeyID), &(existing.Nonce), &(existing.Ciphertext), &(existing.UpdatedAt), &(existing.DeletedAt), &(existing.ContentHash), &(existing.SchemaVersion), &(existing.ParentID))
-	error := value_1
-	var value_2 bool = error != nil
-	var value_3 bool = value_2
-	if value_3 {
-		var value_4 Error = error
-		var value_5 bool = StdErrorsGo_Is(value_4, StdSqlGo_NoRows())
-		value_3 = !value_5
+	error := (*sql.Row).Scan(row, &(existing.KeyID), &(existing.Nonce), &(existing.Ciphertext), &(existing.UpdatedAt), &(existing.DeletedAt), &(existing.ContentHash), &(existing.SchemaVersion), &(existing.ParentID))
+	var value_1 bool = error != nil
+	var value_2 bool = value_1
+	if value_2 {
+		var value_3 bool = StdErrorsGo_Is(error, StdSqlGo_NoRows())
+		value_2 = !value_3
 	}
-	if value_3 {
+	if value_2 {
 		result.Error = error
 		return result
 	}
 	if error == nil {
 		existingUpdated := Timestamp_NormalizeTime(existing.UpdatedAt, "")
-		var value_6 bool = strings.Compare(updated, existingUpdated) < int(0)
-		var value_7 bool = value_6
-		if !value_7 {
-			var value_8 bool = updated == existingUpdated
-			var value_9 bool = value_8
-			if value_9 {
-				var value_10 bool = strings.Compare(EncryptedRecord_ContentKey(item), EncryptedRecord_ContentKey(existing)) <= int(0)
-				value_9 = value_10
+		var value_4 bool = strings.Compare(updated, existingUpdated) < int(0)
+		var value_5 bool = value_4
+		if !value_5 {
+			var value_6 bool = updated == existingUpdated
+			if value_6 {
+				var value_7 bool = strings.Compare(EncryptedRecord_ContentKey(item), EncryptedRecord_ContentKey(existing)) <= int(0)
+				value_6 = value_7
 			}
-			value_7 = value_9
+			value_5 = value_6
 		}
-		if value_7 {
+		if value_5 {
 			return result
 		}
 	}
@@ -565,13 +531,11 @@ func MeshStore_UpsertRecord(transaction *Transaction, context Context, userID st
 	if result.Error != nil {
 		return result
 	}
-	var value_11 string = "INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n    key_id=excluded.key_id,\n    nonce=excluded.nonce,\n    ciphertext=excluded.ciphertext,\n    updated_at=excluded.updated_at,\n    deleted_at=excluded.deleted_at,\n    content_hash=excluded.content_hash,\n    schema_version=excluded.schema_version,\n    parent_id=excluded.parent_id,\n    server_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at\n"
-	var value_12 zir_6be7d93d8f1ad09a_ExecResult = MeshStore_WriteRecord(transaction, context, value_11, userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext, updated, int64(item.DeletedAt), item.ContentHash, int(item.SchemaVersion), item.ParentID, int64(version.Value))
-	written := value_12
+	var value_8 string = "INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n    key_id=excluded.key_id,\n    nonce=excluded.nonce,\n    ciphertext=excluded.ciphertext,\n    updated_at=excluded.updated_at,\n    deleted_at=excluded.deleted_at,\n    content_hash=excluded.content_hash,\n    schema_version=excluded.schema_version,\n    parent_id=excluded.parent_id,\n    server_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at\n"
+	written := MeshStore_WriteRecord(transaction, context, value_8, userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext, updated, int64(item.DeletedAt), item.ContentHash, int(item.SchemaVersion), item.ParentID, int64(version.Value))
 	result.Error = written.Error
 	if result.Error == nil {
-		var value_13 int = AccountState_Affected(written.Value)
-		result.Value = value_13
+		result.Value = AccountState_Affected(written.Value)
 	}
 	return result
 }

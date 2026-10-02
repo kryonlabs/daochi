@@ -43,8 +43,7 @@ func MeshCursor_Encode(cursor MeshCursor) CursorTextResult {
 	if result.Error != nil {
 		return result
 	}
-	var value_0 string = (*base64.Encoding).EncodeToString(MeshCursor_RawURL(), encoded.Value)
-	result.Value = value_0
+	result.Value = (*base64.Encoding).EncodeToString(MeshCursor_RawURL(), encoded.Value)
 	return result
 }
 
@@ -54,18 +53,15 @@ func MeshCursor_Decode(raw string) CursorResult {
 	if raw == "" {
 		return result
 	}
-	var value_0 *zir_b10bf2f154c93a01_Encoding = MeshCursor_RawURL()
-	decoded := MeshCursor_DecodeRaw(value_0, raw)
+	decoded := MeshCursor_DecodeRaw(MeshCursor_RawURL(), raw)
 	if decoded.Error != nil {
-		var value_1 Error = StdErrorsGo_New("invalid mesh cursor")
-		result.Error = value_1
+		result.Error = StdErrorsGo_New("invalid mesh cursor")
 		return result
 	}
 	var cursor MeshCursor = MeshCursor{}
-	var value_2 Error = StdJsonGo_Unmarshal(decoded.Value, &(cursor))
-	if value_2 != nil {
-		var value_3 Error = StdErrorsGo_New("invalid mesh cursor")
-		result.Error = value_3
+	var value_0 Error = StdJsonGo_Unmarshal(decoded.Value, &(cursor))
+	if value_0 != nil {
+		result.Error = StdErrorsGo_New("invalid mesh cursor")
 		return result
 	}
 	result.Value = cursor

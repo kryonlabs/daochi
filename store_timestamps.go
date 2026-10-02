@@ -113,8 +113,7 @@ func StoreTimestamps_CanonicalizeColumn(context Context, transaction *Transactio
 		return result
 	}
 	StdSqlGo_CloseRows(rows)
-	for it_index := int64(0); it_index < int64(len(pending)); it_index++ {
-		item := pending[it_index]
+	for _, item := range pending {
 		query := fmt.Sprintf("UPDATE %s SET %s=?2 WHERE rowid=?1", table, column)
 		_ = query
 		updated := StoreTimestamps_ExecRewrite(transaction, context, query, int64(item.Rowid), item.Value)

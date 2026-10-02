@@ -1,9 +1,9 @@
 # Daochi Ziran port
 
-The target is a complete port of Daochi's first-party code to Ziran. This is
-an incremental implementation: the running server currently combines generated
-Go from canonical `.zi` files with a small handwritten entry and database
-driver registration. Caller changes alone do not count as a completed module.
+The target is a complete port of Daochi's first-party code to Ziran. All server
+production code, including the executable entry and database driver registration,
+now comes from canonical `.zi` files. The test migration and final compatibility
+audit remain in progress. Caller changes alone do not count as a completed module.
 
 The goal is Daochi's complete port. Ziran's existing C compiler/bootstrap is
 allowed to remain; upstream changes are made only when Daochi needs a language,
@@ -42,6 +42,9 @@ change to record that checkout's exact commit. Run `ziran update ziran` to
 refresh the pin from the published toolchain ref.
 Generated Go is committed so ordinary Go and container builds work without
 having a compiler checkout installed. `make check-generated` detects drift.
+Generation retains the complete library surface and obtains `ziran_entry.go`
+from a separate executable build of `main:Main`. Both use the same canonical
+modules; the saved-IR check follows the same path.
 
 `make test-ziran` checks generation, runs the existing server suite, saves all
 Ziran modules as checked `.zir`, regenerates Go from those saved modules, and
@@ -77,7 +80,7 @@ field names, Go storage types, order and reflection tags.
 | `docs.go` | Ziran | `docs.zi`: public HTML, typed OpenAPI map builders, cached JSON and both HTTP handlers; public statistics remain a storage dependency |
 | `inspect.go` | Ziran | `inspect.zi`: read-only database access, native flag parsing, summary/user/doctor commands, warnings, ordered queries, byte-preserving redaction and output |
 | `log_safety.go` | Ziran | `log_safety.zi`: byte-preserving CR/LF removal |
-| `main.go` | Ziran; Go entry bridge | Startup, inspection dispatch, worker supervision and HTTP lifecycle in `startup.zi`; the native entry invokes the canonical verifier and signer directly |
+| `main.go` | Ziran | Executable entry in `main.zi`; startup, inspection dispatch, worker supervision and HTTP lifecycle in `startup.zi`; canonical verifier and signer in `ml_dsa44.zi` |
 | `mesh.go` | Ziran | `mesh.zi`: HTTP export/import, signed/token authentication, approved-scope checks, configured/trusted peer selection, signed outbound requests, pagination, cursor persistence and the cancellable recurring worker; wire records, cursors and scope predicates in `mesh_types.zi`, `mesh_cursor.zi` and `mesh_policy.zi`; native authentication error conversion is supplied by the caller |
 | `mesh_apps.go` | Ziran | `mesh_apps.zi`: scoped signed registry export/import, manifest decoding, signature verification, version queries, downgrade/fork rejection and per-app transactions; native authentication error conversion remains supplied by the Go caller |
 | `mesh_store.go` | Ziran | `mesh_store.zi`: encrypted-record export/import, stable change ordering, account tombstones, conflicts, deletion propagation, cursor persistence and atomic rollback; collection ownership in `collection_scope.zi`, record validation in `encrypted_record.zi` |
@@ -89,7 +92,7 @@ field names, Go storage types, order and reflection tags.
 | `server.go` | Ziran | Protocol bounds in `protocol.zi`; identifier/collection grammars in `identity.zi`, encrypted-record and metadata validation in `encrypted_record.zi`; random resource identifiers in `resource_id.zi`; bounded JSON bodies in `http_body.zi`, JSON responses in `response.zi`, header selection and bearer authentication in `http_auth.zi`; alias, profile icon and account export in `account_http.zi`; friend/request and profile-stat HTTP handling in `social_http.zi`; sync/login/deletion request decoding, signature/user header selection, exported account-key parsing and transition helpers in `sync_request.zi`; health, readiness, node information, metrics, live connection counts and account diagnostics HTTP handling in `operational_http.zi`; shared advertised capabilities in `node_info.zi`; challenge/login/account-deletion HTTP orchestration in `account_access.zi`, signature authentication in `account_signature.zi` and request-rate counters in `request_rate.zi`; structured/encrypted-envelope sync orchestration in `sync_http.zi`, app/collection validation in `sync_validation.zi`; response-writer methods, common headers, CORS and deferred request metrics in `middleware.zi`; Server construction, dependency selection and all 62 routes in `server.zi` |
 | `signed_tx.go` | Ziran | `signed_tx.zi`: header decoding, ordered validation, account/device signatures, expiry, replay recording and exact forgetting; record and canonical bytes in `transaction.zi`, JSON serialization in the standard library |
 | `signing.go` | Ziran | `signing.zi`: canonical account/node/approval bytes and raw-body hashing |
-| `store.go` | Ziran; Go driver registration | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; incremental snapshots, clean projections and operation reads in `sync_views.zi`; exact state hashing in `state_hash.zi`; transactional session/round, habit/day, meditation and encrypted-record writes, timestamp-guarded deletions and data replacement in `sync_writes.zi`; sync transaction orchestration, operation materialization and idempotent operation logging in `sync_application.zi`; canonical UUID creation, legacy identifier mappings and payload rewriting in `habit_id.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; legacy UUID merging, operation rewriting, orphan recovery/cleanup, protocol-gated migrations and bulk account migration in `habit_migration.zi`; schema initialization and upgrades in `store_schema.zi`, database opening and ordered initialization in `store_open.zi`; public filesystem statistics, recent account/client usage and app/collection storage totals in `store_stats.zi`; health checks, table counts and account diagnostics in `store_diagnostics.zi`; Store handle, open results, shared missing-user error and all 49 native methods in `store.zi`; SQLite driver registration remains Go |
+| `store.go` | Ziran | Public statistics record in `types.zi`; timestamp helpers in `timestamp.zi`, public-key lookup in `account_keys.zi`, transactional registration/account touch, version allocation, affected-row counts and tombstone queries in `account_state.zi`; aliases/icons in `account_profile.zi`, account resolution in `account_lookup.zi`, friendships and profile-stat storage in `friend_store.zi`, account export in `account_export.zi`, friend leaderboards in `leaderboard.zi`, social snapshot writes in `social_cache.zi`; client tracking, compaction and legacy write policy in `sync_clients.zi`; encrypted payload writes, pagination and retention in `encrypted_payloads.zi`; request audits and operation/delete logs in `sync_audit.zi`; account deletion and current-version queries in `account_state.zi`; incremental snapshots, clean projections and operation reads in `sync_views.zi`; exact state hashing in `state_hash.zi`; transactional session/round, habit/day, meditation and encrypted-record writes, timestamp-guarded deletions and data replacement in `sync_writes.zi`; sync transaction orchestration, operation materialization and idempotent operation logging in `sync_application.zi`; canonical UUID creation, legacy identifier mappings and payload rewriting in `habit_id.zi`; key/hash checks in `encrypted_record.zi`, collection matching in `collection_scope.zi`; legacy UUID merging, operation rewriting, orphan recovery/cleanup, protocol-gated migrations and bulk account migration in `habit_migration.zi`; schema initialization and upgrades in `store_schema.zi`, database opening and ordered initialization in `store_open.zi`; public filesystem statistics, recent account/client usage and app/collection storage totals in `store_stats.zi`; health checks, table counts and account diagnostics in `store_diagnostics.zi`; Store handle, open results, shared missing-user error and all 49 native methods in `store.zi`; SQLite driver registration in `sqlite_driver.zi` |
 | `store_timestamps.go` | Ziran | `store_timestamps.zi`: version guard, all 14 columns, canonical rewrites, error wrapping and atomic transaction cleanup |
 | `sync_ws.go` | Ziran | `sync_ws.zi`: authenticated upgrades, account and IP limits, reader worker, event/ping selection, deadlines and cancellation; `websocket.zi`: native handshakes and exact frame encoding/validation; `sync_hub.zi`: scoped subscriptions, bounded event delivery, counts and disconnect cleanup |
 | `token.go` | Ziran | `token.zi`: bearer-token issue/verify, decimal parsing, exact expiry behavior |
@@ -807,8 +810,14 @@ and native panic cleanup. CLI subprocesses compare inspection output and startup
 fatal messages, exercise key creation and argument-read timing, serve the real
 health endpoint and exit cleanly on SIGINT/SIGTERM. Child environments omit both
 display variables and isolate configuration from the developer's environment.
-The five-line Go entry bridge invokes canonical startup with the Ziran verifier
-factory and signer.
+`main.zi` supplies the canonical verifier factory and signer to startup. Its
+native executable entry is generated by zi2go.
+
+`sqlite_driver.zi` declares the native Go package initialization binding for
+SQLite. Both Store opening and read-only inspection retain that dependency, so
+entry pruning preserves registration. Go initializes the driver once before
+the server package's globals; the canonical initialization call does not repeat
+registration.
 
 `ml_dsa44.zi` owns the liboqs provider's availability checks, verifier callback,
 algorithm selection, buffer allocation, size validation, signing, verification,
@@ -828,9 +837,9 @@ unexpected signature lengths. An isolated no-cgo build compares the unavailable
 path. All child environments omit display variables. Released Go tests retain
 their old provider calls through test-only adapters.
 
-Two handwritten production Go files remain, totaling nine lines: the native
-entry bridge and SQLite driver registration. The Go regression test port and
-the final CLI, deployment and released-client compatibility audit also remain.
+All 137 root production Go files are generated from Ziran; no handwritten
+production Go remains. The Go regression test port and the final CLI,
+deployment and released-client compatibility audit remain.
 
 ## Compiler work exercised by this port
 
@@ -967,11 +976,11 @@ type identity, interface values, zero values and custom JSON methods in source
 and saved IR. Go primitives now provide method calls, multiple results,
 HTTP field access, error interfaces, mutex synchronization, variadic SQL
 arguments, cancellation/deadlines, native channel selection and worker callbacks.
-Remaining server work includes the native entry bridge and driver registration.
 Add missing reusable compiler/runtime capabilities upstream in Ziran as that
 application code moves; wrapping existing
 Go application functions does not complete their port.
 
 Completion requires auditing every remaining production module, the test
 coverage, CLI and deployment paths, and compatibility with released clients.
-The current mixed-language server is an intermediate checkpoint.
+Production implementation is complete; the full-codebase port still requires
+the test migration and final compatibility audit.

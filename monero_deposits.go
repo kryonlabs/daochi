@@ -62,21 +62,20 @@ func MoneroDeposits_AssertMutex(Value Any) *Mutex {
 
 func MoneroDeposits_CollectTransfers(payments __type_79590c567c780445, transfers []WalletTransfer) {
 	for _, transfer := range transfers {
-		var value_0 string = fmt.Sprintf("%s:%d:%d", transfer.TxID, int(transfer.SubaddrIndex.Major), int(transfer.SubaddrIndex.Minor))
-		key := value_0
-		var value_1 __type_79590c567c780445 = payments
-		var value_2 string = key
-		var value_3 __type_3ed04d94244870e7 = __type_3ed04d94244870e7{}
-		value_3.Value, value_3.HasValue = value_1[value_2]
-		previous := value_3
+		key := fmt.Sprintf("%s:%d:%d", transfer.TxID, int(transfer.SubaddrIndex.Major), int(transfer.SubaddrIndex.Minor))
+		var value_0 __type_79590c567c780445 = payments
+		var value_1 string = key
+		var value_2 __type_3ed04d94244870e7 = __type_3ed04d94244870e7{}
+		value_2.Value, value_2.HasValue = value_0[value_1]
+		previous := value_2
 		if !previous.HasValue || transfer.Confirmations >= previous.Value.Confirmations {
-			var value_4 *__type_79590c567c780445 = &(payments)
-			var value_5 string = key
-			var value_6 WalletTransfer = transfer
-			if (*value_4) == nil {
-				(*value_4) = make(__type_79590c567c780445)
+			var value_3 *__type_79590c567c780445 = &(payments)
+			var value_4 string = key
+			var value_5 WalletTransfer = transfer
+			if (*value_3) == nil {
+				(*value_3) = make(__type_79590c567c780445)
 			}
-			(*value_4)[value_5] = value_6
+			(*value_3)[value_4] = value_5
 		}
 	}
 }
@@ -102,9 +101,8 @@ func MoneroDeposits_Address(monero Monero, writer ResponseWriter, request *Reque
 	parts[0] = "monero-address:"
 	var value_6 string = ClientAddress_FromRequest(request)
 	parts[1] = value_6
-	var value_7 *RateLimiter = monero.Limiter
-	var value_8 bool = RateLimit_Allow(value_7, strings.Join(parts[0:2:2], ""), int(60), Duration(3600000000000))
-	if !value_8 {
+	var value_7 bool = RateLimit_Allow(monero.Limiter, strings.Join(parts[0:2:2], ""), int(60), Duration(3600000000000))
+	if !value_7 {
 		Response_Error(writer, int(429), "too many address requests")
 		return
 	}
@@ -119,9 +117,7 @@ func MoneroDeposits_Address(monero Monero, writer ResponseWriter, request *Reque
 		}
 		accountID = user.Value
 	} else {
-		var value_9 *Database = monero.Database
-		var value_10 Context = StdHttpGo_Context(request)
-		recipient := AccountLookup_Resolve(value_9, value_10, reference)
+		recipient := AccountLookup_Resolve(monero.Database, StdHttpGo_Context(request), reference)
 		if recipient.Error != nil {
 			slog.Error("resolve monero recipient", "error", recipient.Error)
 			Response_Error(writer, int(500), "recipient lookup failed")
@@ -133,24 +129,17 @@ func MoneroDeposits_Address(monero Monero, writer ResponseWriter, request *Reque
 		}
 		accountID = recipient.Value
 	}
-	var value_11 *ConcurrentMap = monero.AddressLocks
-	var value_12 string = accountID
-	loaded := StdSyncGo_LoadOrStore(value_11, value_12, new(Mutex))
+	loaded := StdSyncGo_LoadOrStore(monero.AddressLocks, accountID, new(Mutex))
 	lock := MoneroDeposits_AssertMutex(loaded.Value)
 	StdSyncGo_Lock(lock)
-	var value_13 *Database = monero.Database
-	var value_14 Context = StdHttpGo_Context(request)
-	allocated := MoneroDepositStore_AccountAddress(value_13, value_14, accountID)
+	allocated := MoneroDepositStore_AccountAddress(monero.Database, StdHttpGo_Context(request), accountID)
 	if allocated.Error == nil && !allocated.Found {
-		var value_15 *Database = monero.Database
-		var value_16 Context = StdHttpGo_Context(request)
-		var value_17 AddressResult = MoneroDepositStore_CreateAccountAddress(value_15, value_16, accountID, *(monero.Configuration), monero.MissingUser, monero.Unavailable)
-		allocated = value_17
+		var value_8 Context = StdHttpGo_Context(request)
+		allocated = MoneroDepositStore_CreateAccountAddress(monero.Database, value_8, accountID, *(monero.Configuration), monero.MissingUser, monero.Unavailable)
 	}
 	StdSyncGo_Unlock(lock)
 	if allocated.Error != nil {
-		var value_18 string = LogSafety_LogText(accountID)
-		slog.Error("allocate monero account address", "account", value_18, "error", allocated.Error)
+		slog.Error("allocate monero account address", "account", LogSafety_LogText(accountID), "error", allocated.Error)
 		Response_Error(writer, int(500), "monero address unavailable")
 		return
 	}
@@ -165,15 +154,12 @@ func MoneroDeposits_Address(monero Monero, writer ResponseWriter, request *Reque
 	value.AssetID = "waozi:token"
 	value.Address = allocated.Value.Address
 	parts[0] = "monero:"
-	var value_19 string = url.PathEscape(allocated.Value.Address)
-	parts[1] = value_19
-	var value_20 string = strings.Join(parts[0:2:2], "")
-	value.URI = value_20
+	var value_9 string = url.PathEscape(allocated.Value.Address)
+	parts[1] = value_9
+	value.URI = strings.Join(parts[0:2:2], "")
 	value.Network = network
-	var value_21 int64 = MoneroWallet_ConfirmationsRequired(*(monero.Configuration))
-	value.ConfirmationsRequired = value_21
-	var value_22 int64 = MoneroWallet_MinimumAtomicAmount(*(monero.Configuration))
-	value.MinimumAtomicAmount = value_22
+	value.ConfirmationsRequired = MoneroWallet_ConfirmationsRequired(*(monero.Configuration))
+	value.MinimumAtomicAmount = MoneroWallet_MinimumAtomicAmount(*(monero.Configuration))
 	value.Rate.AtomicAmount = monero.Configuration.MoneroRateAtomicAmount
 	value.Rate.TokenUnits = monero.Configuration.MoneroRateTokenUnits
 	Response_JSON(writer, int(200), value)
@@ -275,17 +261,16 @@ func MoneroDeposits_Transfers(monero Monero, context Context) TransfersResult {
 	var value_25 __type_7d6cc8a85f09fc88 = parameters
 	clear(value_25)
 	var height WalletHeight = WalletHeight{}
-	var value_26 Error = MoneroWallet_Request(context, *(monero.Configuration), "get_height", parameters, &(height), monero.Unavailable)
-	heightError := value_26
+	heightError := MoneroWallet_Request(context, *(monero.Configuration), "get_height", parameters, &(height), monero.Unavailable)
 	if heightError == nil && height.Height > maximum {
 		maximum = height.Height
 	}
 	{
-		value_27 := confirmed.Incoming[:]
-		if int64(0) < 0 || int64(int64(len(value_27))) < int64(0) || int64(int64(len(value_27))) > int64(len(value_27)) {
+		value_26 := confirmed.Incoming[:]
+		if int64(0) < 0 || int64(int64(len(value_26))) < int64(0) || int64(int64(len(value_26))) > int64(len(value_26)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_33 := value_27[0:int64(len(value_27)):int64(len(value_27))]
+		loop_view_33 := value_26[0:int64(len(value_26)):int64(len(value_26))]
 		loop_count_33 := int64(len(loop_view_33))
 		var loop_cursor_33 int64 = 0
 		for loop_cursor_33 < loop_count_33 {
@@ -298,43 +283,43 @@ func MoneroDeposits_Transfers(monero Monero, context Context) TransfersResult {
 		}
 	}
 	if maximum > bookmark.Value {
-		var value_28 Error = MoneroDepositStore_SaveScanHeight(monero.Database, context, maximum)
-		result.Error = value_28
+		var value_27 Error = MoneroDepositStore_SaveScanHeight(monero.Database, context, maximum)
+		result.Error = value_27
 		if result.Error != nil {
 			return result
 		}
 	}
 	var payments __type_79590c567c780445 = *new(__type_79590c567c780445)
-	var value_29 *__type_79590c567c780445 = &(payments)
-	if (*value_29) == nil {
-		(*value_29) = make(__type_79590c567c780445)
+	var value_28 *__type_79590c567c780445 = &(payments)
+	if (*value_28) == nil {
+		(*value_28) = make(__type_79590c567c780445)
 	}
 	MoneroDeposits_CollectTransfers(payments, pool.Pool)
 	MoneroDeposits_CollectTransfers(payments, confirmed.Incoming)
 	MoneroDeposits_CollectTransfers(payments, confirmed.Pending)
-	var value_30 __type_79590c567c780445 = payments
-	var value_31 int64 = int64(len(value_30))
-	transfers := make([]WalletTransfer, int(int(0)), int(int(value_31)))
+	var value_29 __type_79590c567c780445 = payments
+	var value_30 int64 = int64(len(value_29))
+	transfers := make([]WalletTransfer, int(int(0)), int(int(value_30)))
 	{
-		var value_32 __type_79590c567c780445 = payments
-		var value_33 []string = make([]string, 0, len(value_32))
-		for value_34 := range value_32 {
-			value_33 = append(value_33, value_34)
+		var value_31 __type_79590c567c780445 = payments
+		var value_32 []string = make([]string, 0, len(value_31))
+		for value_33 := range value_31 {
+			value_32 = append(value_32, value_33)
 		}
-		if int64(0) < 0 || int64(int64(len(value_33))) < int64(0) || int64(int64(len(value_33))) > int64(len(value_33)) {
+		if int64(0) < 0 || int64(int64(len(value_32))) < int64(0) || int64(int64(len(value_32))) > int64(len(value_32)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_50 := value_33[0:int64(len(value_33)):int64(len(value_33))]
+		loop_view_50 := value_32[0:int64(len(value_32)):int64(len(value_32))]
 		loop_count_50 := int64(len(loop_view_50))
 		var loop_cursor_50 int64 = 0
 		for loop_cursor_50 < loop_count_50 {
 			loop_index_50 := loop_cursor_50
 			key := loop_view_50[loop_index_50]
-			var value_36 []WalletTransfer = transfers
-			var value_37 __type_79590c567c780445 = payments
-			var value_38 string = key
-			var value_39 WalletTransfer = value_37[value_38]
-			transfers = append(value_36, value_39)
+			var value_35 []WalletTransfer = transfers
+			var value_36 __type_79590c567c780445 = payments
+			var value_37 string = key
+			var value_38 WalletTransfer = value_36[value_37]
+			transfers = append(value_35, value_38)
 			loop_cursor_50++
 		}
 	}
@@ -343,24 +328,22 @@ func MoneroDeposits_Transfers(monero Monero, context Context) TransfersResult {
 }
 
 func MoneroDeposits_SettleDeposit(monero Monero, context Context, accountID string, transfer WalletTransfer) Error {
-	var value_0 TokenUnitsResult = MoneroWallet_TokenUnits(transfer.Amount, monero.Configuration.MoneroRateAtomicAmount, monero.Configuration.MoneroRateTokenUnits)
-	conversion := value_0
+	conversion := MoneroWallet_TokenUnits(transfer.Amount, monero.Configuration.MoneroRateAtomicAmount, monero.Configuration.MoneroRateTokenUnits)
 	status := "confirming"
 	if transfer.DoubleSpendSeen {
 		status = "double_spend"
 	} else {
-		var value_1 bool = transfer.Amount < MoneroWallet_MinimumAtomicAmount(*(monero.Configuration))
-		if value_1 || conversion.Error != nil || conversion.Value <= 0 {
+		var value_0 bool = transfer.Amount < MoneroWallet_MinimumAtomicAmount(*(monero.Configuration))
+		if value_0 || conversion.Error != nil || conversion.Value <= 0 {
 			status = "below_minimum"
 		} else {
-			var value_2 bool = transfer.Confirmations >= MoneroWallet_ConfirmationsRequired(*(monero.Configuration))
-			if value_2 && !transfer.Locked && transfer.UnlockTime == 0 {
+			var value_1 bool = transfer.Confirmations >= MoneroWallet_ConfirmationsRequired(*(monero.Configuration))
+			if value_1 && !transfer.Locked && transfer.UnlockTime == 0 {
 				status = "confirmed"
 			}
 		}
 	}
-	var value_3 DepositResult = MoneroDepositStore_UpsertDeposit(monero.Database, context, accountID, transfer, status, *(monero.Configuration))
-	deposit := value_3
+	deposit := MoneroDepositStore_UpsertDeposit(monero.Database, context, accountID, transfer, status, *(monero.Configuration))
 	if deposit.Error != nil || status != "confirmed" || deposit.Value.Receipt != nil {
 		return deposit.Error
 	}
@@ -368,8 +351,7 @@ func MoneroDeposits_SettleDeposit(monero Monero, context Context, accountID stri
 	if issuer.Error != nil {
 		return issuer.Error
 	}
-	var value_4 CreditResult = MoneroDepositStore_CreditDeposit(monero.Database, context, issuer.Value, transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor, monero.IssuerUnavailable)
-	credited := value_4
+	credited := MoneroDepositStore_CreditDeposit(monero.Database, context, issuer.Value, transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor, monero.IssuerUnavailable)
 	return credited.Error
 }
 
@@ -420,9 +402,7 @@ func MoneroDeposits_Reconcile(monero Monero, context Context) Error {
 			}
 			settled := MoneroDeposits_SettleDeposit(monero, context, owner.Value, transfer)
 			if settled != nil {
-				var value_7 string = LogSafety_LogText(owner.Value)
-				var value_8 string = LogSafety_LogText(transfer.TxID)
-				slog.Warn("monero account deposit settlement failed", "account", value_7, "tx", value_8, "error", settled)
+				slog.Warn("monero account deposit settlement failed", "account", LogSafety_LogText(owner.Value), "tx", LogSafety_LogText(transfer.TxID), "error", settled)
 			}
 			loop_cursor_14++
 		}

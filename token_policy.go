@@ -70,24 +70,21 @@ func TokenPolicy_Authorize(database *Database, context Context, request *Request
 		if result.Authentication.Error != nil || result.Authentication.Status != 0 {
 			return result
 		}
-		var value_0 AuthenticationResult = SignedTx_Verify(database, context, request, body, header.Value, accountID, appID, verify, replayError)
-		result.Authentication = value_0
+		result.Authentication = SignedTx_Verify(database, context, request, body, header.Value, accountID, appID, verify, replayError)
 		if result.Authentication.Error != nil || result.Authentication.Status != 0 {
 			return result
 		}
 		result.Value = header.Value
 	}
 	result.Signed = hasSignature
-	var value_1 bool = Scope_ValidTokenPolicyPermission(permission)
-	if !value_1 {
-		var value_2 AuthenticationResult = Authentication_Failure(int(400), "invalid token permission")
-		result.Authentication = value_2
+	var value_0 bool = Scope_ValidTokenPolicyPermission(permission)
+	if !value_0 {
+		result.Authentication = Authentication_Failure(int(400), "invalid token permission")
 		return result
 	}
 	policyExists := AppStore_HasPolicy(database, context, appID)
 	if policyExists.Error != nil {
-		var value_3 AuthenticationResult = Authentication_NativeFailure(policyExists.Error)
-		result.Authentication = value_3
+		result.Authentication = Authentication_NativeFailure(policyExists.Error)
 		return result
 	}
 	if !policyExists.Value {
@@ -95,27 +92,24 @@ func TokenPolicy_Authorize(database *Database, context Context, request *Request
 	}
 	permissionResult := AppStore_Permission(database, context, appID, assetID, permission)
 	if permissionResult.Error != nil {
-		var value_4 AuthenticationResult = Authentication_NativeFailure(permissionResult.Error)
-		result.Authentication = value_4
+		result.Authentication = Authentication_NativeFailure(permissionResult.Error)
 		return result
 	}
 	if !permissionResult.Found {
-		var value_5 AuthenticationResult = Authentication_Failure(int(403), "app token permission denied")
-		result.Authentication = value_5
+		result.Authentication = Authentication_Failure(int(403), "app token permission denied")
 		return result
 	}
-	var value_6 bool = !hasSignature
-	if value_6 {
-		var value_7 bool = permissionResult.Value.LegacyUnsignedUntil == 0
-		if !value_7 {
-			var value_8 bool = StdTimeGo_Unix(StdTimeGo_Now()) > permissionResult.Value.LegacyUnsignedUntil
-			value_7 = value_8
+	var value_1 bool = !hasSignature
+	if value_1 {
+		var value_2 bool = permissionResult.Value.LegacyUnsignedUntil == 0
+		if !value_2 {
+			var value_3 bool = StdTimeGo_Unix(StdTimeGo_Now()) > permissionResult.Value.LegacyUnsignedUntil
+			value_2 = value_3
 		}
-		value_6 = value_7
+		value_1 = value_2
 	}
-	if value_6 {
-		var value_9 AuthenticationResult = Authentication_Failure(int(401), "signed transaction required")
-		result.Authentication = value_9
+	if value_1 {
+		result.Authentication = Authentication_Failure(int(401), "signed transaction required")
 	}
 	return result
 }

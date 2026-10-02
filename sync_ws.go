@@ -101,18 +101,15 @@ func SyncWs_ReadLoop(connection Connection, reader *BufferedReader, cancel Cance
 func SyncWs_Authenticate(value SyncSocket, request *Request) UserAuthenticationResult {
 	var result UserAuthenticationResult = UserAuthenticationResult{}
 	if StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "token") != "" {
-		var value_0 AuthenticationResult = Authentication_Failure(int(401), "websocket query tokens are not accepted")
-		result.Authentication = value_0
+		result.Authentication = Authentication_Failure(int(401), "websocket query tokens are not accepted")
 		return result
 	}
-	var value_1 string = Websocket_BearerToken(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "Sec-WebSocket-Protocol"))
-	bearer := value_1
+	bearer := Websocket_BearerToken(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "Sec-WebSocket-Protocol"))
 	if bearer != "" {
-		var value_2 []uint8 = value.Configuration.TokenSecret
-		verified := Token_VerifyAuthToken(value_2, bearer, StdTimeGo_Unix(StdTimeGo_Now()))
+		var value_0 []uint8 = value.Configuration.TokenSecret
+		verified := Token_VerifyAuthToken(value_0, bearer, StdTimeGo_Unix(StdTimeGo_Now()))
 		if verified.Error != "" {
-			var value_3 AuthenticationResult = Authentication_Failure(int(401), "invalid bearer token")
-			result.Authentication = value_3
+			result.Authentication = Authentication_Failure(int(401), "invalid bearer token")
 			return result
 		}
 		result.Value = verified.Value

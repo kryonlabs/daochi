@@ -87,15 +87,13 @@ func SyncViews_ReadHabits(rows *Rows, withVersion bool) HabitsResult {
 		if withVersion {
 			count = int(12)
 		}
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:count:count])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:count:count])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, item)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	result.Value = values
 	return result
 }
@@ -114,8 +112,7 @@ func SyncViews_ReadHabitDays(rows *Rows) HabitDaysResult {
 		value_0[4] = &(item.UpdatedAt)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:5:5])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:5:5])
 		if result.Error != nil {
 			return result
 		}
@@ -125,8 +122,7 @@ func SyncViews_ReadHabitDays(rows *Rows) HabitDaysResult {
 		}
 		values = append(values, item)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	result.Value = values
 	return result
 }
@@ -146,8 +142,7 @@ func SyncViews_ReadCleanHabitDays(rows *Rows) CleanHabitDaysResult {
 		value_0[5] = &(item.UpdatedAt)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:6:6])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:6:6])
 		if result.Error != nil {
 			return result
 		}
@@ -157,8 +152,7 @@ func SyncViews_ReadCleanHabitDays(rows *Rows) CleanHabitDaysResult {
 		}
 		values = append(values, item)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	result.Value = values
 	return result
 }
@@ -186,15 +180,13 @@ func SyncViews_ReadSessions(rows *Rows) SessionsResult {
 		value_0[14] = &(item.UpdatedAt)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:15:15])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:15:15])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, item)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error != nil {
 		return result
 	}
@@ -213,15 +205,13 @@ func SyncViews_ReadRounds(rows *Rows) RoundsResult {
 		value_0[2] = &(item.HoldSeconds)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, item)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	result.Value = values
 	return result
 }
@@ -238,15 +228,13 @@ func SyncViews_ReadMeditations(rows *Rows) MeditationsResult {
 		value_0[3] = &(item.CompletedAt)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:4:4])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:4:4])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, item)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	result.Value = values
 	return result
 }
@@ -263,20 +251,18 @@ func SyncViews_ReadSocial(rows *Rows) SocialSnapshotsResult {
 		value_0[2] = &(item.UpdatedAt)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
 		if result.Error != nil {
 			return result
 		}
 		if payload == "" {
 			payload = "{}"
 		}
-		var value_2 []uint8 = StdTextGo_ToBytes(payload)
-		item.JSON = RawMessage(value_2)
+		var value_1 []uint8 = StdTextGo_ToBytes(payload)
+		item.JSON = RawMessage(value_1)
 		values = append(values, item)
 	}
-	var value_3 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_3
+	result.Error = StdSqlGo_RowsError(rows)
 	result.Value = values
 	return result
 }
@@ -299,15 +285,13 @@ func SyncViews_ReadRecords(rows *Rows) RecordsResult {
 		value_0[9] = &(item.ParentID)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:10:10])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:10:10])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, item)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	result.Value = values
 	return result
 }
@@ -330,19 +314,17 @@ func SyncViews_ReadOperations(rows *Rows) OperationsResult {
 		value_0[8] = &(item.CreatedAt)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:9:9])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:9:9])
 		if result.Error != nil {
 			return result
 		}
 		if payload != "" {
-			var value_2 []uint8 = StdTextGo_ToBytes(payload)
-			item.Payload = RawMessage(value_2)
+			var value_1 []uint8 = StdTextGo_ToBytes(payload)
+			item.Payload = RawMessage(value_1)
 		}
 		values = append(values, item)
 	}
-	var value_3 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_3
+	result.Error = StdSqlGo_RowsError(rows)
 	result.Value = values
 	return result
 }

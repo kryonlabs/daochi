@@ -19,26 +19,22 @@ func AccountProfile_Alias(database *Database, context Context, userID string) Al
 	arguments[0] = userID
 	var destinations [1]Any
 	destinations[0] = &(alias)
-	var value_0 *Row = StdSqlGo_QueryRow(database, context, "SELECT alias FROM server_users WHERE user_id_hash=?1", arguments[0:1:1])
-	row := value_0
-	var value_1 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_1
-	var value_2 Error = result.Error
-	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+	row := StdSqlGo_QueryRow(database, context, "SELECT alias FROM server_users WHERE user_id_hash=?1", arguments[0:1:1])
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	if StdErrorsGo_Is(result.Error, StdSqlGo_NoRows()) {
 		result.Error = nil
 		return result
 	}
-	var value_3 bool = result.Error != nil
-	var value_4 bool = value_3
-	if !value_4 {
-		var value_5 bool = StdSqlGo_NullStringValid(alias)
-		value_4 = !value_5
+	var value_0 bool = result.Error != nil
+	var value_1 bool = value_0
+	if !value_1 {
+		var value_2 bool = StdSqlGo_NullStringValid(alias)
+		value_1 = !value_2
 	}
-	if value_4 {
+	if value_1 {
 		return result
 	}
-	var value_6 string = StdSqlGo_NullStringValue(alias)
-	result.Value = value_6
+	result.Value = StdSqlGo_NullStringValue(alias)
 	return result
 }
 
@@ -48,8 +44,7 @@ func AccountProfile_SetAlias(database *Database, context Context, userID string,
 	arguments[1] = alias
 	var value_0 string = Timestamp_CanonicalNow()
 	arguments[2] = value_0
-	var value_1 zir_519e32da2199d006_ExecResult = StdSqlGo_Exec(database, context, "UPDATE server_users SET alias=?2,last_seen_at=?3 WHERE user_id_hash=?1", arguments[0:3:3])
-	updated := value_1
+	updated := StdSqlGo_Exec(database, context, "UPDATE server_users SET alias=?2,last_seen_at=?3 WHERE user_id_hash=?1", arguments[0:3:3])
 	if updated.Error != nil {
 		return updated.Error
 	}
@@ -65,12 +60,11 @@ func AccountProfile_Icon(database *Database, context Context, userID string) Ico
 	arguments[0] = userID
 	var destinations [1]Any
 	destinations[0] = &(result.Value)
-	var value_0 *Row = StdSqlGo_QueryRow(database, context, "SELECT profile_icon FROM server_users WHERE user_id_hash=?1", arguments[0:1:1])
-	row := value_0
-	var value_1 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_1
-	var value_2 Error = result.Error
-	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+	row := StdSqlGo_QueryRow(database, context, "SELECT profile_icon FROM server_users WHERE user_id_hash=?1", arguments[0:1:1])
+	var value_0 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	result.Error = value_0
+	var value_1 Error = result.Error
+	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
 		result.Error = nil
 		return result
 	}
@@ -86,8 +80,7 @@ func AccountProfile_SetIcon(database *Database, context Context, userID string, 
 	arguments[1] = icon
 	var value_0 string = Timestamp_CanonicalNow()
 	arguments[2] = value_0
-	var value_1 zir_519e32da2199d006_ExecResult = StdSqlGo_Exec(database, context, "UPDATE server_users SET profile_icon=?2,last_seen_at=?3 WHERE user_id_hash=?1", arguments[0:3:3])
-	updated := value_1
+	updated := StdSqlGo_Exec(database, context, "UPDATE server_users SET profile_icon=?2,last_seen_at=?3 WHERE user_id_hash=?1", arguments[0:3:3])
 	if updated.Error != nil {
 		return updated.Error
 	}

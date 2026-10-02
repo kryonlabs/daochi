@@ -186,15 +186,12 @@ func AppStore_Hydrate(database *Database, context Context, app *AppRegistration)
 }
 
 func AppStore_ReplacePolicies(transaction *Transaction, context Context, appID string, policies []TokenPolicy) Error {
-	var value_0 zir_29bde45da7d805e7_ExecResult = AppStore_DeleteByApp(transaction, context, "DELETE FROM token_app_permissions WHERE app_id=?1", appID)
-	deleted := value_0
+	deleted := AppStore_DeleteByApp(transaction, context, "DELETE FROM token_app_permissions WHERE app_id=?1", appID)
 	if deleted.Error != nil {
 		return deleted.Error
 	}
 	for _, policy := range policies {
-		var value_1 string = "INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until) VALUES(?1,?2,?3,?4,?5)"
-		var value_2 zir_29bde45da7d805e7_ExecResult = AppStore_InsertPolicy(transaction, context, value_1, appID, policy.AssetID, policy.Permission, Manifest_DefaultString(policy.Status, "active"), int64(policy.LegacyUnsignedUntil))
-		inserted := value_2
+		inserted := AppStore_InsertPolicy(transaction, context, "INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until) VALUES(?1,?2,?3,?4,?5)", appID, policy.AssetID, policy.Permission, Manifest_DefaultString(policy.Status, "active"), int64(policy.LegacyUnsignedUntil))
 		if inserted.Error != nil {
 			return inserted.Error
 		}
@@ -215,44 +212,38 @@ func AppStore_UpsertTransaction(transaction *Transaction, context Context, app A
 	if status == "" {
 		status = "active"
 	}
-	var value_0 *Transaction = transaction
-	var value_1 Context = context
-	var value_2 string = "\nINSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status,app_schema_version,min_supported_client_version,current_client_version,compatibility_until,features_json,legacy_protocols_json)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(app_id) DO UPDATE SET\n display_name=excluded.display_name,\n description=excluded.description,\n homepage_url=excluded.homepage_url,\n source_url=excluded.source_url,\n public_key=excluded.public_key,\n status=excluded.status,\n app_schema_version=excluded.app_schema_version,\n min_supported_client_version=excluded.min_supported_client_version,\n current_client_version=excluded.current_client_version,\n compatibility_until=excluded.compatibility_until,\n features_json=excluded.features_json,\n legacy_protocols_json=excluded.legacy_protocols_json,\n updated_at=CURRENT_TIMESTAMP\n"
-	var value_3 string = app.AppID
-	var value_4 string = app.DisplayName
-	var value_5 string = app.Description
-	var value_6 string = app.HomepageURL
-	var value_7 string = app.SourceURL
-	var value_8 string = app.PublicKey
-	var value_9 string = status
-	var value_10 int = app.AppSchemaVersion
-	var value_11 string = app.MinClientVersion
-	var value_12 string = app.CurrentVersion
-	var value_13 string = app.CompatibilityUntil
-	var value_14 zir_29bde45da7d805e7_ExecResult = AppStore_InsertApp(value_0, value_1, value_2, value_3, value_4, value_5, value_6, value_7, value_8, value_9, int(value_10), value_11, value_12, value_13, StdTextGo_FromBytes(features.Value), StdTextGo_FromBytes(legacy.Value))
-	inserted := value_14
+	var value_0 string = "\nINSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status,app_schema_version,min_supported_client_version,current_client_version,compatibility_until,features_json,legacy_protocols_json)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(app_id) DO UPDATE SET\n display_name=excluded.display_name,\n description=excluded.description,\n homepage_url=excluded.homepage_url,\n source_url=excluded.source_url,\n public_key=excluded.public_key,\n status=excluded.status,\n app_schema_version=excluded.app_schema_version,\n min_supported_client_version=excluded.min_supported_client_version,\n current_client_version=excluded.current_client_version,\n compatibility_until=excluded.compatibility_until,\n features_json=excluded.features_json,\n legacy_protocols_json=excluded.legacy_protocols_json,\n updated_at=CURRENT_TIMESTAMP\n"
+	var value_1 string = app.AppID
+	var value_2 string = app.DisplayName
+	var value_3 string = app.Description
+	var value_4 string = app.HomepageURL
+	var value_5 string = app.SourceURL
+	var value_6 string = app.PublicKey
+	var value_7 int = app.AppSchemaVersion
+	var value_8 string = app.MinClientVersion
+	var value_9 string = app.CurrentVersion
+	var value_10 string = app.CompatibilityUntil
+	inserted := AppStore_InsertApp(transaction, context, value_0, value_1, value_2, value_3, value_4, value_5, value_6, status, int(value_7), value_8, value_9, value_10, StdTextGo_FromBytes(features.Value), StdTextGo_FromBytes(legacy.Value))
 	if inserted.Error != nil {
 		return inserted.Error
 	}
-	var value_15 zir_29bde45da7d805e7_ExecResult = AppStore_DeleteByApp(transaction, context, "DELETE FROM server_app_collections WHERE app_id=?1", app.AppID)
-	collections := value_15
+	collections := AppStore_DeleteByApp(transaction, context, "DELETE FROM server_app_collections WHERE app_id=?1", app.AppID)
 	if collections.Error != nil {
 		return collections.Error
 	}
 	{
-		value_16 := app.Collections[:]
-		if int64(0) < 0 || int64(int64(len(value_16))) < int64(0) || int64(int64(len(value_16))) > int64(len(value_16)) {
+		value_11 := app.Collections[:]
+		if int64(0) < 0 || int64(int64(len(value_11))) < int64(0) || int64(int64(len(value_11))) > int64(len(value_11)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_20 := value_16[0:int64(len(value_16)):int64(len(value_16))]
+		loop_view_20 := value_11[0:int64(len(value_11)):int64(len(value_11))]
 		loop_count_20 := int64(len(loop_view_20))
 		var loop_cursor_20 int64 = 0
 		for loop_cursor_20 < loop_count_20 {
 			loop_index_20 := loop_cursor_20
 			collection := loop_view_20[loop_index_20]
-			var value_17 string = "INSERT INTO server_app_collections(app_id,collection_prefix,visibility,schema_version,description) VALUES(?1,?2,?3,?4,?5)"
-			var value_18 zir_29bde45da7d805e7_ExecResult = AppStore_InsertCollection(transaction, context, value_17, app.AppID, collection.CollectionPrefix, collection.Visibility, int(collection.SchemaVersion), collection.Description)
-			written := value_18
+			var value_12 string = "INSERT INTO server_app_collections(app_id,collection_prefix,visibility,schema_version,description) VALUES(?1,?2,?3,?4,?5)"
+			written := AppStore_InsertCollection(transaction, context, value_12, app.AppID, collection.CollectionPrefix, collection.Visibility, int(collection.SchemaVersion), collection.Description)
 			_ = written
 			if written.Error != nil {
 				return written.Error
@@ -260,24 +251,22 @@ func AppStore_UpsertTransaction(transaction *Transaction, context Context, app A
 			loop_cursor_20++
 		}
 	}
-	var value_19 zir_29bde45da7d805e7_ExecResult = AppStore_DeleteByApp(transaction, context, "DELETE FROM server_app_capabilities WHERE app_id=?1", app.AppID)
-	capabilities := value_19
+	capabilities := AppStore_DeleteByApp(transaction, context, "DELETE FROM server_app_capabilities WHERE app_id=?1", app.AppID)
 	if capabilities.Error != nil {
 		return capabilities.Error
 	}
 	{
-		value_20 := app.Capabilities[:]
-		if int64(0) < 0 || int64(int64(len(value_20))) < int64(0) || int64(int64(len(value_20))) > int64(len(value_20)) {
+		value_13 := app.Capabilities[:]
+		if int64(0) < 0 || int64(int64(len(value_13))) < int64(0) || int64(int64(len(value_13))) > int64(len(value_13)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_30 := value_20[0:int64(len(value_20)):int64(len(value_20))]
+		loop_view_30 := value_13[0:int64(len(value_13)):int64(len(value_13))]
 		loop_count_30 := int64(len(loop_view_30))
 		var loop_cursor_30 int64 = 0
 		for loop_cursor_30 < loop_count_30 {
 			loop_index_30 := loop_cursor_30
 			capability := loop_view_30[loop_index_30]
-			var value_21 zir_29bde45da7d805e7_ExecResult = AppStore_InsertCapability(transaction, context, "INSERT OR IGNORE INTO server_app_capabilities(app_id,capability) VALUES(?1,?2)", app.AppID, capability)
-			written := value_21
+			written := AppStore_InsertCapability(transaction, context, "INSERT OR IGNORE INTO server_app_capabilities(app_id,capability) VALUES(?1,?2)", app.AppID, capability)
 			_ = written
 			if written.Error != nil {
 				return written.Error
@@ -336,44 +325,32 @@ func AppStore_UpsertSignedManifest(database *Database, context Context, value Ap
 	if error != nil {
 		return error
 	}
-	var value_0 *Transaction = transaction
-	var value_1 Context = context
-	var value_2 string = "\nINSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at,status)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8)\nON CONFLICT(app_id) DO UPDATE SET\n manifest_version=excluded.manifest_version,\n manifest_json=excluded.manifest_json,\n manifest_hash=excluded.manifest_hash,\n manifest_signature=excluded.manifest_signature,\n approval_signature=excluded.approval_signature,\n expires_at=excluded.expires_at,\n status=excluded.status,\n updated_at=CURRENT_TIMESTAMP\n"
-	var value_3 string = value.AppID
-	var value_4 int = value.ManifestVersion
-	var value_5 string = StdTextGo_FromBytes(bytes)
-	var value_6 zir_29bde45da7d805e7_ExecResult = AppStore_InsertManifest(value_0, value_1, value_2, value_3, int(value_4), value_5, hash, signature, approval, int64(value.ExpiresAt), status)
-	written := value_6
+	var value_0 string = "\nINSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at,status)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8)\nON CONFLICT(app_id) DO UPDATE SET\n manifest_version=excluded.manifest_version,\n manifest_json=excluded.manifest_json,\n manifest_hash=excluded.manifest_hash,\n manifest_signature=excluded.manifest_signature,\n approval_signature=excluded.approval_signature,\n expires_at=excluded.expires_at,\n status=excluded.status,\n updated_at=CURRENT_TIMESTAMP\n"
+	var value_1 string = value.AppID
+	var value_2 int = value.ManifestVersion
+	var value_3 string = StdTextGo_FromBytes(bytes)
+	written := AppStore_InsertManifest(transaction, context, value_0, value_1, int(value_2), value_3, hash, signature, approval, int64(value.ExpiresAt), status)
 	if written.Error != nil {
 		return written.Error
 	}
-	var value_7 zir_29bde45da7d805e7_ExecResult = AppStore_DeleteByApp(transaction, context, "DELETE FROM server_app_keys WHERE app_id=?1", value.AppID)
-	deleted := value_7
+	deleted := AppStore_DeleteByApp(transaction, context, "DELETE FROM server_app_keys WHERE app_id=?1", value.AppID)
 	if deleted.Error != nil {
 		return deleted.Error
 	}
 	{
-		value_8 := value.Keys[:]
-		if int64(0) < 0 || int64(int64(len(value_8))) < int64(0) || int64(int64(len(value_8))) > int64(len(value_8)) {
+		value_4 := value.Keys[:]
+		if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_41 := value_8[0:int64(len(value_8)):int64(len(value_8))]
+		loop_view_41 := value_4[0:int64(len(value_4)):int64(len(value_4))]
 		loop_count_41 := int64(len(loop_view_41))
 		var loop_cursor_41 int64 = 0
 		for loop_cursor_41 < loop_count_41 {
 			loop_index_41 := loop_cursor_41
 			key := loop_view_41[loop_index_41]
-			var value_9 *Transaction = transaction
-			var value_10 Context = context
-			var value_11 string = "INSERT INTO server_app_keys(app_id,key_id,algorithm,public_key,purpose,status,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7)"
-			var value_12 string = value.AppID
-			var value_13 string = key.KeyID
-			var value_14 string = key.Algorithm
-			var value_15 string = key.PublicKey
-			var value_16 string = Manifest_DefaultString(key.Purpose, "signing")
-			var value_17 string = Manifest_DefaultString(key.Status, "active")
-			var value_18 zir_29bde45da7d805e7_ExecResult = AppStore_InsertKey(value_9, value_10, value_11, value_12, value_13, value_14, value_15, value_16, value_17, int64(key.ExpiresAt))
-			inserted := value_18
+			var value_5 string = "INSERT INTO server_app_keys(app_id,key_id,algorithm,public_key,purpose,status,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7)"
+			var value_6 string = value.AppID
+			inserted := AppStore_InsertKey(transaction, context, value_5, value_6, key.KeyID, key.Algorithm, key.PublicKey, Manifest_DefaultString(key.Purpose, "signing"), Manifest_DefaultString(key.Status, "active"), int64(key.ExpiresAt))
 			if inserted.Error != nil {
 				return inserted.Error
 			}
@@ -392,23 +369,21 @@ func AppStore_ActiveKey(database *Database, context Context, appID string, keyID
 	var key AppKey = AppKey{}
 	var value_0 string = "\nSELECT key_id,algorithm,public_key,purpose,status,expires_at,created_at\nFROM server_app_keys WHERE app_id=?1 AND key_id=?2 AND status='active'\n"
 	row := (*sql.DB).QueryRowContext(database, context, value_0, appID, keyID)
-	var value_1 Error = (*sql.Row).Scan(row, &(key.KeyID), &(key.Algorithm), &(key.PublicKey), &(key.Purpose), &(key.Status), &(key.ExpiresAt), &(key.CreatedAt))
-	error := value_1
-	var value_2 Error = error
-	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+	error := (*sql.Row).Scan(row, &(key.KeyID), &(key.Algorithm), &(key.PublicKey), &(key.Purpose), &(key.Status), &(key.ExpiresAt), &(key.CreatedAt))
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {
 		result.Error = error
 		return result
 	}
-	var value_3 bool = key.ExpiresAt > 0
-	var value_4 bool = value_3
-	if value_4 {
-		var value_5 int64 = StdTimeGo_Unix(StdTimeGo_Now())
-		value_4 = (value_5 > key.ExpiresAt)
+	var value_1 bool = key.ExpiresAt > 0
+	var value_2 bool = value_1
+	if value_2 {
+		var value_3 int64 = StdTimeGo_Unix(StdTimeGo_Now())
+		value_2 = (value_3 > key.ExpiresAt)
 	}
-	if value_4 {
+	if value_2 {
 		return result
 	}
 	result.Value = key
@@ -420,16 +395,15 @@ func AppStore_HydrateManifest(database *Database, context Context, app *AppRegis
 	manifestJSON := ""
 	var value_0 string = "\nSELECT manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at\nFROM server_app_manifests WHERE app_id=?1 AND status='active'\n"
 	row := (*sql.DB).QueryRowContext(database, context, value_0, app.AppID)
-	var value_1 Error = (*sql.Row).Scan(row, &(app.ManifestVersion), &(manifestJSON), &(app.ManifestHash), &(app.ManifestSignature), &(app.ApprovalSignature), &(app.ManifestExpiresAt))
-	error := value_1
-	var value_2 bool = error != nil
-	var value_3 bool = value_2
-	if value_3 {
-		var value_4 Error = error
-		var value_5 bool = StdErrorsGo_Is(value_4, StdSqlGo_NoRows())
-		value_3 = !value_5
+	error := (*sql.Row).Scan(row, &(app.ManifestVersion), &(manifestJSON), &(app.ManifestHash), &(app.ManifestSignature), &(app.ApprovalSignature), &(app.ManifestExpiresAt))
+	var value_1 bool = error != nil
+	var value_2 bool = value_1
+	if value_2 {
+		var value_3 Error = error
+		var value_4 bool = StdErrorsGo_Is(value_3, StdSqlGo_NoRows())
+		value_2 = !value_4
 	}
-	if value_3 {
+	if value_2 {
 		return error
 	}
 	if manifestJSON != "" {
@@ -471,16 +445,14 @@ func AppStore_Keys(database *Database, context Context, appID string) AppKeysRes
 	var keys []AppKey = nil
 	for StdSqlGo_Next(rows) {
 		var key AppKey = AppKey{}
-		var value_1 Error = (*sql.Rows).Scan(rows, &(key.KeyID), &(key.Algorithm), &(key.PublicKey), &(key.Purpose), &(key.Status), &(key.ExpiresAt), &(key.CreatedAt))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(key.KeyID), &(key.Algorithm), &(key.PublicKey), &(key.Purpose), &(key.Status), &(key.ExpiresAt), &(key.CreatedAt))
 		if result.Error != nil {
 			return result
 		}
 		keys = append(keys, key)
 	}
 	result.Value = keys
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -497,16 +469,14 @@ func AppStore_Policies(database *Database, context Context, appID string) TokenP
 	var policies []TokenPolicy = nil
 	for StdSqlGo_Next(rows) {
 		var policy TokenPolicy = TokenPolicy{}
-		var value_1 Error = (*sql.Rows).Scan(rows, &(policy.AssetID), &(policy.Permission), &(policy.Status), &(policy.LegacyUnsignedUntil))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(policy.AssetID), &(policy.Permission), &(policy.Status), &(policy.LegacyUnsignedUntil))
 		if result.Error != nil {
 			return result
 		}
 		policies = append(policies, policy)
 	}
 	result.Value = policies
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -515,10 +485,8 @@ func AppStore_Permission(database *Database, context Context, appID string, asse
 	var policy TokenPolicy = TokenPolicy{}
 	var value_0 string = "\nSELECT asset_id,permission,status,legacy_unsigned_until\nFROM token_app_permissions\nWHERE app_id=?1 AND asset_id=?2 AND permission=?3 AND status='active'\n"
 	row := (*sql.DB).QueryRowContext(database, context, value_0, appID, asset, permission)
-	var value_1 Error = (*sql.Row).Scan(row, &(policy.AssetID), &(policy.Permission), &(policy.Status), &(policy.LegacyUnsignedUntil))
-	error := value_1
-	var value_2 Error = error
-	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+	error := (*sql.Row).Scan(row, &(policy.AssetID), &(policy.Permission), &(policy.Status), &(policy.LegacyUnsignedUntil))
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		return result
 	}
 	result.Value = policy
@@ -530,10 +498,8 @@ func AppStore_Permission(database *Database, context Context, appID string, asse
 func AppStore_HasPolicy(database *Database, context Context, appID string) TokenPolicyExistsResult {
 	var result TokenPolicyExistsResult = TokenPolicyExistsResult{}
 	var count int = 0
-	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT COUNT(*) FROM token_app_permissions WHERE app_id=?1", appID)
-	row := value_0
-	var value_1 Error = (*sql.Row).Scan(row, &(count))
-	result.Error = value_1
+	row := (*sql.DB).QueryRowContext(database, context, "SELECT COUNT(*) FROM token_app_permissions WHERE app_id=?1", appID)
+	result.Error = (*sql.Row).Scan(row, &(count))
 	result.Value = count > 0
 	return result
 }
@@ -553,27 +519,23 @@ func AppStore_List(database *Database, context Context) AppsResult {
 		var app AppRegistration = AppRegistration{}
 		features := ""
 		legacy := ""
-		var value_1 Error = (*sql.Rows).Scan(rows, &(app.AppID), &(app.DisplayName), &(app.Description), &(app.HomepageURL), &(app.SourceURL), &(app.PublicKey), &(app.Status), &(app.AppSchemaVersion), &(app.MinClientVersion), &(app.CurrentVersion), &(app.CompatibilityUntil), &(features), &(legacy), &(app.CreatedAt), &(app.UpdatedAt))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(app.AppID), &(app.DisplayName), &(app.Description), &(app.HomepageURL), &(app.SourceURL), &(app.PublicKey), &(app.Status), &(app.AppSchemaVersion), &(app.MinClientVersion), &(app.CurrentVersion), &(app.CompatibilityUntil), &(features), &(legacy), &(app.CreatedAt), &(app.UpdatedAt))
 		if result.Error != nil {
 			return result
 		}
-		var value_2 Error = AppStore_DecodeMetadata(features, legacy, &(app))
-		result.Error = value_2
+		result.Error = AppStore_DecodeMetadata(features, legacy, &(app))
 		if result.Error != nil {
 			return result
 		}
 		apps = append(apps, app)
 	}
-	var value_3 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_3
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error != nil {
 		return result
 	}
 	var index int64 = 0
 	for index < int64(len(apps)) {
-		var value_4 Error = AppStore_Hydrate(database, context, &(apps[index]))
-		result.Error = value_4
+		result.Error = AppStore_Hydrate(database, context, &(apps[index]))
 		if result.Error != nil {
 			return result
 		}
@@ -590,23 +552,19 @@ func AppStore_ByID(database *Database, context Context, appID string) AppResult 
 	legacy := ""
 	var value_0 string = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps WHERE app_id=?1\n"
 	row := (*sql.DB).QueryRowContext(database, context, value_0, appID)
-	var value_1 Error = (*sql.Row).Scan(row, &(app.AppID), &(app.DisplayName), &(app.Description), &(app.HomepageURL), &(app.SourceURL), &(app.PublicKey), &(app.Status), &(app.AppSchemaVersion), &(app.MinClientVersion), &(app.CurrentVersion), &(app.CompatibilityUntil), &(features), &(legacy), &(app.CreatedAt), &(app.UpdatedAt))
-	error := value_1
-	var value_2 Error = error
-	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+	error := (*sql.Row).Scan(row, &(app.AppID), &(app.DisplayName), &(app.Description), &(app.HomepageURL), &(app.SourceURL), &(app.PublicKey), &(app.Status), &(app.AppSchemaVersion), &(app.MinClientVersion), &(app.CurrentVersion), &(app.CompatibilityUntil), &(features), &(legacy), &(app.CreatedAt), &(app.UpdatedAt))
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {
 		result.Error = error
 		return result
 	}
-	var value_3 Error = AppStore_DecodeMetadata(features, legacy, &(app))
-	result.Error = value_3
+	result.Error = AppStore_DecodeMetadata(features, legacy, &(app))
 	if result.Error != nil {
 		return result
 	}
-	var value_4 Error = AppStore_Hydrate(database, context, &(app))
-	result.Error = value_4
+	result.Error = AppStore_Hydrate(database, context, &(app))
 	if result.Error != nil {
 		return result
 	}
@@ -618,10 +576,8 @@ func AppStore_ByID(database *Database, context Context, appID string) AppResult 
 func AppStore_Exists(database *Database, context Context, appID string) ExistsResult {
 	var result ExistsResult = ExistsResult{}
 	var count int = 0
-	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT EXISTS(SELECT 1 FROM server_apps WHERE app_id=?1 AND status='active')", appID)
-	row := value_0
-	var value_1 Error = (*sql.Row).Scan(row, &(count))
-	result.Error = value_1
+	row := (*sql.DB).QueryRowContext(database, context, "SELECT EXISTS(SELECT 1 FROM server_apps WHERE app_id=?1 AND status='active')", appID)
+	result.Error = (*sql.Row).Scan(row, &(count))
 	result.Value = count != 0
 	return result
 }
@@ -683,23 +639,20 @@ func AppStore_Collections(database *Database, context Context, appID string) Col
 	collections := make([]AppCollection, int(0))
 	for StdSqlGo_Next(rows) {
 		var collection AppCollection = AppCollection{}
-		var value_1 Error = (*sql.Rows).Scan(rows, &(collection.AppID), &(collection.CollectionPrefix), &(collection.Visibility), &(collection.SchemaVersion), &(collection.Description), &(collection.CreatedAt))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(collection.AppID), &(collection.CollectionPrefix), &(collection.Visibility), &(collection.SchemaVersion), &(collection.Description), &(collection.CreatedAt))
 		if result.Error != nil {
 			return result
 		}
 		collections = append(collections, collection)
 	}
 	result.Value = collections
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
 func AppStore_Capabilities(database *Database, context Context, appID string) CapabilitiesResult {
 	var result CapabilitiesResult = CapabilitiesResult{}
-	var value_0 zir_add2c8397c1add63_RowsResult = AppStore_QueryRows(database, context, "SELECT capability FROM server_app_capabilities WHERE app_id=?1 ORDER BY capability", appID)
-	queried := value_0
+	queried := AppStore_QueryRows(database, context, "SELECT capability FROM server_app_capabilities WHERE app_id=?1 ORDER BY capability", appID)
 	if queried.Error != nil {
 		result.Error = queried.Error
 		return result
@@ -709,16 +662,14 @@ func AppStore_Capabilities(database *Database, context Context, appID string) Ca
 	values := make([]string, int(0))
 	for StdSqlGo_Next(rows) {
 		value := ""
-		var value_1 Error = (*sql.Rows).Scan(rows, &(value))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(value))
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, value)
 	}
 	result.Value = values
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -762,69 +713,63 @@ func AppStore_SeedBuiltin(database *Database, context Context) Error {
 	app.MinClientVersion = "0.0.0"
 	app.CurrentVersion = "next"
 	app.CompatibilityUntil = "2027-09-01"
-	var value_0 []AppCollection = make([]AppCollection, int(9))
-	app.Collections = value_0
-	var value_1 AppCollection = AppCollection{CollectionPrefix: "inbe.habits", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit records."}
-	app.Collections[0] = value_1
-	var value_2 AppCollection = AppCollection{CollectionPrefix: "inbe.habit_days", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit-day records."}
-	app.Collections[1] = value_2
-	var value_3 AppCollection = AppCollection{CollectionPrefix: "inbe.sessions", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted session records."}
-	app.Collections[2] = value_3
-	var value_4 AppCollection = AppCollection{CollectionPrefix: "private.inbe.v1.*", Visibility: "private", SchemaVersion: 1, Description: "Future private Inbe records."}
-	app.Collections[3] = value_4
-	var value_5 AppCollection = AppCollection{CollectionPrefix: "private.inbe.v1.elist-lists", Visibility: "private", SchemaVersion: 1, Description: "Encrypted Inbe EList list records."}
-	app.Collections[4] = value_5
-	var value_6 AppCollection = AppCollection{CollectionPrefix: "private.inbe.v1.elist-items", Visibility: "private", SchemaVersion: 1, Description: "Encrypted Inbe EList item records."}
-	app.Collections[5] = value_6
-	var value_7 AppCollection = AppCollection{CollectionPrefix: "shared.inbe.v1.*", Visibility: "shared", SchemaVersion: 1, Description: "User-grantable Inbe records."}
-	app.Collections[6] = value_7
-	var value_8 AppCollection = AppCollection{CollectionPrefix: "friends.inbe.v1.*", Visibility: "friends", SchemaVersion: 1, Description: "Friend-visible Inbe records."}
-	app.Collections[7] = value_8
-	var value_9 AppCollection = AppCollection{CollectionPrefix: "public.inbe.v1.*", Visibility: "public", SchemaVersion: 1, Description: "Public Inbe records."}
-	app.Collections[8] = value_9
-	var value_10 []string = make([]string, int(4))
-	app.Capabilities = value_10
+	app.Collections = make([]AppCollection, int(9))
+	var value_0 AppCollection = AppCollection{CollectionPrefix: "inbe.habits", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit records."}
+	app.Collections[0] = value_0
+	var value_1 AppCollection = AppCollection{CollectionPrefix: "inbe.habit_days", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit-day records."}
+	app.Collections[1] = value_1
+	var value_2 AppCollection = AppCollection{CollectionPrefix: "inbe.sessions", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted session records."}
+	app.Collections[2] = value_2
+	var value_3 AppCollection = AppCollection{CollectionPrefix: "private.inbe.v1.*", Visibility: "private", SchemaVersion: 1, Description: "Future private Inbe records."}
+	app.Collections[3] = value_3
+	var value_4 AppCollection = AppCollection{CollectionPrefix: "private.inbe.v1.elist-lists", Visibility: "private", SchemaVersion: 1, Description: "Encrypted Inbe EList list records."}
+	app.Collections[4] = value_4
+	var value_5 AppCollection = AppCollection{CollectionPrefix: "private.inbe.v1.elist-items", Visibility: "private", SchemaVersion: 1, Description: "Encrypted Inbe EList item records."}
+	app.Collections[5] = value_5
+	var value_6 AppCollection = AppCollection{CollectionPrefix: "shared.inbe.v1.*", Visibility: "shared", SchemaVersion: 1, Description: "User-grantable Inbe records."}
+	app.Collections[6] = value_6
+	var value_7 AppCollection = AppCollection{CollectionPrefix: "friends.inbe.v1.*", Visibility: "friends", SchemaVersion: 1, Description: "Friend-visible Inbe records."}
+	app.Collections[7] = value_7
+	var value_8 AppCollection = AppCollection{CollectionPrefix: "public.inbe.v1.*", Visibility: "public", SchemaVersion: 1, Description: "Public Inbe records."}
+	app.Collections[8] = value_8
+	app.Capabilities = make([]string, int(4))
 	app.Capabilities[0] = "sync"
 	app.Capabilities[1] = "encrypted-records"
 	app.Capabilities[2] = "profile-stats"
 	app.Capabilities[3] = "leaderboard"
-	var value_11 []AppFeature = make([]AppFeature, int(4))
-	app.Features = value_11
+	app.Features = make([]AppFeature, int(4))
 	(app.Features[0]).ID = "sync.private_records"
 	(app.Features[0]).RequiresSignedTx = true
-	var value_12 []string = make([]string, int(4))
-	(app.Features[0]).Collections = value_12
+	var value_9 []string = make([]string, int(4))
+	(app.Features[0]).Collections = value_9
 	(app.Features[0]).Collections[0] = "private.inbe.v1.*"
 	(app.Features[0]).Collections[1] = "inbe.habits"
 	(app.Features[0]).Collections[2] = "inbe.habit_days"
 	(app.Features[0]).Collections[3] = "inbe.sessions"
 	(app.Features[1]).ID = "sync.elist"
 	(app.Features[1]).RequiresSignedTx = true
-	var value_13 []string = make([]string, int(2))
-	(app.Features[1]).Collections = value_13
+	var value_10 []string = make([]string, int(2))
+	(app.Features[1]).Collections = value_10
 	(app.Features[1]).Collections[0] = "private.inbe.v1.elist-lists"
 	(app.Features[1]).Collections[1] = "private.inbe.v1.elist-items"
 	(app.Features[2]).ID = "sync.shared_records"
 	(app.Features[2]).RequiresSignedTx = true
-	var value_14 []string = make([]string, int(1))
-	(app.Features[2]).Collections = value_14
+	var value_11 []string = make([]string, int(1))
+	(app.Features[2]).Collections = value_11
 	(app.Features[2]).Collections[0] = "shared.inbe.v1.*"
 	(app.Features[3]).ID = "profile.stats"
-	var value_15 []LegacyProtocol = make([]LegacyProtocol, int(2))
-	app.LegacyProtocols = value_15
-	var value_16 LegacyProtocol = LegacyProtocol{Name: "inbe-typed-sync", Version: 5, Status: "compatibility", ValidUntil: "2027-09-01"}
-	app.LegacyProtocols[0] = value_16
-	var value_17 LegacyProtocol = LegacyProtocol{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: "2027-09-01"}
-	app.LegacyProtocols[1] = value_17
-	var value_18 []TokenPolicy = make([]TokenPolicy, int(2))
-	app.TokenPolicies = value_18
-	var value_19 TokenPolicy = TokenPolicy{AssetID: "waozi:token", Permission: "spend", Status: "active", LegacyUnsignedUntil: 1819756800}
-	app.TokenPolicies[0] = value_19
-	var value_20 TokenPolicy = TokenPolicy{AssetID: "waozi:token", Permission: "purchase", Status: "active", LegacyUnsignedUntil: 1819756800}
-	app.TokenPolicies[1] = value_20
+	app.LegacyProtocols = make([]LegacyProtocol, int(2))
+	var value_12 LegacyProtocol = LegacyProtocol{Name: "inbe-typed-sync", Version: 5, Status: "compatibility", ValidUntil: "2027-09-01"}
+	app.LegacyProtocols[0] = value_12
+	var value_13 LegacyProtocol = LegacyProtocol{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: "2027-09-01"}
+	app.LegacyProtocols[1] = value_13
+	app.TokenPolicies = make([]TokenPolicy, int(2))
+	var value_14 TokenPolicy = TokenPolicy{AssetID: "waozi:token", Permission: "spend", Status: "active", LegacyUnsignedUntil: 1819756800}
+	app.TokenPolicies[0] = value_14
+	var value_15 TokenPolicy = TokenPolicy{AssetID: "waozi:token", Permission: "purchase", Status: "active", LegacyUnsignedUntil: 1819756800}
+	app.TokenPolicies[1] = value_15
 	var signed int = 0
-	var value_21 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status='active')")
-	row := value_21
+	row := (*sql.DB).QueryRowContext(database, context, "SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status='active')")
 	error := (*sql.Row).Scan(row, &(signed))
 	if error != nil {
 		return error

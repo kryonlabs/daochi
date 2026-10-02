@@ -109,10 +109,9 @@ func PaymentRequest_ReadGoogle(writer ResponseWriter, request *Request, limit in
 		result.Error = value_7
 		return result
 	}
-	var value_8 bool = result.Value.PackageName == "" || result.Value.ProductID == "" || result.Value.PurchaseToken == ""
-	if value_8 {
-		var value_9 Error = StdErrorsGo_New("purchase fields required")
-		result.Error = value_9
+	if result.Value.PackageName == "" || result.Value.ProductID == "" || result.Value.PurchaseToken == "" {
+		var value_8 Error = StdErrorsGo_New("purchase fields required")
+		result.Error = value_8
 		return result
 	}
 	result.Body = read.Value
@@ -153,16 +152,14 @@ func PaymentRequest_ReadInvoice(writer ResponseWriter, request *Request, limit i
 
 func PaymentRequest_AppFilter(request *Request) AppFilterResult {
 	var result AppFilterResult = AppFilterResult{}
-	var value_0 string = strings.TrimSpace(StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "app_id"))
-	result.Value = value_0
+	result.Value = strings.TrimSpace(StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "app_id"))
 	if result.Value == "" {
 		return result
 	}
-	var value_1 bool = Identity_ValidNamespace(result.Value)
-	if !value_1 {
+	var value_0 bool = Identity_ValidNamespace(result.Value)
+	if !value_0 {
 		result.Value = ""
-		var value_2 Error = StdErrorsGo_New("invalid app_id")
-		result.Error = value_2
+		result.Error = StdErrorsGo_New("invalid app_id")
 		return result
 	}
 	result.Scoped = true

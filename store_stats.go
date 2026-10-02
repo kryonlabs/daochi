@@ -91,8 +91,7 @@ func StoreStats_EmptyApp(id string, displayName string) AppStorageUsage {
 	var app AppStorageUsage = AppStorageUsage{}
 	app.AppID = id
 	app.DisplayName = displayName
-	var value_0 []CollectionStorageUsage = make([]CollectionStorageUsage, int(int(0)))
-	app.Collections = value_0
+	app.Collections = make([]CollectionStorageUsage, int(int(0)))
 	return app
 }
 
@@ -153,12 +152,10 @@ func StoreStats_AvailableBytes(path string) StorageBytesResult {
 		directory = "."
 	}
 	var stats FilesystemStats = *new(FilesystemStats)
-	var value_0 Error = syscall.Statfs(directory, &(stats))
-	result.Error = value_0
+	result.Error = syscall.Statfs(directory, &(stats))
 	if result.Error == nil {
-		var value_1 uint64 = StoreStats_AvailableBlocks(&(stats))
-		var value_2 int64 = int64(value_1) * StoreStats_BlockSize(&(stats))
-		result.Value = value_2
+		var value_0 uint64 = StoreStats_AvailableBlocks(&(stats))
+		result.Value = int64(value_0) * StoreStats_BlockSize(&(stats))
 	}
 	return result
 }
@@ -176,10 +173,8 @@ func StoreStats_Public(database *Database, context Context, path string) PublicS
 	if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 		panic("slice range out of bounds")
 	}
-	var value_2 *Row = StdSqlGo_QueryRow(database, context, "SELECT COUNT(*) FROM server_users", value_1[0:int64(len(value_1)):int64(len(value_1))])
-	row := value_2
-	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_3
+	row := StdSqlGo_QueryRow(database, context, "SELECT COUNT(*) FROM server_users", value_1[0:int64(len(value_1)):int64(len(value_1))])
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 	if result.Error != nil {
 		return result
 	}
@@ -189,10 +184,10 @@ func StoreStats_Public(database *Database, context Context, path string) PublicS
 		return result
 	}
 	stats.StorageUsedBytes = used.Value
-	var value_4 int64 = StoreStats_FloorGB(used.Value)
-	stats.StorageUsedGB = value_4
-	var value_5 string = StoreStats_UsedText(stats.StorageUsedGB)
-	stats.StorageUsedText = value_5
+	var value_2 int64 = StoreStats_FloorGB(used.Value)
+	stats.StorageUsedGB = value_2
+	var value_3 string = StoreStats_UsedText(stats.StorageUsedGB)
+	stats.StorageUsedText = value_3
 	available := StoreStats_AvailableBytes(path)
 	result.Error = available.Error
 	if result.Error != nil {
@@ -202,51 +197,48 @@ func StoreStats_Public(database *Database, context Context, path string) PublicS
 	if stats.AvailableBytes < 0 {
 		stats.AvailableBytes = 0
 	}
-	var value_6 int64 = StoreStats_FloorGB(stats.AvailableBytes)
-	stats.AvailableGB = value_6
+	var value_4 int64 = StoreStats_FloorGB(stats.AvailableBytes)
+	stats.AvailableGB = value_4
 	result.Value = stats
 	return result
 }
 
 func StoreStats_Usage(database *Database, context Context, now Time) NodeUsageResult {
 	var result NodeUsageResult = NodeUsageResult{}
-	var value_0 string = StdTimeGo_Format(StdTimeGo_Add(StdTimeGo_UTC(now), Duration(-2592000000000000)), "2006-01-02 15:04:05")
-	cutoff := value_0
+	cutoff := StdTimeGo_Format(StdTimeGo_Add(StdTimeGo_UTC(now), Duration(-2592000000000000)), "2006-01-02 15:04:05")
 	var usage NodeUsage = NodeUsage{}
 	usage.RecentActivityWindowDays = int(30)
-	var value_1 [1]Any
-	value_1[0] = cutoff
-	arguments := value_1
+	var value_0 [1]Any
+	value_0[0] = cutoff
+	arguments := value_0
 	_ = arguments
 	var empty [0]Any
 	_ = empty
-	var value_2 [4]UsageQuery
-	var value_3 []Any
-	if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
+	var value_1 [4]UsageQuery
+	var value_2 []Any
+	if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
 		panic("slice range out of bounds")
 	}
-	var value_4 UsageQuery = UsageQuery{Target: &(usage.RegisteredUsers), Query: "SELECT COUNT(*) FROM server_users", Arguments: value_3[0:int64(len(value_3)):int64(len(value_3))]}
-	value_2[0] = value_4
-	var value_5 UsageQuery = UsageQuery{Target: &(usage.ActiveUsers30d), Query: "SELECT COUNT(*) FROM server_users WHERE last_seen_at>=?1", Arguments: arguments[0:1:1]}
-	value_2[1] = value_5
-	var value_6 []Any
-	if int64(0) < 0 || int64(int64(len(value_6))) < int64(0) || int64(int64(len(value_6))) > int64(len(value_6)) {
+	var value_3 UsageQuery = UsageQuery{Target: &(usage.RegisteredUsers), Query: "SELECT COUNT(*) FROM server_users", Arguments: value_2[0:int64(len(value_2)):int64(len(value_2))]}
+	value_1[0] = value_3
+	var value_4 UsageQuery = UsageQuery{Target: &(usage.ActiveUsers30d), Query: "SELECT COUNT(*) FROM server_users WHERE last_seen_at>=?1", Arguments: arguments[0:1:1]}
+	value_1[1] = value_4
+	var value_5 []Any
+	if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
 		panic("slice range out of bounds")
 	}
-	var value_7 UsageQuery = UsageQuery{Target: &(usage.RegisteredClients), Query: "SELECT COUNT(*) FROM server_clients", Arguments: value_6[0:int64(len(value_6)):int64(len(value_6))]}
-	value_2[2] = value_7
-	var value_8 UsageQuery = UsageQuery{Target: &(usage.ActiveClients30d), Query: "SELECT COUNT(*) FROM server_clients WHERE last_seen_at>=?1", Arguments: arguments[0:1:1]}
-	value_2[3] = value_8
-	queries := value_2
-	for it_index := int64(0); it_index < 4; it_index++ {
-		item := queries[it_index]
+	var value_6 UsageQuery = UsageQuery{Target: &(usage.RegisteredClients), Query: "SELECT COUNT(*) FROM server_clients", Arguments: value_5[0:int64(len(value_5)):int64(len(value_5))]}
+	value_1[2] = value_6
+	var value_7 UsageQuery = UsageQuery{Target: &(usage.ActiveClients30d), Query: "SELECT COUNT(*) FROM server_clients WHERE last_seen_at>=?1", Arguments: arguments[0:1:1]}
+	value_1[3] = value_7
+	queries := value_1
+	for _, item := range queries {
 		row := StdSqlGo_QueryRow(database, context, item.Query, item.Arguments)
-		var value_9 [1]Any
-		value_9[0] = item.Target
-		destinations := value_9
+		var value_8 [1]Any
+		value_8[0] = item.Target
+		destinations := value_8
 		_ = destinations
-		var value_10 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-		result.Error = value_10
+		result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 		if result.Error != nil {
 			return result
 		}
@@ -282,9 +274,7 @@ func StoreStats_Apps(database *Database, context Context) AppStorageResult {
 	if (*value_2) == nil {
 		(*value_2) = make(__type_5368e59f46c7c199)
 	}
-	for it_index := int64(0); it_index < int64(len(matchers)); it_index++ {
-		matcher := matchers[it_index]
-		_ = matcher
+	for _, matcher := range matchers {
 		var value_3 __type_5368e59f46c7c199 = appsByID
 		var value_4 string = matcher.AppID
 		var value_5 bool = false
@@ -310,8 +300,7 @@ func StoreStats_Apps(database *Database, context Context) AppStorageResult {
 		value_10[2] = &(bytes)
 		destinations := value_10
 		_ = destinations
-		var value_11 Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
-		result.Error = value_11
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
 		if result.Error != nil {
 			return result
 		}
@@ -325,24 +314,24 @@ func StoreStats_Apps(database *Database, context Context) AppStorageResult {
 			displayName = matcher.DisplayName
 			prefix = matcher.Prefix
 		}
-		var value_12 __type_5368e59f46c7c199 = appsByID
-		var value_13 string = appID
-		var value_14 bool = false
-		_, value_14 = value_12[value_13]
-		if !value_14 {
-			var value_15 *__type_5368e59f46c7c199 = &(appsByID)
-			var value_16 string = appID
-			var value_18 AppStorageUsage = StoreStats_EmptyApp(appID, displayName)
-			var value_17 AppStorageUsage = value_18
-			if (*value_15) == nil {
-				(*value_15) = make(__type_5368e59f46c7c199)
+		var value_11 __type_5368e59f46c7c199 = appsByID
+		var value_12 string = appID
+		var value_13 bool = false
+		_, value_13 = value_11[value_12]
+		if !value_13 {
+			var value_14 *__type_5368e59f46c7c199 = &(appsByID)
+			var value_15 string = appID
+			var value_17 AppStorageUsage = StoreStats_EmptyApp(appID, displayName)
+			var value_16 AppStorageUsage = value_17
+			if (*value_14) == nil {
+				(*value_14) = make(__type_5368e59f46c7c199)
 			}
-			(*value_15)[value_16] = value_17
+			(*value_14)[value_15] = value_16
 		}
-		var value_19 __type_5368e59f46c7c199 = appsByID
-		var value_20 string = appID
-		var value_21 AppStorageUsage = value_19[value_20]
-		app := value_21
+		var value_18 __type_5368e59f46c7c199 = appsByID
+		var value_19 string = appID
+		var value_20 AppStorageUsage = value_18[value_19]
+		app := value_20
 		_ = app
 		app.LogicalBytes += bytes
 		app.RecordBytes += bytes
@@ -353,36 +342,33 @@ func StoreStats_Apps(database *Database, context Context) AppStorageResult {
 		item.LogicalBytes = bytes
 		item.RecordBytes = bytes
 		item.RecordCount = count
-		var value_22 []CollectionStorageUsage = append(app.Collections, item)
-		app.Collections = value_22
-		var value_23 *__type_5368e59f46c7c199 = &(appsByID)
-		var value_24 string = appID
-		var value_25 AppStorageUsage = app
-		if (*value_23) == nil {
-			(*value_23) = make(__type_5368e59f46c7c199)
+		app.Collections = append(app.Collections, item)
+		var value_21 *__type_5368e59f46c7c199 = &(appsByID)
+		var value_22 string = appID
+		var value_23 AppStorageUsage = app
+		if (*value_21) == nil {
+			(*value_21) = make(__type_5368e59f46c7c199)
 		}
-		(*value_23)[value_24] = value_25
+		(*value_21)[value_22] = value_23
 	}
-	var value_26 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_26
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error != nil {
 		return result
 	}
-	var value_27 __type_5368e59f46c7c199 = appsByID
-	var value_28 int64 = int64(len(value_27))
-	apps := make([]AppStorageUsage, int(int(0)), int(int(value_28)))
-	var value_29 __type_5368e59f46c7c199 = appsByID
-	var value_30 []string = make([]string, 0, len(value_29))
-	for value_31 := range value_29 {
-		value_30 = append(value_30, value_31)
+	var value_24 __type_5368e59f46c7c199 = appsByID
+	var value_25 int64 = int64(len(value_24))
+	apps := make([]AppStorageUsage, int(int(0)), int(int(value_25)))
+	var value_26 __type_5368e59f46c7c199 = appsByID
+	var value_27 []string = make([]string, 0, len(value_26))
+	for value_28 := range value_26 {
+		value_27 = append(value_27, value_28)
 	}
-	keys := value_30
-	for it_index := int64(0); it_index < int64(len(keys)); it_index++ {
-		key := keys[it_index]
-		var value_32 __type_5368e59f46c7c199 = appsByID
-		var value_33 string = key
-		var value_34 AppStorageUsage = value_32[value_33]
-		app := value_34
+	keys := value_27
+	for _, key := range keys {
+		var value_29 __type_5368e59f46c7c199 = appsByID
+		var value_30 string = key
+		var value_31 AppStorageUsage = value_29[value_30]
+		app := value_31
 		_ = app
 		StoreStats_ZiSpecF9abe995f77bd153(app.Collections)
 		apps = append(apps, app)
@@ -414,10 +400,8 @@ func StoreStats_Storage(database *Database, context Context, path string) NodeSt
 	if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
 		panic("slice range out of bounds")
 	}
-	var value_5 *Row = StdSqlGo_QueryRow(database, context, "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()", value_4[0:int64(len(value_4)):int64(len(value_4))])
-	row := value_5
-	var value_6 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_6
+	row := StdSqlGo_QueryRow(database, context, "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()", value_4[0:int64(len(value_4)):int64(len(value_4))])
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 	if result.Error != nil {
 		return result
 	}
@@ -428,11 +412,11 @@ func StoreStats_Storage(database *Database, context Context, path string) NodeSt
 	}
 	usage.Apps = apps.Value
 	{
-		value_7 := apps.Value[:]
-		if int64(0) < 0 || int64(int64(len(value_7))) < int64(0) || int64(int64(len(value_7))) > int64(len(value_7)) {
+		value_5 := apps.Value[:]
+		if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_21 := value_7[0:int64(len(value_7)):int64(len(value_7))]
+		loop_view_21 := value_5[0:int64(len(value_5)):int64(len(value_5))]
 		loop_count_21 := int64(len(loop_view_21))
 		var loop_cursor_21 int64 = 0
 		for loop_cursor_21 < loop_count_21 {
@@ -447,20 +431,18 @@ func StoreStats_Storage(database *Database, context Context, path string) NodeSt
 		}
 	}
 	var payloadCount int = 0
-	var value_8 [2]Any
-	value_8[0] = &(payloadCount)
-	value_8[1] = &(usage.EncryptedPayloadBytes)
-	payloadDestinations := value_8
+	var value_6 [2]Any
+	value_6[0] = &(payloadCount)
+	value_6[1] = &(usage.EncryptedPayloadBytes)
+	payloadDestinations := value_6
 	_ = payloadDestinations
-	var value_9 string = "\nSELECT COUNT(*), COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)\nFROM server_encrypted_payloads"
-	var value_10 []Any
-	if int64(0) < 0 || int64(int64(len(value_10))) < int64(0) || int64(int64(len(value_10))) > int64(len(value_10)) {
+	var value_7 string = "\nSELECT COUNT(*), COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)\nFROM server_encrypted_payloads"
+	var value_8 []Any
+	if int64(0) < 0 || int64(int64(len(value_8))) < int64(0) || int64(int64(len(value_8))) > int64(len(value_8)) {
 		panic("slice range out of bounds")
 	}
-	var value_11 *Row = StdSqlGo_QueryRow(database, context, value_9, value_10[0:int64(len(value_10)):int64(len(value_10))])
-	payloadRow := value_11
-	var value_12 Error = StdSqlGo_ScanRow(payloadRow, payloadDestinations[0:2:2])
-	result.Error = value_12
+	payloadRow := StdSqlGo_QueryRow(database, context, value_7, value_8[0:int64(len(value_8)):int64(len(value_8))])
+	result.Error = StdSqlGo_ScanRow(payloadRow, payloadDestinations[0:2:2])
 	if result.Error != nil {
 		return result
 	}

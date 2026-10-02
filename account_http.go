@@ -25,19 +25,16 @@ func AccountHttp_HeaderUser(request *Request, bodyUser string) HeaderUserResult 
 	var result HeaderUserResult = HeaderUserResult{}
 	header := HttpAuth_UserHeader(request)
 	if header.Value == "" {
-		var value_0 Error = StdErrorsGo_New("missing X-Daochi-User")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("missing X-Daochi-User")
 		return result
 	}
 	if bodyUser == "" {
 		result.Value = header.Value
 		return result
 	}
-	var value_1 string = strings.ToLower(strings.TrimSpace(bodyUser))
-	result.Value = value_1
+	result.Value = strings.ToLower(strings.TrimSpace(bodyUser))
 	if result.Value != header.Value {
-		var value_2 Error = StdErrorsGo_New(fmt.Sprintf("%s does not match user_id_hash", header.Name))
-		result.Error = value_2
+		result.Error = StdErrorsGo_New(fmt.Sprintf("%s does not match user_id_hash", header.Name))
 	}
 	return result
 }
@@ -66,39 +63,35 @@ func AccountHttp_ValidIcon(value int) bool {
 func AccountHttp_Alias(accounts Accounts, writer ResponseWriter, request *Request) {
 	read := HttpBody_ReadJSON(writer, request, accounts.Configuration.MaxBodyBytes)
 	if read.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(read.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(read.Error))
 		return
 	}
 	var decoded AliasRequest = AliasRequest{}
-	var value_1 Error = StdJsonGo_Unmarshal(read.Value, &(decoded))
-	if value_1 != nil {
+	var value_0 Error = StdJsonGo_Unmarshal(read.Value, &(decoded))
+	if value_0 != nil {
 		Response_Error(writer, int(400), "invalid json")
 		return
 	}
-	var value_2 string = strings.ToLower(strings.TrimSpace(decoded.UserIDHash))
-	decoded.UserIDHash = value_2
-	var value_3 string = AccountHttp_NormalizeAlias(decoded.Alias)
-	decoded.Alias = value_3
+	var value_1 string = strings.ToLower(strings.TrimSpace(decoded.UserIDHash))
+	decoded.UserIDHash = value_1
+	var value_2 string = AccountHttp_NormalizeAlias(decoded.Alias)
+	decoded.Alias = value_2
 	user := AccountHttp_HeaderUser(request, decoded.UserIDHash)
 	if user.Error != nil {
-		var value_4 ResponseWriter = writer
-		Response_Error(value_4, int(400), StdErrorsGo_Message(user.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(user.Error))
 		return
 	}
-	var value_5 bool = AccountHttp_Authenticate(accounts, writer, request, user.Value)
-	if !value_5 {
+	var value_3 bool = AccountHttp_Authenticate(accounts, writer, request, user.Value)
+	if !value_3 {
 		return
 	}
 	alias := AccountHttp_NormalizeAlias(decoded.Alias)
-	var value_6 bool = Identity_ValidAccountAlias(alias)
-	if !value_6 {
+	var value_4 bool = Identity_ValidAccountAlias(alias)
+	if !value_4 {
 		Response_Error(writer, int(400), "invalid alias")
 		return
 	}
-	var value_7 *Database = accounts.Database
-	var value_8 Context = StdHttpGo_Context(request)
-	error := AccountProfile_SetAlias(value_7, value_8, user.Value, alias, accounts.MissingUser)
+	error := AccountProfile_SetAlias(accounts.Database, StdHttpGo_Context(request), user.Value, alias, accounts.MissingUser)
 	if error != nil {
 		if strings.Contains(StdErrorsGo_Message(error), "UNIQUE") {
 			Response_Error(writer, int(409), "alias unavailable")
@@ -108,8 +101,7 @@ func AccountHttp_Alias(accounts Accounts, writer ResponseWriter, request *Reques
 			Response_Error(writer, int(404), "sync account not found")
 			return
 		}
-		var value_9 string = LogSafety_LogText(user.Value)
-		slog.Error("set account alias", "user", value_9, "error", error)
+		slog.Error("set account alias", "user", LogSafety_LogText(user.Value), "error", error)
 		Response_Error(writer, int(500), "alias failed")
 		return
 	}
@@ -122,43 +114,39 @@ func AccountHttp_Alias(accounts Accounts, writer ResponseWriter, request *Reques
 func AccountHttp_ProfileIcon(accounts Accounts, writer ResponseWriter, request *Request) {
 	read := HttpBody_ReadJSON(writer, request, accounts.Configuration.MaxBodyBytes)
 	if read.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(read.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(read.Error))
 		return
 	}
 	var decoded ProfileIconRequest = ProfileIconRequest{}
-	var value_1 Error = StdJsonGo_Unmarshal(read.Value, &(decoded))
-	if value_1 != nil {
+	var value_0 Error = StdJsonGo_Unmarshal(read.Value, &(decoded))
+	if value_0 != nil {
 		Response_Error(writer, int(400), "invalid json")
 		return
 	}
-	var value_2 string = strings.ToLower(strings.TrimSpace(decoded.UserIDHash))
-	decoded.UserIDHash = value_2
+	var value_1 string = strings.ToLower(strings.TrimSpace(decoded.UserIDHash))
+	decoded.UserIDHash = value_1
 	user := AccountHttp_HeaderUser(request, decoded.UserIDHash)
 	if user.Error != nil {
-		var value_3 ResponseWriter = writer
-		Response_Error(value_3, int(400), StdErrorsGo_Message(user.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(user.Error))
 		return
 	}
-	var value_4 bool = AccountHttp_Authenticate(accounts, writer, request, user.Value)
-	if !value_4 {
+	var value_2 bool = AccountHttp_Authenticate(accounts, writer, request, user.Value)
+	if !value_2 {
 		return
 	}
-	var value_5 bool = AccountHttp_ValidIcon(decoded.ProfileIcon)
-	if !value_5 {
+	var value_3 bool = AccountHttp_ValidIcon(decoded.ProfileIcon)
+	if !value_3 {
 		Response_Error(writer, int(400), "invalid profile_icon")
 		return
 	}
-	var value_6 *Database = accounts.Database
-	var value_7 Context = StdHttpGo_Context(request)
-	error := AccountProfile_SetIcon(value_6, value_7, user.Value, decoded.ProfileIcon, accounts.MissingUser)
+	var value_4 Context = StdHttpGo_Context(request)
+	error := AccountProfile_SetIcon(accounts.Database, value_4, user.Value, decoded.ProfileIcon, accounts.MissingUser)
 	if error != nil {
 		if StdErrorsGo_Is(error, accounts.MissingUser) {
 			Response_Error(writer, int(404), "sync account not found")
 			return
 		}
-		var value_8 string = LogSafety_LogText(user.Value)
-		slog.Error("set profile icon", "user", value_8, "error", error)
+		slog.Error("set profile icon", "user", LogSafety_LogText(user.Value), "error", error)
 		Response_Error(writer, int(500), "profile icon failed")
 		return
 	}

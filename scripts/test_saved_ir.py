@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from generate_go import project_flags
+from generate_go import generate_go, project_flags
 
 
 def main():
@@ -28,9 +28,7 @@ def main():
         subprocess.run([ziran, "ir", *project_flags(repo),
                         "-o", str(ir), *sources], cwd=repo, env=env, check=True)
         entries = [str(ir / Path(source).with_suffix(".zir")) for source in sources]
-        subprocess.run([ziran, "build", *project_flags(repo), "--target=go",
-                        "--no-main", "--pkg", "main", "--root", str(ir),
-                        "-o", str(generated), *entries], cwd=repo, env=env, check=True)
+        generate_go(ziran, repo, entries, generated, env, source_root=ir)
         replacement = {str(repo / path.name): str(path)
                        for path in generated.glob("*.go")}
         overlay = work / "overlay.json"

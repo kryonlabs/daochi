@@ -307,53 +307,43 @@ func AppRegistration_Verify(request SignedAppRegistrationRequest, nodeKey Public
 	var result ManifestVerificationResult = ManifestVerificationResult{}
 	rawNodeKey := []uint8(nodeKey)
 	if int64(len(rawNodeKey)) != 32 {
-		var value_0 AuthenticationResult = Authentication_Failure(int(403), "node registry approval unavailable")
-		result.Authentication = value_0
+		result.Authentication = Authentication_Failure(int(403), "node registry approval unavailable")
 		return result
 	}
 	encoded := StdJsonGo_Marshal(request.Manifest)
 	if encoded.Error != nil {
-		var value_1 AuthenticationResult = Authentication_NativeFailure(encoded.Error)
-		result.Authentication = value_1
+		result.Authentication = Authentication_NativeFailure(encoded.Error)
 		return result
 	}
 	hash := Signing_SHA256Hex(encoded.Value)
 	decoded := Codec_DecodeBinaryField(request.ManifestSignature)
 	signature := StdTextGo_ToBytes(decoded.Value)
 	if decoded.Error != "" || int64(len(signature)) != 64 {
-		var value_2 AuthenticationResult = Authentication_Failure(int(400), "invalid manifest signature")
-		result.Authentication = value_2
+		result.Authentication = Authentication_Failure(int(400), "invalid manifest signature")
 		return result
 	}
-	var value_3 [2]string
-	value_3[0] = "daochi-app-manifest-v1"
-	var value_4 string = StdTextGo_FromBytes(encoded.Value)
-	value_3[1] = value_4
-	parts := value_3
+	var value_0 [2]string
+	value_0[0] = "daochi-app-manifest-v1"
+	var value_1 string = StdTextGo_FromBytes(encoded.Value)
+	value_0[1] = value_1
+	parts := value_0
 	_ = parts
 	message := StdTextGo_ToBytes(strings.Join(parts[0:2:2], "\n"))
-	var value_5 AppManifest = request.Manifest
-	var value_6 []uint8 = message
-	var value_7 []uint8 = signature
-	var value_8 bool = Manifest_SignedByActiveKey(value_5, value_6, value_7, StdTimeGo_Unix(StdTimeGo_Now()))
-	if !value_8 {
-		var value_9 AuthenticationResult = Authentication_Failure(int(401), "manifest signature rejected")
-		result.Authentication = value_9
+	var value_2 bool = Manifest_SignedByActiveKey(request.Manifest, message, signature, StdTimeGo_Unix(StdTimeGo_Now()))
+	if !value_2 {
+		result.Authentication = Authentication_Failure(int(401), "manifest signature rejected")
 		return result
 	}
 	decoded = Codec_DecodeBinaryField(request.ApprovalSignature)
 	signature = StdTextGo_ToBytes(decoded.Value)
 	if decoded.Error != "" || int64(len(signature)) != 64 {
-		var value_10 AuthenticationResult = Authentication_Failure(int(400), "invalid approval signature")
-		result.Authentication = value_10
+		result.Authentication = Authentication_Failure(int(400), "invalid approval signature")
 		return result
 	}
-	var value_11 []uint8 = StdTextGo_ToBytes(Signing_AppApprovalMessage("daochi-app-approval-v1", request.Manifest.AppID, hash))
-	approval := value_11
-	var value_12 bool = StdEd25519Go_Verify(nodeKey, approval, signature)
-	if !value_12 {
-		var value_13 AuthenticationResult = Authentication_Failure(int(401), "node approval rejected")
-		result.Authentication = value_13
+	approval := StdTextGo_ToBytes(Signing_AppApprovalMessage("daochi-app-approval-v1", request.Manifest.AppID, hash))
+	var value_3 bool = StdEd25519Go_Verify(nodeKey, approval, signature)
+	if !value_3 {
+		result.Authentication = Authentication_Failure(int(401), "node approval rejected")
 		return result
 	}
 	result.Value = encoded.Value
@@ -369,8 +359,7 @@ func AppRegistration_Encode(value AppManifest) ManifestEncodingResult {
 		return result
 	}
 	result.Value = encoded.Value
-	var value_0 string = Signing_SHA256Hex(encoded.Value)
-	result.Hash = value_0
+	result.Hash = Signing_SHA256Hex(encoded.Value)
 	return result
 }
 
@@ -380,8 +369,7 @@ func AppRegistration_Prepare(value AppManifest) ManifestEncodingResult {
 	problem := Manifest_Validate(value_0, StdTimeGo_Unix(StdTimeGo_Now()))
 	if problem != "" {
 		var result ManifestEncodingResult = ManifestEncodingResult{}
-		var value_1 Error = StdErrorsGo_New(problem)
-		result.Error = value_1
+		result.Error = StdErrorsGo_New(problem)
 		return result
 	}
 	return AppRegistration_Encode(value)

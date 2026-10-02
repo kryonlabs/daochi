@@ -47,19 +47,17 @@ func CollectionScope_Load(database *Database, context Context) MatchersResult {
 	var values []CollectionMatcher = nil
 	for StdSqlGo_Next(rows) {
 		var matcher CollectionMatcher = CollectionMatcher{}
-		var value_1 Error = (*sql.Rows).Scan(rows, &(matcher.AppID), &(matcher.DisplayName), &(matcher.Prefix))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(matcher.AppID), &(matcher.DisplayName), &(matcher.Prefix))
 		if result.Error != nil {
 			return result
 		}
-		var value_2 string = strings.TrimSuffix(matcher.Prefix, "*")
-		matcher.MatchPrefix = value_2
+		var value_1 string = strings.TrimSuffix(matcher.Prefix, "*")
+		matcher.MatchPrefix = value_1
 		matcher.Wildcard = matcher.MatchPrefix != matcher.Prefix
 		matcher.Specificity = int(int64(len(matcher.MatchPrefix)))
 		values = append(values, matcher)
 	}
-	var value_3 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_3
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error != nil {
 		return result
 	}

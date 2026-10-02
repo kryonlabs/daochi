@@ -1,5 +1,6 @@
 #import "std/go_types"
 sql :: #import "std/sql_go";
+driver :: #import "sqlite_driver";
 ctx :: #import "std/context_go";
 schema :: #import "store_schema";
 trust :: #import "trust_store";
@@ -47,6 +48,7 @@ Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
 
 #scope_export
 Open :: (path: string) -> StoreOpenResult {
+    driver.Initialize()
     parts: [2]string = .[path, "?_busy_timeout=5000&_foreign_keys=on"]
     opened := OpenRaw("sqlite3", Join(parts[:], ""))
     if opened.error != null {

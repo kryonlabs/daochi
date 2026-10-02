@@ -27,9 +27,7 @@ func DeviceHttp_Route(devices Devices, writer ResponseWriter, request *Request) 
 	}
 	method := StdHttpGo_Method(request)
 	if method == "GET" {
-		var value_0 *Database = devices.Database
-		var value_1 Context = StdHttpGo_Context(request)
-		listed := DeviceKeys_List(value_0, value_1, user.Value)
+		listed := DeviceKeys_List(devices.Database, StdHttpGo_Context(request), user.Value)
 		if listed.Error != nil {
 			Response_Error(writer, int(500), "device list failed")
 			return
@@ -45,20 +43,18 @@ func DeviceHttp_Route(devices Devices, writer ResponseWriter, request *Request) 
 	}
 	body := HttpBody_ReadJSON(writer, request, devices.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_2 ResponseWriter = writer
-		Response_Error(value_2, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var registration DeviceRegistrationRequest = DeviceRegistrationRequest{}
-	var value_3 Error = StdJsonGo_Unmarshal(body.Value, &(registration))
-	if value_3 != nil {
+	var value_0 Error = StdJsonGo_Unmarshal(body.Value, &(registration))
+	if value_0 != nil {
 		Response_Error(writer, int(400), "invalid device registration")
 		return
 	}
 	DeviceKeys_NormalizeRegistration(&(registration))
 	context := StdHttpGo_Context(request)
-	var value_4 AuthenticationResult = DeviceKeys_VerifyRegistration(devices.Database, context, user.Value, registration, devices.Verify)
-	verified := value_4
+	verified := DeviceKeys_VerifyRegistration(devices.Database, context, user.Value, registration, devices.Verify)
 	if verified.Error != nil || verified.Status != int(0) {
 		HttpAuth_Respond(writer, devices.Counters, verified)
 		return
@@ -84,13 +80,12 @@ func DeviceHttp_Route(devices Devices, writer ResponseWriter, request *Request) 
 func DeviceHttp_Revoke(devices Devices, writer ResponseWriter, request *Request, accountID string) {
 	body := HttpBody_ReadJSON(writer, request, devices.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var revocation DeviceRevocationRequest = DeviceRevocationRequest{}
-	var value_1 Error = StdJsonGo_Unmarshal(body.Value, &(revocation))
-	if value_1 != nil {
+	var value_0 Error = StdJsonGo_Unmarshal(body.Value, &(revocation))
+	if value_0 != nil {
 		Response_Error(writer, int(400), "invalid device revocation")
 		return
 	}

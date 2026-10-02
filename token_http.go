@@ -115,11 +115,9 @@ func TokenHttp_Products(tokens Tokens, writer ResponseWriter, request *Request) 
 func TokenHttp_Issuer(tokens Tokens, writer ResponseWriter, request *Request) {
 	var value TokenIssuerResponse = TokenIssuerResponse{}
 	value.IssuerID = "waozi"
-	var value_0 string = hex.EncodeToString([]uint8(tokens.Configuration.WaoziIssuerPublicKey))
-	value.PublicKey = value_0
+	value.PublicKey = hex.EncodeToString([]uint8(tokens.Configuration.WaoziIssuerPublicKey))
 	value.Algorithm = "Ed25519"
-	var value_1 string = TokenPolicy_IssuerStatus(*(tokens.Configuration))
-	value.Status = value_1
+	value.Status = TokenPolicy_IssuerStatus(*(tokens.Configuration))
 	Response_JSON(writer, int(200), value)
 }
 
@@ -135,8 +133,7 @@ func TokenHttp_Balance(tokens Tokens, writer ResponseWriter, request *Request) {
 	}
 	var balance BalanceResult = BalanceResult{}
 	if filter.Scoped {
-		var value_0 BalanceResult = TokenLedger_AppBalance(tokens.Database, StdHttpGo_Context(request), user.Value, "waozi:token", filter.Value)
-		balance = value_0
+		balance = TokenLedger_AppBalance(tokens.Database, StdHttpGo_Context(request), user.Value, "waozi:token", filter.Value)
 	} else {
 		balance = TokenLedger_Balance(tokens.Database, StdHttpGo_Context(request), user.Value, "waozi:token")
 	}
@@ -158,8 +155,7 @@ func TokenHttp_Ledger(tokens Tokens, writer ResponseWriter, request *Request) {
 	if user.Authentication.Error != nil || user.Authentication.Status != 0 {
 		return
 	}
-	var value_0 zir_ad3d877ba686f8a9_IntegerResult = TokenHttp_ParseInt(strings.TrimSpace(StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "since")), int(int(10)), int(int(64)))
-	since := value_0
+	since := TokenHttp_ParseInt(strings.TrimSpace(StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "since")), int(int(10)), int(int(64)))
 	filter := PaymentRequest_AppFilter(request)
 	if filter.Error != nil {
 		Response_Error(writer, int(400), StdErrorsGo_Message(filter.Error))
@@ -167,11 +163,9 @@ func TokenHttp_Ledger(tokens Tokens, writer ResponseWriter, request *Request) {
 	}
 	var listed ReceiptsResult = ReceiptsResult{}
 	if filter.Scoped {
-		var value_1 ReceiptsResult = TokenLedger_AppList(tokens.Database, StdHttpGo_Context(request), user.Value, "waozi:token", filter.Value, since.Value)
-		listed = value_1
+		listed = TokenLedger_AppList(tokens.Database, StdHttpGo_Context(request), user.Value, "waozi:token", filter.Value, since.Value)
 	} else {
-		var value_2 ReceiptsResult = TokenLedger_List(tokens.Database, StdHttpGo_Context(request), user.Value, "waozi:token", since.Value)
-		listed = value_2
+		listed = TokenLedger_List(tokens.Database, StdHttpGo_Context(request), user.Value, "waozi:token", since.Value)
 	}
 	if listed.Error != nil {
 		slog.Error("token ledger", "user", LogSafety_LogText(user.Value), "error", listed.Error)
@@ -196,18 +190,14 @@ func TokenHttp_Receipt(tokens Tokens, writer ResponseWriter, request *Request) {
 	value_1[1] = value_2
 	parts := value_1
 	_ = parts
-	var value_3 Tokens = tokens
-	var value_4 bool = TokenHttp_AllowReceipt(value_3, strings.Join(parts[0:2:2], ""))
-	if !value_4 {
+	var value_3 bool = TokenHttp_AllowReceipt(tokens, strings.Join(parts[0:2:2], ""))
+	if !value_3 {
 		Response_Error(writer, int(429), "too many receipt requests")
 		return
 	}
-	var value_5 *Database = tokens.Database
-	var value_6 Context = StdHttpGo_Context(request)
-	receipt := TokenLedger_ByID(value_5, value_6, receiptID)
+	receipt := TokenLedger_ByID(tokens.Database, StdHttpGo_Context(request), receiptID)
 	if receipt.Error != nil {
-		var value_7 string = LogSafety_LogText(receiptID)
-		slog.Error("token receipt", "receipt", value_7, "error", receipt.Error)
+		slog.Error("token receipt", "receipt", LogSafety_LogText(receiptID), "error", receipt.Error)
 		Response_Error(writer, int(500), "token receipt failed")
 		return
 	}
@@ -225,8 +215,7 @@ func TokenHttp_Spend(tokens Tokens, writer ResponseWriter, request *Request) {
 	}
 	decoded := PaymentRequest_ReadSpend(writer, request, tokens.Configuration.MaxBodyBytes)
 	if decoded.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(decoded.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(decoded.Error))
 		return
 	}
 	signer := TokenPolicy_Issuer(*(tokens.Configuration), tokens.IssuerUnavailable)
@@ -242,8 +231,7 @@ func TokenHttp_Spend(tokens Tokens, writer ResponseWriter, request *Request) {
 	context := StdHttpGo_Context(request)
 	existence := AppStore_Exists(tokens.Database, context, value.AppID)
 	if existence.Error != nil {
-		var value_1 string = LogSafety_LogText(value.AppID)
-		slog.Error("token spend app lookup", "app", value_1, "error", existence.Error)
+		slog.Error("token spend app lookup", "app", LogSafety_LogText(value.AppID), "error", existence.Error)
 		Response_Error(writer, int(500), "token spend failed")
 		return
 	}
@@ -251,8 +239,7 @@ func TokenHttp_Spend(tokens Tokens, writer ResponseWriter, request *Request) {
 		Response_Error(writer, int(400), "unknown app_id")
 		return
 	}
-	var value_2 TokenAuthorizationResult = TokenPolicy_Authorize(tokens.Database, context, request, decoded.Body, user.Value, value.AppID, value.AssetID, "spend", tokens.Verify, tokens.ReplayError)
-	authorization := value_2
+	authorization := TokenPolicy_Authorize(tokens.Database, context, request, decoded.Body, user.Value, value.AppID, value.AssetID, "spend", tokens.Verify, tokens.ReplayError)
 	if authorization.Authentication.Error != nil || authorization.Authentication.Status != 0 {
 		if authorization.Signed {
 			SignedTx_Forget(tokens.Database, context, authorization.Value)
@@ -261,24 +248,24 @@ func TokenHttp_Spend(tokens Tokens, writer ResponseWriter, request *Request) {
 		return
 	}
 	completed := false
-	var value_7 zir_f35cdd4564eb3be3_ReplayCleanup = func(value_3 *Database, value_4 Context, value_5 TokenAuthorizationResult, value_6 *bool) {
-		TokenHttp_ForgetOnFailure(value_3, value_4, value_5, value_6)
+	var value_4 zir_f35cdd4564eb3be3_ReplayCleanup = func(value_0 *Database, value_1 Context, value_2 TokenAuthorizationResult, value_3 *bool) {
+		TokenHttp_ForgetOnFailure(value_0, value_1, value_2, value_3)
 	}
-	defer TokenHttp_CleanupAtReturn(value_7, tokens.Database, context, authorization, &(completed))
-	var value_8 [3]string
-	value_8[0] = value.Action
-	value_8[1] = ":"
-	value_8[2] = value.IdempotencyKey
-	parts := value_8
+	defer TokenHttp_CleanupAtReturn(value_4, tokens.Database, context, authorization, &(completed))
+	var value_5 [3]string
+	value_5[0] = value.Action
+	value_5[1] = ":"
+	value_5[2] = value.IdempotencyKey
+	parts := value_5
 	_ = parts
 	sourceRef := strings.Join(parts[0:3:3], "")
 	if value.Metadata != "" {
-		var value_9 [3]string
-		value_9[0] = sourceRef
-		value_9[1] = ":"
-		var value_10 string = TokenPolicy_ShortHash(value.Metadata)
-		value_9[2] = value_10
-		metadata := value_9
+		var value_6 [3]string
+		value_6[0] = sourceRef
+		value_6[1] = ":"
+		var value_7 string = TokenPolicy_ShortHash(value.Metadata)
+		value_6[2] = value_7
+		metadata := value_6
 		_ = metadata
 		sourceRef = strings.Join(metadata[0:3:3], "")
 	}
@@ -289,8 +276,7 @@ func TokenHttp_Spend(tokens Tokens, writer ResponseWriter, request *Request) {
 	input.AmountDelta = 0 - value.Amount
 	input.SourceType = "spend"
 	input.SourceRef = sourceRef
-	var value_11 SpendResult = TokenLedger_Spend(tokens.Database, context, signer.Value, input, value.IdempotencyKey, tokens.IssuerUnavailable)
-	spent := value_11
+	spent := TokenLedger_Spend(tokens.Database, context, signer.Value, input, value.IdempotencyKey, tokens.IssuerUnavailable)
 	if spent.Error != nil {
 		message := StdErrorsGo_Message(spent.Error)
 		if strings.Contains(message, "insufficient balance") {
@@ -301,8 +287,7 @@ func TokenHttp_Spend(tokens Tokens, writer ResponseWriter, request *Request) {
 			Response_Error(writer, int(409), message)
 			return
 		}
-		var value_12 string = LogSafety_LogText(user.Value)
-		slog.Error("token spend", "user", value_12, "error", spent.Error)
+		slog.Error("token spend", "user", LogSafety_LogText(user.Value), "error", spent.Error)
 		Response_Error(writer, int(500), "token spend failed")
 		return
 	}
@@ -335,36 +320,35 @@ func TokenHttp_ManualCredit(tokens Tokens, writer ResponseWriter, request *Reque
 	}
 	read := HttpBody_ReadJSON(writer, request, tokens.Configuration.MaxBodyBytes)
 	if read.Error != nil {
-		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), StdErrorsGo_Message(read.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(read.Error))
 		return
 	}
 	var value ManualCreditRequest = ManualCreditRequest{}
-	var value_2 Error = StdJsonGo_Unmarshal(read.Value, &(value))
-	if value_2 != nil {
+	var value_1 Error = StdJsonGo_Unmarshal(read.Value, &(value))
+	if value_1 != nil {
 		Response_Error(writer, int(400), "invalid json")
 		return
 	}
-	var value_3 string = strings.ToLower(strings.TrimSpace(value.AccountID))
-	value.AccountID = value_3
-	var value_4 string = strings.TrimSpace(value.AppID)
-	value.AppID = value_4
-	var value_5 string = strings.TrimSpace(value.SourceRef)
-	value.SourceRef = value_5
+	var value_2 string = strings.ToLower(strings.TrimSpace(value.AccountID))
+	value.AccountID = value_2
+	var value_3 string = strings.TrimSpace(value.AppID)
+	value.AppID = value_3
+	var value_4 string = strings.TrimSpace(value.SourceRef)
+	value.SourceRef = value_4
 	signer := TokenPolicy_Issuer(*(tokens.Configuration), tokens.IssuerUnavailable)
 	if signer.Error != nil {
 		Response_Error(writer, int(503), "token issuer unavailable")
 		return
 	}
 	if value.SourceRef == "" {
-		var value_6 [2]string
-		value_6[0] = "manual:"
-		var value_7 string = StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02T15:04:05.999999999Z07:00")
-		value_6[1] = value_7
-		parts := value_6
+		var value_5 [2]string
+		value_5[0] = "manual:"
+		var value_6 string = StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02T15:04:05.999999999Z07:00")
+		value_5[1] = value_6
+		parts := value_5
 		_ = parts
-		var value_8 string = strings.Join(parts[0:2:2], "")
-		value.SourceRef = value_8
+		var value_7 string = strings.Join(parts[0:2:2], "")
+		value.SourceRef = value_7
 	}
 	var input TokenEventInput = TokenEventInput{}
 	input.AccountID = value.AccountID
@@ -374,11 +358,9 @@ func TokenHttp_ManualCredit(tokens Tokens, writer ResponseWriter, request *Reque
 	input.SourceType = "admin"
 	input.SourceRef = value.SourceRef
 	context := StdHttpGo_Context(request)
-	var value_9 CreditResult = TokenLedger_CreditPayment(tokens.Database, context, signer.Value, "admin", value.SourceRef, input, tokens.IssuerUnavailable)
-	credited := value_9
+	credited := TokenLedger_CreditPayment(tokens.Database, context, signer.Value, "admin", value.SourceRef, input, tokens.IssuerUnavailable)
 	if credited.Error != nil {
-		var value_10 ResponseWriter = writer
-		Response_Error(value_10, int(400), StdErrorsGo_Message(credited.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(credited.Error))
 		return
 	}
 	balance := TokenLedger_Balance(tokens.Database, context, value.AccountID, "waozi:token")
@@ -403,8 +385,7 @@ func TokenHttp_CreateCheckpoint(tokens Tokens, writer ResponseWriter, request *R
 		Response_Error(writer, int(503), "token issuer unavailable")
 		return
 	}
-	var value_1 CheckpointResult = TokenCheckpoint_Create(tokens.Database, StdHttpGo_Context(request), signer.Value, tokens.IssuerUnavailable)
-	checkpoint := value_1
+	checkpoint := TokenCheckpoint_Create(tokens.Database, StdHttpGo_Context(request), signer.Value, tokens.IssuerUnavailable)
 	if checkpoint.Error != nil {
 		slog.Error("create token checkpoint", "error", checkpoint.Error)
 		Response_Error(writer, int(500), "token checkpoint failed")

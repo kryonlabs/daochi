@@ -230,11 +230,9 @@ func Config_Load() Config {
 		var value_0 string = os.Getenv("DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET")
 		var value_1 bool = ConfigValues_Bool(value_0, false)
 		if !value_1 {
-			var value_2 string = "DAOCHI_TOKEN_SECRET_HEX must be at least 32 bytes; set DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET=1 only for local development"
-			log.Fatal(value_2)
+			log.Fatal("DAOCHI_TOKEN_SECRET_HEX must be at least 32 bytes; set DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET=1 only for local development")
 		}
-		var value_3 string = "DAOCHI_TOKEN_SECRET_HEX is missing or too short; using an ephemeral token secret suitable only for local development"
-		slog.Warn(value_3)
+		slog.Warn("DAOCHI_TOKEN_SECRET_HEX is missing or too short; using an ephemeral token secret suitable only for local development")
 		secret = make([]uint8, int(int(32)))
 		random := Config_ReadRandom(secret)
 		if random.Error != nil {
@@ -242,20 +240,18 @@ func Config_Load() Config {
 		}
 		ephemeralSecret = true
 	}
-	var value_4 []uint8 = Config_EnvBytesHexOrFile("DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX", "DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE", empty)
-	nodeRegistryPublic := PublicKey(value_4)
-	var value_5 []uint8 = Config_EnvBytesHexOrFile("DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE", empty)
-	issuerPublic := value_5
-	var value_6 []uint8 = Config_EnvBytesHexOrFile("DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE", empty)
-	issuerPrivateBytes := value_6
+	var value_2 []uint8 = Config_EnvBytesHexOrFile("DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX", "DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE", empty)
+	nodeRegistryPublic := PublicKey(value_2)
+	issuerPublic := Config_EnvBytesHexOrFile("DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PUBLIC_KEY_HEX_FILE", empty)
+	issuerPrivateBytes := Config_EnvBytesHexOrFile("DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX", "DAOCHI_TOKEN_ISSUER_PRIVATE_KEY_HEX_FILE", empty)
 	var issuerPrivate PrivateKey = *new(PrivateKey)
 	if int64(len(issuerPrivateBytes)) == 32 {
 		issuerPrivate = StdEd25519Go_NewKeyFromSeed(issuerPrivateBytes)
 	} else if int64(len(issuerPrivateBytes)) == 64 {
 		issuerPrivate = PrivateKey(issuerPrivateBytes)
 	}
-	var value_7 bool = len(issuerPrivate) == 64
-	if value_7 && int64(len(issuerPublic)) == 0 {
+	var value_3 bool = len(issuerPrivate) == 64
+	if value_3 && int64(len(issuerPublic)) == 0 {
 		privateBytes := []uint8(issuerPrivate)
 		issuerPublic = make([]uint8, int(int(32)))
 		for index := int64(0); index <= 31; index++ {
@@ -263,86 +259,54 @@ func Config_Load() Config {
 		}
 	}
 	baseURL := Config_EnvString("DAOCHI_BASE_URL", "https://api.example.com")
-	var value_8 []uint8 = Config_EnvBytesHexOrFile("DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX", "DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX_FILE", empty)
-	nodeKeyBytes := value_8
+	nodeKeyBytes := Config_EnvBytesHexOrFile("DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX", "DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX_FILE", empty)
 	var nodePrivateKey PrivateKey = *new(PrivateKey)
 	if int64(len(nodeKeyBytes)) == 32 {
 		nodePrivateKey = StdEd25519Go_NewKeyFromSeed(nodeKeyBytes)
 	} else if int64(len(nodeKeyBytes)) == 64 {
 		nodePrivateKey = PrivateKey(nodeKeyBytes)
 	} else if int64(len(nodeKeyBytes)) != 0 {
-		var value_9 string = "DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX must contain a 32-byte Ed25519 seed or 64-byte private key"
-		log.Fatal(value_9)
+		log.Fatal("DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX must contain a 32-byte Ed25519 seed or 64-byte private key")
 	}
 	var result Config = Config{}
-	var value_10 string = Config_EnvString("DAOCHI_ADDR", "127.0.0.1:8080")
-	result.Addr = value_10
+	result.Addr = Config_EnvString("DAOCHI_ADDR", "127.0.0.1:8080")
 	result.BaseURL = baseURL
-	var value_11 string = Config_EnvString("DAOCHI_DB", "daochi.db")
-	result.DBPath = value_11
-	var value_12 string = Config_EnvString("DAOCHI_ADMIN_TOKEN", "")
-	result.AdminToken = value_12
-	var value_13 Duration = Config_EnvDurationSeconds("DAOCHI_CHALLENGE_TTL_SECONDS", Duration(60000000000))
-	result.ChallengeTTL = value_13
-	var value_14 Duration = Config_EnvDurationSeconds("DAOCHI_TOKEN_TTL_SECONDS", Duration(3600000000000))
-	result.TokenTTL = value_14
+	result.DBPath = Config_EnvString("DAOCHI_DB", "daochi.db")
+	result.AdminToken = Config_EnvString("DAOCHI_ADMIN_TOKEN", "")
+	result.ChallengeTTL = Config_EnvDurationSeconds("DAOCHI_CHALLENGE_TTL_SECONDS", Duration(60000000000))
+	result.TokenTTL = Config_EnvDurationSeconds("DAOCHI_TOKEN_TTL_SECONDS", Duration(3600000000000))
 	result.TokenSecret = secret
 	result.TokenSecretEphemeral = ephemeralSecret
-	var value_15 int64 = Config_EnvInt64("DAOCHI_MAX_BODY_BYTES", 1048576)
-	result.MaxBodyBytes = value_15
-	var value_16 int = Config_EnvInt("DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN", int(0))
-	result.EncryptedPayloadMaxReturn = value_16
-	var value_17 int64 = Config_EnvInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0)
-	result.EncryptedPayloadMaxAccountBytes = value_17
-	var value_18 Duration = Config_EnvDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", Duration(0))
-	result.EncryptedPayloadRetention = value_18
+	result.MaxBodyBytes = Config_EnvInt64("DAOCHI_MAX_BODY_BYTES", 1048576)
+	result.EncryptedPayloadMaxReturn = Config_EnvInt("DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN", int(0))
+	result.EncryptedPayloadMaxAccountBytes = Config_EnvInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0)
+	result.EncryptedPayloadRetention = Config_EnvDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", Duration(0))
 	result.NodeRegistryPublicKey = nodeRegistryPublic
-	var value_19 []NodePeer = ConfigValues_Peers(Config_EnvString("DAOCHI_KNOWN_NODES", ""))
-	result.KnownNodes = value_19
-	var value_20 string = Config_EnvString("DAOCHI_NODE_SYNC_TOKEN", "")
-	result.NodeSyncToken = value_20
-	var value_21 Duration = Config_EnvDurationSeconds("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", Duration(0))
-	result.NodeSyncInterval = value_21
-	var value_22 int = Config_EnvInt("DAOCHI_NODE_SYNC_BATCH_LIMIT", int(500))
-	result.NodeSyncBatchLimit = value_22
-	var value_23 string = Config_EnvString("DAOCHI_NODE_IDENTITY_KEY_FILE", fmt.Sprintf("%s.node-key", Config_EnvString("DAOCHI_DB", "daochi.db")))
-	result.NodeIdentityKeyFile = value_23
+	result.KnownNodes = ConfigValues_Peers(Config_EnvString("DAOCHI_KNOWN_NODES", ""))
+	result.NodeSyncToken = Config_EnvString("DAOCHI_NODE_SYNC_TOKEN", "")
+	result.NodeSyncInterval = Config_EnvDurationSeconds("DAOCHI_NODE_SYNC_INTERVAL_SECONDS", Duration(0))
+	result.NodeSyncBatchLimit = Config_EnvInt("DAOCHI_NODE_SYNC_BATCH_LIMIT", int(500))
+	result.NodeIdentityKeyFile = Config_EnvString("DAOCHI_NODE_IDENTITY_KEY_FILE", fmt.Sprintf("%s.node-key", Config_EnvString("DAOCHI_DB", "daochi.db")))
 	result.NodeIdentityPrivateKey = nodePrivateKey
-	var value_24 string = Config_EnvString("DAOCHI_NODE_NAME", "Daochi Node")
-	result.NodeDisplayName = value_24
-	var value_25 string = os.Getenv("DAOCHI_LAN_DISCOVERY")
-	var value_26 bool = ConfigValues_Bool(value_25, true)
-	result.LANDiscovery = value_26
+	result.NodeDisplayName = Config_EnvString("DAOCHI_NODE_NAME", "Daochi Node")
+	var value_4 string = os.Getenv("DAOCHI_LAN_DISCOVERY")
+	result.LANDiscovery = ConfigValues_Bool(value_4, true)
 	result.WaoziIssuerPublicKey = PublicKey(issuerPublic)
 	result.WaoziIssuerPrivateKey = issuerPrivate
-	var value_27 __type_cd75cecb5feef7fa = ConfigValues_Products(Config_EnvString("DAOCHI_TOKEN_PRODUCTS", ""))
-	result.TokenProducts = value_27
-	var value_28 StringSet = Sets_FromEnvironment(Config_EnvString("DAOCHI_GOOGLE_PACKAGE_NAMES", ""))
-	result.GooglePackageNames = value_28
-	var value_29 string = Config_EnvStringOrFile("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON", "DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", "")
-	result.GoogleServiceAccountJSON = value_29
-	var value_30 string = Config_EnvStringOrFile("DAOCHI_GOOGLE_OAUTH_CLIENT_JSON", "DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE", "")
-	result.GoogleOAuthClientJSON = value_30
-	var value_31 string = Config_EnvStringOrFile("DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN", "DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", "")
-	result.GoogleOAuthRefreshToken = value_31
-	var value_32 string = Config_EnvString("MONERO_WALLET_RPC_URL", "")
-	result.MoneroWalletRPCURL = value_32
-	var value_33 string = Config_EnvString("MONERO_WALLET_RPC_USER", "")
-	result.MoneroWalletRPCUser = value_33
-	var value_34 string = Config_EnvStringOrFile("MONERO_WALLET_RPC_PASSWORD", "MONERO_WALLET_RPC_PASSWORD_FILE", "")
-	result.MoneroWalletRPCPassword = value_34
-	var value_35 string = Config_EnvString("MONERO_NETWORK", "mainnet")
-	result.MoneroNetwork = value_35
-	var value_36 int64 = Config_EnvInt64("MONERO_RATE_ATOMIC_AMOUNT", 0)
-	result.MoneroRateAtomicAmount = value_36
-	var value_37 int64 = Config_EnvInt64("MONERO_RATE_TOKEN_UNITS", 0)
-	result.MoneroRateTokenUnits = value_37
-	var value_38 int64 = Config_EnvInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", 1)
-	result.MoneroMinimumAtomicAmount = value_38
-	var value_39 int64 = Config_EnvInt64("MONERO_CONFIRMATIONS_REQUIRED", 10)
-	result.MoneroConfirmationsRequired = value_39
-	var value_40 string = os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED")
-	var value_41 bool = ConfigValues_Bool(value_40, false)
-	result.TokenDirectPurchasesEnabled = value_41
+	result.TokenProducts = ConfigValues_Products(Config_EnvString("DAOCHI_TOKEN_PRODUCTS", ""))
+	result.GooglePackageNames = Sets_FromEnvironment(Config_EnvString("DAOCHI_GOOGLE_PACKAGE_NAMES", ""))
+	result.GoogleServiceAccountJSON = Config_EnvStringOrFile("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON", "DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", "")
+	result.GoogleOAuthClientJSON = Config_EnvStringOrFile("DAOCHI_GOOGLE_OAUTH_CLIENT_JSON", "DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE", "")
+	result.GoogleOAuthRefreshToken = Config_EnvStringOrFile("DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN", "DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE", "")
+	result.MoneroWalletRPCURL = Config_EnvString("MONERO_WALLET_RPC_URL", "")
+	result.MoneroWalletRPCUser = Config_EnvString("MONERO_WALLET_RPC_USER", "")
+	result.MoneroWalletRPCPassword = Config_EnvStringOrFile("MONERO_WALLET_RPC_PASSWORD", "MONERO_WALLET_RPC_PASSWORD_FILE", "")
+	result.MoneroNetwork = Config_EnvString("MONERO_NETWORK", "mainnet")
+	result.MoneroRateAtomicAmount = Config_EnvInt64("MONERO_RATE_ATOMIC_AMOUNT", 0)
+	result.MoneroRateTokenUnits = Config_EnvInt64("MONERO_RATE_TOKEN_UNITS", 0)
+	result.MoneroMinimumAtomicAmount = Config_EnvInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", 1)
+	result.MoneroConfirmationsRequired = Config_EnvInt64("MONERO_CONFIRMATIONS_REQUIRED", 10)
+	var value_5 string = os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED")
+	result.TokenDirectPurchasesEnabled = ConfigValues_Bool(value_5, false)
 	return result
 }

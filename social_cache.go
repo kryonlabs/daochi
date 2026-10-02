@@ -18,31 +18,28 @@ func SocialCache_Upsert(transaction *Transaction, context Context, userID string
 	kind := strings.TrimSpace(item.Kind)
 	payload := []uint8(item.JSON)
 	if kind == "" || int64(len(kind)) > 96 {
-		var value_0 Error = StdErrorsGo_New("invalid social_cache kind")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("invalid social_cache kind")
 		return result
 	}
 	if int64(len(payload)) == 0 {
 		payload = StdTextGo_ToBytes("{}")
 	}
-	var value_1 bool = StdJsonGo_Valid(payload)
-	if !value_1 {
-		var value_2 Error = StdErrorsGo_New("invalid social_cache json")
-		result.Error = value_2
+	var value_0 bool = StdJsonGo_Valid(payload)
+	if !value_0 {
+		result.Error = StdErrorsGo_New("invalid social_cache json")
 		return result
 	}
 	var same int = 0
 	var arguments [3]Any
 	arguments[0] = userID
 	arguments[1] = kind
-	var value_3 string = StdTextGo_FromBytes(payload)
-	arguments[2] = value_3
+	var value_1 string = StdTextGo_FromBytes(payload)
+	arguments[2] = value_1
 	var destinations [1]Any
 	destinations[0] = &(same)
-	var value_4 string = "SELECT EXISTS(SELECT 1 FROM server_social_snapshots WHERE user_id_hash=?1 AND kind=?2 AND json=?3)"
-	row := StdSqlGo_QueryRowTx(transaction, context, value_4, arguments[0:3:3])
-	var value_5 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_5
+	var value_2 string = "SELECT EXISTS(SELECT 1 FROM server_social_snapshots WHERE user_id_hash=?1 AND kind=?2 AND json=?3)"
+	row := StdSqlGo_QueryRowTx(transaction, context, value_2, arguments[0:3:3])
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 	if result.Error != nil || same != int(0) {
 		return result
 	}
@@ -54,17 +51,16 @@ func SocialCache_Upsert(transaction *Transaction, context Context, userID string
 	var values [5]Any
 	values[0] = userID
 	values[1] = kind
-	var value_6 string = StdTextGo_FromBytes(payload)
-	values[2] = value_6
-	var value_7 string = Timestamp_NormalizeTime(item.UpdatedAt, "")
-	values[3] = value_7
+	var value_3 string = StdTextGo_FromBytes(payload)
+	values[2] = value_3
+	var value_4 string = Timestamp_NormalizeTime(item.UpdatedAt, "")
+	values[3] = value_4
 	values[4] = version.Value
-	var value_8 string = "\nINSERT INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5)\nON CONFLICT(user_id_hash,kind) DO UPDATE SET\n\tjson=excluded.json,\n\tupdated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.json != server_social_snapshots.json"
-	written := StdSqlGo_ExecTx(transaction, context, value_8, values[0:5:5])
+	var value_5 string = "\nINSERT INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)\nVALUES(?1,?2,?3,?4,?5)\nON CONFLICT(user_id_hash,kind) DO UPDATE SET\n\tjson=excluded.json,\n\tupdated_at=excluded.updated_at,\n\tserver_version=excluded.server_version\nWHERE excluded.json != server_social_snapshots.json"
+	written := StdSqlGo_ExecTx(transaction, context, value_5, values[0:5:5])
 	result.Error = written.Error
 	if result.Error == nil {
-		var value_9 int = AccountState_Affected(written.Value)
-		result.Applied = value_9
+		result.Applied = AccountState_Affected(written.Value)
 	}
 	return result
 }
@@ -86,8 +82,7 @@ func SocialCache_Set(database *Database, context Context, userID string, kind st
 	if result.Error != nil {
 		return result
 	}
-	var value_0 Error = StdSqlGo_Commit(transaction)
-	result.Error = value_0
+	result.Error = StdSqlGo_Commit(transaction)
 	if result.Error == nil {
 		result.Applied = written.Applied
 	}

@@ -39,13 +39,11 @@ func NodeNonce_Consume(database *Database, context Context, nodeID string, nonce
 	}
 	transaction := begun.Value
 	defer (*sql.Tx).Rollback(transaction)
-	var value_0 zir_39ef582091ea3a89_ExecResult = NodeNonce_DeleteExpired(transaction, context, "DELETE FROM node_request_nonces WHERE expires_at<?1", int64(StdTimeGo_Unix(StdTimeGo_Now())))
-	deleted := value_0
+	deleted := NodeNonce_DeleteExpired(transaction, context, "DELETE FROM node_request_nonces WHERE expires_at<?1", int64(StdTimeGo_Unix(StdTimeGo_Now())))
 	if deleted.Error != nil {
 		return deleted.Error
 	}
-	var value_1 zir_39ef582091ea3a89_ExecResult = NodeNonce_Insert(transaction, context, "INSERT INTO node_request_nonces(node_id,nonce,expires_at) VALUES(?1,?2,?3)", nodeID, nonce, int64(expiresAt))
-	inserted := value_1
+	inserted := NodeNonce_Insert(transaction, context, "INSERT INTO node_request_nonces(node_id,nonce,expires_at) VALUES(?1,?2,?3)", nodeID, nonce, int64(expiresAt))
 	if inserted.Error != nil {
 		return StdErrorsGo_New("node request replayed")
 	}

@@ -93,10 +93,8 @@ func FriendStore_RequestByUsers(database *Database, context Context, requester s
 	var arguments [2]Any
 	arguments[0] = requester
 	arguments[1] = target
-	var value_1 *Database = database
-	var value_2 Context = context
-	var value_3 string = strings.Join(parts[0:2:2], "")
-	row := StdSqlGo_QueryRow(value_1, value_2, value_3, arguments[0:2:2])
+	var value_1 string = strings.Join(parts[0:2:2], "")
+	row := StdSqlGo_QueryRow(database, context, value_1, arguments[0:2:2])
 	return FriendStore_ReadRequest(row)
 }
 
@@ -110,16 +108,13 @@ func FriendStore_PendingRequests(database *Database, context Context, userID str
 	parts[3] = " AND fr.status='pending'\nORDER BY fr.updated_at DESC"
 	var arguments [1]Any
 	arguments[0] = userID
-	var value_1 *Database = database
-	var value_2 Context = context
-	var value_3 string = strings.Join(parts[0:4:4], "")
-	queried := StdSqlGo_Query(value_1, value_2, value_3, arguments[0:1:1])
+	var value_1 string = strings.Join(parts[0:4:4], "")
+	queried := StdSqlGo_Query(database, context, value_1, arguments[0:1:1])
 	result.Error = queried.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_4 []FriendRequest = make([]FriendRequest, int(int(0)))
-	result.Value = value_4
+	result.Value = make([]FriendRequest, int(int(0)))
 	for StdSqlGo_Next(queried.Value) {
 		var request FriendRequest = FriendRequest{}
 		destinations := FriendStore_Destinations(&(request))
@@ -131,11 +126,9 @@ func FriendStore_PendingRequests(database *Database, context Context, userID str
 			StdSqlGo_CloseRows(queried.Value)
 			return cleanup_return_0
 		}
-		var value_5 []FriendRequest = append(result.Value, request)
-		result.Value = value_5
+		result.Value = append(result.Value, request)
 	}
-	var value_6 Error = StdSqlGo_RowsError(queried.Value)
-	result.Error = value_6
+	result.Error = StdSqlGo_RowsError(queried.Value)
 	cleanup_return_1 := result
 	StdSqlGo_CloseRows(queried.Value)
 	return cleanup_return_1
@@ -152,8 +145,7 @@ func FriendStore_CreateRequest(database *Database, context Context, id string, r
 	var exists int = 0
 	var destinations [1]Any
 	destinations[0] = &(exists)
-	var value_0 *Row = StdSqlGo_QueryRow(database, context, "SELECT EXISTS(SELECT 1 FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2)", arguments[0:2:2])
-	row := value_0
+	row := StdSqlGo_QueryRow(database, context, "SELECT EXISTS(SELECT 1 FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2)", arguments[0:2:2])
 	error := StdSqlGo_ScanRow(row, destinations[0:1:1])
 	if error != nil {
 		return FriendStore_Failure(error)
@@ -164,10 +156,9 @@ func FriendStore_CreateRequest(database *Database, context Context, id string, r
 	arguments[0] = id
 	arguments[1] = requester
 	arguments[2] = target
-	var value_1 string = StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02T15:04:05Z07:00")
-	arguments[3] = value_1
-	var value_2 string = "INSERT INTO server_friend_requests(id,requester_user_id_hash,target_user_id_hash,status,created_at,updated_at)\nVALUES(?1,?2,?3,'pending',?4,?4)\nON CONFLICT(requester_user_id_hash,target_user_id_hash) DO UPDATE SET\n    status=CASE WHEN server_friend_requests.status='declined' THEN 'pending' ELSE server_friend_requests.status END,\n    updated_at=CASE WHEN server_friend_requests.status='declined' THEN excluded.updated_at ELSE server_friend_requests.updated_at END\n"
-	query := value_2
+	var value_0 string = StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02T15:04:05Z07:00")
+	arguments[3] = value_0
+	query := "INSERT INTO server_friend_requests(id,requester_user_id_hash,target_user_id_hash,status,created_at,updated_at)\nVALUES(?1,?2,?3,'pending',?4,?4)\nON CONFLICT(requester_user_id_hash,target_user_id_hash) DO UPDATE SET\n    status=CASE WHEN server_friend_requests.status='declined' THEN 'pending' ELSE server_friend_requests.status END,\n    updated_at=CASE WHEN server_friend_requests.status='declined' THEN excluded.updated_at ELSE server_friend_requests.updated_at END\n"
 	written := StdSqlGo_Exec(database, context, query, arguments[0:4:4])
 	if written.Error != nil {
 		return FriendStore_Failure(written.Error)
@@ -182,13 +173,10 @@ func FriendStore_Request(database *Database, context Context, id string) FriendR
 	parts[1] = "\nWHERE fr.id=?1"
 	var arguments [1]Any
 	arguments[0] = id
-	var value_1 *Database = database
-	var value_2 Context = context
-	var value_3 string = strings.Join(parts[0:2:2], "")
-	row := StdSqlGo_QueryRow(value_1, value_2, value_3, arguments[0:1:1])
+	var value_1 string = strings.Join(parts[0:2:2], "")
+	row := StdSqlGo_QueryRow(database, context, value_1, arguments[0:1:1])
 	result := FriendStore_ReadRequest(row)
-	var value_4 Error = result.Error
-	if StdErrorsGo_Is(value_4, StdSqlGo_NoRows()) {
+	if StdErrorsGo_Is(result.Error, StdSqlGo_NoRows()) {
 		result = FriendRequestResult{}
 	}
 	return result
@@ -219,10 +207,8 @@ func FriendStore_Accept(database *Database, context Context, userID string, id s
 	parts[1] = "\nWHERE fr.id=?1"
 	var arguments [3]Any
 	arguments[0] = id
-	var value_1 *Transaction = opened.Value
-	var value_2 Context = context
-	var value_3 string = strings.Join(parts[0:2:2], "")
-	row := StdSqlGo_QueryRowTx(value_1, value_2, value_3, arguments[0:1:1])
+	var value_1 string = strings.Join(parts[0:2:2], "")
+	row := StdSqlGo_QueryRowTx(opened.Value, context, value_1, arguments[0:1:1])
 	result := FriendStore_ReadRequest(row)
 	if result.Error != nil {
 		cleanup_return_0 := FriendStore_Failure(result.Error)
@@ -242,8 +228,7 @@ func FriendStore_Accept(database *Database, context Context, userID string, id s
 	pair := FriendStore_Pair(result.Value.RequesterUserID, result.Value.TargetUserID)
 	now := StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02T15:04:05Z07:00")
 	arguments[1] = now
-	var value_4 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(opened.Value, context, "UPDATE server_friend_requests SET status='accepted',updated_at=?2 WHERE id=?1", arguments[0:2:2])
-	updated := value_4
+	updated := StdSqlGo_ExecTx(opened.Value, context, "UPDATE server_friend_requests SET status='accepted',updated_at=?2 WHERE id=?1", arguments[0:2:2])
 	if updated.Error != nil {
 		cleanup_return_3 := FriendStore_Failure(updated.Error)
 		StdSqlGo_Rollback(opened.Value)
@@ -252,15 +237,13 @@ func FriendStore_Accept(database *Database, context Context, userID string, id s
 	arguments[0] = pair.First
 	arguments[1] = pair.Second
 	arguments[2] = now
-	var value_5 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(opened.Value, context, "INSERT OR IGNORE INTO server_friendships(user_id_a,user_id_b,created_at) VALUES(?1,?2,?3)", arguments[0:3:3])
-	inserted := value_5
+	inserted := StdSqlGo_ExecTx(opened.Value, context, "INSERT OR IGNORE INTO server_friendships(user_id_a,user_id_b,created_at) VALUES(?1,?2,?3)", arguments[0:3:3])
 	if inserted.Error != nil {
 		cleanup_return_4 := FriendStore_Failure(inserted.Error)
 		StdSqlGo_Rollback(opened.Value)
 		return cleanup_return_4
 	}
-	var value_6 Error = StdSqlGo_Commit(opened.Value)
-	result.Error = value_6
+	result.Error = StdSqlGo_Commit(opened.Value)
 	if result.Error != nil {
 		cleanup_return_5 := FriendStore_Failure(result.Error)
 		StdSqlGo_Rollback(opened.Value)
@@ -291,8 +274,7 @@ func FriendStore_Decline(database *Database, context Context, userID string, id 
 	var arguments [2]Any
 	arguments[0] = id
 	arguments[1] = now
-	var value_0 zir_519e32da2199d006_ExecResult = StdSqlGo_Exec(database, context, "UPDATE server_friend_requests SET status='declined',updated_at=?2 WHERE id=?1", arguments[0:2:2])
-	updated := value_0
+	updated := StdSqlGo_Exec(database, context, "UPDATE server_friend_requests SET status='declined',updated_at=?2 WHERE id=?1", arguments[0:2:2])
 	if updated.Error != nil {
 		return FriendStore_Failure(updated.Error)
 	}
@@ -305,15 +287,13 @@ func FriendStore_Friends(database *Database, context Context, userID string) Fri
 	var result FriendsResult = FriendsResult{}
 	var arguments [1]Any
 	arguments[0] = userID
-	var value_0 string = "SELECT u.user_id_hash,COALESCE(u.alias,''),u.profile_icon,f.created_at\nFROM server_friendships f\nJOIN server_users u ON u.user_id_hash=CASE WHEN f.user_id_a=?1 THEN f.user_id_b ELSE f.user_id_a END\nWHERE f.user_id_a=?1 OR f.user_id_b=?1\nORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash\n"
-	query := value_0
+	query := "SELECT u.user_id_hash,COALESCE(u.alias,''),u.profile_icon,f.created_at\nFROM server_friendships f\nJOIN server_users u ON u.user_id_hash=CASE WHEN f.user_id_a=?1 THEN f.user_id_b ELSE f.user_id_a END\nWHERE f.user_id_a=?1 OR f.user_id_b=?1\nORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash\n"
 	queried := StdSqlGo_Query(database, context, query, arguments[0:1:1])
 	result.Error = queried.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_1 []Friend = make([]Friend, int(int(0)))
-	result.Value = value_1
+	result.Value = make([]Friend, int(int(0)))
 	for StdSqlGo_Next(queried.Value) {
 		var friend Friend = Friend{}
 		var destinations [4]Any
@@ -328,11 +308,9 @@ func FriendStore_Friends(database *Database, context Context, userID string) Fri
 			StdSqlGo_CloseRows(queried.Value)
 			return cleanup_return_0
 		}
-		var value_2 []Friend = append(result.Value, friend)
-		result.Value = value_2
+		result.Value = append(result.Value, friend)
 	}
-	var value_3 Error = StdSqlGo_RowsError(queried.Value)
-	result.Error = value_3
+	result.Error = StdSqlGo_RowsError(queried.Value)
 	cleanup_return_1 := result
 	StdSqlGo_CloseRows(queried.Value)
 	return cleanup_return_1
@@ -366,8 +344,7 @@ func FriendStore_Authoritative(database *Database, context Context, userID strin
 		return result
 	}
 	now := Timestamp_CanonicalNow()
-	var value_0 []SocialSnapshot = make([]SocialSnapshot, int(int(2)))
-	result.Value = value_0
+	result.Value = make([]SocialSnapshot, int(int(2)))
 	(result.Value[0]).Kind = "friends.list"
 	(result.Value[0]).JSON = RawMessage(friendsJSON.Value)
 	(result.Value[0]).UpdatedAt = now
@@ -386,8 +363,7 @@ func FriendStore_Remove(database *Database, context Context, userID string, frie
 	var arguments [2]Any
 	arguments[0] = pair.First
 	arguments[1] = pair.Second
-	var value_0 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(opened.Value, context, "DELETE FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2", arguments[0:2:2])
-	removed := value_0
+	removed := StdSqlGo_ExecTx(opened.Value, context, "DELETE FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2", arguments[0:2:2])
 	if removed.Error != nil {
 		cleanup_return_0 := removed.Error
 		StdSqlGo_Rollback(opened.Value)
@@ -395,8 +371,8 @@ func FriendStore_Remove(database *Database, context Context, userID string, frie
 	}
 	arguments[0] = userID
 	arguments[1] = friendID
-	var value_1 string = "DELETE FROM server_friend_requests WHERE (requester_user_id_hash=?1 AND target_user_id_hash=?2) OR (requester_user_id_hash=?2 AND target_user_id_hash=?1)"
-	removed = StdSqlGo_ExecTx(opened.Value, context, value_1, arguments[0:2:2])
+	var value_0 string = "DELETE FROM server_friend_requests WHERE (requester_user_id_hash=?1 AND target_user_id_hash=?2) OR (requester_user_id_hash=?2 AND target_user_id_hash=?1)"
+	removed = StdSqlGo_ExecTx(opened.Value, context, value_0, arguments[0:2:2])
 	if removed.Error != nil {
 		cleanup_return_1 := removed.Error
 		StdSqlGo_Rollback(opened.Value)
@@ -415,14 +391,12 @@ func FriendStore_UpsertStats(database *Database, context Context, userID string,
 		return result
 	}
 	now := StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02T15:04:05Z07:00")
-	var value_0 string = "INSERT INTO server_profile_stats(user_id_hash,app,practice,metric,value,label,local_date,updated_at)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8)\nON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET\n    value=excluded.value,label=excluded.label,local_date=excluded.local_date,updated_at=excluded.updated_at\nWHERE excluded.value != server_profile_stats.value\n   OR excluded.label != server_profile_stats.label\n   OR excluded.local_date != server_profile_stats.local_date\n"
-	query := value_0
+	query := "INSERT INTO server_profile_stats(user_id_hash,app,practice,metric,value,label,local_date,updated_at)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8)\nON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET\n    value=excluded.value,label=excluded.label,local_date=excluded.local_date,updated_at=excluded.updated_at\nWHERE excluded.value != server_profile_stats.value\n   OR excluded.label != server_profile_stats.label\n   OR excluded.local_date != server_profile_stats.local_date\n"
 	var arguments [8]Any
 	arguments[0] = userID
 	arguments[1] = app
 	arguments[7] = now
-	for it_index := int64(0); it_index < int64(len(metrics)); it_index++ {
-		metric := metrics[it_index]
+	for _, metric := range metrics {
 		practice := strings.TrimSpace(metric.Practice)
 		name := strings.TrimSpace(metric.Metric)
 		if practice == "" || name == "" {
@@ -441,12 +415,11 @@ func FriendStore_UpsertStats(database *Database, context Context, userID string,
 			StdSqlGo_Rollback(opened.Value)
 			return cleanup_return_0
 		}
-		var value_1 int = result.Applied
-		var value_2 int = AccountState_Affected(written.Value)
-		result.Applied = value_1 + value_2
+		var value_0 int = result.Applied
+		var value_1 int = AccountState_Affected(written.Value)
+		result.Applied = value_0 + value_1
 	}
-	var value_3 Error = StdSqlGo_Commit(opened.Value)
-	result.Error = value_3
+	result.Error = StdSqlGo_Commit(opened.Value)
 	cleanup_return_1 := result
 	StdSqlGo_Rollback(opened.Value)
 	return cleanup_return_1

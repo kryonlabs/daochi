@@ -184,8 +184,7 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 			HttpAuth_Respond(writer, sync.Counters, header.Authentication)
 			return
 		}
-		var value_10 AuthenticationResult = SignedTx_Verify(sync.Database, context, request, read.Value, header.Value, input.UserIDHash, input.AppID, sync.Verify, sync.ReplayError)
-		verified := value_10
+		verified := SignedTx_Verify(sync.Database, context, request, read.Value, header.Value, input.UserIDHash, input.AppID, sync.Verify, sync.ReplayError)
 		if verified.Error != nil || verified.Status != int(0) {
 			HttpAuth_Respond(writer, sync.Counters, verified)
 			return
@@ -209,13 +208,13 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	snapshotReason := ""
 	var compactedThrough int64 = 0
 	apply := true
-	var value_11 bool = input.LastServerStateHash != ""
-	var value_12 bool = value_11
-	if value_12 {
-		var value_13 bool = strings.EqualFold(input.LastServerStateHash, base.Value)
-		value_12 = !value_13
+	var value_10 bool = input.LastServerStateHash != ""
+	var value_11 bool = value_10
+	if value_11 {
+		var value_12 bool = strings.EqualFold(input.LastServerStateHash, base.Value)
+		value_11 = !value_12
 	}
-	if value_12 && !input.FullSyncRequested {
+	if value_11 && !input.FullSyncRequested {
 		fullSnapshot = true
 		completeChanges = false
 		sinceVersion = 0
@@ -246,13 +245,13 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		result = applied.Value
 		accepted = applied.Accepted
 	}
-	var value_14 bool = fullSnapshot
-	var value_15 bool = value_14
-	if value_15 {
-		var value_16 bool = SyncRequest_HasLocalChanges(input)
-		value_15 = value_16
+	var value_13 bool = fullSnapshot
+	var value_14 bool = value_13
+	if value_14 {
+		var value_15 bool = SyncRequest_HasLocalChanges(input)
+		value_14 = value_15
 	}
-	if value_15 {
+	if value_14 {
 		applied := SyncApplication_Apply(sync.Database, context, input, publicKey.Value, sync.MissingUser)
 		_ = applied
 		if applied.Error != nil {
@@ -296,12 +295,11 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		SyncHttp_StorageFailure(writer, "hash sync response", input.UserIDHash, serverHash.Error, "state hash failed")
 		return
 	}
-	var value_17 Error = SyncClients_RecordSync(sync.Database, context, input.UserIDHash, input.ClientID, input.SinceServerVersion, serverVersion, input.ProtocolVersion, recordedClock)
-	error = value_17
+	error = SyncClients_RecordSync(sync.Database, context, input.UserIDHash, input.ClientID, input.SinceServerVersion, serverVersion, input.ProtocolVersion, recordedClock)
 	if error != nil {
-		var value_18 string = LogSafety_LogText(input.UserIDHash)
-		var value_19 string = LogSafety_LogText(input.ClientID)
-		slog.Error("record sync client", "user", value_18, "client", value_19, "error", error)
+		var value_16 string = LogSafety_LogText(input.UserIDHash)
+		var value_17 string = LogSafety_LogText(input.ClientID)
+		slog.Error("record sync client", "user", value_16, "client", value_17, "error", error)
 		Response_Error(writer, int(500), "client state failed")
 		return
 	}
@@ -328,10 +326,10 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	var value SyncResponse = SyncResponse{}
 	value.ProtocolVersion = input.ProtocolVersion
 	value.Status = "ok"
-	var value_20 []string = NodeInfo_Capabilities()
-	value.ServerCapabilities = value_20
-	var value_21 string = SyncRequest_TransitionMode(input)
-	value.TransitionMode = value_21
+	var value_18 []string = NodeInfo_Capabilities()
+	value.ServerCapabilities = value_18
+	var value_19 string = SyncRequest_TransitionMode(input)
+	value.TransitionMode = value_19
 	value.Applied = result
 	value.AccountAlias = alias.Value
 	value.ProfileIcon = icon.Value
@@ -353,13 +351,13 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	diagnostics.EffectiveSinceServerVersion = sinceVersion
 	diagnostics.ClientClock = input.ClientClock
 	diagnostics.CompactedThroughVersion = compactedThrough
-	var value_22 bool = SyncRequest_HasLocalChanges(input)
-	diagnostics.HasLocalChanges = value_22
+	var value_20 bool = SyncRequest_HasLocalChanges(input)
+	diagnostics.HasLocalChanges = value_20
 	diagnostics.AcceptedOps = int(int64(len(accepted)))
 	diagnostics.RemoteOps = int(int64(len(remote)))
 	diagnostics.AppliedInput = result
-	var value_23 SyncResult = SyncHttp_ChangesResult(changes)
-	diagnostics.ReturnedChanges = value_23
+	var value_21 SyncResult = SyncHttp_ChangesResult(changes)
+	diagnostics.ReturnedChanges = value_21
 	value.Diagnostics = &(diagnostics)
 	if input.ProtocolVersion >= int(3) {
 		error = HabitMigration_ForProtocol(sync.Database, context, input.UserIDHash, input.ProtocolVersion)
@@ -417,8 +415,8 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	value.LegacyWriteRequired = policy.Required
 	value.LegacyProjectionEpoch = policy.Epoch
 	if value.Diagnostics != nil {
-		var value_24 SyncResult = SyncHttp_ChangesResult(value.Changes)
-		value.Diagnostics.ReturnedChanges = value_24
+		var value_22 SyncResult = SyncHttp_ChangesResult(value.Changes)
+		value.Diagnostics.ReturnedChanges = value_22
 	}
 	if result.EncryptedRecords > int(0) {
 		StdAtomicGo_Add(&(sync.Counters.SyncEncryptedRecords), uint64(result.EncryptedRecords))
@@ -437,9 +435,9 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	entry.SnapshotReason = snapshotReason
 	error = SyncAudit_Record(sync.Database, context, entry)
 	if error != nil {
-		var value_25 string = LogSafety_LogText(input.UserIDHash)
-		var value_26 string = LogSafety_LogText(input.ClientID)
-		slog.Error("record sync audit", "user", value_25, "client", value_26, "error", error)
+		var value_23 string = LogSafety_LogText(input.UserIDHash)
+		var value_24 string = LogSafety_LogText(input.ClientID)
+		slog.Error("record sync audit", "user", value_23, "client", value_24, "error", error)
 	}
 	completion.Complete = true
 	Response_JSON(writer, int(200), value)
@@ -518,8 +516,7 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 			SyncHttp_StorageFailure(writer, "load encrypted payload usage", user, usage.Error, "encrypted sync failed")
 			return false
 		}
-		var value_11 bool = int64(len(bytes)) > sync.Configuration.EncryptedPayloadMaxAccountBytes || usage.Value+int64(len(bytes)) > sync.Configuration.EncryptedPayloadMaxAccountBytes
-		if value_11 {
+		if int64(len(bytes)) > sync.Configuration.EncryptedPayloadMaxAccountBytes || usage.Value+int64(len(bytes)) > sync.Configuration.EncryptedPayloadMaxAccountBytes {
 			Response_Error(writer, int(413), "encrypted payload quota exceeded")
 			return false
 		}
@@ -548,26 +545,24 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 		SyncHttp_StorageFailure(writer, "store encrypted payload", user, stored.Error, "encrypted sync failed")
 		return false
 	}
-	var value_12 PayloadPruneOutcome = EncryptedPayloads_Prune(sync.Database, context, user, sync.Configuration.EncryptedPayloadRetention, 0)
-	pruned := value_12
+	pruned := EncryptedPayloads_Prune(sync.Database, context, user, sync.Configuration.EncryptedPayloadRetention, 0)
 	if pruned.Error != nil {
-		var value_13 string = LogSafety_LogText(user)
-		slog.Error("prune encrypted payloads", "user", value_13, "error", pruned.Error)
+		var value_11 string = LogSafety_LogText(user)
+		slog.Error("prune encrypted payloads", "user", value_11, "error", pruned.Error)
 	} else if pruned.Value.Deleted > 0 {
-		var value_14 string = LogSafety_LogText(user)
-		slog.Info("pruned encrypted payloads", "user", value_14, "deleted", int64(pruned.Value.Deleted))
+		var value_12 string = LogSafety_LogText(user)
+		slog.Info("pruned encrypted payloads", "user", value_12, "deleted", int64(pruned.Value.Deleted))
 	}
 	loaded := EncryptedPayloads_Since(sync.Database, context, user, sinceVersion, limit.Value)
 	if loaded.Error != nil {
 		SyncHttp_StorageFailure(writer, "load encrypted payloads", user, loaded.Error, "encrypted sync failed")
 		return false
 	}
-	var value_15 Error = SyncClients_RecordSync(sync.Database, context, user, client, sinceVersion, stored.Version, 6, stored.Version)
-	error := value_15
+	error := SyncClients_RecordSync(sync.Database, context, user, client, sinceVersion, stored.Version, 6, stored.Version)
 	if error != nil {
-		var value_16 string = LogSafety_LogText(user)
-		var value_17 string = LogSafety_LogText(client)
-		slog.Error("record encrypted sync client", "user", value_16, "client", value_17, "error", error)
+		var value_13 string = LogSafety_LogText(user)
+		var value_14 string = LogSafety_LogText(client)
+		slog.Error("record encrypted sync client", "user", value_13, "client", value_14, "error", error)
 	}
 	var entry SyncAuditEntry = SyncAuditEntry{}
 	entry.UserIDHash = user
@@ -580,25 +575,25 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 	entry.EncryptedPayloadBytes = int64(len(bytes))
 	error = SyncAudit_Record(sync.Database, context, entry)
 	if error != nil {
-		var value_18 string = LogSafety_LogText(user)
-		var value_19 string = LogSafety_LogText(client)
-		slog.Error("record encrypted sync audit", "user", value_18, "client", value_19, "error", error)
+		var value_15 string = LogSafety_LogText(user)
+		var value_16 string = LogSafety_LogText(client)
+		slog.Error("record encrypted sync audit", "user", value_15, "client", value_16, "error", error)
 	}
 	StdAtomicGo_Add(&(sync.Counters.SyncEncryptedPayloads), 1)
 	SyncHub_Publish(sync.Notifications, user, stored.Version)
 	var value SyncResponse = SyncResponse{}
 	value.ProtocolVersion = 6
 	value.Status = "ok"
-	var value_20 []string = NodeInfo_Capabilities()
-	value.ServerCapabilities = value_20
+	var value_17 []string = NodeInfo_Capabilities()
+	value.ServerCapabilities = value_17
 	value.TransitionMode = "encrypted_payload"
 	value.AccountAlias = alias.Value
 	value.ProfileIcon = icon.Value
 	value.ServerVersion = stored.Version
 	value.ServerClock = stored.Version
 	value.ChangesComplete = true
-	var value_21 SyncChanges = SyncRequest_EmptyChanges()
-	value.Changes = value_21
+	var value_18 SyncChanges = SyncRequest_EmptyChanges()
+	value.Changes = value_18
 	value.EncryptedPayloads = loaded.Value
 	value.MinSupportedProtocol = 1
 	value.ServerLatestProtocol = 6

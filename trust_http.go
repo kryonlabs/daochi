@@ -74,14 +74,13 @@ func TrustHttp_CreateInvite(trust Trust, writer ResponseWriter, request *Request
 	}
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var input CreateInviteRequest = CreateInviteRequest{}
 	if int64(len(body.Value)) > 0 {
-		var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(input))
-		if value_2 != nil {
+		var value_1 Error = StdJsonGo_Unmarshal(body.Value, &(input))
+		if value_1 != nil {
 			Response_Error(writer, int(400), "invalid pairing invite request")
 			return
 		}
@@ -94,55 +93,51 @@ func TrustHttp_CreateInvite(trust Trust, writer ResponseWriter, request *Request
 		Response_Error(writer, int(400), "pairing invite expiry exceeds 24 hours")
 		return
 	}
-	var value_3 string = ConfigValues_SyncDirection(input.Policy.Direction)
-	input.Policy.Direction = value_3
-	var value_4 bool = TrustHttp_ValidPairingPolicy(input.Policy)
-	if !value_4 {
+	var value_2 string = ConfigValues_SyncDirection(input.Policy.Direction)
+	input.Policy.Direction = value_2
+	var value_3 bool = TrustHttp_ValidPairingPolicy(input.Policy)
+	if !value_3 {
 		Response_Error(writer, int(400), "explicit pairing policy required")
 		return
 	}
 	addresses := input.Addresses
-	var value_5 bool = int64(len(addresses)) == 0
-	var value_6 bool = value_5
-	if value_6 {
-		var value_7 bool = strings.TrimSpace(trust.Configuration.BaseURL) != ""
-		value_6 = value_7
+	var value_4 bool = int64(len(addresses)) == 0
+	if value_4 {
+		var value_5 bool = strings.TrimSpace(trust.Configuration.BaseURL) != ""
+		value_4 = value_5
 	}
-	if value_6 {
+	if value_4 {
 		addresses = make([]string, int(int(1)))
-		var value_8 string = strings.TrimRight(trust.Configuration.BaseURL, "/")
-		addresses[0] = value_8
+		var value_6 string = strings.TrimRight(trust.Configuration.BaseURL, "/")
+		addresses[0] = value_6
 	}
 	invalid := NodeIdentity_ValidateAddresses(addresses)
 	if invalid != nil {
-		var value_9 ResponseWriter = writer
-		Response_Error(value_9, int(400), StdErrorsGo_Message(invalid))
+		Response_Error(writer, int(400), StdErrorsGo_Message(invalid))
 		return
 	}
 	var invite PairingInvite = PairingInvite{}
 	invite.Version = int(1)
-	var value_10 string = NodeAuth_RandomHex(int(16))
-	invite.InviteID = value_10
+	var value_7 string = NodeAuth_RandomHex(int(16))
+	invite.InviteID = value_7
 	invite.NodeID = trust.Identity.ID
-	var value_11 string = hex.EncodeToString([]uint8(trust.Identity.PublicKey))
-	invite.PublicKey = value_11
-	var value_12 string = strings.TrimSpace(input.DisplayName)
-	var value_13 string = Manifest_DefaultString(value_12, trust.Configuration.NodeDisplayName)
-	invite.DisplayName = value_13
+	var value_8 string = hex.EncodeToString([]uint8(trust.Identity.PublicKey))
+	invite.PublicKey = value_8
+	var value_9 string = strings.TrimSpace(input.DisplayName)
+	var value_10 string = Manifest_DefaultString(value_9, trust.Configuration.NodeDisplayName)
+	invite.DisplayName = value_10
 	invite.Addresses = addresses
-	var value_14 string = strings.TrimSpace(input.SpaceID)
-	invite.SpaceID = value_14
-	var value_15 Time = StdTimeGo_Now()
-	var value_16 int64 = StdTimeGo_Unix(StdTimeGo_Add(value_15, Duration(lifetime)))
-	invite.ExpiresAt = value_16
-	var value_17 string = NodeAuth_RandomHex(int(16))
-	invite.Nonce = value_17
+	var value_11 string = strings.TrimSpace(input.SpaceID)
+	invite.SpaceID = value_11
+	var value_12 int64 = StdTimeGo_Unix(StdTimeGo_Add(StdTimeGo_Now(), Duration(lifetime)))
+	invite.ExpiresAt = value_12
+	var value_13 string = NodeAuth_RandomHex(int(16))
+	invite.Nonce = value_13
 	invite.Policy = input.Policy
 	NodeIdentity_SignInvite(trust.Identity, &(invite))
-	var value_18 *Database = trust.Database
-	var value_19 Context = StdHttpGo_Context(request)
-	var value_20 Error = TrustStore_RecordIssuedPairingInvite(value_18, value_19, invite)
-	if value_20 != nil {
+	var value_14 Context = StdHttpGo_Context(request)
+	var value_15 Error = TrustStore_RecordIssuedPairingInvite(trust.Database, value_14, invite)
+	if value_15 != nil {
 		Response_Error(writer, int(500), "pairing invite creation failed")
 		return
 	}
@@ -203,9 +198,7 @@ func TrustHttp_CompleteRemote(context Context, invite PairingInvite, acceptance 
 			targetParts := value_1
 			_ = targetParts
 			target := strings.Join(targetParts[0:2:2], "")
-			var value_3 Context = context
-			var value_4 string = target
-			request := StdHttpGo_NewRequest(value_3, "POST", value_4, StdIoGo_FromBytes(body.Value))
+			request := StdHttpGo_NewRequest(context, "POST", target, StdIoGo_FromBytes(body.Value))
 			if request.Error != nil {
 				lastError = request.Error
 				loop_cursor_9++
@@ -230,8 +223,7 @@ func TrustHttp_CompleteRemote(context Context, invite PairingInvite, acceptance 
 			if status >= int(200) && status < int(300) {
 				return nil
 			}
-			var value_5 Error = fmt.Errorf("pairing completion failed: %s %s", StdHttpGo_Status(reply.Value), strings.TrimSpace(StdTextGo_FromBytes(responseBody.Value)))
-			lastError = value_5
+			lastError = fmt.Errorf("pairing completion failed: %s %s", StdHttpGo_Status(reply.Value), strings.TrimSpace(StdTextGo_FromBytes(responseBody.Value)))
 			loop_cursor_9++
 		}
 	}
@@ -248,21 +240,19 @@ func TrustHttp_AcceptInvite(trust Trust, writer ResponseWriter, request *Request
 	}
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var invite PairingInvite = PairingInvite{}
-	var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(invite))
-	if value_2 != nil {
+	var value_1 Error = StdJsonGo_Unmarshal(body.Value, &(invite))
+	if value_1 != nil {
 		Response_Error(writer, int(400), "invalid pairing invite")
 		return
 	}
-	var value_3 PairingInvite = invite
-	publicKey := NodeIdentity_ValidateInvite(value_3, StdTimeGo_Now())
+	var value_2 PairingInvite = invite
+	publicKey := NodeIdentity_ValidateInvite(value_2, StdTimeGo_Now())
 	if publicKey.Error != nil {
-		var value_4 ResponseWriter = writer
-		Response_Error(value_4, int(400), StdErrorsGo_Message(publicKey.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(publicKey.Error))
 		return
 	}
 	if invite.NodeID == trust.Identity.ID {
@@ -271,23 +261,19 @@ func TrustHttp_AcceptInvite(trust Trust, writer ResponseWriter, request *Request
 	}
 	acceptance := TrustHttp_NewAcceptance(trust, invite)
 	if acceptance.Error != nil {
-		var value_5 ResponseWriter = writer
-		Response_Error(value_5, int(400), StdErrorsGo_Message(acceptance.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(acceptance.Error))
 		return
 	}
-	var value_6 Context = StdHttpGo_Context(request)
-	remoteError := TrustHttp_CompleteRemote(value_6, invite, acceptance.Value)
+	var value_3 Context = StdHttpGo_Context(request)
+	remoteError := TrustHttp_CompleteRemote(value_3, invite, acceptance.Value)
 	if remoteError != nil {
-		var value_7 ResponseWriter = writer
-		Response_Error(value_7, int(502), StdErrorsGo_Message(remoteError))
+		Response_Error(writer, int(502), StdErrorsGo_Message(remoteError))
 		return
 	}
-	var value_8 *Database = trust.Database
-	var value_9 Context = StdHttpGo_Context(request)
-	trustError := TrustStore_TrustPeer(value_8, value_9, invite, publicKey.Value)
+	var value_4 Context = StdHttpGo_Context(request)
+	trustError := TrustStore_TrustPeer(trust.Database, value_4, invite, publicKey.Value)
 	if trustError != nil {
-		var value_10 ResponseWriter = writer
-		Response_Error(value_10, int(409), StdErrorsGo_Message(trustError))
+		Response_Error(writer, int(409), StdErrorsGo_Message(trustError))
 		return
 	}
 	var value PairingResponse = PairingResponse{}
@@ -299,46 +285,40 @@ func TrustHttp_AcceptInvite(trust Trust, writer ResponseWriter, request *Request
 func TrustHttp_CompletePairing(trust Trust, writer ResponseWriter, request *Request) {
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var input CompletePairingRequest = CompletePairingRequest{}
-	var value_1 Error = StdJsonGo_Unmarshal(body.Value, &(input))
-	if value_1 != nil {
+	var value_0 Error = StdJsonGo_Unmarshal(body.Value, &(input))
+	if value_0 != nil {
 		Response_Error(writer, int(400), "invalid pairing completion")
 		return
 	}
-	var value_2 PairingInvite = input.Invite
-	validated := NodeIdentity_ValidateInvite(value_2, StdTimeGo_Now())
+	var value_1 PairingInvite = input.Invite
+	validated := NodeIdentity_ValidateInvite(value_1, StdTimeGo_Now())
 	if validated.Error != nil {
-		var value_3 ResponseWriter = writer
-		Response_Error(value_3, int(400), StdErrorsGo_Message(validated.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(validated.Error))
 		return
 	}
 	if input.Invite.NodeID != trust.Identity.ID {
 		Response_Error(writer, int(400), "pairing invite belongs to another node")
 		return
 	}
-	var value_4 PairingInvite = input.Invite
-	var value_5 PairingAcceptance = input.Acceptance
-	publicKey := NodeIdentity_ValidateAcceptance(value_4, value_5, StdTimeGo_Now())
+	var value_2 PairingInvite = input.Invite
+	var value_3 PairingAcceptance = input.Acceptance
+	publicKey := NodeIdentity_ValidateAcceptance(value_2, value_3, StdTimeGo_Now())
 	if publicKey.Error != nil {
-		var value_6 ResponseWriter = writer
-		Response_Error(value_6, int(400), StdErrorsGo_Message(publicKey.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(publicKey.Error))
 		return
 	}
 	if input.Acceptance.NodeID == trust.Identity.ID {
 		Response_Error(writer, int(400), "cannot pair a node with itself")
 		return
 	}
-	var value_7 *Database = trust.Database
-	var value_8 Context = StdHttpGo_Context(request)
-	var value_9 Error = TrustStore_CompleteIssuedPairing(value_7, value_8, input.Invite, input.Acceptance, publicKey.Value)
-	error := value_9
+	var value_4 Context = StdHttpGo_Context(request)
+	error := TrustStore_CompleteIssuedPairing(trust.Database, value_4, input.Invite, input.Acceptance, publicKey.Value)
 	if error != nil {
-		var value_10 ResponseWriter = writer
-		Response_Error(value_10, int(409), StdErrorsGo_Message(error))
+		Response_Error(writer, int(409), StdErrorsGo_Message(error))
 		return
 	}
 	var value PairingResponse = PairingResponse{}
@@ -369,26 +349,23 @@ func TrustHttp_CreateSpace(trust Trust, writer ResponseWriter, request *Request)
 	}
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var input CreateSpaceRequest = CreateSpaceRequest{}
-	var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(input))
-	var value_3 bool = value_2 != nil
-	var value_4 bool = value_3
-	if !value_4 {
-		var value_5 bool = strings.TrimSpace(input.DisplayName) == ""
-		value_4 = value_5
+	var value_1 Error = StdJsonGo_Unmarshal(body.Value, &(input))
+	var value_2 bool = value_1 != nil
+	var value_3 bool = value_2
+	if !value_3 {
+		var value_4 bool = strings.TrimSpace(input.DisplayName) == ""
+		value_3 = value_4
 	}
-	if value_4 {
+	if value_3 {
 		Response_Error(writer, int(400), "invalid trust space")
 		return
 	}
 	displayName := strings.TrimSpace(input.DisplayName)
-	var value_6 *Database = trust.Database
-	var value_7 Context = StdHttpGo_Context(request)
-	created := TrustStore_CreateTrustSpace(value_6, value_7, displayName)
+	created := TrustStore_CreateTrustSpace(trust.Database, StdHttpGo_Context(request), displayName)
 	if created.Error != nil {
 		Response_Error(writer, int(500), "trust space creation failed")
 		return
@@ -406,59 +383,55 @@ func TrustHttp_RegisterName(trust Trust, writer ResponseWriter, request *Request
 	}
 	body := HttpBody_ReadJSON(writer, request, trust.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
 	var claim NameClaim = NameClaim{}
-	var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(claim))
-	if value_2 != nil {
+	var value_1 Error = StdJsonGo_Unmarshal(body.Value, &(claim))
+	if value_1 != nil {
 		Response_Error(writer, int(400), "invalid name claim")
 		return
 	}
-	var value_3 string = strings.TrimSpace(claim.SpaceID)
-	claim.SpaceID = value_3
-	var value_4 string = NodeIdentity_NormalizeName(claim.Name)
-	claim.Name = value_4
-	var value_5 string = strings.TrimSpace(claim.NodeID)
-	claim.NodeID = value_5
-	var value_6 bool = Identity_ValidUserID(claim.SpaceID)
-	var value_7 bool = !value_6
-	if !value_7 {
-		var value_8 bool = NodeIdentity_ValidName(claim.Name)
-		value_7 = !value_8
+	var value_2 string = strings.TrimSpace(claim.SpaceID)
+	claim.SpaceID = value_2
+	var value_3 string = NodeIdentity_NormalizeName(claim.Name)
+	claim.Name = value_3
+	var value_4 string = strings.TrimSpace(claim.NodeID)
+	claim.NodeID = value_4
+	var value_5 bool = Identity_ValidUserID(claim.SpaceID)
+	var value_6 bool = !value_5
+	if !value_6 {
+		var value_7 bool = NodeIdentity_ValidName(claim.Name)
+		value_6 = !value_7
 	}
-	var value_9 bool = value_7
-	if !value_9 {
-		var value_10 bool = Identity_ValidUserID(claim.NodeID)
-		value_9 = !value_10
+	var value_8 bool = value_6
+	if !value_8 {
+		var value_9 bool = Identity_ValidUserID(claim.NodeID)
+		value_8 = !value_9
 	}
-	if value_9 {
+	if value_8 {
 		Response_Error(writer, int(400), "invalid space, name, or node ID")
 		return
 	}
 	if claim.ExpiresAt == 0 {
-		var value_11 int64 = StdTimeGo_Unix(StdTimeGo_Add(StdTimeGo_Now(), Duration(31536000000000000)))
-		claim.ExpiresAt = value_11
+		var value_10 int64 = StdTimeGo_Unix(StdTimeGo_Add(StdTimeGo_Now(), Duration(31536000000000000)))
+		claim.ExpiresAt = value_10
 	}
-	var value_12 Duration = StdTimeGo_Until(StdTimeGo_FromUnix(claim.ExpiresAt, 0))
-	remaining := int64(value_12)
+	var value_11 Duration = StdTimeGo_Until(StdTimeGo_FromUnix(claim.ExpiresAt, 0))
+	remaining := int64(value_11)
 	if remaining <= 0 || remaining > 31622400000000000 {
 		Response_Error(writer, int(400), "invalid name expiry")
 		return
 	}
 	invalid := TrustStore_ValidateServices(claim.Services)
 	if invalid != nil {
-		var value_13 ResponseWriter = writer
-		Response_Error(value_13, int(400), StdErrorsGo_Message(invalid))
+		Response_Error(writer, int(400), StdErrorsGo_Message(invalid))
 		return
 	}
-	var value_14 *Database = trust.Database
-	var value_15 Context = StdHttpGo_Context(request)
-	signed := TrustStore_SignAndStoreNameClaim(value_14, value_15, claim)
+	var value_12 Context = StdHttpGo_Context(request)
+	signed := TrustStore_SignAndStoreNameClaim(trust.Database, value_12, claim)
 	if signed.Error != nil {
-		var value_16 ResponseWriter = writer
-		Response_Error(value_16, int(400), StdErrorsGo_Message(signed.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(signed.Error))
 		return
 	}
 	Response_JSON(writer, int(200), signed.Value)
@@ -478,9 +451,7 @@ func TrustHttp_ResolveName(trust Trust, writer ResponseWriter, request *Request)
 		Response_Error(writer, int(400), "invalid space or name")
 		return
 	}
-	var value_3 *Database = trust.Database
-	var value_4 Context = StdHttpGo_Context(request)
-	resolved := TrustStore_ResolveNameClaim(value_3, value_4, spaceID, name)
+	resolved := TrustStore_ResolveNameClaim(trust.Database, StdHttpGo_Context(request), spaceID, name)
 	if resolved.Error != nil {
 		Response_Error(writer, int(500), "name resolution failed")
 		return
@@ -491,17 +462,14 @@ func TrustHttp_ResolveName(trust Trust, writer ResponseWriter, request *Request)
 	}
 	var value NameResponse = NameResponse{}
 	value.Claim = resolved.Value
-	var value_5 int64 = resolved.Value.ExpiresAt
-	var value_6 int64 = value_5 - StdTimeGo_Unix(StdTimeGo_Now())
-	value.TtlSeconds = value_6
-	var value_7 [4]string
-	value_7[0] = "daochi://"
-	value_7[1] = spaceID
-	value_7[2] = "/"
-	value_7[3] = name
-	uriParts := value_7
+	value.TtlSeconds = resolved.Value.ExpiresAt - StdTimeGo_Unix(StdTimeGo_Now())
+	var value_3 [4]string
+	value_3[0] = "daochi://"
+	value_3[1] = spaceID
+	value_3[2] = "/"
+	value_3[3] = name
+	uriParts := value_3
 	_ = uriParts
-	var value_8 string = strings.Join(uriParts[0:4:4], "")
-	value.Uri = value_8
+	value.Uri = strings.Join(uriParts[0:4:4], "")
 	Response_JSON(writer, int(200), value)
 }

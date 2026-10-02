@@ -109,29 +109,25 @@ func HttpAuth_AuthenticateToken(database *Database, request *Request, secret []u
 		value_0 = value_1
 	}
 	if value_0 {
-		var value_2 AuthenticationResult = Authentication_Failure(int(401), "bearer token required")
-		result.Authentication = value_2
+		result.Authentication = Authentication_Failure(int(401), "bearer token required")
 		return result
 	}
 	verified := Token_VerifyAuthToken(secret, strings.TrimSpace(bearer.Value), StdTimeGo_Unix(StdTimeGo_Now()))
 	if verified.Error != "" {
-		var value_3 AuthenticationResult = Authentication_Failure(int(401), "invalid bearer token")
-		result.Authentication = value_3
+		result.Authentication = Authentication_Failure(int(401), "invalid bearer token")
 		return result
 	}
 	context := StdHttpGo_Context(request)
 	account := AccountKeys_PublicKey(database, context, verified.Value)
 	if account.Error != nil {
-		var value_4 AuthenticationResult = Authentication_NativeFailure(account.Error)
-		result.Authentication = value_4
+		result.Authentication = Authentication_NativeFailure(account.Error)
 		return result
 	}
 	if !account.Found {
 		if StdUrlGo_Path(StdHttpGo_RequestURL(request)) == "/api/v1/sync" {
 			deleted := AccountState_Tombstoned(database, context, verified.Value)
 			if deleted.Error != nil {
-				var value_5 AuthenticationResult = Authentication_NativeFailure(deleted.Error)
-				result.Authentication = value_5
+				result.Authentication = Authentication_NativeFailure(deleted.Error)
 				return result
 			}
 			if !deleted.Value {
@@ -139,8 +135,7 @@ func HttpAuth_AuthenticateToken(database *Database, request *Request, secret []u
 				return result
 			}
 		}
-		var value_6 AuthenticationResult = Authentication_Failure(int(401), "sync account not found")
-		result.Authentication = value_6
+		result.Authentication = Authentication_Failure(int(401), "sync account not found")
 		return result
 	}
 	result.Value = verified.Value
@@ -155,13 +150,11 @@ func HttpAuth_BearerUser(database *Database, request *Request, secret []uint8) U
 	header := HttpAuth_UserHeader(request)
 	if header.Value != "" && header.Value != result.Value {
 		result.Value = ""
-		var value_0 AuthenticationResult = Authentication_Failure(int(401), "token user mismatch")
-		result.Authentication = value_0
+		result.Authentication = Authentication_Failure(int(401), "token user mismatch")
 	}
 	return result
 }
 
 func HttpAuth_Respond(writer ResponseWriter, counters *ServerMetrics, result AuthenticationResult) {
-	var value_0 ResponseWriter = writer
-	AuthenticationError_Respond(value_0, &(counters), AuthenticationError_Convert(result))
+	AuthenticationError_Respond(writer, &(counters), AuthenticationError_Convert(result))
 }

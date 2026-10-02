@@ -51,52 +51,47 @@ func MeshApps_Export(database *Database, context Context, meshPolicy NodeSyncPol
 	var result MeshAppsExportResult = MeshAppsExportResult{}
 	var value_0 bool = MeshPolicy_IncludesData(&(meshPolicy), "app_registry")
 	if !value_0 || int64(len(meshPolicy.Apps)) == 0 {
-		var value_1 []SignedAppRegistrationRequest = make([]SignedAppRegistrationRequest, int(0), int(0))
-		result.Value = value_1
+		result.Value = make([]SignedAppRegistrationRequest, int(0), int(0))
 		return result
 	}
 	allowed := Sets_Normalize(meshPolicy.Apps)
-	var value_2 string = "SELECT app_id,manifest_json,manifest_signature,approval_signature\nFROM server_app_manifests\nORDER BY app_id\n"
-	queried := MeshApps_Query(database, context, value_2)
+	queried := MeshApps_Query(database, context, "SELECT app_id,manifest_json,manifest_signature,approval_signature\nFROM server_app_manifests\nORDER BY app_id\n")
 	result.Error = queried.Error
 	if result.Error != nil {
 		return result
 	}
 	rows := queried.Value
 	defer (*sql.Rows).Close(rows)
-	var value_3 StringSet = allowed
-	var value_4 int64 = int64(len(value_3))
-	values := make([]SignedAppRegistrationRequest, int(0), int(int(value_4)))
+	var value_1 StringSet = allowed
+	var value_2 int64 = int64(len(value_1))
+	values := make([]SignedAppRegistrationRequest, int(0), int(int(value_2)))
 	for StdSqlGo_Next(rows) {
 		var appID string = ""
 		var manifestJSON string = ""
 		var signature string = ""
 		var approval string = ""
-		var value_5 Error = (*sql.Rows).Scan(rows, &(appID), &(manifestJSON), &(signature), &(approval))
-		result.Error = value_5
+		result.Error = (*sql.Rows).Scan(rows, &(appID), &(manifestJSON), &(signature), &(approval))
 		if result.Error != nil {
 			return result
 		}
-		var value_6 StringSet = allowed
-		var value_8 string = strings.ToLower(appID)
-		var value_7 string = value_8
-		var value_9 bool = value_6[value_7]
-		if !value_9 {
+		var value_3 StringSet = allowed
+		var value_5 string = strings.ToLower(appID)
+		var value_4 string = value_5
+		var value_6 bool = value_3[value_4]
+		if !value_6 {
 			continue
 		}
 		var value SignedAppRegistrationRequest = SignedAppRegistrationRequest{}
 		error := StdJsonGo_Unmarshal(StdTextGo_ToBytes(manifestJSON), &(value.Manifest))
 		if error != nil {
-			var value_10 Error = fmt.Errorf("decode stored manifest %q: %w", appID, error)
-			result.Error = value_10
+			result.Error = fmt.Errorf("decode stored manifest %q: %w", appID, error)
 			return result
 		}
 		value.ManifestSignature = signature
 		value.ApprovalSignature = approval
 		values = append(values, value)
 	}
-	var value_11 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_11
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error == nil {
 		result.Value = values
 	}
@@ -111,32 +106,28 @@ func MeshApps_Import(database *Database, context Context, registryKey PublicKey,
 	}
 	allowed := Sets_Normalize(meshPolicy.Apps)
 	var applied int = 0
-	for it_index := int64(0); it_index < int64(len(registrations)); it_index++ {
-		value := registrations[it_index]
+	for _, value := range registrations {
 		Manifest_Normalize(&(value.Manifest))
 		var value_1 StringSet = allowed
 		var value_3 string = strings.ToLower(value.Manifest.AppID)
 		var value_2 string = value_3
 		var value_4 bool = value_1[value_2]
 		if !value_4 {
-			var value_5 Error = fmt.Errorf("app %q exceeds mesh policy", value.Manifest.AppID)
-			result.Error = value_5
+			result.Error = fmt.Errorf("app %q exceeds mesh policy", value.Manifest.AppID)
 			return result
 		}
-		var value_6 AppManifest = value.Manifest
-		problem := Manifest_Validate(value_6, StdTimeGo_Unix(StdTimeGo_Now()))
+		var value_5 AppManifest = value.Manifest
+		problem := Manifest_Validate(value_5, StdTimeGo_Unix(StdTimeGo_Now()))
 		if problem != "" {
-			var value_7 string = value.Manifest.AppID
-			var value_8 Error = fmt.Errorf("invalid mesh app %q: %w", value_7, StdErrorsGo_New(problem))
-			result.Error = value_8
+			var value_6 string = value.Manifest.AppID
+			result.Error = fmt.Errorf("invalid mesh app %q: %w", value_6, StdErrorsGo_New(problem))
 			return result
 		}
 		verified := AppRegistration_Verify(value, registryKey)
-		var value_9 ConvertError = convertError
-		error := value_9(verified.Authentication)
+		var value_7 ConvertError = convertError
+		error := value_7(verified.Authentication)
 		if error != nil {
-			var value_10 Error = fmt.Errorf("verify mesh app %q: %w", value.Manifest.AppID, error)
-			result.Error = value_10
+			result.Error = fmt.Errorf("verify mesh app %q: %w", value.Manifest.AppID, error)
 			return result
 		}
 		current := MeshApps_LoadVersion(database, context, value.Manifest.AppID)
@@ -149,14 +140,12 @@ func MeshApps_Import(database *Database, context Context, registryKey PublicKey,
 		}
 		if current.Found && value.Manifest.ManifestVersion == current.Value.Version {
 			if verified.Hash != current.Value.Hash {
-				var value_11 Error = fmt.Errorf("conflicting app manifest %q at version %d", value.Manifest.AppID, int(current.Value.Version))
-				result.Error = value_11
+				result.Error = fmt.Errorf("conflicting app manifest %q at version %d", value.Manifest.AppID, int(current.Value.Version))
 				return result
 			}
 			continue
 		}
-		var value_12 Error = AppStore_UpsertSignedManifest(database, context, value.Manifest, verified.Value, verified.Hash, value.ManifestSignature, value.ApprovalSignature)
-		result.Error = value_12
+		result.Error = AppStore_UpsertSignedManifest(database, context, value.Manifest, verified.Value, verified.Hash, value.ManifestSignature, value.ApprovalSignature)
 		if result.Error != nil {
 			return result
 		}
@@ -169,11 +158,9 @@ func MeshApps_Import(database *Database, context Context, registryKey PublicKey,
 func MeshApps_LoadVersion(database *Database, context Context, appID string) ManifestVersionResult {
 	var result ManifestVersionResult = ManifestVersionResult{}
 	var value ManifestVersion = ManifestVersion{}
-	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT manifest_version,manifest_hash\nFROM server_app_manifests\nWHERE app_id=?1\n", appID)
-	row := value_0
+	row := (*sql.DB).QueryRowContext(database, context, "SELECT manifest_version,manifest_hash\nFROM server_app_manifests\nWHERE app_id=?1\n", appID)
 	error := (*sql.Row).Scan(row, &(value.Version), &(value.Hash))
-	var value_1 Error = error
-	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		return result
 	}
 	result.Error = error

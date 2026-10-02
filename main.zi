@@ -1,0 +1,6 @@
+startup :: #import "startup";
+signatures :: #import "ml_dsa44";
+
+Main :: () {
+    startup.Main(signatures.New, signatures.Sign)
+}

@@ -57,17 +57,15 @@ func EncryptedPayloads_ReadPayloads(rows *Rows, failIncomplete bool) PayloadsRes
 		value_0[4] = &(item.ServerVersion)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:5:5])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:5:5])
 		if result.Error != nil {
 			return result
 		}
-		var value_2 []uint8 = StdTextGo_ToBytes(payload)
-		item.Payload = RawMessage(value_2)
+		var value_1 []uint8 = StdTextGo_ToBytes(payload)
+		item.Payload = RawMessage(value_1)
 		values = append(values, item)
 	}
-	var value_3 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_3
+	result.Error = StdSqlGo_RowsError(rows)
 	if failIncomplete && result.Error != nil {
 		return result
 	}
@@ -84,8 +82,7 @@ func EncryptedPayloads_Store(database *Database, context Context, userID string,
 	}
 	transaction := opened.Value
 	defer (*sql.Tx).Rollback(transaction)
-	var value_0 Error = AccountState_Touch(transaction, context, userID, missingUser)
-	result.Error = value_0
+	result.Error = AccountState_Touch(transaction, context, userID, missingUser)
 	if result.Error != nil {
 		return result
 	}
@@ -94,25 +91,24 @@ func EncryptedPayloads_Store(database *Database, context Context, userID string,
 	if result.Error != nil {
 		return result
 	}
-	var value_1 [5]Any
-	value_1[0] = userID
-	value_1[1] = clientID
-	var value_2 string = StdTextGo_FromBytes(payload)
-	value_1[2] = value_2
-	value_1[3] = version.Value
-	var value_3 string = Timestamp_CanonicalNow()
-	value_1[4] = value_3
-	arguments := value_1
+	var value_0 [5]Any
+	value_0[0] = userID
+	value_0[1] = clientID
+	var value_1 string = StdTextGo_FromBytes(payload)
+	value_0[2] = value_1
+	value_0[3] = version.Value
+	var value_2 string = Timestamp_CanonicalNow()
+	value_0[4] = value_2
+	arguments := value_0
 	_ = arguments
-	var value_4 string = "\nINSERT INTO server_encrypted_payloads(user_id_hash,client_id,payload_json,server_version,created_at)\nVALUES(?1,?2,?3,?4,?5)"
-	written := StdSqlGo_ExecTx(transaction, context, value_4, arguments[0:5:5])
+	var value_3 string = "\nINSERT INTO server_encrypted_payloads(user_id_hash,client_id,payload_json,server_version,created_at)\nVALUES(?1,?2,?3,?4,?5)"
+	written := StdSqlGo_ExecTx(transaction, context, value_3, arguments[0:5:5])
 	result.Error = written.Error
 	if result.Error != nil {
 		return result
 	}
 	result.Version = version.Value
-	var value_5 Error = StdSqlGo_Commit(transaction)
-	result.Error = value_5
+	result.Error = StdSqlGo_Commit(transaction)
 	return result
 }
 
@@ -201,19 +197,16 @@ func EncryptedPayloads_Bytes(database *Database, context Context, userID string)
 	value_1[0] = &(total)
 	destinations := value_1
 	_ = destinations
-	var value_2 *Row = StdSqlGo_QueryRow(database, context, "\nSELECT SUM(LENGTH(payload_json))\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1", arguments[0:1:1])
-	row := value_2
-	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_3
-	var value_4 bool = result.Error == nil
-	var value_5 bool = value_4
-	if value_5 {
-		var value_6 bool = EncryptedPayloads_TotalValid(total)
-		value_5 = value_6
+	row := StdSqlGo_QueryRow(database, context, "\nSELECT SUM(LENGTH(payload_json))\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1", arguments[0:1:1])
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	var value_2 bool = result.Error == nil
+	var value_3 bool = value_2
+	if value_3 {
+		var value_4 bool = EncryptedPayloads_TotalValid(total)
+		value_3 = value_4
 	}
-	if value_5 {
-		var value_7 int64 = EncryptedPayloads_TotalValue(total)
-		result.Value = value_7
+	if value_3 {
+		result.Value = EncryptedPayloads_TotalValue(total)
 	}
 	return result
 }
@@ -231,15 +224,13 @@ func EncryptedPayloads_Prune(database *Database, context Context, userID string,
 	transaction := opened.Value
 	defer (*sql.Tx).Rollback(transaction)
 	if int64(maxAge) > 0 {
-		var value_0 Time = StdTimeGo_UTC(StdTimeGo_Now())
-		cutoff := Timestamp_CanonicalTimestamp(StdTimeGo_Add(value_0, Duration(0-int64(maxAge))))
-		var value_1 [2]Any
-		value_1[0] = userID
-		value_1[1] = cutoff
-		arguments := value_1
+		cutoff := Timestamp_CanonicalTimestamp(StdTimeGo_Add(StdTimeGo_UTC(StdTimeGo_Now()), Duration(0-int64(maxAge))))
+		var value_0 [2]Any
+		value_0[0] = userID
+		value_0[1] = cutoff
+		arguments := value_0
 		_ = arguments
-		var value_2 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_encrypted_payloads\nWHERE user_id_hash=?1 AND created_at<?2", arguments[0:2:2])
-		deleted := value_2
+		deleted := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_encrypted_payloads\nWHERE user_id_hash=?1 AND created_at<?2", arguments[0:2:2])
 		_ = deleted
 		result.Error = deleted.Error
 		if result.Error != nil {
@@ -250,34 +241,32 @@ func EncryptedPayloads_Prune(database *Database, context Context, userID string,
 		result.Value.Deleted += affected.Value
 	}
 	if maxBytes > 0 {
-		var value_3 [1]Any
-		value_3[0] = userID
-		arguments := value_3
+		var value_1 [1]Any
+		value_1[0] = userID
+		arguments := value_1
 		_ = arguments
 		for true {
 			var total PayloadByteTotal = *new(PayloadByteTotal)
-			var value_4 [1]Any
-			value_4[0] = &(total)
-			destinations := value_4
+			var value_2 [1]Any
+			value_2[0] = &(total)
+			destinations := value_2
 			_ = destinations
-			var value_5 *Row = StdSqlGo_QueryRowTx(transaction, context, "\nSELECT SUM(LENGTH(payload_json))\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1", arguments[0:1:1])
-			row := value_5
-			var value_6 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-			result.Error = value_6
+			row := StdSqlGo_QueryRowTx(transaction, context, "\nSELECT SUM(LENGTH(payload_json))\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1", arguments[0:1:1])
+			result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 			if result.Error != nil {
 				return result
 			}
-			var value_7 bool = EncryptedPayloads_TotalValid(total)
-			var value_8 bool = !value_7
-			if !value_8 {
-				var value_9 int64 = EncryptedPayloads_TotalValue(total)
-				value_8 = (value_9 <= maxBytes)
+			var value_3 bool = EncryptedPayloads_TotalValid(total)
+			var value_4 bool = !value_3
+			if !value_4 {
+				var value_5 bool = EncryptedPayloads_TotalValue(total) <= maxBytes
+				value_4 = value_5
 			}
-			if value_8 {
+			if value_4 {
 				break
 			}
-			var value_10 string = "\nDELETE FROM server_encrypted_payloads\nWHERE id=(\n\tSELECT id\n\tFROM server_encrypted_payloads\n\tWHERE user_id_hash=?1\n\tORDER BY server_version,id\n\tLIMIT 1\n)"
-			deleted := StdSqlGo_ExecTx(transaction, context, value_10, arguments[0:1:1])
+			var value_6 string = "\nDELETE FROM server_encrypted_payloads\nWHERE id=(\n\tSELECT id\n\tFROM server_encrypted_payloads\n\tWHERE user_id_hash=?1\n\tORDER BY server_version,id\n\tLIMIT 1\n)"
+			deleted := StdSqlGo_ExecTx(transaction, context, value_6, arguments[0:1:1])
 			_ = deleted
 			result.Error = deleted.Error
 			if result.Error != nil {
@@ -291,7 +280,6 @@ func EncryptedPayloads_Prune(database *Database, context Context, userID string,
 			result.Value.Deleted += affected.Value
 		}
 	}
-	var value_11 Error = StdSqlGo_Commit(transaction)
-	result.Error = value_11
+	result.Error = StdSqlGo_Commit(transaction)
 	return result
 }

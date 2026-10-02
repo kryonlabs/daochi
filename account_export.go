@@ -83,34 +83,32 @@ func AccountExport_QueryRows(database *Database, context Context, query string, 
 			destinations[index] = &(values[index])
 			index++
 		}
-		var value_0 Error = StdSqlGo_ScanRows(rows, destinations)
-		result.Error = value_0
+		result.Error = StdSqlGo_ScanRows(rows, destinations)
 		if result.Error != nil {
 			return result
 		}
 		var item __type_7d6cc8a85f09fc88 = *new(__type_7d6cc8a85f09fc88)
-		var value_1 *__type_7d6cc8a85f09fc88 = &(item)
-		if (*value_1) == nil {
-			(*value_1) = make(__type_7d6cc8a85f09fc88)
+		var value_0 *__type_7d6cc8a85f09fc88 = &(item)
+		if (*value_0) == nil {
+			(*value_0) = make(__type_7d6cc8a85f09fc88)
 		}
 		index = 0
 		for index < int64(len(columns.Value)) {
 			column := columns.Value[index]
-			var value_2 *__type_7d6cc8a85f09fc88 = &(item)
-			var value_3 string = column
-			var value_5 Any = AccountExport_RowValue(column, values[index], jsonFields)
-			var value_4 Any = value_5
-			if (*value_2) == nil {
-				(*value_2) = make(__type_7d6cc8a85f09fc88)
+			var value_1 *__type_7d6cc8a85f09fc88 = &(item)
+			var value_2 string = column
+			var value_4 Any = AccountExport_RowValue(column, values[index], jsonFields)
+			var value_3 Any = value_4
+			if (*value_1) == nil {
+				(*value_1) = make(__type_7d6cc8a85f09fc88)
 			}
-			(*value_2)[value_3] = value_4
+			(*value_1)[value_2] = value_3
 			index++
 		}
 		output = append(output, item)
 	}
 	result.Value = output
-	var value_6 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_6
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -130,79 +128,77 @@ func AccountExport_Export(database *Database, context Context, userID string) Ac
 	destinations[0] = &(alias)
 	destinations[1] = &(response.ProfileIcon)
 	var value_1 *Row = StdSqlGo_QueryRow(database, context, "\nSELECT alias,profile_icon\nFROM server_users\nWHERE user_id_hash=?1", arguments[0:1:1])
-	var value_2 Error = StdSqlGo_ScanRow(value_1, destinations[0:2:2])
-	result.Error = value_2
+	result.Error = StdSqlGo_ScanRow(value_1, destinations[0:2:2])
 	if result.Error != nil {
 		return result
 	}
 	if StdSqlGo_NullStringValid(alias) {
-		var value_3 string = StdSqlGo_NullStringValue(alias)
-		response.AccountAlias = value_3
+		var value_2 string = StdSqlGo_NullStringValue(alias)
+		response.AccountAlias = value_2
 	}
-	var value_4 [19]TableQuery
-	var value_5 string = "SELECT user_id_hash, alias, profile_icon, created_at, last_seen_at FROM server_users WHERE user_id_hash=?1"
-	value_4[0] = TableQuery{Name: "users", Query: value_5}
-	var value_6 string = "SELECT client_id, created_at, last_seen_at, last_login_at, last_sync_at, last_since_server_version, last_seen_server_version, protocol_version, last_client_clock FROM server_clients WHERE user_id_hash=?1 ORDER BY last_seen_at DESC, client_id"
-	value_4[1] = TableQuery{Name: "clients", Query: value_6}
-	var value_7 TableQuery = TableQuery{Name: "sync_state", Query: "SELECT server_version FROM server_sync_state WHERE user_id_hash=?1"}
-	value_4[2] = value_7
-	var value_8 TableQuery = TableQuery{Name: "sync_compaction", Query: "SELECT compacted_through_version, updated_at FROM server_sync_compaction WHERE user_id_hash=?1"}
-	value_4[3] = value_8
-	var value_9 string = "SELECT id, name, color_r, color_g, color_b, sync_mode, sync_activity, counter_enabled, sort_order, deleted_at, updated_at, server_version FROM server_habits WHERE user_id_hash=?1 ORDER BY sort_order, id"
-	value_4[4] = TableQuery{Name: "habits", Query: value_9}
-	var value_10 string = "SELECT habit_id, local_date, completed, count, updated_at, server_version FROM server_habit_days WHERE user_id_hash=?1 ORDER BY local_date DESC, habit_id"
-	value_4[5] = TableQuery{Name: "habit_days", Query: value_10}
-	var value_11 string = "SELECT id, started_at, local_date, topic, activity, source, rounds_hash, mood_before, mood_after, energy, stress, note, tags, deleted_at, updated_at, server_version FROM server_sessions WHERE user_id_hash=?1 ORDER BY started_at DESC, id"
-	value_4[6] = TableQuery{Name: "sessions", Query: value_11}
-	var value_12 string = "SELECT session_id, round_index, breaths, hold_seconds FROM server_session_rounds WHERE user_id_hash=?1 ORDER BY session_id, round_index"
-	value_4[7] = TableQuery{Name: "session_rounds", Query: value_12}
-	var value_13 string = "SELECT id, session_id, duration_seconds, completed_at, server_version, created_at FROM server_meditation_logs WHERE user_id_hash=?1 ORDER BY completed_at DESC, id"
-	value_4[8] = TableQuery{Name: "meditation_logs", Query: value_13}
-	var value_14 string = "SELECT kind, json, updated_at, server_version FROM server_social_snapshots WHERE user_id_hash=?1 ORDER BY kind"
-	value_4[9] = TableQuery{Name: "social_snapshots", Query: value_14, JsonField: "json"}
-	var value_15 string = "SELECT collection, id, key_id, nonce, ciphertext, updated_at, deleted_at, content_hash, schema_version, parent_id, server_version FROM server_encrypted_records WHERE user_id_hash=?1 ORDER BY collection, id"
-	value_4[10] = TableQuery{Name: "encrypted_records", Query: value_15}
-	var value_16 string = "SELECT op_id, client_id, seq, entity_type, entity_id, local_date, op_type, payload_json, created_at, server_version FROM server_sync_ops WHERE user_id_hash=?1 ORDER BY server_version, client_id, seq"
-	value_4[11] = TableQuery{Name: "sync_ops", Query: value_16, JsonField: "payload_json"}
-	var value_17 string = "SELECT id, client_id, payload_json, created_at, server_version FROM server_encrypted_payloads WHERE user_id_hash=?1 ORDER BY server_version, id"
-	value_4[12] = TableQuery{Name: "encrypted_payloads", Query: value_17, JsonField: "payload_json"}
-	var value_18 string = "SELECT id, client_id, app_id, protocol_version, since_server_version, client_clock, server_version, applied_json, remote_ops, full_snapshot_required, snapshot_reason, encrypted_payload, encrypted_payload_bytes, created_at FROM server_sync_audit WHERE user_id_hash=?1 ORDER BY id DESC LIMIT 200"
-	value_4[13] = TableQuery{Name: "sync_audit", Query: value_18, JsonField: "applied_json"}
-	var value_19 string = "SELECT id, requester_user_id_hash, target_user_id_hash, status, created_at, updated_at FROM server_friend_requests WHERE requester_user_id_hash=?1 OR target_user_id_hash=?1 ORDER BY updated_at DESC, id"
-	value_4[14] = TableQuery{Name: "friend_requests", Query: value_19}
-	var value_20 string = "SELECT user_id_a, user_id_b, created_at FROM server_friendships WHERE user_id_a=?1 OR user_id_b=?1 ORDER BY created_at DESC, user_id_a, user_id_b"
-	value_4[15] = TableQuery{Name: "friendships", Query: value_20}
-	var value_21 string = "SELECT app, practice, metric, value, label, local_date, updated_at FROM server_profile_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric"
-	value_4[16] = TableQuery{Name: "profile_stats", Query: value_21}
-	var value_22 string = "SELECT app, practice, metric, source_version, calc_version, value, label, local_date, updated_at FROM server_leaderboard_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric"
-	value_4[17] = TableQuery{Name: "leaderboard_stats", Query: value_22}
-	var value_23 string = "SELECT id, source_app_id, target_app_id, collection_prefix, permission, status, created_at, updated_at, revoked_at FROM server_app_grants WHERE user_id_hash=?1 ORDER BY updated_at DESC, id"
-	value_4[18] = TableQuery{Name: "app_grants", Query: value_23}
-	queries := value_4
-	for it_index := int64(0); it_index < 19; it_index++ {
-		item := queries[it_index]
+	var value_3 [19]TableQuery
+	var value_4 string = "SELECT user_id_hash, alias, profile_icon, created_at, last_seen_at FROM server_users WHERE user_id_hash=?1"
+	value_3[0] = TableQuery{Name: "users", Query: value_4}
+	var value_5 string = "SELECT client_id, created_at, last_seen_at, last_login_at, last_sync_at, last_since_server_version, last_seen_server_version, protocol_version, last_client_clock FROM server_clients WHERE user_id_hash=?1 ORDER BY last_seen_at DESC, client_id"
+	value_3[1] = TableQuery{Name: "clients", Query: value_5}
+	var value_6 TableQuery = TableQuery{Name: "sync_state", Query: "SELECT server_version FROM server_sync_state WHERE user_id_hash=?1"}
+	value_3[2] = value_6
+	var value_7 TableQuery = TableQuery{Name: "sync_compaction", Query: "SELECT compacted_through_version, updated_at FROM server_sync_compaction WHERE user_id_hash=?1"}
+	value_3[3] = value_7
+	var value_8 string = "SELECT id, name, color_r, color_g, color_b, sync_mode, sync_activity, counter_enabled, sort_order, deleted_at, updated_at, server_version FROM server_habits WHERE user_id_hash=?1 ORDER BY sort_order, id"
+	value_3[4] = TableQuery{Name: "habits", Query: value_8}
+	var value_9 string = "SELECT habit_id, local_date, completed, count, updated_at, server_version FROM server_habit_days WHERE user_id_hash=?1 ORDER BY local_date DESC, habit_id"
+	value_3[5] = TableQuery{Name: "habit_days", Query: value_9}
+	var value_10 string = "SELECT id, started_at, local_date, topic, activity, source, rounds_hash, mood_before, mood_after, energy, stress, note, tags, deleted_at, updated_at, server_version FROM server_sessions WHERE user_id_hash=?1 ORDER BY started_at DESC, id"
+	value_3[6] = TableQuery{Name: "sessions", Query: value_10}
+	var value_11 string = "SELECT session_id, round_index, breaths, hold_seconds FROM server_session_rounds WHERE user_id_hash=?1 ORDER BY session_id, round_index"
+	value_3[7] = TableQuery{Name: "session_rounds", Query: value_11}
+	var value_12 string = "SELECT id, session_id, duration_seconds, completed_at, server_version, created_at FROM server_meditation_logs WHERE user_id_hash=?1 ORDER BY completed_at DESC, id"
+	value_3[8] = TableQuery{Name: "meditation_logs", Query: value_12}
+	var value_13 string = "SELECT kind, json, updated_at, server_version FROM server_social_snapshots WHERE user_id_hash=?1 ORDER BY kind"
+	value_3[9] = TableQuery{Name: "social_snapshots", Query: value_13, JsonField: "json"}
+	var value_14 string = "SELECT collection, id, key_id, nonce, ciphertext, updated_at, deleted_at, content_hash, schema_version, parent_id, server_version FROM server_encrypted_records WHERE user_id_hash=?1 ORDER BY collection, id"
+	value_3[10] = TableQuery{Name: "encrypted_records", Query: value_14}
+	var value_15 string = "SELECT op_id, client_id, seq, entity_type, entity_id, local_date, op_type, payload_json, created_at, server_version FROM server_sync_ops WHERE user_id_hash=?1 ORDER BY server_version, client_id, seq"
+	value_3[11] = TableQuery{Name: "sync_ops", Query: value_15, JsonField: "payload_json"}
+	var value_16 string = "SELECT id, client_id, payload_json, created_at, server_version FROM server_encrypted_payloads WHERE user_id_hash=?1 ORDER BY server_version, id"
+	value_3[12] = TableQuery{Name: "encrypted_payloads", Query: value_16, JsonField: "payload_json"}
+	var value_17 string = "SELECT id, client_id, app_id, protocol_version, since_server_version, client_clock, server_version, applied_json, remote_ops, full_snapshot_required, snapshot_reason, encrypted_payload, encrypted_payload_bytes, created_at FROM server_sync_audit WHERE user_id_hash=?1 ORDER BY id DESC LIMIT 200"
+	value_3[13] = TableQuery{Name: "sync_audit", Query: value_17, JsonField: "applied_json"}
+	var value_18 string = "SELECT id, requester_user_id_hash, target_user_id_hash, status, created_at, updated_at FROM server_friend_requests WHERE requester_user_id_hash=?1 OR target_user_id_hash=?1 ORDER BY updated_at DESC, id"
+	value_3[14] = TableQuery{Name: "friend_requests", Query: value_18}
+	var value_19 string = "SELECT user_id_a, user_id_b, created_at FROM server_friendships WHERE user_id_a=?1 OR user_id_b=?1 ORDER BY created_at DESC, user_id_a, user_id_b"
+	value_3[15] = TableQuery{Name: "friendships", Query: value_19}
+	var value_20 string = "SELECT app, practice, metric, value, label, local_date, updated_at FROM server_profile_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric"
+	value_3[16] = TableQuery{Name: "profile_stats", Query: value_20}
+	var value_21 string = "SELECT app, practice, metric, source_version, calc_version, value, label, local_date, updated_at FROM server_leaderboard_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric"
+	value_3[17] = TableQuery{Name: "leaderboard_stats", Query: value_21}
+	var value_22 string = "SELECT id, source_app_id, target_app_id, collection_prefix, permission, status, created_at, updated_at, revoked_at FROM server_app_grants WHERE user_id_hash=?1 ORDER BY updated_at DESC, id"
+	value_3[18] = TableQuery{Name: "app_grants", Query: value_22}
+	queries := value_3
+	for _, item := range queries {
 		var fields __type_c922d3f56b74fd5a = *new(__type_c922d3f56b74fd5a)
 		if item.JsonField != "" {
-			var value_24 *__type_c922d3f56b74fd5a = &(fields)
-			var value_25 string = item.JsonField
-			var value_26 bool = true
-			if (*value_24) == nil {
-				(*value_24) = make(__type_c922d3f56b74fd5a)
+			var value_23 *__type_c922d3f56b74fd5a = &(fields)
+			var value_24 string = item.JsonField
+			var value_25 bool = true
+			if (*value_23) == nil {
+				(*value_23) = make(__type_c922d3f56b74fd5a)
 			}
-			(*value_24)[value_25] = value_26
+			(*value_23)[value_24] = value_25
 		}
 		queried := AccountExport_QueryRows(database, context, item.Query, userID, fields)
 		result.Error = queried.Error
 		if result.Error != nil {
 			return result
 		}
-		var value_27 *__type_7f1b14325d38f3e4 = &(response.Tables)
-		var value_28 string = item.Name
-		var value_29 []__type_7d6cc8a85f09fc88 = queried.Value
-		if (*value_27) == nil {
-			(*value_27) = make(__type_7f1b14325d38f3e4)
+		var value_26 *__type_7f1b14325d38f3e4 = &(response.Tables)
+		var value_27 string = item.Name
+		var value_28 []__type_7d6cc8a85f09fc88 = queried.Value
+		if (*value_26) == nil {
+			(*value_26) = make(__type_7f1b14325d38f3e4)
 		}
-		(*value_27)[value_28] = value_29
+		(*value_26)[value_27] = value_28
 	}
 	result.Value = response
 	return result

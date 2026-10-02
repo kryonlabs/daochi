@@ -30,9 +30,9 @@ type FlagSet = flag.FlagSet
 
 type ErrorHandling = flag.ErrorHandling
 
-type zir_e637c215c4967bec_NullInteger = sql.NullInt64
+type zir_0732531d6612aaed_NullInteger = sql.NullInt64
 
-type zir_0732531d6612aaed_RowsResult struct {
+type zir_242d5027da75102e_RowsResult struct {
 	Value *Rows
 	Error Error
 }
@@ -51,23 +51,23 @@ func Inspect_OpenDatabase(Driver string, Source string) DatabaseResult {
 	return result
 }
 
-func Inspect_QueryAll(Database *Database, Context Context, Query string) zir_0732531d6612aaed_RowsResult {
-	var result zir_0732531d6612aaed_RowsResult
+func Inspect_QueryAll(Database *Database, Context Context, Query string) zir_242d5027da75102e_RowsResult {
+	var result zir_242d5027da75102e_RowsResult
 	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query)
 	return result
 }
 
-func Inspect_QueryUser(Database *Database, Context Context, Query string, UserID string) zir_0732531d6612aaed_RowsResult {
-	var result zir_0732531d6612aaed_RowsResult
+func Inspect_QueryUser(Database *Database, Context Context, Query string, UserID string) zir_242d5027da75102e_RowsResult {
+	var result zir_242d5027da75102e_RowsResult
 	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query, UserID)
 	return result
 }
 
-func Inspect_IntegerValid(Value zir_e637c215c4967bec_NullInteger) bool {
+func Inspect_IntegerValid(Value zir_0732531d6612aaed_NullInteger) bool {
 	return Value.Valid
 }
 
-func Inspect_IntegerValue(Value zir_e637c215c4967bec_NullInteger) int64 {
+func Inspect_IntegerValue(Value zir_0732531d6612aaed_NullInteger) int64 {
 	return Value.Int64
 }
 
@@ -139,6 +139,7 @@ func Inspect_Run(context Context, arguments []string, options InspectOptions) Er
 }
 
 func Inspect_Open(path string) DatabaseResult {
+	SqliteDriver_Initialize()
 	result := Inspect_OpenDatabase("sqlite3", fmt.Sprintf("file:%s?mode=ro&_query_only=1", path))
 	if result.Error != nil {
 		result.Value = nil
@@ -168,8 +169,7 @@ func Inspect_Summary(context Context, database *Database, out Writer) Error {
 }
 
 func Inspect_Users(context Context, database *Database, out Writer, full bool) Error {
-	var value_0 string = "\nSELECT user_id_hash, hex(public_key), created_at, last_seen_at\nFROM server_users\nORDER BY last_seen_at DESC\n"
-	queried := Inspect_QueryAll(database, context, value_0)
+	queried := Inspect_QueryAll(database, context, "\nSELECT user_id_hash, hex(public_key), created_at, last_seen_at\nFROM server_users\nORDER BY last_seen_at DESC\n")
 	if queried.Error != nil {
 		return queried.Error
 	}
@@ -185,11 +185,9 @@ func Inspect_Users(context Context, database *Database, out Writer, full bool) E
 		if error != nil {
 			return error
 		}
-		var value_1 Writer = out
-		var value_2 string = Inspect_RedactID(userID, full)
-		var value_3 string = strings.ToLower(publicKey)
-		var value_4 string = Inspect_RedactID(value_3, full)
-		fmt.Fprintf(value_1, "%s  key=%s  created=%s  last_seen=%s\n", value_2, value_4, createdAt, lastSeenAt)
+		var value_0 string = Inspect_RedactID(userID, full)
+		var value_1 string = Inspect_RedactID(strings.ToLower(publicKey), full)
+		fmt.Fprintf(out, "%s  key=%s  created=%s  last_seen=%s\n", value_0, value_1, createdAt, lastSeenAt)
 	}
 	return StdSqlGo_RowsError(rows)
 }
@@ -205,18 +203,14 @@ func Inspect_User(context Context, database *Database, out Writer, userID string
 	var lastSeenAt string = ""
 	var value_1 *Row = (*sql.DB).QueryRowContext(database, context, "\nSELECT hex(public_key), created_at, last_seen_at\nFROM server_users\nWHERE user_id_hash=?1\n", userID)
 	error := (*sql.Row).Scan(value_1, &(publicKey), &(createdAt), &(lastSeenAt))
-	var value_2 Error = error
-	if value_2 == StdSqlGo_NoRows() {
+	if error == StdSqlGo_NoRows() {
 		return StdErrorsGo_New("user not found")
 	}
 	if error != nil {
 		return error
 	}
-	var value_3 Writer = out
-	fmt.Fprintf(value_3, "User %s\n", Inspect_RedactID(userID, full))
-	var value_4 Writer = out
-	var value_5 string = strings.ToLower(publicKey)
-	fmt.Fprintf(value_4, "public_key=%s\n", Inspect_RedactID(value_5, full))
+	fmt.Fprintf(out, "User %s\n", Inspect_RedactID(userID, full))
+	fmt.Fprintf(out, "public_key=%s\n", Inspect_RedactID(strings.ToLower(publicKey), full))
 	fmt.Fprintf(out, "created=%s\nlast_seen=%s\n", createdAt, lastSeenAt)
 	for it_index := int64(0); it_index < 6; it_index++ {
 		table := UserTables[it_index]
@@ -243,21 +237,19 @@ func Inspect_Doctor(context Context, database *Database, out Writer, userID stri
 	var lastSeenAt string = ""
 	var value_1 *Row = (*sql.DB).QueryRowContext(database, context, "\nSELECT created_at,last_seen_at\nFROM server_users\nWHERE user_id_hash=?1\n", userID)
 	error := (*sql.Row).Scan(value_1, &(createdAt), &(lastSeenAt))
-	var value_2 Error = error
-	if value_2 == StdSqlGo_NoRows() {
+	if error == StdSqlGo_NoRows() {
 		return StdErrorsGo_New("user not found")
 	}
 	if error != nil {
 		return error
 	}
 	var version int64 = 0
-	var value_3 *Row = (*sql.DB).QueryRowContext(database, context, "\nSELECT server_version\nFROM server_sync_state\nWHERE user_id_hash=?1\n", userID)
-	(*sql.Row).Scan(value_3, &(version))
+	var value_2 *Row = (*sql.DB).QueryRowContext(database, context, "\nSELECT server_version\nFROM server_sync_state\nWHERE user_id_hash=?1\n", userID)
+	(*sql.Row).Scan(value_2, &(version))
 	var compactedThrough int64 = 0
-	var value_4 *Row = (*sql.DB).QueryRowContext(database, context, "\nSELECT compacted_through_version\nFROM server_sync_compaction\nWHERE user_id_hash=?1\n", userID)
-	(*sql.Row).Scan(value_4, &(compactedThrough))
-	var value_5 Writer = out
-	fmt.Fprintf(value_5, "Daochi doctor %s\n", Inspect_RedactID(userID, full))
+	var value_3 *Row = (*sql.DB).QueryRowContext(database, context, "\nSELECT compacted_through_version\nFROM server_sync_compaction\nWHERE user_id_hash=?1\n", userID)
+	(*sql.Row).Scan(value_3, &(compactedThrough))
+	fmt.Fprintf(out, "Daochi doctor %s\n", Inspect_RedactID(userID, full))
 	fmt.Fprintf(out, "status=ok server_version=%d compacted_through=%d\n", version, compactedThrough)
 	fmt.Fprintf(out, "created=%s last_seen=%s\n", createdAt, lastSeenAt)
 	for it_index := int64(0); it_index < 9; it_index++ {
@@ -282,59 +274,48 @@ func Inspect_Doctor(context Context, database *Database, out Writer, userID stri
 func Inspect_DoctorWarnings(context Context, database *Database, out Writer, userID string) Error {
 	warnings := make([]string, int(int(0)))
 	var legacyClients int = 0
-	var value_0 string = "\nSELECT COUNT(*)\nFROM server_clients\nWHERE user_id_hash=?1 AND protocol_version>0 AND protocol_version<5\n"
-	error := (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, value_0, userID), &(legacyClients))
+	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "\nSELECT COUNT(*)\nFROM server_clients\nWHERE user_id_hash=?1 AND protocol_version>0 AND protocol_version<5\n", userID)
+	error := (*sql.Row).Scan(value_0, &(legacyClients))
 	if error != nil {
 		return error
 	}
 	if legacyClients > 0 {
-		var value_1 []string = warnings
-		var value_2 []string = append(value_1, fmt.Sprintf("%d legacy clients below protocol 5 seen recently", int64(int64(legacyClients))))
-		warnings = value_2
+		warnings = append(warnings, fmt.Sprintf("%d legacy clients below protocol 5 seen recently", int64(int64(legacyClients))))
 	}
 	var payloadCount int = 0
-	var payloadBytes zir_e637c215c4967bec_NullInteger = *new(zir_e637c215c4967bec_NullInteger)
-	var value_3 string = "\nSELECT COUNT(*),SUM(LENGTH(payload_json))\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1\n"
-	var value_4 Error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, value_3, userID), &(payloadCount), &(payloadBytes))
-	error = value_4
+	var payloadBytes zir_0732531d6612aaed_NullInteger = *new(zir_0732531d6612aaed_NullInteger)
+	var value_1 *Row = (*sql.DB).QueryRowContext(database, context, "\nSELECT COUNT(*),SUM(LENGTH(payload_json))\nFROM server_encrypted_payloads\nWHERE user_id_hash=?1\n", userID)
+	error = (*sql.Row).Scan(value_1, &(payloadCount), &(payloadBytes))
 	if error != nil {
 		return error
 	}
 	if payloadCount > 1000 {
-		var value_5 []string = warnings
-		var value_6 string = fmt.Sprintf("%d encrypted payloads queued; consider pagination/retention tuning", int64(int64(payloadCount)))
-		warnings = append(value_5, value_6)
+		warnings = append(warnings, fmt.Sprintf("%d encrypted payloads queued; consider pagination/retention tuning", int64(int64(payloadCount))))
 	}
-	var value_7 bool = Inspect_IntegerValid(payloadBytes)
-	var value_8 bool = value_7
-	if value_8 {
-		var value_9 bool = Inspect_IntegerValue(payloadBytes) > 67108864
-		value_8 = value_9
+	var value_2 bool = Inspect_IntegerValid(payloadBytes)
+	var value_3 bool = value_2
+	if value_3 {
+		var value_4 bool = Inspect_IntegerValue(payloadBytes) > 67108864
+		value_3 = value_4
 	}
-	if value_8 {
-		var value_10 []string = warnings
-		var value_11 string = fmt.Sprintf("%d encrypted payload bytes stored; check account quota/retention", int64(Inspect_IntegerValue(payloadBytes)))
-		warnings = append(value_10, value_11)
+	if value_3 {
+		warnings = append(warnings, fmt.Sprintf("%d encrypted payload bytes stored; check account quota/retention", int64(Inspect_IntegerValue(payloadBytes))))
 	}
 	var fullSnapshots int = 0
-	var value_12 string = "\nSELECT COUNT(*)\nFROM (\n\tSELECT full_snapshot_required\n\tFROM server_sync_audit\n\tWHERE user_id_hash=?1\n\tORDER BY id DESC\n\tLIMIT 8\n)\nWHERE full_snapshot_required!=0\n"
-	var value_13 Error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, value_12, userID), &(fullSnapshots))
-	error = value_13
+	var value_5 string = "\nSELECT COUNT(*)\nFROM (\n\tSELECT full_snapshot_required\n\tFROM server_sync_audit\n\tWHERE user_id_hash=?1\n\tORDER BY id DESC\n\tLIMIT 8\n)\nWHERE full_snapshot_required!=0\n"
+	error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, value_5, userID), &(fullSnapshots))
 	if error != nil {
 		return error
 	}
 	if fullSnapshots >= 3 {
-		var value_14 []string = warnings
-		var value_15 []string = append(value_14, fmt.Sprintf("%d recent syncs required full snapshots", int64(int64(fullSnapshots))))
-		warnings = value_15
+		warnings = append(warnings, fmt.Sprintf("%d recent syncs required full snapshots", int64(int64(fullSnapshots))))
 	}
 	fmt.Fprintln(out, "\nWarnings")
 	if int64(len(warnings)) == 0 {
 		fmt.Fprintln(out, "- none")
 		return nil
 	}
-	for it_index := int64(0); it_index < int64(len(warnings)); it_index++ {
-		warning := warnings[it_index]
+	for _, warning := range warnings {
 		fmt.Fprintf(out, "- %s\n", warning)
 	}
 	return nil
@@ -356,8 +337,7 @@ func Inspect_DoctorClients(context Context, database *Database, out Writer, user
 		var protocol int = 0
 		var seenVersion int64 = 0
 		var clientClock int64 = 0
-		var value_1 Error = (*sql.Rows).Scan(rows, &(clientID), &(protocol), &(loginAt), &(syncAt), &(seenVersion), &(clientClock))
-		error := value_1
+		error := (*sql.Rows).Scan(rows, &(clientID), &(protocol), &(loginAt), &(syncAt), &(seenVersion), &(clientClock))
 		if error != nil {
 			return error
 		}
@@ -365,13 +345,11 @@ func Inspect_DoctorClients(context Context, database *Database, out Writer, user
 		if protocol > 0 && protocol < 5 {
 			status = "legacy"
 		}
-		var value_2 Writer = out
-		var value_3 string = clientID
-		var value_4 int = protocol
-		var value_5 string = status
-		var value_6 string = Inspect_NullText(loginAt)
-		var value_7 string = Inspect_NullText(syncAt)
-		fmt.Fprintf(value_2, "%s protocol=%d status=%s last_login=%s last_sync=%s seen=%d clock=%d\n", value_3, value_4, value_5, value_6, value_7, seenVersion, clientClock)
+		var value_1 string = clientID
+		var value_2 int = protocol
+		var value_3 string = Inspect_NullText(loginAt)
+		var value_4 string = Inspect_NullText(syncAt)
+		fmt.Fprintf(out, "%s protocol=%d status=%s last_login=%s last_sync=%s seen=%d clock=%d\n", value_1, value_2, status, value_3, value_4, seenVersion, clientClock)
 	}
 	return StdSqlGo_RowsError(rows)
 }
@@ -395,20 +373,18 @@ func Inspect_DoctorAudit(context Context, database *Database, out Writer, userID
 		var encryptedPayload int = 0
 		var version int64 = 0
 		var encryptedBytes int64 = 0
-		var value_1 Error = (*sql.Rows).Scan(rows, &(clientID), &(protocol), &(version), &(remoteOps), &(fullSnapshot), &(snapshotReason), &(encryptedPayload), &(encryptedBytes), &(createdAt))
-		error := value_1
+		error := (*sql.Rows).Scan(rows, &(clientID), &(protocol), &(version), &(remoteOps), &(fullSnapshot), &(snapshotReason), &(encryptedPayload), &(encryptedBytes), &(createdAt))
 		if error != nil {
 			return error
 		}
-		var value_2 Writer = out
-		var value_3 string = "%s protocol=%d version=%d remote_ops=%d full_snapshot=%t reason=%s encrypted_payload=%t bytes=%d at=%s\n"
-		var value_4 string = clientID
-		var value_5 int = protocol
-		var value_6 int64 = version
-		var value_7 int = remoteOps
-		var value_8 bool = fullSnapshot != 0
-		var value_9 string = Inspect_EmptyText(snapshotReason, "-")
-		fmt.Fprintf(value_2, value_3, value_4, value_5, value_6, value_7, value_8, value_9, encryptedPayload != 0, encryptedBytes, createdAt)
+		var value_1 string = "%s protocol=%d version=%d remote_ops=%d full_snapshot=%t reason=%s encrypted_payload=%t bytes=%d at=%s\n"
+		var value_2 string = clientID
+		var value_3 int = protocol
+		var value_4 int64 = version
+		var value_5 int = remoteOps
+		var value_6 bool = fullSnapshot != 0
+		var value_7 string = Inspect_EmptyText(snapshotReason, "-")
+		fmt.Fprintf(out, value_1, value_2, value_3, value_4, value_5, value_6, value_7, encryptedPayload != 0, encryptedBytes, createdAt)
 	}
 	return StdSqlGo_RowsError(rows)
 }
@@ -455,8 +431,7 @@ func Inspect_UserSessions(context Context, database *Database, out Writer, userI
 		var localDate int = 0
 		var activity int = 0
 		var deletedAt int = 0
-		var value_1 Error = (*sql.Rows).Scan(rows, &(id), &(startedAt), &(localDate), &(topic), &(activity), &(deletedAt), &(updatedAt))
-		error := value_1
+		error := (*sql.Rows).Scan(rows, &(id), &(startedAt), &(localDate), &(topic), &(activity), &(deletedAt), &(updatedAt))
 		if error != nil {
 			return error
 		}

@@ -36,8 +36,7 @@ const SeedQuery = "INSERT INTO token_assets(issuer_id,asset_id,display_name,deci
 
 func TokenAssets_List(database *Database, context Context) AssetsResult {
 	var result AssetsResult = AssetsResult{}
-	var value_0 string = "SELECT issuer_id,asset_id,display_name,decimals,status\nFROM token_assets\nORDER BY issuer_id,asset_id"
-	queried := TokenAssets_Query(database, context, value_0)
+	queried := TokenAssets_Query(database, context, "SELECT issuer_id,asset_id,display_name,decimals,status\nFROM token_assets\nORDER BY issuer_id,asset_id")
 	result.Error = queried.Error
 	if result.Error != nil {
 		return result
@@ -47,16 +46,14 @@ func TokenAssets_List(database *Database, context Context) AssetsResult {
 	var values []TokenAsset = nil
 	for StdSqlGo_Next(rows) {
 		var item TokenAsset = TokenAsset{}
-		var value_1 Error = (*sql.Rows).Scan(rows, &(item.IssuerID), &(item.AssetID), &(item.DisplayName), &(item.Decimals), &(item.Status))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(item.IssuerID), &(item.AssetID), &(item.DisplayName), &(item.Decimals), &(item.Status))
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, item)
 	}
 	result.Value = values
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 

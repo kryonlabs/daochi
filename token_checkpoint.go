@@ -55,10 +55,8 @@ func TokenCheckpoint_Latest(database *Database, context Context) CheckpointResul
 	var result CheckpointResult = CheckpointResult{}
 	var item TokenCheckpoint = TokenCheckpoint{}
 	var value_0 string = "SELECT ledger_seq,issuer_id,asset_id,ledger_root,signature,created_at\nFROM token_checkpoints\nORDER BY ledger_seq DESC\nLIMIT 1"
-	var value_1 Error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, value_0), &(item.LedgerSeq), &(item.IssuerID), &(item.AssetID), &(item.LedgerRoot), &(item.Signature), &(item.CreatedAt))
-	result.Error = value_1
-	var value_2 Error = result.Error
-	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+	result.Error = (*sql.Row).Scan((*sql.DB).QueryRowContext(database, context, value_0), &(item.LedgerSeq), &(item.IssuerID), &(item.AssetID), &(item.LedgerRoot), &(item.Signature), &(item.CreatedAt))
+	if StdErrorsGo_Is(result.Error, StdSqlGo_NoRows()) {
 		result.Error = nil
 		return result
 	}
@@ -75,8 +73,7 @@ func TokenCheckpoint_Create(database *Database, context Context, signer PrivateK
 		result.Error = unavailable
 		return result
 	}
-	var value_0 string = "SELECT ledger_seq,event_hash\nFROM token_ledger\nWHERE issuer_id=?1 AND asset_id=?2\nORDER BY ledger_seq"
-	queried := TokenCheckpoint_QueryRows(database, context, value_0, "waozi", "waozi:token")
+	queried := TokenCheckpoint_QueryRows(database, context, "SELECT ledger_seq,event_hash\nFROM token_ledger\nWHERE issuer_id=?1 AND asset_id=?2\nORDER BY ledger_seq", "waozi", "waozi:token")
 	result.Error = queried.Error
 	if result.Error != nil {
 		return result
@@ -88,26 +85,22 @@ func TokenCheckpoint_Create(database *Database, context Context, signer PrivateK
 	var sequence int64 = 0
 	for StdSqlGo_Next(rows) {
 		var hash string = ""
-		var value_1 Error = (*sql.Rows).Scan(rows, &(sequence), &(hash))
-		result.Error = value_1
+		result.Error = (*sql.Rows).Scan(rows, &(sequence), &(hash))
 		if result.Error != nil {
 			return result
 		}
 		TokenCheckpoint_WriteString(buffer, hash)
 		(*bytes.Buffer).WriteByte(buffer, uint8(10))
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error != nil {
 		return result
 	}
 	root := Signing_SHA256Hex((*bytes.Buffer).Bytes(buffer))
-	var value_3 string = fmt.Sprintf("ksync-token-checkpoint-v1\n%s\n%s\n%d\n%s\n", "waozi", "waozi:token", int64(sequence), root)
-	message := StdTextGo_ToBytes(value_3)
+	message := StdTextGo_ToBytes(fmt.Sprintf("ksync-token-checkpoint-v1\n%s\n%s\n%d\n%s\n", "waozi", "waozi:token", int64(sequence), root))
 	signature := hex.EncodeToString(StdEd25519Go_Sign(signer, message))
-	var value_4 string = "INSERT INTO token_checkpoints(ledger_seq,issuer_id,asset_id,ledger_root,signature)\nVALUES(?1,?2,?3,?4,?5)\nON CONFLICT(ledger_seq) DO UPDATE SET\nledger_root=excluded.ledger_root,\nsignature=excluded.signature,\ncreated_at=CURRENT_TIMESTAMP"
-	var value_5 zir_752ea6e2e5e596c8_ExecResult = TokenCheckpoint_Insert(database, context, value_4, int64(sequence), "waozi", "waozi:token", root, signature)
-	written := value_5
+	var value_0 string = "INSERT INTO token_checkpoints(ledger_seq,issuer_id,asset_id,ledger_root,signature)\nVALUES(?1,?2,?3,?4,?5)\nON CONFLICT(ledger_seq) DO UPDATE SET\nledger_root=excluded.ledger_root,\nsignature=excluded.signature,\ncreated_at=CURRENT_TIMESTAMP"
+	written := TokenCheckpoint_Insert(database, context, value_0, int64(sequence), "waozi", "waozi:token", root, signature)
 	result.Error = written.Error
 	if result.Error != nil {
 		return result

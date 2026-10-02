@@ -1,6 +1,7 @@
 #import "std/go_types"
 ctx :: #import "std/context_go";
 sql :: #import "std/sql_go";
+driver :: #import "sqlite_driver";
 io :: #import "std/io_go";
 errors :: #import "std/errors_go";
 config :: #import "config";
@@ -145,6 +146,7 @@ Run :: (context: ctx.Context, arguments: []string, options: InspectOptions) -> E
 }
 
 Open :: (path: string) -> DatabaseResult {
+    driver.Initialize()
     result := OpenDatabase("sqlite3", FormatString("file:%s?mode=ro&_query_only=1", path))
     if result.error != null {
         result.value = null

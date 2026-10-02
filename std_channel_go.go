@@ -15,8 +15,7 @@ func StdChannelGo_BothDirections() zir_32aa9a05308e6fce_Direction {
 }
 
 func StdChannelGo_New(element Any, capacity int) Channel {
-	var value_0 Channel = reflect.MakeChan(reflect.ChanOf(StdChannelGo_BothDirections(), reflect.TypeOf(element)), int(capacity))
-	return value_0
+	return reflect.MakeChan(reflect.ChanOf(StdChannelGo_BothDirections(), reflect.TypeOf(element)), int(capacity))
 }
 
 func StdChannelGo_Interface(channel Channel) Any {

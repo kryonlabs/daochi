@@ -29,18 +29,15 @@ func MlDsa44_New() VerifierResult {
 		result.Error = ErrVerifierUnavailable
 		return result
 	}
-	var value_4 VerifySignature = func(value_1 []uint8, value_2 []uint8, value_3 []uint8) bool {
+	result.Value = Verifier_New(func(value_1 []uint8, value_2 []uint8, value_3 []uint8) bool {
 		return MlDsa44_Verify(value_1, value_2, value_3)
-	}
-	var value_5 *Verifier = Verifier_New(value_4)
-	result.Value = value_5
+	})
 	return result
 }
 
 func MlDsa44_Verify(publicKey []uint8, message []uint8, signature []uint8) bool {
 	var value_0 bool = MlDsa44_NativeAvailable()
-	var value_1 bool = !value_0 || int64(len(publicKey)) != 1312 || int64(len(signature)) != 2420 || int64(len(message)) == 0
-	if value_1 {
+	if !value_0 || int64(len(publicKey)) != 1312 || int64(len(signature)) != 2420 || int64(len(message)) == 0 {
 		return false
 	}
 	algorithm := MlDsa44_Algorithm()
@@ -49,17 +46,16 @@ func MlDsa44_Verify(publicKey []uint8, message []uint8, signature []uint8) bool 
 		return false
 	}
 	defer MlDsa44_FreeAtReturn(handle)
-	var value_2 bool = MlDsa44_PublicKeySize(handle) != uint(1312)
-	var value_3 bool = value_2
-	if !value_3 {
-		var value_4 uint = MlDsa44_SignatureSize(handle)
-		value_3 = (value_4 != uint(int64(len(signature))))
+	var value_1 bool = MlDsa44_PublicKeySize(handle) != uint(1312)
+	var value_2 bool = value_1
+	if !value_2 {
+		var value_3 uint = MlDsa44_SignatureSize(handle)
+		value_2 = (value_3 != uint(int64(len(signature))))
 	}
-	if value_3 {
+	if value_2 {
 		return false
 	}
-	var value_5 int32 = MlDsa44_VerifyNative(handle, &(message[0]), uint(uint(int64(len(message)))), &(signature[0]), uint(uint(int64(len(signature)))), &(publicKey[0]))
-	return value_5 == MlDsa44_Success()
+	return MlDsa44_VerifyNative(handle, &(message[0]), uint(uint(int64(len(message)))), &(signature[0]), uint(uint(int64(len(signature)))), &(publicKey[0])) == MlDsa44_Success()
 }
 
 func MlDsa44_Sign(message []uint8, privateKey []uint8) PrivateKeySignatureResult {
@@ -86,18 +82,15 @@ func MlDsa44_Sign(message []uint8, privateKey []uint8) PrivateKeySignatureResult
 	if value_2 {
 		return result
 	}
-	var value_4 int32 = MlDsa44_SignNative(handle, &(signature[0]), &(signatureLength), &(message[0]), uint(uint(int64(len(message)))), &(privateKey[0]))
-	status := value_4
-	var value_5 int32 = status
-	var value_6 bool = value_5 != MlDsa44_Success()
-	if value_6 || signatureLength != uint(2420) {
+	status := MlDsa44_SignNative(handle, &(signature[0]), &(signatureLength), &(message[0]), uint(uint(int64(len(message)))), &(privateKey[0]))
+	var value_4 bool = status != MlDsa44_Success()
+	if value_4 || signatureLength != uint(2420) {
 		return result
 	}
 	if int64(0) < 0 || int64(int64(signatureLength)) < int64(0) || int64(int64(signatureLength)) > int64(len(signature)) {
 		panic("slice range out of bounds")
 	}
-	var value_8 []uint8 = MlDsa44_RetainBytes(signature[0:int64(signatureLength):int64(signatureLength)])
-	result.Value = value_8
+	result.Value = MlDsa44_RetainBytes(signature[0:int64(signatureLength):int64(signatureLength)])
 	result.Error = nil
 	return result
 }

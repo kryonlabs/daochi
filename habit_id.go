@@ -37,10 +37,9 @@ func HabitId_Mapping(transaction *Transaction, context Context, userID string, i
 	value_1[0] = &(result.Value)
 	destinations := value_1
 	_ = destinations
-	var value_2 *Row = StdSqlGo_QueryRowTx(transaction, context, "\nSELECT new_id\nFROM server_habit_id_migrations\nWHERE user_id_hash=?1 AND old_id=?2", arguments[0:2:2])
-	row := value_2
-	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_3
+	row := StdSqlGo_QueryRowTx(transaction, context, "\nSELECT new_id\nFROM server_habit_id_migrations\nWHERE user_id_hash=?1 AND old_id=?2", arguments[0:2:2])
+	var value_2 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	result.Error = value_2
 	return result
 }
 
@@ -73,8 +72,7 @@ func HabitId_New() HabitIDResult {
 	}
 	bytes[6] = (bytes[6] & 15) | 64
 	bytes[8] = (bytes[8] & 63) | 128
-	var value_0 string = fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", bytes[0:4:4], bytes[4:6:6], bytes[6:8:8], bytes[8:10:10], bytes[10:16:16])
-	result.Value = value_0
+	result.Value = fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", bytes[0:4:4], bytes[4:6:6], bytes[6:8:8], bytes[8:10:10], bytes[10:16:16])
 	return result
 }
 
@@ -82,13 +80,11 @@ func HabitId_ForWrite(transaction *Transaction, context Context, userID string, 
 	var result HabitIDResult = HabitIDResult{}
 	normalized := strings.TrimSpace(id)
 	if normalized == "" {
-		var value_0 Error = StdErrorsGo_New("empty habit id")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("empty habit id")
 		return result
 	}
 	if HabitId_IsCanonical(normalized) {
-		var value_1 string = strings.ToLower(normalized)
-		result.Value = value_1
+		result.Value = strings.ToLower(normalized)
 		return result
 	}
 	mapped := HabitId_Mapping(transaction, context, userID, normalized)
@@ -97,14 +93,13 @@ func HabitId_ForWrite(transaction *Transaction, context Context, userID string, 
 		result.Mapped = true
 		return result
 	}
-	var value_2 bool = mapped.Error != nil
-	var value_3 bool = value_2
-	if value_3 {
-		var value_4 Error = mapped.Error
-		var value_5 bool = StdErrorsGo_Is(value_4, StdSqlGo_NoRows())
-		value_3 = !value_5
+	var value_0 bool = mapped.Error != nil
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = StdErrorsGo_Is(mapped.Error, StdSqlGo_NoRows())
+		value_1 = !value_2
 	}
-	if value_3 {
+	if value_1 {
 		result.Error = mapped.Error
 		return result
 	}
@@ -113,15 +108,15 @@ func HabitId_ForWrite(transaction *Transaction, context Context, userID string, 
 	if result.Error != nil {
 		return result
 	}
-	var value_6 [4]Any
-	value_6[0] = userID
-	value_6[1] = normalized
-	value_6[2] = generated.Value
-	value_6[3] = source
-	arguments := value_6
+	var value_3 [4]Any
+	value_3[0] = userID
+	value_3[1] = normalized
+	value_3[2] = generated.Value
+	value_3[3] = source
+	arguments := value_3
 	_ = arguments
-	var value_7 string = "\nINSERT OR REPLACE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,?4)"
-	written := StdSqlGo_ExecTx(transaction, context, value_7, arguments[0:4:4])
+	var value_4 string = "\nINSERT OR REPLACE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,?4)"
+	written := StdSqlGo_ExecTx(transaction, context, value_4, arguments[0:4:4])
 	result.Error = written.Error
 	if result.Error == nil {
 		result.Value = generated.Value
@@ -139,8 +134,7 @@ func HabitId_ForRead(transaction *Transaction, context Context, userID string, i
 		value_0 = value_1
 	}
 	if value_0 {
-		var value_2 string = strings.ToLower(normalized)
-		result.Value = value_2
+		result.Value = strings.ToLower(normalized)
 		return result
 	}
 	mapped := HabitId_Mapping(transaction, context, userID, normalized)

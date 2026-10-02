@@ -42,29 +42,25 @@ func MoneroInvoices_Create(monero Monero, writer ResponseWriter, request *Reques
 	}
 	decoded := PaymentRequest_ReadInvoice(writer, request, monero.Configuration.MaxBodyBytes)
 	if decoded.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(decoded.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(decoded.Error))
 		return
 	}
 	if !monero.Configuration.TokenDirectPurchasesEnabled {
 		Response_Error(writer, int(503), "direct token purchases disabled")
 		return
 	}
-	var value_1 __type_cd75cecb5feef7fa = monero.Configuration.TokenProducts
-	var value_2 string = decoded.Value.ProductID
-	var value_3 __type_31c6478de00191c0 = __type_31c6478de00191c0{}
-	value_3.Value, value_3.HasValue = value_1[value_2]
-	product := value_3
+	var value_0 __type_cd75cecb5feef7fa = monero.Configuration.TokenProducts
+	var value_1 string = decoded.Value.ProductID
+	var value_2 __type_31c6478de00191c0 = __type_31c6478de00191c0{}
+	value_2.Value, value_2.HasValue = value_0[value_1]
+	product := value_2
 	if !product.HasValue || product.Value.MoneroAtomicAmount <= 0 {
 		Response_Error(writer, int(400), "unknown monero product_id")
 		return
 	}
-	var value_4 *Database = monero.Database
-	var value_5 Context = StdHttpGo_Context(request)
-	existence := AppStore_Exists(value_4, value_5, decoded.Value.AppID)
+	existence := AppStore_Exists(monero.Database, StdHttpGo_Context(request), decoded.Value.AppID)
 	if existence.Error != nil {
-		var value_6 string = LogSafety_LogText(decoded.Value.AppID)
-		slog.Error("monero invoice app lookup", "app", value_6, "error", existence.Error)
+		slog.Error("monero invoice app lookup", "app", LogSafety_LogText(decoded.Value.AppID), "error", existence.Error)
 		Response_Error(writer, int(500), "monero invoice failed")
 		return
 	}
@@ -72,34 +68,23 @@ func MoneroInvoices_Create(monero Monero, writer ResponseWriter, request *Reques
 		Response_Error(writer, int(400), "unknown app_id")
 		return
 	}
-	var value_7 *Database = monero.Database
-	var value_8 Context = StdHttpGo_Context(request)
-	var value_9 TokenAuthorizationResult = TokenPolicy_Authorize(value_7, value_8, request, decoded.Body, user.Value, decoded.Value.AppID, "waozi:token", "purchase", monero.Verify, monero.ReplayError)
-	authorization := value_9
+	authorization := TokenPolicy_Authorize(monero.Database, StdHttpGo_Context(request), request, decoded.Body, user.Value, decoded.Value.AppID, "waozi:token", "purchase", monero.Verify, monero.ReplayError)
 	if authorization.Authentication.Error != nil || authorization.Authentication.Status != 0 {
 		if authorization.Signed {
-			var value_10 *Database = monero.Database
-			var value_11 Context = StdHttpGo_Context(request)
-			SignedTx_Forget(value_10, value_11, authorization.Value)
+			SignedTx_Forget(monero.Database, StdHttpGo_Context(request), authorization.Value)
 		}
 		HttpAuth_Respond(writer, monero.Counters, authorization.Authentication)
 		return
 	}
 	completed := false
-	var value_16 zir_19c0d0f233cecbb8_ReplayCleanup = func(value_12 *Database, value_13 Context, value_14 TokenAuthorizationResult, value_15 *bool) {
-		MoneroInvoices_ForgetOnFailure(value_12, value_13, value_14, value_15)
+	var value_7 zir_19c0d0f233cecbb8_ReplayCleanup = func(value_3 *Database, value_4 Context, value_5 TokenAuthorizationResult, value_6 *bool) {
+		MoneroInvoices_ForgetOnFailure(value_3, value_4, value_5, value_6)
 	}
-	var value_17 zir_19c0d0f233cecbb8_ReplayCleanup = value_16
-	var value_18 *Database = monero.Database
-	var value_19 Context = StdHttpGo_Context(request)
-	defer MoneroInvoices_CleanupAtReturn(value_17, value_18, value_19, authorization, &(completed))
-	var value_20 *Database = monero.Database
-	var value_21 Context = StdHttpGo_Context(request)
-	var value_22 InvoiceResult = MoneroInvoiceStore_Create(value_20, value_21, user.Value, decoded.Value.AppID, product.Value, *(monero.Configuration), monero.Unavailable)
-	created := value_22
+	defer MoneroInvoices_CleanupAtReturn(value_7, monero.Database, StdHttpGo_Context(request), authorization, &(completed))
+	var value_8 Context = StdHttpGo_Context(request)
+	created := MoneroInvoiceStore_Create(monero.Database, value_8, user.Value, decoded.Value.AppID, product.Value, *(monero.Configuration), monero.Unavailable)
 	if created.Error != nil {
-		var value_23 string = LogSafety_LogText(user.Value)
-		slog.Error("create monero invoice", "user", value_23, "error", created.Error)
+		slog.Error("create monero invoice", "user", LogSafety_LogText(user.Value), "error", created.Error)
 		Response_Error(writer, int(500), "monero invoice failed")
 		return
 	}
@@ -113,10 +98,9 @@ func MoneroInvoices_Read(monero Monero, writer ResponseWriter, request *Request)
 		HttpAuth_Respond(writer, monero.Counters, user.Authentication)
 		return
 	}
-	var value_0 string = strings.TrimPrefix(StdUrlGo_Path(StdHttpGo_RequestURL(request)), "/api/v1/tokens/purchases/monero/invoices/")
-	id := value_0
-	var value_1 bool = Identity_ValidResourceID(id)
-	if !value_1 {
+	id := strings.TrimPrefix(StdUrlGo_Path(StdHttpGo_RequestURL(request)), "/api/v1/tokens/purchases/monero/invoices/")
+	var value_0 bool = Identity_ValidResourceID(id)
+	if !value_0 {
 		Response_Error(writer, int(400), "invalid invoice id")
 		return
 	}
@@ -165,22 +149,19 @@ func MoneroInvoices_Settle(monero Monero, context Context, accountID string, inv
 		return result
 	}
 	if inspected.Value.ConfirmedAtomic >= invoice.AtomicAmount {
-		var value_0 CreditResult = TokenLedger_CreditPayment(monero.Database, context, issuer.Value, "monero", inspected.Value.PaymentID, MoneroInvoices_CreditEvent(accountID, invoice, inspected.Value), monero.IssuerUnavailable)
-		credited := value_0
+		credited := TokenLedger_CreditPayment(monero.Database, context, issuer.Value, "monero", inspected.Value.PaymentID, MoneroInvoices_CreditEvent(accountID, invoice, inspected.Value), monero.IssuerUnavailable)
 		result.Error = credited.Error
 		if result.Error != nil {
 			return result
 		}
-		var value_1 Error = MoneroInvoiceStore_MarkPendingPaid(monero.Database, context, accountID, invoice.ID, credited.Value.ReceiptID, inspected.Value.PaymentID)
-		result.Error = value_1
+		result.Error = MoneroInvoiceStore_MarkPendingPaid(monero.Database, context, accountID, invoice.ID, credited.Value.ReceiptID, inspected.Value.PaymentID)
 		if result.Error != nil {
 			return result
 		}
 		return MoneroInvoiceStore_Invoice(monero.Database, context, accountID, invoice.ID)
 	}
 	if MoneroInvoices_Expired(invoice) {
-		var value_2 Error = MoneroInvoiceStore_MarkExpired(monero.Database, context, accountID, invoice.ID)
-		result.Error = value_2
+		result.Error = MoneroInvoiceStore_MarkExpired(monero.Database, context, accountID, invoice.ID)
 		if result.Error != nil {
 			return result
 		}
@@ -207,9 +188,7 @@ func MoneroInvoices_Pending(monero Monero, context Context, limit int) Error {
 			item := loop_view_4[loop_index_4]
 			updated := MoneroInvoices_Settle(monero, context, item.AccountID, item.Invoice)
 			if updated.Error != nil {
-				var value_1 string = LogSafety_LogText(item.AccountID)
-				var value_2 string = LogSafety_LogText(item.Invoice.ID)
-				slog.Warn("monero invoice reconciliation item failed", "account", value_1, "invoice", value_2, "error", updated.Error)
+				slog.Warn("monero invoice reconciliation item failed", "account", LogSafety_LogText(item.AccountID), "invoice", LogSafety_LogText(item.Invoice.ID), "error", updated.Error)
 			}
 			loop_cursor_4++
 		}
@@ -256,30 +235,20 @@ func MoneroInvoices_SweepExpired(monero Monero, context Context, limit int) Erro
 			item := loop_view_14[loop_index_14]
 			inspected := MoneroWallet_InspectInvoice(context, *(monero.Configuration), item.Invoice, monero.Unavailable)
 			if inspected.Error != nil {
-				var value_1 string = LogSafety_LogText(item.Invoice.ID)
-				slog.Warn("expired monero invoice sweep failed", "invoice", value_1, "error", inspected.Error)
+				slog.Warn("expired monero invoice sweep failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", inspected.Error)
 				loop_cursor_14++
 				continue
 			}
 			if inspected.Value.ConfirmedAtomic >= item.Invoice.AtomicAmount {
-				var value_2 *Database = monero.Database
-				var value_3 Context = context
-				var value_4 PrivateKey = issuer.Value
-				var value_5 string = inspected.Value.PaymentID
-				var value_6 TokenEventInput = MoneroInvoices_CreditEvent(item.AccountID, item.Invoice, inspected.Value)
-				var value_7 CreditResult = TokenLedger_CreditPayment(value_2, value_3, value_4, "monero", value_5, value_6, monero.IssuerUnavailable)
-				credited := value_7
+				credited := TokenLedger_CreditPayment(monero.Database, context, issuer.Value, "monero", inspected.Value.PaymentID, MoneroInvoices_CreditEvent(item.AccountID, item.Invoice, inspected.Value), monero.IssuerUnavailable)
 				if credited.Error != nil {
-					var value_8 string = LogSafety_LogText(item.Invoice.ID)
-					slog.Warn("expired monero invoice credit failed", "invoice", value_8, "error", credited.Error)
+					slog.Warn("expired monero invoice credit failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", credited.Error)
 					loop_cursor_14++
 					continue
 				}
-				var value_9 Error = MoneroInvoiceStore_SettleExpired(monero.Database, context, item.AccountID, item.Invoice.ID, credited.Value.ReceiptID, inspected.Value.PaymentID)
-				settled := value_9
+				settled := MoneroInvoiceStore_SettleExpired(monero.Database, context, item.AccountID, item.Invoice.ID, credited.Value.ReceiptID, inspected.Value.PaymentID)
 				if settled != nil {
-					var value_10 string = LogSafety_LogText(item.Invoice.ID)
-					slog.Warn("expired monero invoice settle failed", "invoice", value_10, "error", settled)
+					slog.Warn("expired monero invoice settle failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", settled)
 					loop_cursor_14++
 					continue
 				}

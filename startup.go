@@ -206,12 +206,9 @@ func Startup_LocalHTTPURL(address string) string {
 
 func Startup_NativeWorkers() Workers {
 	var result Workers = Workers{}
-	var value_2 Worker = func(value_0 *Server, value_1 Context) { Startup_RunInvoices(value_0, value_1) }
-	result.Invoices = value_2
-	var value_5 Worker = func(value_3 *Server, value_4 Context) { Startup_RunMesh(value_3, value_4) }
-	result.Mesh = value_5
-	var value_8 Worker = func(value_6 *Server, value_7 Context) { Startup_RunDiscovery(value_6, value_7) }
-	result.Discovery = value_8
+	result.Invoices = func(value_0 *Server, value_1 Context) { Startup_RunInvoices(value_0, value_1) }
+	result.Mesh = func(value_2 *Server, value_3 Context) { Startup_RunMesh(value_2, value_3) }
+	result.Discovery = func(value_4 *Server, value_5 Context) { Startup_RunDiscovery(value_4, value_5) }
 	return result
 }
 
@@ -247,10 +244,9 @@ func Startup_ShutdownOnCancel(server *HTTPServer, context Context, shutdown Shut
 	cases[0] = value_0
 	StdSelectGo_Select(cases[0:1:1])
 	deadline := StdContextGo_WithTimeout(StdContextGo_Background(), Duration(15000000000))
-	var value_2 zir_c4d9a008fd698927_CancelCallback = func(value_1 CancelFunc) { StdContextGo_Cancel(value_1) }
-	defer Startup_CancelAtReturn(value_2, deadline.Cancel)
-	var value_3 Shutdown = shutdown
-	error := value_3(server, deadline.Value)
+	defer Startup_CancelAtReturn(func(value_1 CancelFunc) { StdContextGo_Cancel(value_1) }, deadline.Cancel)
+	var value_2 Shutdown = shutdown
+	error := value_2(server, deadline.Value)
 	if error != nil {
 		slog.Error("HTTP shutdown failed", "error", error)
 	}
@@ -309,10 +305,9 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 		log.Fatalf("open store: %v", opened.Error)
 	}
 	store := opened.Value
-	var value_3 CloseCallback = func(value_2 *Store) { Startup_CloseStore(value_2) }
-	defer Startup_CloseAtReturn(value_3, store)
-	var value_4 VerifierFactory = createVerifier
-	verifier := value_4()
+	defer Startup_CloseAtReturn(func(value_2 *Store) { Startup_CloseStore(value_2) }, store)
+	var value_3 VerifierFactory = createVerifier
+	verifier := value_3()
 	if verifier.Error != nil {
 		if StdErrorsGo_Is(verifier.Error, ErrVerifierUnavailable) {
 			log.Fatal("ML-DSA-44 verifier unavailable: build with CGO_ENABLED=1 and liboqs installed")
@@ -321,17 +316,12 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 	}
 	server := Server_New(configuration, store, verifier.Value, signer)
 	runtime := Startup_NotifyContext(StdContextGo_Background(), Startup_Interrupt(), Startup_Terminate())
-	var value_6 zir_c4d9a008fd698927_CancelCallback = func(value_5 CancelFunc) { StdContextGo_Cancel(value_5) }
-	defer Startup_CancelAtReturn(value_6, runtime.Cancel)
+	defer Startup_CancelAtReturn(func(value_4 CancelFunc) { StdContextGo_Cancel(value_4) }, runtime.Cancel)
 	var group WorkerGroup = *new(WorkerGroup)
-	var value_7 *Server = server
-	var value_8 Context = runtime.Value
-	Startup_StartWorkers(value_7, value_8, &(group), Startup_NativeWorkers())
-	var value_9 string = configuration.Addr
-	http := Startup_NewHTTPServer(value_9, Server_Routes(server))
-	var value_11 Listen = func(value_10 *HTTPServer) Error { return Startup_ListenNative(value_10) }
-	var value_14 Shutdown = func(value_12 *HTTPServer, value_13 Context) Error { return Startup_ShutdownNative(value_12, value_13) }
-	Startup_Serve(http, configuration, runtime.Value, runtime.Cancel, &(group), value_11, value_14)
+	Startup_StartWorkers(server, runtime.Value, &(group), Startup_NativeWorkers())
+	http := Startup_NewHTTPServer(configuration.Addr, Server_Routes(server))
+	var value_6 Listen = func(value_5 *HTTPServer) Error { return Startup_ListenNative(value_5) }
+	Startup_Serve(http, configuration, runtime.Value, runtime.Cancel, &(group), value_6, func(value_7 *HTTPServer, value_8 Context) Error { return Startup_ShutdownNative(value_7, value_8) })
 }
 
 func Startup_Run(configuration Config, arguments []string, createVerifier VerifierFactory, signer SignPrivateKey) {

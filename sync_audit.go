@@ -94,8 +94,7 @@ func SyncAudit_Recent(database *Database, context Context, userID string, limit 
 		value_2[14] = &(item.CreatedAt)
 		destinations := value_2
 		_ = destinations
-		var value_3 Error = StdSqlGo_ScanRows(rows, destinations[0:15:15])
-		result.Error = value_3
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:15:15])
 		if result.Error != nil {
 			return result
 		}
@@ -105,8 +104,7 @@ func SyncAudit_Recent(database *Database, context Context, userID string, limit 
 		values = append(values, item)
 	}
 	result.Value = values
-	var value_4 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_4
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -139,21 +137,19 @@ func SyncAudit_Logs(database *Database, context Context, userID string, sinceVer
 		value_2[6] = &(item.CreatedAt)
 		destinations := value_2
 		_ = destinations
-		var value_3 Error = StdSqlGo_ScanRows(rows, destinations[0:7:7])
-		result.Error = value_3
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:7:7])
 		if result.Error != nil {
 			return result
 		}
 		item.Kind = "op"
 		if payload != "" {
-			var value_4 []uint8 = StdTextGo_ToBytes(payload)
-			item.Payload = RawMessage(value_4)
+			var value_3 []uint8 = StdTextGo_ToBytes(payload)
+			item.Payload = RawMessage(value_3)
 		}
 		values = append(values, item)
 	}
 	result.Value = values
-	var value_5 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_5
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -164,14 +160,13 @@ func SyncAudit_Deletes(database *Database, context Context, userID string, since
 	if result.Error != nil {
 		return result
 	}
-	var value_0 []SyncLog = make([]SyncLog, int(int(0)))
-	result.Value = value_0
+	result.Value = make([]SyncLog, int(int(0)))
 	{
-		value_1 := logs.Value[:]
-		if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
+		value_0 := logs.Value[:]
+		if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_7 := value_1[0:int64(len(value_1)):int64(len(value_1))]
+		loop_view_7 := value_0[0:int64(len(value_0)):int64(len(value_0))]
 		loop_count_7 := int64(len(loop_view_7))
 		var loop_cursor_7 int64 = 0
 		for loop_cursor_7 < loop_count_7 {
@@ -179,8 +174,7 @@ func SyncAudit_Deletes(database *Database, context Context, userID string, since
 			item := loop_view_7[loop_index_7]
 			if item.OpType == "delete" {
 				item.Kind = "delete"
-				var value_2 []SyncLog = append(result.Value, item)
-				result.Value = value_2
+				result.Value = append(result.Value, item)
 			}
 			loop_cursor_7++
 		}

@@ -203,18 +203,12 @@ func SyncRequest_IsEncryptedEnvelope(bytes []uint8) bool {
 
 func SyncRequest_EmptyChanges() SyncChanges {
 	var result SyncChanges = SyncChanges{}
-	var value_0 []Habit = make([]Habit, int(int(0)))
-	result.Habits = value_0
-	var value_1 []HabitDay = make([]HabitDay, int(int(0)))
-	result.HabitDays = value_1
-	var value_2 []Session = make([]Session, int(int(0)))
-	result.Sessions = value_2
-	var value_3 []MeditationLog = make([]MeditationLog, int(int(0)))
-	result.MeditationLogs = value_3
-	var value_4 []SocialSnapshot = make([]SocialSnapshot, int(int(0)))
-	result.SocialCache = value_4
-	var value_5 []EncryptedRecord = make([]EncryptedRecord, int(int(0)))
-	result.EncryptedRecords = value_5
+	result.Habits = make([]Habit, int(int(0)))
+	result.HabitDays = make([]HabitDay, int(int(0)))
+	result.Sessions = make([]Session, int(int(0)))
+	result.MeditationLogs = make([]MeditationLog, int(int(0)))
+	result.SocialCache = make([]SocialSnapshot, int(int(0)))
+	result.EncryptedRecords = make([]EncryptedRecord, int(int(0)))
 	return result
 }
 
@@ -394,8 +388,7 @@ func SyncRequest_EncryptedPayloadLimit(request *Request, configuredMax int) Payl
 		parsed := SyncRequest_Atoi(value)
 		if parsed.Error != nil || parsed.Value <= int(0) {
 			result.Value = int(0)
-			var value_1 Error = StdErrorsGo_New("invalid X-Daochi-Limit")
-			result.Error = value_1
+			result.Error = StdErrorsGo_New("invalid X-Daochi-Limit")
 			return result
 		}
 		result.Value = parsed.Value
@@ -433,20 +426,17 @@ func SyncRequest_PublicKey(request SyncRequest) JSONResult {
 	}
 	decoded := Codec_DecodeBinaryField(request.PublicKey)
 	if decoded.Error != "" {
-		var value_0 Error = StdErrorsGo_New("invalid public_key")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("invalid public_key")
 		return result
 	}
 	if int64(len(decoded.Value)) != 1312 {
-		var value_1 Error = StdErrorsGo_New("wrong public_key size")
-		result.Error = value_1
+		result.Error = StdErrorsGo_New("wrong public_key size")
 		return result
 	}
 	key := StdTextGo_ToBytes(decoded.Value)
-	var value_2 Error = EncryptedRecord_ValidateAccountKey(request.UserIDHash, key)
-	if value_2 != nil {
-		var value_3 Error = StdErrorsGo_New("public_key does not match user_id_hash")
-		result.Error = value_3
+	var value_0 Error = EncryptedRecord_ValidateAccountKey(request.UserIDHash, key)
+	if value_0 != nil {
+		result.Error = StdErrorsGo_New("public_key does not match user_id_hash")
 		return result
 	}
 	result.Value = key

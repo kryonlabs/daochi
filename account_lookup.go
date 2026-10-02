@@ -20,26 +20,24 @@ func AccountLookup_Resolve(database *Database, context Context, reference string
 		result.Value = reference
 		var exists int = 0
 		destinations[0] = &(exists)
-		var value_0 *Row = StdSqlGo_QueryRow(database, context, "SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)", arguments[0:1:1])
-		row := value_0
+		row := StdSqlGo_QueryRow(database, context, "SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)", arguments[0:1:1])
 		_ = row
-		var value_1 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-		result.Error = value_1
+		var value_0 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+		result.Error = value_0
 		result.Found = exists != int(0)
 		return result
 	}
-	var value_2 bool = Identity_ValidAccountAlias(reference)
-	if !value_2 {
+	var value_1 bool = Identity_ValidAccountAlias(reference)
+	if !value_1 {
 		return result
 	}
 	destinations[0] = &(result.Value)
-	var value_3 *Row = StdSqlGo_QueryRow(database, context, "SELECT user_id_hash FROM server_users WHERE alias=?1", arguments[0:1:1])
-	row := value_3
+	row := StdSqlGo_QueryRow(database, context, "SELECT user_id_hash FROM server_users WHERE alias=?1", arguments[0:1:1])
 	_ = row
-	var value_4 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_4
-	var value_5 Error = result.Error
-	if StdErrorsGo_Is(value_5, StdSqlGo_NoRows()) {
+	var value_2 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	result.Error = value_2
+	var value_3 Error = result.Error
+	if StdErrorsGo_Is(value_3, StdSqlGo_NoRows()) {
 		result.Error = nil
 		return result
 	}

@@ -32,8 +32,7 @@ type FriendRequestPath struct {
 }
 
 func SocialHttp_Bearer(social Social, writer ResponseWriter, request *Request) UserAuthenticationResult {
-	var value_0 UserAuthenticationResult = HttpAuth_BearerUser(social.Accounts.Database, request, social.Accounts.Configuration.TokenSecret)
-	result := value_0
+	result := HttpAuth_BearerUser(social.Accounts.Database, request, social.Accounts.Configuration.TokenSecret)
 	if result.Authentication.Error != nil || result.Authentication.Status != int(0) {
 		HttpAuth_Respond(writer, social.Accounts.Counters, result.Authentication)
 	}
@@ -187,10 +186,9 @@ func SocialHttp_RemoveFriend(social Social, writer ResponseWriter, request *Requ
 	if SocialHttp_Failed(user) {
 		return
 	}
-	var value_0 string = strings.Trim(strings.TrimPrefix(StdUrlGo_Path(StdHttpGo_RequestURL(request)), "/api/v1/friends/"), "/")
-	friendID := strings.ToLower(value_0)
-	var value_1 bool = Identity_ValidUserID(friendID)
-	if !value_1 {
+	friendID := strings.ToLower(strings.Trim(strings.TrimPrefix(StdUrlGo_Path(StdHttpGo_RequestURL(request)), "/api/v1/friends/"), "/"))
+	var value_0 bool = Identity_ValidUserID(friendID)
+	if !value_0 {
 		Response_Error(writer, int(404), "friend not found")
 		return
 	}
@@ -203,13 +201,13 @@ func SocialHttp_RemoveFriend(social Social, writer ResponseWriter, request *Requ
 	SyncHub_Publish(social.Notifications, user.Value, 0)
 	SyncHub_Publish(social.Notifications, friendID, 0)
 	var output __type_9ff0571749a9f227 = *new(__type_9ff0571749a9f227)
-	var value_2 *__type_9ff0571749a9f227 = &(output)
-	var value_3 string = "status"
-	var value_4 string = "removed"
-	if (*value_2) == nil {
-		(*value_2) = make(__type_9ff0571749a9f227)
+	var value_1 *__type_9ff0571749a9f227 = &(output)
+	var value_2 string = "status"
+	var value_3 string = "removed"
+	if (*value_1) == nil {
+		(*value_1) = make(__type_9ff0571749a9f227)
 	}
-	(*value_2)[value_3] = value_4
+	(*value_1)[value_2] = value_3
 	Response_JSON(writer, int(200), output)
 }
 
@@ -241,8 +239,7 @@ func SocialHttp_CreateRequest(social Social, writer ResponseWriter, request *Req
 		Response_Error(writer, int(400), StdErrorsGo_Message(decoded.Error))
 		return
 	}
-	var value_0 AccountResult = AccountLookup_Resolve(social.Accounts.Database, StdHttpGo_Context(request), decoded.Value.Target)
-	target := value_0
+	target := AccountLookup_Resolve(social.Accounts.Database, StdHttpGo_Context(request), decoded.Value.Target)
 	if target.Error != nil {
 		slog.Error("resolve friend target", "user", LogSafety_LogText(user.Value), "error", target.Error)
 		Response_Error(writer, int(500), "friend request failed")
@@ -258,17 +255,16 @@ func SocialHttp_CreateRequest(social Social, writer ResponseWriter, request *Req
 		Response_Error(writer, int(500), "friend request failed")
 		return
 	}
-	var value_1 FriendRequestResult = FriendStore_CreateRequest(social.Accounts.Database, StdHttpGo_Context(request), identifier.Value, user.Value, target.Value)
-	created := value_1
+	created := FriendStore_CreateRequest(social.Accounts.Database, StdHttpGo_Context(request), identifier.Value, user.Value, target.Value)
 	if created.Error != nil {
 		message := StdErrorsGo_Message(created.Error)
-		var value_2 bool = strings.Contains(message, "self")
-		var value_3 bool = value_2
-		if !value_3 {
-			var value_4 bool = strings.Contains(message, "already friends")
-			value_3 = value_4
+		var value_0 bool = strings.Contains(message, "self")
+		var value_1 bool = value_0
+		if !value_1 {
+			var value_2 bool = strings.Contains(message, "already friends")
+			value_1 = value_2
 		}
-		if value_3 {
+		if value_1 {
 			Response_Error(writer, int(409), message)
 			return
 		}
@@ -296,11 +292,9 @@ func SocialHttp_RequestAction(social Social, writer ResponseWriter, request *Req
 	}
 	var changed FriendRequestResult = FriendRequestResult{}
 	if path.Action == "accept" {
-		var value_0 FriendRequestResult = FriendStore_Accept(social.Accounts.Database, StdHttpGo_Context(request), user.Value, path.ID, social.Accounts.MissingUser)
-		changed = value_0
+		changed = FriendStore_Accept(social.Accounts.Database, StdHttpGo_Context(request), user.Value, path.ID, social.Accounts.MissingUser)
 	} else if path.Action == "decline" {
-		var value_1 FriendRequestResult = FriendStore_Decline(social.Accounts.Database, StdHttpGo_Context(request), user.Value, path.ID, social.Accounts.MissingUser)
-		changed = value_1
+		changed = FriendStore_Decline(social.Accounts.Database, StdHttpGo_Context(request), user.Value, path.ID, social.Accounts.MissingUser)
 	} else {
 		Response_Error(writer, int(404), "friend request not found")
 		return
@@ -338,32 +332,25 @@ func SocialHttp_PutStats(social Social, writer ResponseWriter, request *Request)
 	}
 	decoded := SocialHttp_ReadStats(writer, request, social.Accounts.Configuration.MaxBodyBytes)
 	if decoded.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(decoded.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(decoded.Error))
 		return
 	}
-	var value_1 *Database = social.Accounts.Database
-	var value_2 Context = StdHttpGo_Context(request)
-	written := FriendStore_UpsertStats(value_1, value_2, user.Value, decoded.Value.App, decoded.Value.Metrics)
+	written := FriendStore_UpsertStats(social.Accounts.Database, StdHttpGo_Context(request), user.Value, decoded.Value.App, decoded.Value.Metrics)
 	if written.Error != nil {
-		var value_3 string = LogSafety_LogText(user.Value)
-		var value_4 string = LogSafety_LogText(decoded.Value.App)
-		slog.Error("upsert profile stats", "user", value_3, "app", value_4, "error", written.Error)
+		slog.Error("upsert profile stats", "user", LogSafety_LogText(user.Value), "app", LogSafety_LogText(decoded.Value.App), "error", written.Error)
 		Response_Error(writer, int(500), "profile stats failed")
 		return
 	}
 	if written.Applied > int(0) {
 		SyncHub_Publish(social.Notifications, user.Value, 0)
-		var value_5 *Database = social.Accounts.Database
-		var value_6 Context = StdHttpGo_Context(request)
-		listed := FriendStore_Friends(value_5, value_6, user.Value)
+		listed := FriendStore_Friends(social.Accounts.Database, StdHttpGo_Context(request), user.Value)
 		if listed.Error == nil {
 			{
-				value_7 := listed.Value[:]
-				if int64(0) < 0 || int64(int64(len(value_7))) < int64(0) || int64(int64(len(value_7))) > int64(len(value_7)) {
+				value_0 := listed.Value[:]
+				if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_19 := value_7[0:int64(len(value_7)):int64(len(value_7))]
+				loop_view_19 := value_0[0:int64(len(value_0)):int64(len(value_0))]
 				loop_count_19 := int64(len(loop_view_19))
 				var loop_cursor_19 int64 = 0
 				for loop_cursor_19 < loop_count_19 {
@@ -374,8 +361,8 @@ func SocialHttp_PutStats(social Social, writer ResponseWriter, request *Request)
 				}
 			}
 		} else {
-			var value_8 string = LogSafety_LogText(user.Value)
-			slog.Error("notify profile stats friends", "user", value_8, "error", listed.Error)
+			var value_1 string = LogSafety_LogText(user.Value)
+			slog.Error("notify profile stats friends", "user", value_1, "error", listed.Error)
 		}
 	}
 	var output ProfileStatsResponse = ProfileStatsResponse{}
@@ -413,31 +400,21 @@ func SocialHttp_FriendStats(social Social, writer ResponseWriter, request *Reque
 		Response_Error(writer, int(400), "invalid stats query")
 		return
 	}
-	var value_7 *Database = social.Accounts.Database
-	var value_8 Context = StdHttpGo_Context(request)
-	listed := Leaderboard_Friends(value_7, value_8, user.Value, app, practice, metric)
+	listed := Leaderboard_Friends(social.Accounts.Database, StdHttpGo_Context(request), user.Value, app, practice, metric)
 	if listed.Error != nil {
-		var value_9 string = LogSafety_LogText(user.Value)
-		var value_10 string = LogSafety_LogText(app)
-		var value_11 string = LogSafety_LogText(practice)
-		var value_12 string = LogSafety_LogText(metric)
-		slog.Error("friend stats", "user", value_9, "app", value_10, "practice", value_11, "metric", value_12, "error", listed.Error)
+		slog.Error("friend stats", "user", LogSafety_LogText(user.Value), "app", LogSafety_LogText(app), "practice", LogSafety_LogText(practice), "metric", LogSafety_LogText(metric), "error", listed.Error)
 		Response_Error(writer, int(500), "friend stats failed")
 		return
 	}
 	var output FriendStatsResponse = FriendStatsResponse{}
 	output.Rows = listed.Value
-	var value_13 [4]string
-	value_13[0] = "leaderboard"
-	value_13[1] = app
-	value_13[2] = practice
-	value_13[3] = metric
-	parts := value_13
+	var value_7 [4]string
+	value_7[0] = "leaderboard"
+	value_7[1] = app
+	value_7[2] = practice
+	value_7[3] = metric
+	parts := value_7
 	_ = parts
-	var value_14 Social = social
-	var value_15 Context = StdHttpGo_Context(request)
-	var value_16 string = user.Value
-	var value_17 string = strings.Join(parts[0:4:4], ".")
-	SocialHttp_Cache(value_14, value_15, value_16, value_17, output)
+	SocialHttp_Cache(social, StdHttpGo_Context(request), user.Value, strings.Join(parts[0:4:4], "."), output)
 	Response_JSON(writer, int(200), output)
 }

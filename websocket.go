@@ -288,16 +288,15 @@ func Websocket_WriteFrame(connection Connection, opcode uint8, payload []uint8) 
 		header[1] = 127
 		size := uint64(int64(len(payload)))
 		for index := int64(0); index <= 7; index++ {
-			var value_0 []uint8 = append(header, uint8(uint8((uint64(integerOp(uint64(size), uint64(uint64(((7 - index) * 8))), 64, false, 7))))))
-			header = value_0
+			header = append(header, uint8(uint8((uint64(integerOp(uint64(size), uint64(uint64(((7 - index) * 8))), 64, false, 7))))))
 		}
 	}
 	written := Websocket_WriteBytes(connection, header)
 	if written.Error != nil {
 		return written.Error
 	}
-	var value_1 zir_f5c2242e7b75ab47_WriteResult = Websocket_WriteBytes(connection, payload)
-	return value_1.Error
+	var value_0 zir_f5c2242e7b75ab47_WriteResult = Websocket_WriteBytes(connection, payload)
+	return value_0.Error
 }
 
 func Websocket_ReadFrame(reader *BufferedReader) Frame {
@@ -401,8 +400,7 @@ func Websocket_ReadMaskedFrame(reader *BufferedReader, requireMask bool) Frame {
 	result.Opcode = opcode
 	result.Payload = payload
 	if opcode == 8 {
-		var value_7 Error = Websocket_EOF()
-		result.Error = value_7
+		result.Error = Websocket_EOF()
 	}
 	return result
 }

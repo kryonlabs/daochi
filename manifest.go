@@ -354,8 +354,7 @@ func Manifest_Validate(manifest AppManifest, now int64) string {
 		if policy.Status != "" && policy.Status != "active" && policy.Status != "suspended" {
 			return "invalid token policy status"
 		}
-		var value_23 bool = policy.LegacyUnsignedUntil < 0 || (policy.LegacyUnsignedUntil > now && uint64(policy.LegacyUnsignedUntil)-uint64(now) > 31536000)
-		if value_23 {
+		if policy.LegacyUnsignedUntil < 0 || (policy.LegacyUnsignedUntil > now && uint64(policy.LegacyUnsignedUntil)-uint64(now) > 31536000) {
 			return "invalid legacy_unsigned_until"
 		}
 		index++

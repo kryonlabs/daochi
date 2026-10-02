@@ -35,10 +35,8 @@ func SyncApplication_OperationExists(transaction *Transaction, context Context, 
 	value_1[0] = &(exists)
 	destinations := value_1
 	_ = destinations
-	var value_2 *Row = StdSqlGo_QueryRowTx(transaction, context, "SELECT EXISTS(SELECT 1 FROM server_sync_ops WHERE user_id_hash=?1 AND op_id=?2)", arguments[0:2:2])
-	row := value_2
-	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_3
+	row := StdSqlGo_QueryRowTx(transaction, context, "SELECT EXISTS(SELECT 1 FROM server_sync_ops WHERE user_id_hash=?1 AND op_id=?2)", arguments[0:2:2])
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 	result.Value = exists != int(0)
 	return result
 }
@@ -152,11 +150,9 @@ func SyncApplication_MaterializeOperation(transaction *Transaction, context Cont
 func SyncApplication_ApplyOperations(transaction *Transaction, context Context, userID string, operations []SyncOp, applied *SyncResult) OperationsWriteResult {
 	var result OperationsWriteResult = OperationsWriteResult{}
 	accepted := make([]string, int(int(0)))
-	for it_index := int64(0); it_index < int64(len(operations)); it_index++ {
-		operation := operations[it_index]
+	for _, operation := range operations {
 		if operation.OpID == "" || operation.ClientID == "" || operation.Seq <= 0 {
-			var value_0 Error = StdErrorsGo_New("invalid sync op identity")
-			result.Error = value_0
+			result.Error = StdErrorsGo_New("invalid sync op identity")
 			return result
 		}
 		exists := SyncApplication_OperationExists(transaction, context, userID, operation.OpID)
@@ -168,13 +164,11 @@ func SyncApplication_ApplyOperations(transaction *Transaction, context Context, 
 			accepted = append(accepted, operation.OpID)
 			continue
 		}
-		var value_1 Error = HabitId_CanonicalizeOperation(transaction, context, userID, &(operation))
-		result.Error = value_1
+		result.Error = HabitId_CanonicalizeOperation(transaction, context, userID, &(operation))
 		if result.Error != nil {
 			return result
 		}
-		var value_2 Error = SyncApplication_MaterializeOperation(transaction, context, userID, operation, applied)
-		result.Error = value_2
+		result.Error = SyncApplication_MaterializeOperation(transaction, context, userID, operation, applied)
 		if result.Error != nil {
 			return result
 		}
@@ -192,22 +186,22 @@ func SyncApplication_ApplyOperations(transaction *Transaction, context Context, 
 		}
 		payload := StdTextGo_FromBytes([]uint8(operation.Payload))
 		createdAt := Timestamp_NormalizeTime(operation.CreatedAt, "")
-		var value_3 [11]Any
-		value_3[0] = userID
-		value_3[1] = operation.OpID
-		value_3[2] = operation.ClientID
-		value_3[3] = operation.Seq
-		value_3[4] = operation.EntityType
-		value_3[5] = operation.EntityID
-		value_3[6] = operation.LocalDate
-		value_3[7] = operation.OpType
-		value_3[8] = payload
-		value_3[9] = createdAt
-		value_3[10] = version.Value
-		arguments := value_3
+		var value_0 [11]Any
+		value_0[0] = userID
+		value_0[1] = operation.OpID
+		value_0[2] = operation.ClientID
+		value_0[3] = operation.Seq
+		value_0[4] = operation.EntityType
+		value_0[5] = operation.EntityID
+		value_0[6] = operation.LocalDate
+		value_0[7] = operation.OpType
+		value_0[8] = payload
+		value_0[9] = createdAt
+		value_0[10] = version.Value
+		arguments := value_0
 		_ = arguments
-		var value_4 string = "\nINSERT INTO server_sync_ops(user_id_hash,op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
-		inserted := StdSqlGo_ExecTx(transaction, context, value_4, arguments[0:11:11])
+		var value_1 string = "\nINSERT INTO server_sync_ops(user_id_hash,op_id,client_id,seq,entity_type,entity_id,local_date,op_type,payload_json,created_at,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
+		inserted := StdSqlGo_ExecTx(transaction, context, value_1, arguments[0:11:11])
 		result.Error = inserted.Error
 		if result.Error != nil {
 			return result
@@ -229,43 +223,38 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 	defer (*sql.Tx).Rollback(transaction)
 	var value_0 bool = StdTextGo_IsNil(publicKey)
 	if !value_0 {
-		var value_1 Error = AccountState_Upsert(transaction, context, request.UserIDHash, publicKey)
-		result.Error = value_1
+		result.Error = AccountState_Upsert(transaction, context, request.UserIDHash, publicKey)
 	} else {
-		var value_2 Error = AccountState_Touch(transaction, context, request.UserIDHash, missingUser)
-		result.Error = value_2
+		result.Error = AccountState_Touch(transaction, context, request.UserIDHash, missingUser)
 	}
 	if result.Error != nil {
 		return result
 	}
 	if request.FullSyncRequested {
-		var value_3 Error = SyncWrites_ReplaceData(transaction, context, request.UserIDHash)
-		result.Error = value_3
+		result.Error = SyncWrites_ReplaceData(transaction, context, request.UserIDHash)
 		if result.Error != nil {
 			return result
 		}
 	}
 	if int64(len(request.SocialCache)) > 0 {
-		var value_4 Error = StdErrorsGo_New("social_cache is server-owned")
-		result.Error = value_4
+		result.Error = StdErrorsGo_New("social_cache is server-owned")
 		return result
 	}
 	{
-		value_5 := request.EncryptedRecords[:]
-		if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
+		value_1 := request.EncryptedRecords[:]
+		if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_27 := value_5[0:int64(len(value_5)):int64(len(value_5))]
+		loop_view_27 := value_1[0:int64(len(value_1)):int64(len(value_1))]
 		loop_count_27 := int64(len(loop_view_27))
 		var loop_cursor_27 int64 = 0
 		for loop_cursor_27 < loop_count_27 {
 			loop_index_27 := loop_cursor_27
 			item := loop_view_27[loop_index_27]
 			_ = item
-			var value_6 bool = EncryptedRecord_ValidForProtocol(item, request.ProtocolVersion)
-			if !value_6 {
-				var value_7 Error = StdErrorsGo_New("invalid encrypted record")
-				result.Error = value_7
+			var value_2 bool = EncryptedRecord_ValidForProtocol(item, request.ProtocolVersion)
+			if !value_2 {
+				result.Error = StdErrorsGo_New("invalid encrypted record")
 				return result
 			}
 			loop_cursor_27++
@@ -274,11 +263,11 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 	var applied SyncResult = SyncResult{}
 	var deletedHabits __type_c922d3f56b74fd5a = *new(__type_c922d3f56b74fd5a)
 	{
-		value_8 := request.MeditationLogs[:]
-		if int64(0) < 0 || int64(int64(len(value_8))) < int64(0) || int64(int64(len(value_8))) > int64(len(value_8)) {
+		value_3 := request.MeditationLogs[:]
+		if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_35 := value_8[0:int64(len(value_8)):int64(len(value_8))]
+		loop_view_35 := value_3[0:int64(len(value_3)):int64(len(value_3))]
 		loop_count_35 := int64(len(loop_view_35))
 		var loop_cursor_35 int64 = 0
 		for loop_cursor_35 < loop_count_35 {
@@ -296,11 +285,11 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		}
 	}
 	{
-		value_9 := request.Habits[:]
-		if int64(0) < 0 || int64(int64(len(value_9))) < int64(0) || int64(int64(len(value_9))) > int64(len(value_9)) {
+		value_4 := request.Habits[:]
+		if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_43 := value_9[0:int64(len(value_9)):int64(len(value_9))]
+		loop_view_43 := value_4[0:int64(len(value_4)):int64(len(value_4))]
 		loop_count_43 := int64(len(loop_view_43))
 		var loop_cursor_43 int64 = 0
 		for loop_cursor_43 < loop_count_43 {
@@ -315,38 +304,38 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 			}
 			habit.ID = canonical.Value
 			if request.Bootstrap && habit.DeletedAt > 0 {
-				var value_10 *__type_c922d3f56b74fd5a = &(deletedHabits)
-				var value_11 string = habit.ID
-				var value_12 bool = true
-				if (*value_10) == nil {
-					(*value_10) = make(__type_c922d3f56b74fd5a)
+				var value_5 *__type_c922d3f56b74fd5a = &(deletedHabits)
+				var value_6 string = habit.ID
+				var value_7 bool = true
+				if (*value_5) == nil {
+					(*value_5) = make(__type_c922d3f56b74fd5a)
 				}
-				(*value_10)[value_11] = value_12
-				var value_13 *__type_c922d3f56b74fd5a = &(deletedHabits)
-				var value_14 string = originalID
-				var value_15 bool = true
-				if (*value_13) == nil {
-					(*value_13) = make(__type_c922d3f56b74fd5a)
+				(*value_5)[value_6] = value_7
+				var value_8 *__type_c922d3f56b74fd5a = &(deletedHabits)
+				var value_9 string = originalID
+				var value_10 bool = true
+				if (*value_8) == nil {
+					(*value_8) = make(__type_c922d3f56b74fd5a)
 				}
-				(*value_13)[value_14] = value_15
+				(*value_8)[value_9] = value_10
 				loop_cursor_43++
 				continue
 			}
 			if habit.DeletedAt > 0 {
-				var value_16 *__type_c922d3f56b74fd5a = &(deletedHabits)
-				var value_17 string = habit.ID
-				var value_18 bool = true
-				if (*value_16) == nil {
-					(*value_16) = make(__type_c922d3f56b74fd5a)
+				var value_11 *__type_c922d3f56b74fd5a = &(deletedHabits)
+				var value_12 string = habit.ID
+				var value_13 bool = true
+				if (*value_11) == nil {
+					(*value_11) = make(__type_c922d3f56b74fd5a)
 				}
-				(*value_16)[value_17] = value_18
-				var value_19 *__type_c922d3f56b74fd5a = &(deletedHabits)
-				var value_20 string = originalID
-				var value_21 bool = true
-				if (*value_19) == nil {
-					(*value_19) = make(__type_c922d3f56b74fd5a)
+				(*value_11)[value_12] = value_13
+				var value_14 *__type_c922d3f56b74fd5a = &(deletedHabits)
+				var value_15 string = originalID
+				var value_16 bool = true
+				if (*value_14) == nil {
+					(*value_14) = make(__type_c922d3f56b74fd5a)
 				}
-				(*value_19)[value_20] = value_21
+				(*value_14)[value_15] = value_16
 				deleted := SyncWrites_DeleteHabit(transaction, context, request.UserIDHash, habit)
 				_ = deleted
 				result.Error = deleted.Error
@@ -368,20 +357,20 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		}
 	}
 	{
-		value_22 := request.HabitDays[:]
-		if int64(0) < 0 || int64(int64(len(value_22))) < int64(0) || int64(int64(len(value_22))) > int64(len(value_22)) {
+		value_17 := request.HabitDays[:]
+		if int64(0) < 0 || int64(int64(len(value_17))) < int64(0) || int64(int64(len(value_17))) > int64(len(value_17)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_74 := value_22[0:int64(len(value_22)):int64(len(value_22))]
+		loop_view_74 := value_17[0:int64(len(value_17)):int64(len(value_17))]
 		loop_count_74 := int64(len(loop_view_74))
 		var loop_cursor_74 int64 = 0
 		for loop_cursor_74 < loop_count_74 {
 			loop_index_74 := loop_cursor_74
 			day := loop_view_74[loop_index_74]
-			var value_23 __type_c922d3f56b74fd5a = deletedHabits
-			var value_24 string = day.HabitID
-			var value_25 bool = value_23[value_24]
-			if value_25 {
+			var value_18 __type_c922d3f56b74fd5a = deletedHabits
+			var value_19 string = day.HabitID
+			var value_20 bool = value_18[value_19]
+			if value_20 {
 				loop_cursor_74++
 				continue
 			}
@@ -392,10 +381,10 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 				return result
 			}
 			day.HabitID = canonical.Value
-			var value_26 __type_c922d3f56b74fd5a = deletedHabits
-			var value_27 string = day.HabitID
-			var value_28 bool = value_26[value_27]
-			if value_28 {
+			var value_21 __type_c922d3f56b74fd5a = deletedHabits
+			var value_22 string = day.HabitID
+			var value_23 bool = value_21[value_22]
+			if value_23 {
 				loop_cursor_74++
 				continue
 			}
@@ -410,11 +399,11 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		}
 	}
 	{
-		value_29 := request.Sessions[:]
-		if int64(0) < 0 || int64(int64(len(value_29))) < int64(0) || int64(int64(len(value_29))) > int64(len(value_29)) {
+		value_24 := request.Sessions[:]
+		if int64(0) < 0 || int64(int64(len(value_24))) < int64(0) || int64(int64(len(value_24))) > int64(len(value_24)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_94 := value_29[0:int64(len(value_29)):int64(len(value_29))]
+		loop_view_94 := value_24[0:int64(len(value_24)):int64(len(value_24))]
 		loop_count_94 := int64(len(loop_view_94))
 		var loop_cursor_94 int64 = 0
 		for loop_cursor_94 < loop_count_94 {
@@ -446,11 +435,11 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		}
 	}
 	{
-		value_30 := request.EncryptedRecords[:]
-		if int64(0) < 0 || int64(int64(len(value_30))) < int64(0) || int64(int64(len(value_30))) > int64(len(value_30)) {
+		value_25 := request.EncryptedRecords[:]
+		if int64(0) < 0 || int64(int64(len(value_25))) < int64(0) || int64(int64(len(value_25))) > int64(len(value_25)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_114 := value_30[0:int64(len(value_30)):int64(len(value_30))]
+		loop_view_114 := value_25[0:int64(len(value_25)):int64(len(value_25))]
 		loop_count_114 := int64(len(loop_view_114))
 		var loop_cursor_114 int64 = 0
 		for loop_cursor_114 < loop_count_114 {
@@ -467,14 +456,12 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 			loop_cursor_114++
 		}
 	}
-	var value_31 OperationsWriteResult = SyncApplication_ApplyOperations(transaction, context, request.UserIDHash, request.Ops, &(applied))
-	operations := value_31
+	operations := SyncApplication_ApplyOperations(transaction, context, request.UserIDHash, request.Ops, &(applied))
 	result.Error = operations.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_32 Error = StdSqlGo_Commit(transaction)
-	result.Error = value_32
+	result.Error = StdSqlGo_Commit(transaction)
 	if result.Error == nil {
 		result.Value = applied
 		result.Accepted = operations.Value

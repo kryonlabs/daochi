@@ -75,15 +75,13 @@ func HabitMigration_ReadStrings(rows *Rows) MigrationStringsResult {
 		value_0[0] = &(value)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:1:1])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:1:1])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, value)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error == nil {
 		result.Value = values
 	}
@@ -102,15 +100,13 @@ func HabitMigration_ReadOperations(rows *Rows) StoredHabitOperationsResult {
 		value_0[2] = &(value.Payload)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, value)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error == nil {
 		result.Value = values
 	}
@@ -129,15 +125,13 @@ func HabitMigration_ReadLegacyHabits(rows *Rows) LegacyHabitsResult {
 		value_0[2] = &(value.ServerVersion)
 		destinations := value_0
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:3:3])
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, value)
 	}
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error == nil {
 		result.Value = values
 	}
@@ -171,8 +165,7 @@ func HabitMigration_CleanupDays(transaction *Transaction, context Context, userI
 	deleted := StdSqlGo_ExecTx(transaction, context, value_1, arguments[0:1:1])
 	result.Error = deleted.Error
 	if result.Error == nil {
-		var value_2 bool = AccountState_Affected(deleted.Value) > int(0)
-		result.Changed = value_2
+		result.Changed = AccountState_Affected(deleted.Value) > int(0)
 	}
 	return result
 }
@@ -198,49 +191,44 @@ func HabitMigration_Cleanup(database *Database, context Context, userID string) 
 }
 
 func HabitMigration_MergeRows(transaction *Transaction, context Context, userID string, keeperID string, duplicateID string) Error {
-	var value_0 MigrationExistsResult = HabitMigration_Exists(transaction, context, "\nSELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)", userID, keeperID)
-	keeper := value_0
+	keeper := HabitMigration_Exists(transaction, context, "\nSELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)", userID, keeperID)
 	if keeper.Error != nil {
 		return keeper.Error
 	}
-	var value_1 MigrationExistsResult = HabitMigration_Exists(transaction, context, "\nSELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)", userID, duplicateID)
-	duplicate := value_1
+	duplicate := HabitMigration_Exists(transaction, context, "\nSELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)", userID, duplicateID)
 	if duplicate.Error != nil {
 		return duplicate.Error
 	}
-	var value_2 [3]Any
-	value_2[0] = userID
-	value_2[1] = duplicateID
-	value_2[2] = keeperID
-	arguments := value_2
+	var value_0 [3]Any
+	value_0[0] = userID
+	value_0[1] = duplicateID
+	value_0[2] = keeperID
+	arguments := value_0
 	_ = arguments
 	if duplicate.Value != 0 {
 		if keeper.Value == 0 {
-			var value_3 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nUPDATE server_habits\nSET id=?3\nWHERE user_id_hash=?1 AND id=?2", arguments[0:3:3])
-			renamed := value_3
+			renamed := StdSqlGo_ExecTx(transaction, context, "\nUPDATE server_habits\nSET id=?3\nWHERE user_id_hash=?1 AND id=?2", arguments[0:3:3])
 			if renamed.Error != nil {
 				return renamed.Error
 			}
 		} else {
-			var value_4 string = "\nUPDATE server_habits\nSET name=CASE WHEN name='' THEN (SELECT name FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE name END,\n\tcolor_r=CASE WHEN color_r=0 THEN (SELECT color_r FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_r END,\n\tcolor_g=CASE WHEN color_g=0 THEN (SELECT color_g FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_g END,\n\tcolor_b=CASE WHEN color_b=0 THEN (SELECT color_b FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_b END,\n\tsync_mode=MAX(sync_mode,(SELECT sync_mode FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tsync_activity=(sync_activity | (SELECT sync_activity FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tcounter_enabled=MAX(counter_enabled,(SELECT counter_enabled FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tsort_order=MIN(sort_order,(SELECT sort_order FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tdeleted_at=CASE WHEN deleted_at=0 THEN 0 ELSE MIN(deleted_at,(SELECT deleted_at FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)) END,\n\tupdated_at=MAX(updated_at,(SELECT updated_at FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tserver_version=MAX(server_version,(SELECT server_version FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2))\nWHERE user_id_hash=?1 AND id=?3"
-			merged := StdSqlGo_ExecTx(transaction, context, value_4, arguments[0:3:3])
+			var value_1 string = "\nUPDATE server_habits\nSET name=CASE WHEN name='' THEN (SELECT name FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE name END,\n\tcolor_r=CASE WHEN color_r=0 THEN (SELECT color_r FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_r END,\n\tcolor_g=CASE WHEN color_g=0 THEN (SELECT color_g FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_g END,\n\tcolor_b=CASE WHEN color_b=0 THEN (SELECT color_b FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2) ELSE color_b END,\n\tsync_mode=MAX(sync_mode,(SELECT sync_mode FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tsync_activity=(sync_activity | (SELECT sync_activity FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tcounter_enabled=MAX(counter_enabled,(SELECT counter_enabled FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tsort_order=MIN(sort_order,(SELECT sort_order FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tdeleted_at=CASE WHEN deleted_at=0 THEN 0 ELSE MIN(deleted_at,(SELECT deleted_at FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)) END,\n\tupdated_at=MAX(updated_at,(SELECT updated_at FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2)),\n\tserver_version=MAX(server_version,(SELECT server_version FROM server_habits d WHERE d.user_id_hash=?1 AND d.id=?2))\nWHERE user_id_hash=?1 AND id=?3"
+			merged := StdSqlGo_ExecTx(transaction, context, value_1, arguments[0:3:3])
 			if merged.Error != nil {
 				return merged.Error
 			}
-			var value_5 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habits\nWHERE user_id_hash=?1 AND id=?2", arguments[0:2:2])
-			removed := value_5
+			removed := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habits\nWHERE user_id_hash=?1 AND id=?2", arguments[0:2:2])
 			if removed.Error != nil {
 				return removed.Error
 			}
 		}
 	}
-	var value_6 string = "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nSELECT user_id_hash,?3,local_date,completed,count,updated_at,server_version\nFROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=MAX(server_habit_days.completed,excluded.completed),\n\tcount=MAX(server_habit_days.count,excluded.count),\n\tupdated_at=MAX(server_habit_days.updated_at,excluded.updated_at),\n\tserver_version=MAX(server_habit_days.server_version,excluded.server_version)"
-	days := StdSqlGo_ExecTx(transaction, context, value_6, arguments[0:3:3])
+	var value_2 string = "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nSELECT user_id_hash,?3,local_date,completed,count,updated_at,server_version\nFROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=MAX(server_habit_days.completed,excluded.completed),\n\tcount=MAX(server_habit_days.count,excluded.count),\n\tupdated_at=MAX(server_habit_days.updated_at,excluded.updated_at),\n\tserver_version=MAX(server_habit_days.server_version,excluded.server_version)"
+	days := StdSqlGo_ExecTx(transaction, context, value_2, arguments[0:3:3])
 	if days.Error != nil {
 		return days.Error
 	}
-	var value_7 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2", arguments[0:2:2])
-	deleted := value_7
+	deleted := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2", arguments[0:2:2])
 	return deleted.Error
 }
 
@@ -292,19 +280,17 @@ func HabitMigration_CanonicalizeOperations(transaction *Transaction, context Con
 			value_4[3] = value_5
 			values := value_4
 			_ = values
-			var value_6 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nUPDATE server_sync_ops\nSET entity_id=?3,payload_json=?4\nWHERE user_id_hash=?1 AND op_id=?2", values[0:4:4])
-			updated := value_6
+			updated := StdSqlGo_ExecTx(transaction, context, "\nUPDATE server_sync_ops\nSET entity_id=?3,payload_json=?4\nWHERE user_id_hash=?1 AND op_id=?2", values[0:4:4])
 			result.Error = updated.Error
 			if result.Error != nil {
 				return result
 			}
-			var value_7 bool = changed
-			var value_8 bool = value_7
-			if !value_8 {
-				var value_9 bool = AccountState_Affected(updated.Value) > int(0)
-				value_8 = value_9
+			var value_6 bool = changed
+			if !value_6 {
+				var value_7 bool = AccountState_Affected(updated.Value) > int(0)
+				value_6 = value_7
 			}
-			changed = value_8
+			changed = value_6
 			loop_cursor_13++
 		}
 	}
@@ -318,8 +304,7 @@ func HabitMigration_CanonicalizeIDs(transaction *Transaction, context Context, u
 	value_0[0] = userID
 	arguments := value_0
 	_ = arguments
-	var value_1 QueryResult = StdSqlGo_QueryTx(transaction, context, "\nSELECT id\nFROM server_habits\nWHERE user_id_hash=?1\nORDER BY sort_order,id", arguments[0:1:1])
-	queried := value_1
+	queried := StdSqlGo_QueryTx(transaction, context, "\nSELECT id\nFROM server_habits\nWHERE user_id_hash=?1\nORDER BY sort_order,id", arguments[0:1:1])
 	result.Error = queried.Error
 	if result.Error != nil {
 		return result
@@ -331,23 +316,22 @@ func HabitMigration_CanonicalizeIDs(transaction *Transaction, context Context, u
 	}
 	changed := false
 	{
-		value_2 := identifiersToMigrate.Value[:]
-		if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
+		value_1 := identifiersToMigrate.Value[:]
+		if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_13 := value_2[0:int64(len(value_2)):int64(len(value_2))]
+		loop_view_13 := value_1[0:int64(len(value_1)):int64(len(value_1))]
 		loop_count_13 := int64(len(loop_view_13))
 		var loop_cursor_13 int64 = 0
 		for loop_cursor_13 < loop_count_13 {
 			loop_index_13 := loop_cursor_13
 			oldID := loop_view_13[loop_index_13]
-			var value_3 bool = oldID == ""
-			var value_4 bool = value_3
-			if !value_4 {
-				var value_5 bool = HabitId_IsCanonical(oldID)
-				value_4 = value_5
+			var value_2 bool = oldID == ""
+			if !value_2 {
+				var value_3 bool = HabitId_IsCanonical(oldID)
+				value_2 = value_3
 			}
-			if value_4 {
+			if value_2 {
 				loop_cursor_13++
 				continue
 			}
@@ -360,8 +344,7 @@ func HabitMigration_CanonicalizeIDs(transaction *Transaction, context Context, u
 				loop_cursor_13++
 				continue
 			}
-			var value_6 Error = HabitMigration_MergeRows(transaction, context, userID, canonical.Value, oldID)
-			result.Error = value_6
+			result.Error = HabitMigration_MergeRows(transaction, context, userID, canonical.Value, oldID)
 			if result.Error != nil {
 				return result
 			}
@@ -480,14 +463,12 @@ func HabitMigration_MaterializeDays(transaction *Transaction, context Context, u
 				return result
 			}
 			var value_6 bool = changed
-			var value_7 bool = value_6
-			if !value_7 {
-				var value_8 bool = AccountState_Affected(written.Value) > int(0)
-				value_7 = value_8
+			if !value_6 {
+				var value_7 bool = AccountState_Affected(written.Value) > int(0)
+				value_6 = value_7
 			}
-			changed = value_7
-			var value_9 Error = HabitMigration_MergeRows(transaction, context, userID, canonical.Value, habit.ID)
-			result.Error = value_9
+			changed = value_6
+			result.Error = HabitMigration_MergeRows(transaction, context, userID, canonical.Value, habit.ID)
 			if result.Error != nil {
 				return result
 			}
@@ -540,8 +521,7 @@ func HabitMigration_AllAccounts(database *Database, context Context) Error {
 	if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
 		panic("slice range out of bounds")
 	}
-	var value_1 QueryResult = StdSqlGo_Query(database, context, "SELECT user_id_hash FROM server_users ORDER BY user_id_hash", value_0[0:int64(len(value_0)):int64(len(value_0))])
-	queried := value_1
+	queried := StdSqlGo_Query(database, context, "SELECT user_id_hash FROM server_users ORDER BY user_id_hash", value_0[0:int64(len(value_0)):int64(len(value_0))])
 	if queried.Error != nil {
 		return queried.Error
 	}
@@ -550,11 +530,11 @@ func HabitMigration_AllAccounts(database *Database, context Context) Error {
 		return users.Error
 	}
 	{
-		value_2 := users.Value[:]
-		if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
+		value_1 := users.Value[:]
+		if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_9 := value_2[0:int64(len(value_2)):int64(len(value_2))]
+		loop_view_9 := value_1[0:int64(len(value_1)):int64(len(value_1))]
 		loop_count_9 := int64(len(loop_view_9))
 		var loop_cursor_9 int64 = 0
 		for loop_cursor_9 < loop_count_9 {
@@ -574,32 +554,29 @@ func HabitMigration_SunSalutation(transaction *Transaction, context Context, use
 	var result MigrationResult = MigrationResult{}
 	oldID := "yoga"
 	newID := "sun-salutation"
-	var value_0 MigrationExistsResult = HabitMigration_Exists(transaction, context, "\nSELECT EXISTS(SELECT 1 FROM server_habit_id_migrations WHERE user_id_hash=?1 AND old_id=?2)", userID, oldID)
-	marker := value_0
+	marker := HabitMigration_Exists(transaction, context, "\nSELECT EXISTS(SELECT 1 FROM server_habit_id_migrations WHERE user_id_hash=?1 AND old_id=?2)", userID, oldID)
 	result.Error = marker.Error
 	if result.Error != nil || marker.Value != 0 {
 		return result
 	}
 	var activity int = 0
 	var deletedAt int64 = 0
-	var value_1 [3]Any
-	value_1[0] = userID
-	value_1[1] = oldID
-	value_1[2] = newID
-	arguments := value_1
+	var value_0 [3]Any
+	value_0[0] = userID
+	value_0[1] = oldID
+	value_0[2] = newID
+	arguments := value_0
 	_ = arguments
-	var value_2 [2]Any
-	value_2[0] = &(activity)
-	value_2[1] = &(deletedAt)
-	destinations := value_2
+	var value_1 [2]Any
+	value_1[0] = &(activity)
+	value_1[1] = &(deletedAt)
+	destinations := value_1
 	_ = destinations
-	var value_3 *Row = StdSqlGo_QueryRowTx(transaction, context, "\nSELECT sync_activity,deleted_at\nFROM server_habits\nWHERE user_id_hash=?1 AND id=?2", arguments[0:2:2])
-	row := value_3
+	row := StdSqlGo_QueryRowTx(transaction, context, "\nSELECT sync_activity,deleted_at\nFROM server_habits\nWHERE user_id_hash=?1 AND id=?2", arguments[0:2:2])
 	scanned := StdSqlGo_ScanRow(row, destinations[0:2:2])
-	var value_4 Error = scanned
-	if StdErrorsGo_Is(value_4, StdSqlGo_NoRows()) {
-		var value_5 string = "\nINSERT OR IGNORE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'not-present')"
-		written := StdSqlGo_ExecTx(transaction, context, value_5, arguments[0:3:3])
+	if StdErrorsGo_Is(scanned, StdSqlGo_NoRows()) {
+		var value_2 string = "\nINSERT OR IGNORE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'not-present')"
+		written := StdSqlGo_ExecTx(transaction, context, value_2, arguments[0:3:3])
 		_ = written
 		result.Error = written.Error
 		return result
@@ -609,55 +586,50 @@ func HabitMigration_SunSalutation(transaction *Transaction, context Context, use
 		return result
 	}
 	if deletedAt != 0 || (activity&int(4)) == int(0) {
-		var value_6 string = "\nINSERT OR IGNORE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'not-sun-salutation')"
-		written := StdSqlGo_ExecTx(transaction, context, value_6, arguments[0:3:3])
+		var value_3 string = "\nINSERT OR IGNORE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'not-sun-salutation')"
+		written := StdSqlGo_ExecTx(transaction, context, value_3, arguments[0:3:3])
 		_ = written
 		result.Error = written.Error
 		return result
 	}
-	var value_7 MigrationExistsResult = HabitMigration_Exists(transaction, context, "\nSELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)", userID, newID)
-	existing := value_7
+	existing := HabitMigration_Exists(transaction, context, "\nSELECT EXISTS(SELECT 1 FROM server_habits WHERE user_id_hash=?1 AND id=?2)", userID, newID)
 	result.Error = existing.Error
 	if result.Error != nil {
 		return result
 	}
 	if existing.Value == 0 {
-		var value_8 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nUPDATE server_habits\nSET id=?3\nWHERE user_id_hash=?1 AND id=?2", arguments[0:3:3])
-		renamed := value_8
+		renamed := StdSqlGo_ExecTx(transaction, context, "\nUPDATE server_habits\nSET id=?3\nWHERE user_id_hash=?1 AND id=?2", arguments[0:3:3])
 		result.Error = renamed.Error
 		if result.Error != nil {
 			return result
 		}
-		var value_9 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nUPDATE server_habit_days\nSET habit_id=?3\nWHERE user_id_hash=?1 AND habit_id=?2", arguments[0:3:3])
-		days := value_9
+		days := StdSqlGo_ExecTx(transaction, context, "\nUPDATE server_habit_days\nSET habit_id=?3\nWHERE user_id_hash=?1 AND habit_id=?2", arguments[0:3:3])
 		_ = days
 		result.Error = days.Error
 		if result.Error != nil {
 			return result
 		}
 	} else {
-		var value_10 string = "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nSELECT user_id_hash,?3,local_date,completed,count,updated_at,server_version\nFROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=MAX(server_habit_days.completed,excluded.completed),\n\tcount=MAX(server_habit_days.count,excluded.count),\n\tupdated_at=MAX(server_habit_days.updated_at,excluded.updated_at),\n\tserver_version=MAX(server_habit_days.server_version,excluded.server_version)"
-		days := StdSqlGo_ExecTx(transaction, context, value_10, arguments[0:3:3])
+		var value_4 string = "\nINSERT INTO server_habit_days(user_id_hash,habit_id,local_date,completed,count,updated_at,server_version)\nSELECT user_id_hash,?3,local_date,completed,count,updated_at,server_version\nFROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2\nON CONFLICT(user_id_hash,habit_id,local_date) DO UPDATE SET\n\tcompleted=MAX(server_habit_days.completed,excluded.completed),\n\tcount=MAX(server_habit_days.count,excluded.count),\n\tupdated_at=MAX(server_habit_days.updated_at,excluded.updated_at),\n\tserver_version=MAX(server_habit_days.server_version,excluded.server_version)"
+		days := StdSqlGo_ExecTx(transaction, context, value_4, arguments[0:3:3])
 		_ = days
 		result.Error = days.Error
 		if result.Error != nil {
 			return result
 		}
-		var value_11 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2", arguments[0:2:2])
-		removedDays := value_11
+		removedDays := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2", arguments[0:2:2])
 		result.Error = removedDays.Error
 		if result.Error != nil {
 			return result
 		}
-		var value_12 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habits\nWHERE user_id_hash=?1 AND id=?2", arguments[0:2:2])
-		removedHabit := value_12
+		removedHabit := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habits\nWHERE user_id_hash=?1 AND id=?2", arguments[0:2:2])
 		result.Error = removedHabit.Error
 		if result.Error != nil {
 			return result
 		}
 	}
-	var value_13 string = "\nINSERT OR REPLACE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'protocol-v3')"
-	completed := StdSqlGo_ExecTx(transaction, context, value_13, arguments[0:3:3])
+	var value_5 string = "\nINSERT OR REPLACE INTO server_habit_id_migrations(user_id_hash,old_id,new_id,source)\nVALUES(?1,?2,?3,'protocol-v3')"
+	completed := StdSqlGo_ExecTx(transaction, context, value_5, arguments[0:3:3])
 	result.Error = completed.Error
 	result.Changed = result.Error == nil
 	return result

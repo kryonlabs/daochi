@@ -18,7 +18,6 @@ func ResourceId_New() ResourceIDResult {
 	if filled.Error != nil {
 		return result
 	}
-	var value_0 string = hex.EncodeToString(bytes[0:16:16])
-	result.Value = value_0
+	result.Value = hex.EncodeToString(bytes[0:16:16])
 	return result
 }

@@ -161,8 +161,7 @@ func Store_Open(path string) StoreResult {
 		result.Error = openedStore.Error
 		return result
 	}
-	var value_0 *Store = new(Store)
-	result.Value = value_0
+	result.Value = new(Store)
 	result.Value.Database = openedStore.Value
 	result.Value.Path = path
 	return result
@@ -190,8 +189,7 @@ func (receiver *Store) ApplySync(argument1 Context, argument2 SyncRequest, argum
 
 func Store_ApplySyncDetailed(store *Store, context Context, req SyncRequest, publicKey []uint8) Results__SyncResult__a_string__Error {
 	result := SyncApplication_Apply(store.Database, context, req, publicKey, ErrSyncUserNotFound)
-	var value_3 Results__SyncResult__a_string__Error = Results__SyncResult__a_string__Error{Value0: result.Value, Value1: result.Accepted, Value2: result.Error}
-	return value_3
+	return Results__SyncResult__a_string__Error{Value0: result.Value, Value1: result.Accepted, Value2: result.Error}
 }
 
 func (receiver *Store) ApplySyncDetailed(argument1 Context, argument2 SyncRequest, argument3 []uint8) (SyncResult, []string, Error) {
@@ -265,8 +263,7 @@ func (receiver *Store) CreateFriendRequest(argument1 Context, argument2 string, 
 
 func Store_FriendRequest(store *Store, context Context, id string) Results__FriendRequest__bool__Error {
 	result := FriendStore_Request(store.Database, context, id)
-	var value_3 Results__FriendRequest__bool__Error = Results__FriendRequest__bool__Error{Value0: result.Value, Value1: result.Found, Value2: result.Error}
-	return value_3
+	return Results__FriendRequest__bool__Error{Value0: result.Value, Value1: result.Found, Value2: result.Error}
 }
 
 func (receiver *Store) FriendRequest(argument1 Context, argument2 string) (FriendRequest, bool, Error) {
@@ -276,8 +273,7 @@ func (receiver *Store) FriendRequest(argument1 Context, argument2 string) (Frien
 
 func Store_ListFriendRequests(store *Store, context Context, userID string) Results__a_FriendRequest__a_FriendRequest__Error {
 	result := FriendStore_Requests(store.Database, context, userID)
-	var value_3 Results__a_FriendRequest__a_FriendRequest__Error = Results__a_FriendRequest__a_FriendRequest__Error{Value0: result.Incoming, Value1: result.Outgoing, Value2: result.Error}
-	return value_3
+	return Results__a_FriendRequest__a_FriendRequest__Error{Value0: result.Incoming, Value1: result.Outgoing, Value2: result.Error}
 }
 
 func (receiver *Store) ListFriendRequests(argument1 Context, argument2 string) ([]FriendRequest, []FriendRequest, Error) {
@@ -362,8 +358,7 @@ func (receiver *Store) RecordClientLogin(argument1 Context, argument2 string, ar
 }
 
 func Store_RecordClientSync(store *Store, context Context, userID string, clientID string, sinceVersion int64, serverVersion int64, protocolVersion int, clientClock int64) Error {
-	var value_0 Error = SyncClients_RecordSync(store.Database, context, userID, clientID, sinceVersion, serverVersion, protocolVersion, clientClock)
-	return value_0
+	return SyncClients_RecordSync(store.Database, context, userID, clientID, sinceVersion, serverVersion, protocolVersion, clientClock)
 }
 
 func (receiver *Store) RecordClientSync(argument1 Context, argument2 string, argument3 string, argument4 int64, argument5 int64, argument6 int, argument7 int64) Error {
@@ -382,8 +377,7 @@ func (receiver *Store) StoreEncryptedPayload(argument1 Context, argument2 string
 
 func Store_EncryptedPayloadsSince(store *Store, context Context, userID string, sinceVersion int64, limit int) Results__a_EncryptedPayload__bool__Error {
 	result := EncryptedPayloads_Since(store.Database, context, userID, sinceVersion, limit)
-	var value_3 Results__a_EncryptedPayload__bool__Error = Results__a_EncryptedPayload__bool__Error{Value0: result.Value, Value1: result.Truncated, Value2: result.Error}
-	return value_3
+	return Results__a_EncryptedPayload__bool__Error{Value0: result.Value, Value1: result.Truncated, Value2: result.Error}
 }
 
 func (receiver *Store) EncryptedPayloadsSince(argument1 Context, argument2 string, argument3 int64, argument4 int) ([]EncryptedPayload, bool, Error) {
@@ -441,8 +435,7 @@ func (receiver *Store) RecentSyncAudit(argument1 Context, argument2 string, argu
 
 func Store_SyncOpsCompacted(store *Store, context Context, userID string, clientClock int64) Results__bool__s64__Error {
 	result := SyncClients_Compacted(store.Database, context, userID, clientClock)
-	var value_3 Results__bool__s64__Error = Results__bool__s64__Error{Value0: result.Compacted, Value1: result.Through, Value2: result.Error}
-	return value_3
+	return Results__bool__s64__Error{Value0: result.Compacted, Value1: result.Through, Value2: result.Error}
 }
 
 func (receiver *Store) SyncOpsCompacted(argument1 Context, argument2 string, argument3 int64) (bool, int64, Error) {
@@ -478,8 +471,7 @@ func (receiver *Store) PublicStats(argument1 Context, argument2 string) (PublicS
 
 func Store_ChangesSince(store *Store, context Context, userID string, sinceVersion int64) Results__SyncChanges__s64__Error {
 	result := SyncViews_Changes(store.Database, context, userID, sinceVersion)
-	var value_3 Results__SyncChanges__s64__Error = Results__SyncChanges__s64__Error{Value0: result.Value, Value1: result.Version, Value2: result.Error}
-	return value_3
+	return Results__SyncChanges__s64__Error{Value0: result.Value, Value1: result.Version, Value2: result.Error}
 }
 
 func (receiver *Store) ChangesSince(argument1 Context, argument2 string, argument3 int64) (SyncChanges, int64, Error) {

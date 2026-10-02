@@ -131,29 +131,28 @@ func Metrics_Reason(value string) string {
 		decoded := Metrics_DecodeRune(normalized[at:])
 		rune := decoded.Value
 		var byte uint8 = 95
-		var value_1 bool = (rune >= 97 && rune <= 122) || (rune >= 48 && rune <= 57) || rune == 95 || rune == 45 || rune == 46
-		if value_1 {
+		if (rune >= 97 && rune <= 122) || (rune >= 48 && rune <= 57) || rune == 95 || rune == 45 || rune == 46 {
 			byte = uint8(rune)
 		}
-		var value_2 uint8 = byte
-		var value_3 bool = false
-		output.Data = append(output.Data, value_2)
+		var value_1 uint8 = byte
+		var value_2 bool = false
+		output.Data = append(output.Data, value_1)
 		output.Count = int64(len(output.Data))
 		output.Capacity = int64(cap(output.Data))
-		value_3 = true
-		_ = value_3
+		value_2 = true
+		_ = value_2
 		at += int64(decoded.Width)
 	}
-	var value_4 string = ""
-	value_4 = string(output.Data[:output.Count])
+	var value_3 string = ""
+	value_3 = string(output.Data[:output.Count])
 	output.Data = nil
 	output.Capacity = 0
 	output.Count = 0
-	var value_5 string = strings.Trim(value_4, "_")
+	var value_4 string = strings.Trim(value_3, "_")
 	value_0.Data = nil
 	value_0.Capacity = 0
 	value_0.Count = 0
-	return value_5
+	return value_4
 }
 
 func Metrics_EscapeLabel(value string) string {
@@ -283,8 +282,7 @@ func Metrics_WriteAppStorage(writer ResponseWriter, name string, kind string, ap
 
 func Metrics_WriteCollectionStorage(writer ResponseWriter, name string, kind string, apps []AppStorageUsage) {
 	fmt.Fprintf(writer, "# TYPE %s %s\n", name, kind)
-	for it_index := int64(0); it_index < int64(len(apps)); it_index++ {
-		app := apps[it_index]
+	for _, app := range apps {
 		{
 			value_0 := app.Collections[:]
 			if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
@@ -296,9 +294,7 @@ func Metrics_WriteCollectionStorage(writer ResponseWriter, name string, kind str
 			for loop_cursor_2 < loop_count_2 {
 				loop_index_2 := loop_cursor_2
 				collection := loop_view_2[loop_index_2]
-				var value_1 ResponseWriter = writer
-				var value_2 string = name
-				fmt.Fprintf(value_1, "%s{app_id=\"%s\",collection=\"%s\"} %d\n", value_2, Metrics_EscapeLabel(app.AppID), Metrics_EscapeLabel(collection.Collection), int64(Metrics_NonNegative(collection.LogicalBytes)))
+				fmt.Fprintf(writer, "%s{app_id=\"%s\",collection=\"%s\"} %d\n", name, Metrics_EscapeLabel(app.AppID), Metrics_EscapeLabel(collection.Collection), int64(Metrics_NonNegative(collection.LogicalBytes)))
 				loop_cursor_2++
 			}
 		}

@@ -76,30 +76,29 @@ type BigInteger = big.Int
 
 func MoneroWallet_CollectTransfers(state *InvoicePaymentState, seen __type_c922d3f56b74fd5a, identifiers []string, transfers []WalletTransfer, configuration Config, invoice MoneroInvoiceResponse) []string {
 	for _, transfer := range transfers {
-		var value_0 bool = transfer.TxID == "" || transfer.Amount <= 0 || transfer.SubaddrIndex.Major != 0 || transfer.SubaddrIndex.Minor != invoice.AddressIndex
-		if value_0 {
+		if transfer.TxID == "" || transfer.Amount <= 0 || transfer.SubaddrIndex.Major != 0 || transfer.SubaddrIndex.Minor != invoice.AddressIndex {
 			continue
 		}
-		var value_1 __type_c922d3f56b74fd5a = seen
-		var value_2 string = transfer.TxID
-		var value_3 bool = value_1[value_2]
-		if value_3 {
+		var value_0 __type_c922d3f56b74fd5a = seen
+		var value_1 string = transfer.TxID
+		var value_2 bool = value_0[value_1]
+		if value_2 {
 			continue
 		}
-		var value_4 *__type_c922d3f56b74fd5a = &(seen)
-		var value_5 string = transfer.TxID
-		var value_6 bool = true
-		if (*value_4) == nil {
-			(*value_4) = make(__type_c922d3f56b74fd5a)
+		var value_3 *__type_c922d3f56b74fd5a = &(seen)
+		var value_4 string = transfer.TxID
+		var value_5 bool = true
+		if (*value_3) == nil {
+			(*value_3) = make(__type_c922d3f56b74fd5a)
 		}
-		(*value_4)[value_5] = value_6
+		(*value_3)[value_4] = value_5
 		state.SeenAtomic += transfer.Amount
 		identifiers = append(identifiers, transfer.TxID)
 		if transfer.DoubleSpendSeen {
 			continue
 		}
-		var value_7 bool = transfer.Confirmations >= MoneroWallet_ConfirmationsRequired(configuration)
-		if value_7 && !transfer.Locked && transfer.UnlockTime == 0 {
+		var value_6 bool = transfer.Confirmations >= MoneroWallet_ConfirmationsRequired(configuration)
+		if value_6 && !transfer.Locked && transfer.UnlockTime == 0 {
 			state.ConfirmedAtomic += transfer.Amount
 		}
 	}
@@ -127,21 +126,18 @@ func MoneroWallet_MinimumAtomicAmount(configuration Config) int64 {
 func MoneroWallet_TokenUnits(amount int64, rateAtomic int64, rateTokens int64) TokenUnitsResult {
 	var result TokenUnitsResult = TokenUnitsResult{}
 	if amount <= 0 || rateAtomic <= 0 || rateTokens <= 0 {
-		var value_0 Error = StdErrorsGo_New("invalid monero conversion")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("invalid monero conversion")
 		return result
 	}
 	value := big.NewInt(int64(0))
 	(*big.Int).Mul(value, big.NewInt(int64(amount)), big.NewInt(int64(rateTokens)))
 	(*big.Int).Div(value, value, big.NewInt(int64(rateAtomic)))
-	var value_1 bool = (*big.Int).IsInt64(value)
-	if !value_1 {
-		var value_2 Error = StdErrorsGo_New("monero conversion overflow")
-		result.Error = value_2
+	var value_0 bool = (*big.Int).IsInt64(value)
+	if !value_0 {
+		result.Error = StdErrorsGo_New("monero conversion overflow")
 		return result
 	}
-	var value_3 int64 = (*big.Int).Int64(value)
-	result.Value = value_3
+	result.Value = (*big.Int).Int64(value)
 	return result
 }
 
@@ -183,9 +179,7 @@ func MoneroWallet_Request(context Context, configuration Config, method string, 
 	var target [2]string
 	target[0] = configuration.MoneroWalletRPCURL
 	target[1] = "/json_rpc"
-	var value_13 Context = context
-	var value_14 RequestResult = StdHttpGo_NewRequest(value_13, "POST", strings.Join(target[0:2:2], ""), StdIoGo_FromBytes(body.Value))
-	request := value_14
+	request := StdHttpGo_NewRequest(context, "POST", strings.Join(target[0:2:2], ""), StdIoGo_FromBytes(body.Value))
 	if request.Error != nil {
 		return request.Error
 	}
@@ -242,14 +236,12 @@ func MoneroWallet_CreateAddress(context Context, configuration Config, label str
 	}
 	(*value_4)[value_5] = value_6
 	var address RPCAddress = RPCAddress{}
-	var value_7 Error = MoneroWallet_Request(context, configuration, "create_address", parameters, &(address), unavailable)
-	result.Error = value_7
+	result.Error = MoneroWallet_Request(context, configuration, "create_address", parameters, &(address), unavailable)
 	if result.Error != nil {
 		return result
 	}
 	if address.Address == "" {
-		var value_8 Error = StdErrorsGo_New("monero rpc missing address")
-		result.Error = value_8
+		result.Error = StdErrorsGo_New("monero rpc missing address")
 		return result
 	}
 	result.Address = address.Address
@@ -313,32 +305,29 @@ func MoneroWallet_InspectInvoice(context Context, configuration Config, invoice 
 	}
 	(*value_16)[value_17] = value_18
 	var transfers InvoiceTransfers = InvoiceTransfers{}
-	var value_19 Error = MoneroWallet_Request(context, configuration, "get_transfers", parameters, &(transfers), unavailable)
-	result.Error = value_19
+	result.Error = MoneroWallet_Request(context, configuration, "get_transfers", parameters, &(transfers), unavailable)
 	if result.Error != nil {
 		return result
 	}
 	var seen __type_c922d3f56b74fd5a = *new(__type_c922d3f56b74fd5a)
-	var value_20 *__type_c922d3f56b74fd5a = &(seen)
-	if (*value_20) == nil {
-		(*value_20) = make(__type_c922d3f56b74fd5a)
+	var value_19 *__type_c922d3f56b74fd5a = &(seen)
+	if (*value_19) == nil {
+		(*value_19) = make(__type_c922d3f56b74fd5a)
 	}
 	identifiers := make([]string, int(int(0)))
 	var state InvoicePaymentState = InvoicePaymentState{}
-	var value_21 []string = MoneroWallet_CollectTransfers(&(state), seen, identifiers, transfers.Pool, configuration, invoice)
-	identifiers = value_21
-	var value_22 []string = MoneroWallet_CollectTransfers(&(state), seen, identifiers, transfers.Incoming, configuration, invoice)
-	identifiers = value_22
+	identifiers = MoneroWallet_CollectTransfers(&(state), seen, identifiers, transfers.Pool, configuration, invoice)
+	identifiers = MoneroWallet_CollectTransfers(&(state), seen, identifiers, transfers.Incoming, configuration, invoice)
 	if int64(len(identifiers)) > 0 {
 		sort.Strings(identifiers)
 		var parts [3]string
-		var value_23 string = strings.Join(identifiers, "+")
-		parts[0] = value_23
+		var value_20 string = strings.Join(identifiers, "+")
+		parts[0] = value_20
 		parts[1] = ":0:"
-		var value_24 string = strconv.Itoa(int(invoice.AddressIndex))
-		parts[2] = value_24
-		var value_25 string = strings.Join(parts[0:3:3], "")
-		state.PaymentID = value_25
+		var value_21 string = strconv.Itoa(int(invoice.AddressIndex))
+		parts[2] = value_21
+		var value_22 string = strings.Join(parts[0:3:3], "")
+		state.PaymentID = value_22
 	}
 	result.Value = state
 	return result

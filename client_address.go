@@ -36,8 +36,7 @@ func ClientAddress_FromRequest(request *Request) string {
 	}
 	host = strings.TrimSpace(host)
 	if ClientAddress_IsLoopbackHost(host) {
-		var value_0 string = ClientAddress_FirstForwardedFor(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "X-Forwarded-For"))
-		forwarded := value_0
+		forwarded := ClientAddress_FirstForwardedFor(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "X-Forwarded-For"))
 		if forwarded != "" {
 			return forwarded
 		}

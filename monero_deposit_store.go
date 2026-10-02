@@ -95,10 +95,8 @@ func MoneroDepositStore_AccountAddress(database *Database, context Context, acco
 	destinations[4] = &(value.AccountIndex)
 	destinations[5] = &(value.AddressIndex)
 	destinations[6] = &(value.CreatedAt)
-	var value_1 Error = StdSqlGo_ScanRow(row, destinations[0:7:7])
-	result.Error = value_1
-	var value_2 Error = result.Error
-	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:7:7])
+	if StdErrorsGo_Is(result.Error, StdSqlGo_NoRows()) {
 		result.Error = nil
 		return result
 	}
@@ -111,19 +109,16 @@ func MoneroDepositStore_CreateAccountAddress(database *Database, context Context
 	var result AddressResult = AddressResult{}
 	var value_0 bool = Identity_ValidUserID(accountID)
 	if !value_0 {
-		var value_1 Error = StdErrorsGo_New("invalid account id")
-		result.Error = value_1
+		result.Error = StdErrorsGo_New("invalid account id")
 		return result
 	}
 	var arguments [1]Any
 	arguments[0] = accountID
-	var value_2 *Row = StdSqlGo_QueryRow(database, context, "SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)", arguments[0:1:1])
-	row := value_2
+	row := StdSqlGo_QueryRow(database, context, "SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)", arguments[0:1:1])
 	var exists int = 0
 	var destinations [1]Any
 	destinations[0] = &(exists)
-	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_3
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 	if result.Error != nil {
 		return result
 	}
@@ -139,10 +134,7 @@ func MoneroDepositStore_CreateAccountAddress(database *Database, context Context
 	var label [2]string
 	label[0] = "daochi-account-"
 	label[1] = resource.Value
-	var value_4 Context = context
-	var value_5 Config = configuration
-	var value_6 string = strings.Join(label[0:2:2], "")
-	allocation := MoneroWallet_CreateAddress(value_4, value_5, value_6, unavailable)
+	allocation := MoneroWallet_CreateAddress(context, configuration, strings.Join(label[0:2:2], ""), unavailable)
 	result.Error = allocation.Error
 	if result.Error != nil {
 		return result
@@ -152,8 +144,8 @@ func MoneroDepositStore_CreateAccountAddress(database *Database, context Context
 	values[1] = allocation.Index
 	values[2] = allocation.Address
 	values[3] = resource.Value
-	var value_7 string = "INSERT INTO monero_account_addresses(account_id,account_index,address_index,address,allocation_id) VALUES(?1,0,?2,?3,?4)"
-	inserted := StdSqlGo_Exec(database, context, value_7, values[0:4:4])
+	var value_1 string = "INSERT INTO monero_account_addresses(account_id,account_index,address_index,address,allocation_id) VALUES(?1,0,?2,?3,?4)"
+	inserted := StdSqlGo_Exec(database, context, value_1, values[0:4:4])
 	if inserted.Error != nil {
 		existing := MoneroDepositStore_AccountAddress(database, context, accountID)
 		if existing.Error == nil && existing.Found {
@@ -173,14 +165,13 @@ func MoneroDepositStore_ScanHeight(database *Database, context Context) HeightRe
 	if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
 		panic("slice range out of bounds")
 	}
-	var value_1 *Row = StdSqlGo_QueryRow(database, context, "SELECT last_height FROM monero_wallet_state WHERE wallet_id='default'", value_0[0:int64(len(value_0)):int64(len(value_0))])
-	row := value_1
+	row := StdSqlGo_QueryRow(database, context, "SELECT last_height FROM monero_wallet_state WHERE wallet_id='default'", value_0[0:int64(len(value_0)):int64(len(value_0))])
 	var destinations [1]Any
 	destinations[0] = &(result.Value)
-	var value_2 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_2
-	var value_3 Error = result.Error
-	if StdErrorsGo_Is(value_3, StdSqlGo_NoRows()) {
+	var value_1 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	result.Error = value_1
+	var value_2 Error = result.Error
+	if StdErrorsGo_Is(value_2, StdSqlGo_NoRows()) {
 		result.Error = nil
 	}
 	return result
@@ -226,22 +217,20 @@ func MoneroDepositStore_AddressOwners(database *Database, context Context) Owner
 		destinations[0] = &(indices[0])
 		destinations[1] = &(indices[1])
 		destinations[2] = &(accountID)
-		var value_3 Error = StdSqlGo_ScanRows(query.Value, destinations[0:3:3])
-		result.Error = value_3
+		result.Error = StdSqlGo_ScanRows(query.Value, destinations[0:3:3])
 		if result.Error != nil {
 			return result
 		}
-		var value_4 *__type_e628f0f93f788fda = &(owners)
-		var value_5 [2]int = indices
-		var value_6 string = accountID
-		if (*value_4) == nil {
-			(*value_4) = make(__type_e628f0f93f788fda)
+		var value_3 *__type_e628f0f93f788fda = &(owners)
+		var value_4 [2]int = indices
+		var value_5 string = accountID
+		if (*value_3) == nil {
+			(*value_3) = make(__type_e628f0f93f788fda)
 		}
-		(*value_4)[value_5] = value_6
+		(*value_3)[value_4] = value_5
 	}
 	result.Value = owners
-	var value_7 Error = StdSqlGo_RowsError(query.Value)
-	result.Error = value_7
+	result.Error = StdSqlGo_RowsError(query.Value)
 	return result
 }
 
@@ -256,13 +245,11 @@ func MoneroDepositStore_Deposit(database *Database, context Context, transaction
 	var value MoneroDeposit = MoneroDeposit{}
 	destinations := MoneroDepositStore_DepositDestinations(&(value))
 	_ = destinations
-	var value_1 Error = StdSqlGo_ScanRow(row, destinations[0:18:18])
-	result.Error = value_1
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:18:18])
 	if result.Error != nil {
 		return result
 	}
-	var value_2 Error = MoneroDepositStore_AttachReceipt(database, context, &(value))
-	result.Error = value_2
+	result.Error = MoneroDepositStore_AttachReceipt(database, context, &(value))
 	if result.Error == nil {
 		result.Value = value
 	}
@@ -271,8 +258,7 @@ func MoneroDepositStore_Deposit(database *Database, context Context, transaction
 
 func MoneroDepositStore_UpsertDeposit(database *Database, context Context, accountID string, transfer WalletTransfer, status string, configuration Config) DepositResult {
 	var result DepositResult = DepositResult{}
-	var value_0 TokenUnitsResult = MoneroWallet_TokenUnits(transfer.Amount, configuration.MoneroRateAtomicAmount, configuration.MoneroRateTokenUnits)
-	conversion := value_0
+	conversion := MoneroWallet_TokenUnits(transfer.Amount, configuration.MoneroRateAtomicAmount, configuration.MoneroRateTokenUnits)
 	var arguments [14]Any
 	arguments[0] = transfer.TxID
 	arguments[1] = transfer.SubaddrIndex.Major
@@ -288,14 +274,13 @@ func MoneroDepositStore_UpsertDeposit(database *Database, context Context, accou
 	arguments[11] = configuration.MoneroRateAtomicAmount
 	arguments[12] = configuration.MoneroRateTokenUnits
 	arguments[13] = conversion.Value
-	var value_1 string = "INSERT INTO monero_deposits(tx_id,account_index,address_index,account_id,amount_atomic,block_height,\n    confirmations,unlock_time,locked,double_spend_seen,status,rate_atomic_amount,rate_token_units,token_units)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)\nON CONFLICT(tx_id,account_index,address_index) DO UPDATE SET\n    amount_atomic=excluded.amount_atomic,\n    block_height=excluded.block_height,\n    confirmations=excluded.confirmations,\n    unlock_time=excluded.unlock_time,\n    locked=excluded.locked,\n    double_spend_seen=excluded.double_spend_seen,\n    status=CASE WHEN monero_deposits.status='credited' THEN 'credited' ELSE excluded.status END,\n    updated_at=CURRENT_TIMESTAMP\n"
-	inserted := StdSqlGo_Exec(database, context, value_1, arguments[0:14:14])
+	var value_0 string = "INSERT INTO monero_deposits(tx_id,account_index,address_index,account_id,amount_atomic,block_height,\n    confirmations,unlock_time,locked,double_spend_seen,status,rate_atomic_amount,rate_token_units,token_units)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)\nON CONFLICT(tx_id,account_index,address_index) DO UPDATE SET\n    amount_atomic=excluded.amount_atomic,\n    block_height=excluded.block_height,\n    confirmations=excluded.confirmations,\n    unlock_time=excluded.unlock_time,\n    locked=excluded.locked,\n    double_spend_seen=excluded.double_spend_seen,\n    status=CASE WHEN monero_deposits.status='credited' THEN 'credited' ELSE excluded.status END,\n    updated_at=CURRENT_TIMESTAMP\n"
+	inserted := StdSqlGo_Exec(database, context, value_0, arguments[0:14:14])
 	result.Error = inserted.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_2 DepositResult = MoneroDepositStore_Deposit(database, context, transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
-	return value_2
+	return MoneroDepositStore_Deposit(database, context, transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
 }
 
 func MoneroDepositStore_CreditDeposit(database *Database, context Context, signer PrivateKey, transactionID string, account int, address int, issuerUnavailable Error) CreditResult {
@@ -322,8 +307,7 @@ func MoneroDepositStore_CreditDeposit(database *Database, context Context, signe
 	destinations[1] = &(status)
 	destinations[2] = &(units)
 	destinations[3] = &(receiptID)
-	var value_1 Error = StdSqlGo_ScanRow(row, destinations[0:4:4])
-	result.Error = value_1
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:4:4])
 	if result.Error != nil {
 		return result
 	}
@@ -334,18 +318,15 @@ func MoneroDepositStore_CreditDeposit(database *Database, context Context, signe
 			return result
 		}
 		if !receipt.Found {
-			var value_2 Error = StdErrorsGo_New("monero deposit receipt missing")
-			result.Error = value_2
+			result.Error = StdErrorsGo_New("monero deposit receipt missing")
 			return result
 		}
 		result.Value = receipt.Value
-		var value_3 Error = StdSqlGo_Commit(transaction)
-		result.Error = value_3
+		result.Error = StdSqlGo_Commit(transaction)
 		return result
 	}
 	if status != "confirmed" || units <= 0 {
-		var value_4 Error = StdErrorsGo_New("monero deposit is not creditable")
-		result.Error = value_4
+		result.Error = StdErrorsGo_New("monero deposit is not creditable")
 		return result
 	}
 	paymentID := fmt.Sprintf("%s:%d:%d", transactionID, int(account), int(address))
@@ -355,8 +336,7 @@ func MoneroDepositStore_CreditDeposit(database *Database, context Context, signe
 	event.AmountDelta = units
 	event.SourceType = "monero_account"
 	event.SourceRef = paymentID
-	var value_5 CreditResult = TokenLedger_CreditPaymentTx(transaction, context, signer, "monero_account", paymentID, event, issuerUnavailable)
-	credited := value_5
+	credited := TokenLedger_CreditPaymentTx(transaction, context, signer, "monero_account", paymentID, event, issuerUnavailable)
 	result.Error = credited.Error
 	if result.Error != nil {
 		return result
@@ -366,21 +346,19 @@ func MoneroDepositStore_CreditDeposit(database *Database, context Context, signe
 	values[1] = account
 	values[2] = address
 	values[3] = credited.Value.ReceiptID
-	var value_6 string = "UPDATE monero_deposits SET status='credited',receipt_id=?4,confirmed_at=CASE WHEN confirmed_at='' THEN CURRENT_TIMESTAMP ELSE confirmed_at END,credited_at=CASE WHEN credited_at='' THEN CURRENT_TIMESTAMP ELSE credited_at END,updated_at=CURRENT_TIMESTAMP WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND receipt_id=''"
-	updated := StdSqlGo_ExecTx(transaction, context, value_6, values[0:4:4])
+	var value_1 string = "UPDATE monero_deposits SET status='credited',receipt_id=?4,confirmed_at=CASE WHEN confirmed_at='' THEN CURRENT_TIMESTAMP ELSE confirmed_at END,credited_at=CASE WHEN credited_at='' THEN CURRENT_TIMESTAMP ELSE credited_at END,updated_at=CURRENT_TIMESTAMP WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND receipt_id=''"
+	updated := StdSqlGo_ExecTx(transaction, context, value_1, values[0:4:4])
 	result.Error = updated.Error
 	if result.Error != nil {
 		return result
 	}
 	if AccountState_Affected(updated.Value) != int(1) {
-		var value_7 Error = StdErrorsGo_New("monero deposit settlement race")
-		result.Error = value_7
+		result.Error = StdErrorsGo_New("monero deposit settlement race")
 		return result
 	}
 	result.Value = credited.Value
 	result.Created = credited.Created
-	var value_8 Error = StdSqlGo_Commit(transaction)
-	result.Error = value_8
+	result.Error = StdSqlGo_Commit(transaction)
 	return result
 }
 
@@ -403,21 +381,18 @@ func MoneroDepositStore_Deposits(database *Database, context Context, accountID 
 		var item MoneroDeposit = MoneroDeposit{}
 		destinations := MoneroDepositStore_DepositDestinations(&(item))
 		_ = destinations
-		var value_1 Error = StdSqlGo_ScanRows(query.Value, destinations[0:18:18])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(query.Value, destinations[0:18:18])
 		if result.Error != nil {
 			StdSqlGo_CloseRows(query.Value)
 			return result
 		}
 		values = append(values, item)
 	}
-	var value_2 Error = StdSqlGo_CloseRows(query.Value)
-	result.Error = value_2
+	result.Error = StdSqlGo_CloseRows(query.Value)
 	if result.Error != nil {
 		return result
 	}
-	var value_3 Error = StdSqlGo_RowsError(query.Value)
-	result.Error = value_3
+	result.Error = StdSqlGo_RowsError(query.Value)
 	if result.Error != nil {
 		return result
 	}
@@ -426,8 +401,7 @@ func MoneroDepositStore_Deposits(database *Database, context Context, accountID 
 		range_last_31 := int64(len(values)) - 1
 		index := range_first_31
 		for index <= range_last_31 {
-			var value_4 Error = MoneroDepositStore_AttachReceipt(database, context, &(values[index]))
-			result.Error = value_4
+			result.Error = MoneroDepositStore_AttachReceipt(database, context, &(values[index]))
 			if result.Error != nil {
 				return result
 			}

@@ -57,30 +57,29 @@ func Mesh_Run(mesh Mesh, context Context) {
 func Mesh_Export(mesh Mesh, writer ResponseWriter, request *Request) {
 	body := HttpBody_ReadJSON(writer, request, mesh.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
-	var value_1 bool = Mesh_Authorize(mesh, writer, request, body.Value)
-	if !value_1 {
+	var value_0 bool = Mesh_Authorize(mesh, writer, request, body.Value)
+	if !value_0 {
 		return
 	}
 	var input NodeMeshExportRequest = NodeMeshExportRequest{}
-	var value_2 []uint8 = bytes.TrimSpace(body.Value)
-	if int64(len(value_2)) > 0 {
-		var value_3 Error = StdJsonGo_Unmarshal(body.Value, &(input))
-		if value_3 != nil {
+	var value_1 []uint8 = bytes.TrimSpace(body.Value)
+	if int64(len(value_1)) > 0 {
+		var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(input))
+		if value_2 != nil {
 			Response_Error(writer, int(400), "invalid mesh export request")
 			return
 		}
 	}
-	var value_4 bool = MeshPolicy_ValidInbound(input.Policy)
-	if !value_4 {
+	var value_3 bool = MeshPolicy_ValidInbound(input.Policy)
+	if !value_3 {
 		Response_Error(writer, int(400), "explicit mesh policy required")
 		return
 	}
-	var value_5 bool = Mesh_AuthorizePolicy(mesh, writer, request, input.Policy, "export")
-	if !value_5 {
+	var value_4 bool = Mesh_AuthorizePolicy(mesh, writer, request, input.Policy, "export")
+	if !value_4 {
 		return
 	}
 	context := StdHttpGo_Context(request)
@@ -118,57 +117,51 @@ func Mesh_Export(mesh Mesh, writer ResponseWriter, request *Request) {
 func Mesh_Import(mesh Mesh, writer ResponseWriter, request *Request) {
 	body := HttpBody_ReadJSON(writer, request, mesh.Configuration.MaxBodyBytes)
 	if body.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(body.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(body.Error))
 		return
 	}
-	var value_1 bool = Mesh_Authorize(mesh, writer, request, body.Value)
-	if !value_1 {
+	var value_0 bool = Mesh_Authorize(mesh, writer, request, body.Value)
+	if !value_0 {
 		return
 	}
 	var input NodeMeshImportRequest = NodeMeshImportRequest{}
-	var value_2 Error = StdJsonGo_Unmarshal(body.Value, &(input))
-	if value_2 != nil {
+	var value_1 Error = StdJsonGo_Unmarshal(body.Value, &(input))
+	if value_1 != nil {
 		Response_Error(writer, int(400), "invalid mesh import request")
 		return
 	}
-	var value_3 bool = MeshPolicy_ValidInbound(input.Policy)
-	if !value_3 {
+	var value_2 bool = MeshPolicy_ValidInbound(input.Policy)
+	if !value_2 {
 		Response_Error(writer, int(400), "explicit mesh policy required")
 		return
 	}
-	var value_4 bool = Mesh_AuthorizePolicy(mesh, writer, request, input.Policy, "import")
-	if !value_4 {
+	var value_3 bool = Mesh_AuthorizePolicy(mesh, writer, request, input.Policy, "import")
+	if !value_3 {
 		return
 	}
 	context := StdHttpGo_Context(request)
-	var value_5 MeshAppsImportResult = MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, input.Policy, input.Apps, mesh.ConvertError)
-	importedApps := value_5
+	importedApps := MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, input.Policy, input.Apps, mesh.ConvertError)
 	if importedApps.Error != nil {
 		slog.Error("mesh app registry import", "error", importedApps.Error)
-		var value_6 ResponseWriter = writer
-		Response_Error(value_6, int(400), StdErrorsGo_Message(importedApps.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(importedApps.Error))
 		return
 	}
-	var value_7 MeshImportResult = MeshStore_ImportEncryptedBatch(mesh.Database, context, input.Policy, input.Records, input.Deletions)
-	importedRecords := value_7
+	importedRecords := MeshStore_ImportEncryptedBatch(mesh.Database, context, input.Policy, input.Records, input.Deletions)
 	if importedRecords.Error != nil {
 		slog.Error("mesh import", "error", importedRecords.Error)
-		var value_8 ResponseWriter = writer
-		Response_Error(value_8, int(400), StdErrorsGo_Message(importedRecords.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(importedRecords.Error))
 		return
 	}
 	importedNames := TrustStore_ImportMeshNames(mesh.Database, context, input.Policy, input.Spaces, input.Names)
 	if importedNames.Error != nil {
 		slog.Error("mesh name import", "error", importedNames.Error)
-		var value_9 ResponseWriter = writer
-		Response_Error(value_9, int(400), StdErrorsGo_Message(importedNames.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(importedNames.Error))
 		return
 	}
 	var value NodeMeshImportResponse = NodeMeshImportResponse{}
 	value.Status = "ok"
-	var value_10 int64 = ((int64(len(input.Apps)) + int64(len(input.Records))) + int64(len(input.Deletions))) + int64(len(input.Names))
-	value.Records = int(value_10)
+	var value_4 int64 = ((int64(len(input.Apps)) + int64(len(input.Records))) + int64(len(input.Deletions))) + int64(len(input.Names))
+	value.Records = int(value_4)
 	value.Applied = (importedApps.Value + importedRecords.Value) + importedNames.Value
 	Response_JSON(writer, int(200), value)
 }
@@ -176,12 +169,9 @@ func Mesh_Import(mesh Mesh, writer ResponseWriter, request *Request) {
 func Mesh_Authorize(mesh Mesh, writer ResponseWriter, request *Request, body []uint8) bool {
 	headers := StdHttpGo_Headers(request)
 	if strings.TrimSpace(StdHttpGo_HeaderValue(headers, "X-Daochi-Node-ID")) != "" {
-		var value_0 *Database = mesh.Database
-		var value_1 Context = StdHttpGo_Context(request)
-		error := NodeAuth_Verify(value_0, value_1, request, body)
+		error := NodeAuth_Verify(mesh.Database, StdHttpGo_Context(request), request, body)
 		if error != nil {
-			var value_2 ResponseWriter = writer
-			Response_Error(value_2, int(401), StdErrorsGo_Message(error))
+			Response_Error(writer, int(401), StdErrorsGo_Message(error))
 			return false
 		}
 		return true
@@ -191,22 +181,21 @@ func Mesh_Authorize(mesh Mesh, writer ResponseWriter, request *Request, body []u
 		Response_Error(writer, int(503), "node sync disabled")
 		return false
 	}
-	var value_3 [2]string
-	value_3[0] = "X-Daochi-Node-Token"
-	value_3[1] = "X-Ksync-Node-Token"
-	names := value_3
+	var value_0 [2]string
+	value_0[0] = "X-Daochi-Node-Token"
+	value_0[1] = "X-Ksync-Node-Token"
+	names := value_0
 	_ = names
 	provided := strings.TrimSpace(HttpAuth_HeaderAlias(request, names[0:2:2]))
 	if provided == "" {
 		provided = Mesh_BearerToken(StdHttpGo_HeaderValue(headers, "Authorization"))
 	}
-	var value_4 bool = provided == ""
-	var value_5 bool = value_4
-	if !value_5 {
-		var value_6 bool = StdConstantTime_ConstantTimeTextEqual(provided, token)
-		value_5 = !value_6
+	var value_1 bool = provided == ""
+	if !value_1 {
+		var value_2 bool = StdConstantTime_ConstantTimeTextEqual(provided, token)
+		value_1 = !value_2
 	}
-	if value_5 {
+	if value_1 {
 		Response_Error(writer, int(401), "invalid node token")
 		return false
 	}
@@ -327,34 +316,27 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 	for true {
 		var request NodeMeshExportRequest = NodeMeshExportRequest{}
 		request.Cursor = currentCursor
-		var value_0 int = MeshCursor_BatchLimit(int(0), mesh.Configuration.NodeSyncBatchLimit)
-		request.Limit = value_0
+		request.Limit = MeshCursor_BatchLimit(int(0), mesh.Configuration.NodeSyncBatchLimit)
 		request.Policy = sync
 		var exported NodeMeshExportResponse = NodeMeshExportResponse{}
-		var value_1 [2]string
-		value_1[0] = baseURL
-		value_1[1] = "/api/v1/node/mesh/export"
-		target := value_1
+		var value_0 [2]string
+		value_0[0] = baseURL
+		value_0[1] = "/api/v1/node/mesh/export"
+		target := value_0
 		_ = target
-		var value_2 Mesh = mesh
-		var value_3 Context = context
-		var value_4 string = peer.NodeID
-		var value_5 string = strings.Join(target[0:2:2], "")
-		error := Mesh_PostJSON(value_2, value_3, value_4, value_5, request, &(exported))
+		error := Mesh_PostJSON(mesh, context, peer.NodeID, strings.Join(target[0:2:2], ""), request, &(exported))
 		if error != nil {
 			return error
 		}
-		var value_6 bool = int64(len(exported.Apps)) == 0 && int64(len(exported.Records)) == 0 && int64(len(exported.Deletions)) == 0
-		if value_6 && int64(len(exported.Names)) == 0 {
+		var value_1 bool = int64(len(exported.Apps)) == 0 && int64(len(exported.Records)) == 0 && int64(len(exported.Deletions)) == 0
+		if value_1 && int64(len(exported.Names)) == 0 {
 			return nil
 		}
-		var value_7 MeshAppsImportResult = MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, sync, exported.Apps, mesh.ConvertError)
-		importedApps := value_7
+		importedApps := MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, sync, exported.Apps, mesh.ConvertError)
 		if importedApps.Error != nil {
 			return importedApps.Error
 		}
-		var value_8 MeshImportResult = MeshStore_ImportEncryptedBatch(mesh.Database, context, sync, exported.Records, exported.Deletions)
-		importedRecords := value_8
+		importedRecords := MeshStore_ImportEncryptedBatch(mesh.Database, context, sync, exported.Records, exported.Deletions)
 		if importedRecords.Error != nil {
 			return importedRecords.Error
 		}
@@ -367,11 +349,11 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 		if lastCursor == "" {
 			var lastSequence int64 = 0
 			{
-				value_9 := exported.Records[:]
-				if int64(0) < 0 || int64(int64(len(value_9))) < int64(0) || int64(int64(len(value_9))) > int64(len(value_9)) {
+				value_2 := exported.Records[:]
+				if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_44 := value_9[0:int64(len(value_9)):int64(len(value_9))]
+				loop_view_44 := value_2[0:int64(len(value_2)):int64(len(value_2))]
 				loop_count_44 := int64(len(loop_view_44))
 				var loop_cursor_44 int64 = 0
 				for loop_cursor_44 < loop_count_44 {
@@ -384,11 +366,11 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 				}
 			}
 			{
-				value_10 := exported.Deletions[:]
-				if int64(0) < 0 || int64(int64(len(value_10))) < int64(0) || int64(int64(len(value_10))) > int64(len(value_10)) {
+				value_3 := exported.Deletions[:]
+				if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_49 := value_10[0:int64(len(value_10)):int64(len(value_10))]
+				loop_view_49 := value_3[0:int64(len(value_3)):int64(len(value_3))]
 				loop_count_49 := int64(len(loop_view_49))
 				var loop_cursor_49 int64 = 0
 				for loop_cursor_49 < loop_count_49 {
@@ -425,9 +407,7 @@ func Mesh_PostJSON(mesh Mesh, context Context, peerNodeID string, target string,
 	if encoded.Error != nil {
 		return encoded.Error
 	}
-	var value_0 Context = context
-	var value_1 string = target
-	outbound := StdHttpGo_NewRequest(value_0, "POST", value_1, StdIoGo_FromBytes(encoded.Value))
+	outbound := StdHttpGo_NewRequest(context, "POST", target, StdIoGo_FromBytes(encoded.Value))
 	if outbound.Error != nil {
 		return outbound.Error
 	}
@@ -436,13 +416,12 @@ func Mesh_PostJSON(mesh Mesh, context Context, peerNodeID string, target string,
 	if peerNodeID != "" {
 		NodeAuth_Sign(mesh.Identity.ID, mesh.Identity.PrivateKey, outbound.Value, encoded.Value)
 	} else {
-		var value_2 [2]string
-		value_2[0] = "Bearer "
-		value_2[1] = mesh.Configuration.NodeSyncToken
-		token := value_2
+		var value_0 [2]string
+		value_0[0] = "Bearer "
+		value_0[1] = mesh.Configuration.NodeSyncToken
+		token := value_0
 		_ = token
-		var value_3 Header = headers
-		StdHttpGo_SetHeader(value_3, "Authorization", strings.Join(token[0:2:2], ""))
+		StdHttpGo_SetHeader(headers, "Authorization", strings.Join(token[0:2:2], ""))
 	}
 	client := StdHttpGo_NewClient(Duration(20000000000))
 	result := StdHttpGo_Do(client, outbound.Value)
@@ -454,9 +433,7 @@ func Mesh_PostJSON(mesh Mesh, context Context, peerNodeID string, target string,
 	status := StdHttpGo_StatusCode(result.Value)
 	if status < int(200) || status >= int(300) {
 		data := StdIoGo_ReadAll(StdIoGo_LimitReader(Reader(body), 2048))
-		var value_4 Error = fmt.Errorf("node mesh request failed: %s %s", StdHttpGo_Status(result.Value), strings.TrimSpace(StdTextGo_FromBytes(data.Value)))
-		return value_4
+		return fmt.Errorf("node mesh request failed: %s %s", StdHttpGo_Status(result.Value), strings.TrimSpace(StdTextGo_FromBytes(data.Value)))
 	}
-	var value_5 *Decoder = StdJsonGo_NewDecoder(Reader(body))
-	return StdJsonGo_Decode(value_5, reply)
+	return StdJsonGo_Decode(StdJsonGo_NewDecoder(Reader(body)), reply)
 }

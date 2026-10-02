@@ -38,8 +38,7 @@ func StoreDiagnostics_Health(database *Database, context Context) Error {
 	if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 		panic("slice range out of bounds")
 	}
-	var value_2 *Row = StdSqlGo_QueryRow(database, context, "PRAGMA quick_check", value_1[0:int64(len(value_1)):int64(len(value_1))])
-	row := value_2
+	row := StdSqlGo_QueryRow(database, context, "PRAGMA quick_check", value_1[0:int64(len(value_1)):int64(len(value_1))])
 	error = StdSqlGo_ScanRow(row, statusDestinations[0:1:1])
 	if error != nil {
 		return error
@@ -48,16 +47,15 @@ func StoreDiagnostics_Health(database *Database, context Context) Error {
 		return fmt.Errorf("sqlite quick_check: %s", status)
 	}
 	var exists int = 0
-	var value_3 [1]Any
-	value_3[0] = &(exists)
-	destinations := value_3
+	var value_2 [1]Any
+	value_2[0] = &(exists)
+	destinations := value_2
 	_ = destinations
-	var value_4 []Any
-	if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
+	var value_3 []Any
+	if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
 		panic("slice range out of bounds")
 	}
-	var value_5 *Row = StdSqlGo_QueryRow(database, context, "\nSELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='server_users')", value_4[0:int64(len(value_4)):int64(len(value_4))])
-	tableRow := value_5
+	tableRow := StdSqlGo_QueryRow(database, context, "\nSELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='server_users')", value_3[0:int64(len(value_3)):int64(len(value_3))])
 	error = StdSqlGo_ScanRow(tableRow, destinations[0:1:1])
 	if error != nil {
 		return error
@@ -92,22 +90,19 @@ func StoreDiagnostics_TableCounts(database *Database, context Context, userID st
 		value_3[0] = &(count)
 		destinations := value_3
 		_ = destinations
-		var value_4 *Database = database
-		var value_5 Context = context
-		var value_6 string = strings.Join(parts[0:3:3], "")
-		row := StdSqlGo_QueryRow(value_4, value_5, value_6, arguments[0:1:1])
-		var value_7 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-		result.Error = value_7
+		var value_4 string = strings.Join(parts[0:3:3], "")
+		row := StdSqlGo_QueryRow(database, context, value_4, arguments[0:1:1])
+		result.Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 		if result.Error != nil {
 			return result
 		}
-		var value_8 *__type_6705e682df266aa4 = &(counts)
-		var value_9 string = table
-		var value_10 int = count
-		if (*value_8) == nil {
-			(*value_8) = make(__type_6705e682df266aa4)
+		var value_5 *__type_6705e682df266aa4 = &(counts)
+		var value_6 string = table
+		var value_7 int = count
+		if (*value_5) == nil {
+			(*value_5) = make(__type_6705e682df266aa4)
 		}
-		(*value_8)[value_9] = value_10
+		(*value_5)[value_6] = value_7
 	}
 	result.Value = counts
 	return result

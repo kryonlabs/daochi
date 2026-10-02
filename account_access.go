@@ -36,16 +36,12 @@ func AccountAccess_Allow(access AccountAccess, prefix string, subject string, li
 	value_0[1] = subject
 	parts := value_0
 	_ = parts
-	var value_1 *RateLimiter = access.Limiter
-	var value_2 *ServerMetrics = access.Counters
-	var value_3 string = strings.Join(parts[0:2:2], "")
-	return RequestRate_Allow(value_1, value_2, value_3, limit, window)
+	return RequestRate_Allow(access.Limiter, access.Counters, strings.Join(parts[0:2:2], ""), limit, window)
 }
 
 func AccountAccess_RequestSignature(access AccountAccess, request *Request, user string, publicKey string, body []uint8) AccountSignatureResult {
 	signed := SyncRequest_SignatureHeader(request)
-	var value_0 AccountSignatureResult = AccountSignature_Authenticate(access.Database, access.Challenges, access.Verify, StdHttpGo_Context(request), user, publicKey, signed.Value, signed.Context, StdHttpGo_Method(request), StdUrlGo_Path(StdHttpGo_RequestURL(request)), body)
-	return value_0
+	return AccountSignature_Authenticate(access.Database, access.Challenges, access.Verify, StdHttpGo_Context(request), user, publicKey, signed.Value, signed.Context, StdHttpGo_Method(request), StdUrlGo_Path(StdHttpGo_RequestURL(request)), body)
 }
 
 func AccountAccess_Deleted(writer ResponseWriter) {
@@ -61,21 +57,20 @@ func AccountAccess_Deleted(writer ResponseWriter) {
 }
 
 func AccountAccess_Challenge(access AccountAccess, writer ResponseWriter, request *Request) {
-	var value_0 string = strings.ToLower(strings.TrimSpace(StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "user_id")))
-	user := value_0
-	var value_1 bool = Identity_ValidUserID(user)
-	if !value_1 {
+	user := strings.ToLower(strings.TrimSpace(StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "user_id")))
+	var value_0 bool = Identity_ValidUserID(user)
+	if !value_0 {
 		Response_Error(writer, int(400), "invalid user_id")
 		return
 	}
 	window := Duration(60000000000)
-	var value_2 bool = AccountAccess_Allow(access, "challenge:ip:", ClientAddress_FromRequest(request), int(60), window)
-	var value_3 bool = !value_2
-	if !value_3 {
-		var value_4 bool = AccountAccess_Allow(access, "challenge:user:", user, int(20), window)
-		value_3 = !value_4
+	var value_1 bool = AccountAccess_Allow(access, "challenge:ip:", ClientAddress_FromRequest(request), int(60), window)
+	var value_2 bool = !value_1
+	if !value_2 {
+		var value_3 bool = AccountAccess_Allow(access, "challenge:user:", user, int(20), window)
+		value_2 = !value_3
 	}
-	if value_3 {
+	if value_2 {
 		Response_Error(writer, int(429), "rate limit exceeded")
 		return
 	}
@@ -87,42 +82,37 @@ func AccountAccess_Challenge(access AccountAccess, writer ResponseWriter, reques
 	}
 	var value ChallengeResponse = ChallengeResponse{}
 	value.UserIDHash = user
-	var value_5 string = hex.EncodeToString(issued.Nonce)
-	value.Nonce = value_5
-	var value_6 float64 = (time.Duration).Seconds(access.Configuration.ChallengeTTL)
-	value.ExpiresIn = int64(floatToInt(value_6, 64, true))
+	value.Nonce = hex.EncodeToString(issued.Nonce)
+	var value_4 float64 = (time.Duration).Seconds(access.Configuration.ChallengeTTL)
+	value.ExpiresIn = int64(floatToInt(value_4, 64, true))
 	Response_JSON(writer, int(200), value)
 }
 
 func AccountAccess_Login(access AccountAccess, writer ResponseWriter, request *Request) {
 	read := SyncRequest_ReadLogin(writer, request, access.Configuration.MaxBodyBytes)
 	if read.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(read.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(read.Error))
 		return
 	}
 	value := read.Value
 	error := SyncRequest_ApplyHeaderUser(request, &(value.UserIDHash))
 	if error != nil {
-		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), StdErrorsGo_Message(error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(error))
 		return
 	}
-	var value_2 bool = Identity_ValidClientID(value.ClientID)
-	if !value_2 {
+	var value_0 bool = Identity_ValidClientID(value.ClientID)
+	if !value_0 {
 		Response_Error(writer, int(400), "invalid client_id")
 		return
 	}
 	window := Duration(60000000000)
-	var value_3 AccountAccess = access
-	var value_4 string = ClientAddress_FromRequest(request)
-	var value_5 bool = AccountAccess_Allow(value_3, "login:ip:", value_4, int(40), window)
-	var value_6 bool = !value_5
-	if !value_6 {
-		var value_7 bool = AccountAccess_Allow(access, "login:user:", value.UserIDHash, int(20), window)
-		value_6 = !value_7
+	var value_1 bool = AccountAccess_Allow(access, "login:ip:", ClientAddress_FromRequest(request), int(40), window)
+	var value_2 bool = !value_1
+	if !value_2 {
+		var value_3 bool = AccountAccess_Allow(access, "login:user:", value.UserIDHash, int(20), window)
+		value_2 = !value_3
 	}
-	if value_6 {
+	if value_2 {
 		Response_Error(writer, int(429), "rate limit exceeded")
 		return
 	}
@@ -134,51 +124,43 @@ func AccountAccess_Login(access AccountAccess, writer ResponseWriter, request *R
 	context := StdHttpGo_Context(request)
 	error = AccountState_Register(access.Database, context, value.UserIDHash, authenticated.Value)
 	if error != nil {
-		var value_8 string = LogSafety_LogText(value.UserIDHash)
-		slog.Error("register sync user", "user", value_8, "error", error)
+		slog.Error("register sync user", "user", LogSafety_LogText(value.UserIDHash), "error", error)
 		Response_Error(writer, int(500), "login failed")
 		return
 	}
 	error = SyncClients_RecordLogin(access.Database, context, value.UserIDHash, value.ClientID)
 	if error != nil {
-		var value_9 string = LogSafety_LogText(value.UserIDHash)
-		var value_10 string = LogSafety_LogText(value.ClientID)
-		slog.Error("record login client", "user", value_9, "client", value_10, "error", error)
+		slog.Error("record login client", "user", LogSafety_LogText(value.UserIDHash), "client", LogSafety_LogText(value.ClientID), "error", error)
 		Response_Error(writer, int(500), "login failed")
 		return
 	}
-	var value_11 []uint8 = access.Configuration.TokenSecret
-	var value_12 string = value.UserIDHash
-	var value_13 Time = StdTimeGo_Now()
-	var value_14 AuthTokenResult = Token_IssueAuthToken(value_11, value_12, StdTimeGo_Unix(StdTimeGo_Add(value_13, access.Configuration.TokenTTL)))
-	issued := value_14
+	var value_4 []uint8 = access.Configuration.TokenSecret
+	var value_5 string = value.UserIDHash
+	var value_6 Time = StdTimeGo_Now()
+	issued := Token_IssueAuthToken(value_4, value_5, StdTimeGo_Unix(StdTimeGo_Add(value_6, access.Configuration.TokenTTL)))
 	if issued.Error != "" {
-		var value_15 string = LogSafety_LogText(value.UserIDHash)
-		slog.Error("issue auth token", "user", value_15, "error", issued.Error)
+		slog.Error("issue auth token", "user", LogSafety_LogText(value.UserIDHash), "error", issued.Error)
 		Response_Error(writer, int(500), "login failed")
 		return
 	}
 	alias := AccountProfile_Alias(access.Database, context, value.UserIDHash)
 	if alias.Error != nil {
-		var value_16 string = LogSafety_LogText(value.UserIDHash)
-		slog.Error("load account alias", "user", value_16, "error", alias.Error)
+		slog.Error("load account alias", "user", LogSafety_LogText(value.UserIDHash), "error", alias.Error)
 		Response_Error(writer, int(500), "alias failed")
 		return
 	}
 	icon := AccountProfile_Icon(access.Database, context, value.UserIDHash)
 	if icon.Error != nil {
-		var value_17 string = LogSafety_LogText(value.UserIDHash)
-		slog.Error("load profile icon", "user", value_17, "error", icon.Error)
+		slog.Error("load profile icon", "user", LogSafety_LogText(value.UserIDHash), "error", icon.Error)
 		Response_Error(writer, int(500), "profile icon failed")
 		return
 	}
 	var result LoginResponse = LoginResponse{}
 	result.Status = "ok"
 	result.AuthToken = issued.Value
-	var value_18 float64 = (time.Duration).Seconds(access.Configuration.TokenTTL)
-	result.ExpiresIn = int64(floatToInt(value_18, 64, true))
-	var value_19 int64 = StdTimeGo_Unix(StdTimeGo_Now())
-	result.ServerTime = value_19
+	var value_7 float64 = (time.Duration).Seconds(access.Configuration.TokenTTL)
+	result.ExpiresIn = int64(floatToInt(value_7, 64, true))
+	result.ServerTime = StdTimeGo_Unix(StdTimeGo_Now())
 	result.AccountAlias = alias.Value
 	result.ProfileIcon = icon.Value
 	Response_JSON(writer, int(200), result)
@@ -187,15 +169,13 @@ func AccountAccess_Login(access AccountAccess, writer ResponseWriter, request *R
 func AccountAccess_Delete(access AccountAccess, writer ResponseWriter, request *Request) {
 	read := SyncRequest_ReadDelete(writer, request, access.Configuration.MaxBodyBytes)
 	if read.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(read.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(read.Error))
 		return
 	}
 	value := read.Value
 	error := SyncRequest_ApplyHeaderUser(request, &(value.UserIDHash))
 	if error != nil {
-		var value_1 ResponseWriter = writer
-		Response_Error(value_1, int(400), StdErrorsGo_Message(error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(error))
 		return
 	}
 	authenticated := AccountAccess_RequestSignature(access, request, value.UserIDHash, "", read.Body)
@@ -203,12 +183,10 @@ func AccountAccess_Delete(access AccountAccess, writer ResponseWriter, request *
 		HttpAuth_Respond(writer, access.Counters, authenticated.Authentication)
 		return
 	}
-	var value_2 *Database = access.Database
-	var value_3 Context = StdHttpGo_Context(request)
-	error = AccountState_Delete(value_2, value_3, value.UserIDHash)
+	var value_0 Context = StdHttpGo_Context(request)
+	error = AccountState_Delete(access.Database, value_0, value.UserIDHash)
 	if error != nil {
-		var value_4 string = LogSafety_LogText(value.UserIDHash)
-		slog.Error("delete account", "user", value_4, "error", error)
+		slog.Error("delete account", "user", LogSafety_LogText(value.UserIDHash), "error", error)
 		Response_Error(writer, int(500), "delete failed")
 		return
 	}
@@ -218,30 +196,24 @@ func AccountAccess_Delete(access AccountAccess, writer ResponseWriter, request *
 func AccountAccess_DeleteWithKey(access AccountAccess, writer ResponseWriter, request *Request) {
 	read := SyncRequest_ReadDeleteWithKey(writer, request, access.Configuration.MaxBodyBytes)
 	if read.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(read.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(read.Error))
 		return
 	}
 	value := read.Value
 	window := Duration(3600000000000)
-	var value_1 AccountAccess = access
-	var value_2 string = ClientAddress_FromRequest(request)
-	var value_3 bool = AccountAccess_Allow(value_1, "delete-key:ip:", value_2, int(8), window)
-	var value_4 bool = !value_3
-	if !value_4 {
-		var value_5 bool = AccountAccess_Allow(access, "delete-key:user:", value.UserIDHash, int(4), window)
-		value_4 = !value_5
+	var value_0 bool = AccountAccess_Allow(access, "delete-key:ip:", ClientAddress_FromRequest(request), int(8), window)
+	var value_1 bool = !value_0
+	if !value_1 {
+		var value_2 bool = AccountAccess_Allow(access, "delete-key:user:", value.UserIDHash, int(4), window)
+		value_1 = !value_2
 	}
-	if value_4 {
+	if value_1 {
 		Response_Error(writer, int(429), "rate limit exceeded")
 		return
 	}
-	var value_6 *Database = access.Database
-	var value_7 Context = StdHttpGo_Context(request)
-	account := AccountKeys_PublicKey(value_6, value_7, value.UserIDHash)
+	account := AccountKeys_PublicKey(access.Database, StdHttpGo_Context(request), value.UserIDHash)
 	if account.Error != nil {
-		var value_8 string = LogSafety_LogText(value.UserIDHash)
-		slog.Error("load account key", "user", value_8, "error", account.Error)
+		slog.Error("load account key", "user", LogSafety_LogText(value.UserIDHash), "error", account.Error)
 		Response_Error(writer, int(500), "delete failed")
 		return
 	}
@@ -251,40 +223,36 @@ func AccountAccess_DeleteWithKey(access AccountAccess, writer ResponseWriter, re
 	}
 	exported := SyncRequest_ParseExportedKey(value.ExportedKey)
 	if exported.Error != nil {
-		var value_9 ResponseWriter = writer
-		Response_Error(value_9, int(400), StdErrorsGo_Message(exported.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(exported.Error))
 		return
 	}
 	if exported.Value.PublicID != "" && exported.Value.PublicID != value.UserIDHash {
 		Response_Error(writer, int(400), "exported key public_id does not match user_id_hash")
 		return
 	}
-	var value_10 [3]string
-	value_10[0] = "inbe-delete-account-v1\n"
-	value_10[1] = value.UserIDHash
-	value_10[2] = "\n"
-	parts := value_10
+	var value_3 [3]string
+	value_3[0] = "inbe-delete-account-v1\n"
+	value_3[1] = value.UserIDHash
+	value_3[2] = "\n"
+	parts := value_3
 	_ = parts
 	message := StdTextGo_ToBytes(strings.Join(parts[0:3:3], ""))
-	var value_11 SignPrivateKey = access.Sign
-	signed := value_11(message, exported.Value.PrivateKey)
-	var value_12 bool = signed.Error != nil
-	var value_13 bool = value_12
-	if !value_13 {
-		var value_14 VerifySignature = access.Verify
-		var value_15 bool = value_14(account.Value, message, signed.Value)
-		value_13 = !value_15
+	var value_4 SignPrivateKey = access.Sign
+	signed := value_4(message, exported.Value.PrivateKey)
+	var value_5 bool = signed.Error != nil
+	var value_6 bool = value_5
+	if !value_6 {
+		var value_7 VerifySignature = access.Verify
+		var value_8 bool = value_7(account.Value, message, signed.Value)
+		value_6 = !value_8
 	}
-	if value_13 {
+	if value_6 {
 		Response_Error(writer, int(401), "exported key does not match sync account")
 		return
 	}
-	var value_16 *Database = access.Database
-	var value_17 Context = StdHttpGo_Context(request)
-	error := AccountState_Delete(value_16, value_17, value.UserIDHash)
+	error := AccountState_Delete(access.Database, StdHttpGo_Context(request), value.UserIDHash)
 	if error != nil {
-		var value_18 string = LogSafety_LogText(value.UserIDHash)
-		slog.Error("delete account with key", "user", value_18, "error", error)
+		slog.Error("delete account with key", "user", LogSafety_LogText(value.UserIDHash), "error", error)
 		Response_Error(writer, int(500), "delete failed")
 		return
 	}

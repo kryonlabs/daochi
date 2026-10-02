@@ -11,14 +11,12 @@ func HttpBody_ReadJSON(writer ResponseWriter, request *Request, limit int64) JSO
 	var value_0 ReadCloser = StdHttpGo_MaxBytesReader(writer, body, limit)
 	read := StdIoGo_ReadAll(Reader(value_0))
 	if read.Error != nil {
-		var value_1 Error = StdErrorsGo_New("request body too large")
-		result.Error = value_1
+		result.Error = StdErrorsGo_New("request body too large")
 		return result
 	}
-	var value_2 bool = StdJsonGo_Valid(read.Value)
-	if !value_2 {
-		var value_3 Error = StdErrorsGo_New("invalid json")
-		result.Error = value_3
+	var value_1 bool = StdJsonGo_Valid(read.Value)
+	if !value_1 {
+		result.Error = StdErrorsGo_New("invalid json")
 		return result
 	}
 	result.Value = read.Value

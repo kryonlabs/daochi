@@ -11,8 +11,7 @@ type AccountSignatureResult struct {
 
 func AccountSignature_Failure(status int, message string) AccountSignatureResult {
 	var result AccountSignatureResult = AccountSignatureResult{}
-	var value_0 AuthenticationResult = Authentication_Failure(status, message)
-	result.Authentication = value_0
+	result.Authentication = Authentication_Failure(status, message)
 	return result
 }
 
@@ -30,8 +29,7 @@ func AccountSignature_Authenticate(database *Database, challenges *ChallengeStor
 	if account.Error != nil {
 		var result AccountSignatureResult = AccountSignatureResult{}
 		_ = result
-		var value_1 AuthenticationResult = Authentication_NativeFailure(account.Error)
-		result.Authentication = value_1
+		result.Authentication = Authentication_NativeFailure(account.Error)
 		return result
 	}
 	publicKey := account.Value
@@ -48,20 +46,20 @@ func AccountSignature_Authenticate(database *Database, challenges *ChallengeStor
 		if int64(len(publicKey)) != 1312 {
 			return AccountSignature_Failure(int(400), "wrong public_key size")
 		}
-		var value_2 Error = EncryptedRecord_ValidateAccountKey(userID, publicKey)
-		if value_2 != nil {
+		var value_1 Error = EncryptedRecord_ValidateAccountKey(userID, publicKey)
+		if value_1 != nil {
 			return AccountSignature_Failure(int(400), "public_key does not match user_id_hash")
 		}
 	} else if publicKeyText != "" {
 		field := Codec_DecodeBinaryField(publicKeyText)
 		_ = field
 		supplied := StdTextGo_ToBytes(field.Value)
-		var value_3 bool = field.Error != ""
-		if !value_3 {
-			var value_4 bool = StdConstantTime_ConstantTimeEqual(supplied, publicKey)
-			value_3 = !value_4
+		var value_2 bool = field.Error != ""
+		if !value_2 {
+			var value_3 bool = StdConstantTime_ConstantTimeEqual(supplied, publicKey)
+			value_2 = !value_3
 		}
-		if value_3 {
+		if value_2 {
 			return AccountSignature_Failure(int(400), "public_key does not match registered user")
 		}
 	}
@@ -73,11 +71,10 @@ func AccountSignature_Authenticate(database *Database, challenges *ChallengeStor
 	if int64(len(signature)) != 2420 {
 		return AccountSignature_Failure(int(400), "wrong signature size")
 	}
-	var value_5 string = Signing_CanonicalMessageWithContext(signatureContext, consumed.Nonce, method, path, signedPayload)
-	message := value_5
-	var value_6 VerifySignature = verify
-	var value_7 bool = value_6(publicKey, StdTextGo_ToBytes(message), signature)
-	if !value_7 {
+	message := Signing_CanonicalMessageWithContext(signatureContext, consumed.Nonce, method, path, signedPayload)
+	var value_4 VerifySignature = verify
+	var value_5 bool = value_4(publicKey, StdTextGo_ToBytes(message), signature)
+	if !value_5 {
 		return AccountSignature_Failure(int(401), "signature rejected")
 	}
 	var result AccountSignatureResult = AccountSignatureResult{}

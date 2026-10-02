@@ -105,17 +105,15 @@ const AppLedgerSQL = "SELECT receipt_id,issuer_id,asset_id,account_id,app_id,eve
 func TokenLedger_ReadBalance(row *Row) BalanceResult {
 	var result BalanceResult = BalanceResult{}
 	var nullable zir_fa235a6fcc8de93c_NullInteger = *new(zir_fa235a6fcc8de93c_NullInteger)
-	var value_0 Error = (*sql.Row).Scan(row, &(nullable))
-	result.Error = value_0
-	var value_1 bool = result.Error == nil
-	var value_2 bool = value_1
-	if value_2 {
-		var value_3 bool = TokenLedger_IntegerValid(nullable)
-		value_2 = value_3
+	result.Error = (*sql.Row).Scan(row, &(nullable))
+	var value_0 bool = result.Error == nil
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = TokenLedger_IntegerValid(nullable)
+		value_1 = value_2
 	}
-	if value_2 {
-		var value_4 int64 = TokenLedger_IntegerValue(nullable)
-		result.Value = value_4
+	if value_1 {
+		result.Value = TokenLedger_IntegerValue(nullable)
 	}
 	return result
 }
@@ -123,10 +121,8 @@ func TokenLedger_ReadBalance(row *Row) BalanceResult {
 func TokenLedger_ReadReceipt(row *Row) ReceiptResult {
 	var result ReceiptResult = ReceiptResult{}
 	var item TokenReceipt = TokenReceipt{}
-	var value_0 Error = (*sql.Row).Scan(row, &(item.ReceiptID), &(item.IssuerID), &(item.AssetID), &(item.AccountID), &(item.AppID), &(item.EventType), &(item.AmountDelta), &(item.LedgerSeq), &(item.PreviousHash), &(item.EventHash), &(item.CreatedAt), &(item.SourceType), &(item.SourceRef), &(item.Signature))
-	result.Error = value_0
-	var value_1 Error = result.Error
-	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
+	result.Error = (*sql.Row).Scan(row, &(item.ReceiptID), &(item.IssuerID), &(item.AssetID), &(item.AccountID), &(item.AppID), &(item.EventType), &(item.AmountDelta), &(item.LedgerSeq), &(item.PreviousHash), &(item.EventHash), &(item.CreatedAt), &(item.SourceType), &(item.SourceRef), &(item.Signature))
+	if StdErrorsGo_Is(result.Error, StdSqlGo_NoRows()) {
 		result.Error = nil
 		return result
 	}
@@ -144,16 +140,14 @@ func TokenLedger_ReadReceipts(rows *Rows) ReceiptsResult {
 	var values []TokenReceipt = nil
 	for StdSqlGo_Next(rows) {
 		var item TokenReceipt = TokenReceipt{}
-		var value_0 Error = (*sql.Rows).Scan(rows, &(item.ReceiptID), &(item.IssuerID), &(item.AssetID), &(item.AccountID), &(item.AppID), &(item.EventType), &(item.AmountDelta), &(item.LedgerSeq), &(item.PreviousHash), &(item.EventHash), &(item.CreatedAt), &(item.SourceType), &(item.SourceRef), &(item.Signature))
-		result.Error = value_0
+		result.Error = (*sql.Rows).Scan(rows, &(item.ReceiptID), &(item.IssuerID), &(item.AssetID), &(item.AccountID), &(item.AppID), &(item.EventType), &(item.AmountDelta), &(item.LedgerSeq), &(item.PreviousHash), &(item.EventHash), &(item.CreatedAt), &(item.SourceType), &(item.SourceRef), &(item.Signature))
 		if result.Error != nil {
 			return result
 		}
 		values = append(values, item)
 	}
 	result.Value = values
-	var value_1 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_1
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -163,9 +157,8 @@ func TokenLedger_Balance(database *Database, context Context, accountID string, 
 }
 
 func TokenLedger_AppBalance(database *Database, context Context, accountID string, assetID string, appID string) BalanceResult {
-	var value_0 string = "SELECT SUM(amount_delta)\nFROM token_ledger\nWHERE account_id=?1 AND asset_id=?2 AND app_id=?3\n"
-	var value_1 BalanceResult = TokenLedger_ReadBalance((*sql.DB).QueryRowContext(database, context, value_0, accountID, assetID, appID))
-	return value_1
+	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT SUM(amount_delta)\nFROM token_ledger\nWHERE account_id=?1 AND asset_id=?2 AND app_id=?3\n", accountID, assetID, appID)
+	return TokenLedger_ReadBalance(value_0)
 }
 
 func TokenLedger_BalanceTx(transaction *Transaction, context Context, accountID string, assetID string) BalanceResult {
@@ -211,24 +204,21 @@ func TokenLedger_Insert(transaction *Transaction, context Context, signer Privat
 		result.Error = unavailable
 		return result
 	}
-	var value_0 Error = TokenReceipt_Validate(input)
-	result.Error = value_0
+	result.Error = TokenReceipt_Validate(input)
 	if result.Error != nil {
 		return result
 	}
 	var sequence zir_fa235a6fcc8de93c_NullInteger = *new(zir_fa235a6fcc8de93c_NullInteger)
 	var previous NullString = *new(NullString)
-	var value_1 *Row = (*sql.Tx).QueryRowContext(transaction, context, "SELECT ledger_seq,event_hash\nFROM token_ledger\nORDER BY ledger_seq DESC\nLIMIT 1")
-	var value_2 Error = (*sql.Row).Scan(value_1, &(sequence), &(previous))
-	result.Error = value_2
-	var value_3 bool = result.Error != nil
-	var value_4 bool = value_3
-	if value_4 {
-		var value_5 Error = result.Error
-		var value_6 bool = StdErrorsGo_Is(value_5, StdSqlGo_NoRows())
-		value_4 = !value_6
+	var value_0 *Row = (*sql.Tx).QueryRowContext(transaction, context, "SELECT ledger_seq,event_hash\nFROM token_ledger\nORDER BY ledger_seq DESC\nLIMIT 1")
+	result.Error = (*sql.Row).Scan(value_0, &(sequence), &(previous))
+	var value_1 bool = result.Error != nil
+	var value_2 bool = value_1
+	if value_2 {
+		var value_3 bool = StdErrorsGo_Is(result.Error, StdSqlGo_NoRows())
+		value_2 = !value_3
 	}
-	if value_4 {
+	if value_2 {
 		return result
 	}
 	generated := ResourceId_New()
@@ -246,23 +236,16 @@ func TokenLedger_Insert(transaction *Transaction, context Context, signer Privat
 	payload.AmountDelta = input.AmountDelta
 	payload.LedgerSeq = 1
 	if TokenLedger_IntegerValid(sequence) {
-		var value_7 int64 = TokenLedger_IntegerValue(sequence) + 1
-		payload.LedgerSeq = value_7
+		payload.LedgerSeq = TokenLedger_IntegerValue(sequence) + 1
 	}
-	var value_8 string = StdSqlGo_NullStringValue(previous)
-	payload.PreviousHash = value_8
-	var value_9 string = StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02T15:04:05Z07:00")
-	payload.CreatedAt = value_9
+	payload.PreviousHash = StdSqlGo_NullStringValue(previous)
+	payload.CreatedAt = StdTimeGo_Format(StdTimeGo_UTC(StdTimeGo_Now()), "2006-01-02T15:04:05Z07:00")
 	payload.SourceType = input.SourceType
 	payload.SourceRef = input.SourceRef
-	var value_10 string = TokenReceipt_Hash(payload)
-	payload.EventHash = value_10
-	var value_11 ReceiptPayload = payload
-	var value_12 PrivateKey = signer
-	receipt := TokenReceipt_FromPayload(value_11, StdEd25519Go_Sign(value_12, TokenReceipt_Canonical(payload)))
-	var value_13 string = "INSERT INTO token_ledger(receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,previous_hash,event_hash,signature,created_at,source_type,source_ref)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
-	var value_14 zir_12f423bfc5846945_ExecResult = TokenLedger_InsertReceipt(transaction, context, value_13, receipt.ReceiptID, receipt.IssuerID, receipt.AssetID, receipt.AccountID, receipt.AppID, receipt.EventType, int64(receipt.AmountDelta), int64(receipt.LedgerSeq), receipt.PreviousHash, receipt.EventHash, receipt.Signature, receipt.CreatedAt, receipt.SourceType, receipt.SourceRef)
-	written := value_14
+	payload.EventHash = TokenReceipt_Hash(payload)
+	receipt := TokenReceipt_FromPayload(payload, StdEd25519Go_Sign(signer, TokenReceipt_Canonical(payload)))
+	var value_4 string = "INSERT INTO token_ledger(receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,previous_hash,event_hash,signature,created_at,source_type,source_ref)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
+	written := TokenLedger_InsertReceipt(transaction, context, value_4, receipt.ReceiptID, receipt.IssuerID, receipt.AssetID, receipt.AccountID, receipt.AppID, receipt.EventType, int64(receipt.AmountDelta), int64(receipt.LedgerSeq), receipt.PreviousHash, receipt.EventHash, receipt.Signature, receipt.CreatedAt, receipt.SourceType, receipt.SourceRef)
 	result.Error = written.Error
 	if result.Error == nil {
 		result.Value = receipt
@@ -275,21 +258,18 @@ func TokenLedger_CreditPaymentTx(transaction *Transaction, context Context, sign
 	var result CreditResult = CreditResult{}
 	var receiptID string = ""
 	var value_0 *Row = (*sql.Tx).QueryRowContext(transaction, context, "SELECT receipt_id\nFROM token_processed_payments\nWHERE provider=?1 AND provider_payment_id=?2", provider, paymentID)
-	var value_1 Error = (*sql.Row).Scan(value_0, &(receiptID))
-	result.Error = value_1
+	result.Error = (*sql.Row).Scan(value_0, &(receiptID))
 	if result.Error == nil {
 		var accountID string = ""
 		var assetID string = ""
 		var amount int64 = 0
-		var value_2 string = "SELECT account_id,asset_id,amount\nFROM token_processed_payments\nWHERE provider=?1 AND provider_payment_id=?2"
-		var value_3 Error = (*sql.Row).Scan((*sql.Tx).QueryRowContext(transaction, context, value_2, provider, paymentID), &(accountID), &(assetID), &(amount))
-		result.Error = value_3
+		var value_1 *Row = (*sql.Tx).QueryRowContext(transaction, context, "SELECT account_id,asset_id,amount\nFROM token_processed_payments\nWHERE provider=?1 AND provider_payment_id=?2", provider, paymentID)
+		result.Error = (*sql.Row).Scan(value_1, &(accountID), &(assetID), &(amount))
 		if result.Error != nil {
 			return result
 		}
 		if accountID != input.AccountID || assetID != "waozi:token" || amount != input.AmountDelta {
-			var value_4 Error = StdErrorsGo_New("provider payment id collision")
-			result.Error = value_4
+			result.Error = StdErrorsGo_New("provider payment id collision")
 			return result
 		}
 		existing := TokenLedger_ByIDTx(transaction, context, receiptID)
@@ -298,16 +278,14 @@ func TokenLedger_CreditPaymentTx(transaction *Transaction, context Context, sign
 			return result
 		}
 		if !existing.Found {
-			var value_5 Error = StdErrorsGo_New("processed payment receipt missing")
-			result.Error = value_5
+			result.Error = StdErrorsGo_New("processed payment receipt missing")
 			return result
 		}
 		result.Value = existing.Value
 		return result
 	}
-	var value_6 Error = result.Error
-	var value_7 bool = StdErrorsGo_Is(value_6, StdSqlGo_NoRows())
-	if !value_7 {
+	var value_2 bool = StdErrorsGo_Is(result.Error, StdSqlGo_NoRows())
+	if !value_2 {
 		return result
 	}
 	inserted := TokenLedger_Insert(transaction, context, signer, input, unavailable)
@@ -315,9 +293,8 @@ func TokenLedger_CreditPaymentTx(transaction *Transaction, context Context, sign
 	if result.Error != nil {
 		return result
 	}
-	var value_8 string = "INSERT INTO token_processed_payments(provider,provider_payment_id,account_id,asset_id,amount,receipt_id)\nVALUES(?1,?2,?3,?4,?5,?6)"
-	var value_9 zir_12f423bfc5846945_ExecResult = TokenLedger_InsertPayment(transaction, context, value_8, provider, paymentID, input.AccountID, "waozi:token", int64(input.AmountDelta), inserted.Value.ReceiptID)
-	written := value_9
+	var value_3 string = "INSERT INTO token_processed_payments(provider,provider_payment_id,account_id,asset_id,amount,receipt_id)\nVALUES(?1,?2,?3,?4,?5,?6)"
+	written := TokenLedger_InsertPayment(transaction, context, value_3, provider, paymentID, input.AccountID, "waozi:token", int64(input.AmountDelta), inserted.Value.ReceiptID)
 	result.Error = written.Error
 	if result.Error == nil {
 		result.Value = inserted.Value
@@ -329,8 +306,7 @@ func TokenLedger_CreditPaymentTx(transaction *Transaction, context Context, sign
 func TokenLedger_CreditPayment(database *Database, context Context, signer PrivateKey, provider string, paymentID string, input TokenEventInput, unavailable Error) CreditResult {
 	var result CreditResult = CreditResult{}
 	if provider == "" || paymentID == "" {
-		var value_0 Error = StdErrorsGo_New("provider payment id required")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("provider payment id required")
 		return result
 	}
 	begun := TokenLedger_Begin(database, context, nil)
@@ -339,11 +315,9 @@ func TokenLedger_CreditPayment(database *Database, context Context, signer Priva
 		return result
 	}
 	defer (*sql.Tx).Rollback(begun.Value)
-	var value_1 CreditResult = TokenLedger_CreditPaymentTx(begun.Value, context, signer, provider, paymentID, input, unavailable)
-	result = value_1
+	result = TokenLedger_CreditPaymentTx(begun.Value, context, signer, provider, paymentID, input, unavailable)
 	if result.Error == nil {
-		var value_2 Error = StdSqlGo_Commit(begun.Value)
-		result.Error = value_2
+		result.Error = StdSqlGo_Commit(begun.Value)
 	}
 	return result
 }
@@ -351,8 +325,7 @@ func TokenLedger_CreditPayment(database *Database, context Context, signer Priva
 func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, input TokenEventInput, key string, unavailable Error) SpendResult {
 	var result SpendResult = SpendResult{}
 	if input.AmountDelta >= 0 {
-		var value_0 Error = StdErrorsGo_New("spend amount must be negative")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("spend amount must be negative")
 		return result
 	}
 	begun := TokenLedger_Begin(database, context, nil)
@@ -365,13 +338,11 @@ func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, i
 	requestHash := TokenReceipt_SpendRequestHash(input)
 	var receiptID string = ""
 	var previousHash string = ""
-	var value_1 string = "SELECT receipt_id,request_hash\nFROM token_spend_nonces\nWHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3"
-	var value_2 Error = (*sql.Row).Scan((*sql.Tx).QueryRowContext(transaction, context, value_1, input.AccountID, input.AppID, key), &(receiptID), &(previousHash))
-	result.Error = value_2
+	var value_0 *Row = (*sql.Tx).QueryRowContext(transaction, context, "SELECT receipt_id,request_hash\nFROM token_spend_nonces\nWHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3", input.AccountID, input.AppID, key)
+	result.Error = (*sql.Row).Scan(value_0, &(receiptID), &(previousHash))
 	if result.Error == nil {
 		if previousHash != "" && previousHash != requestHash {
-			var value_3 Error = StdErrorsGo_New("idempotency key reused for different spend")
-			result.Error = value_3
+			result.Error = StdErrorsGo_New("idempotency key reused for different spend")
 			return result
 		}
 		existing := TokenLedger_ByIDTx(transaction, context, receiptID)
@@ -380,8 +351,7 @@ func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, i
 			return result
 		}
 		if !existing.Found {
-			var value_4 Error = StdErrorsGo_New("spend receipt missing")
-			result.Error = value_4
+			result.Error = StdErrorsGo_New("spend receipt missing")
 			return result
 		}
 		balance := TokenLedger_BalanceTx(transaction, context, input.AccountID, "waozi:token")
@@ -392,13 +362,11 @@ func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, i
 		}
 		result.Value = existing.Value
 		result.Balance = balance.Value
-		var value_5 Error = StdSqlGo_Commit(transaction)
-		result.Error = value_5
+		result.Error = StdSqlGo_Commit(transaction)
 		return result
 	}
-	var value_6 Error = result.Error
-	var value_7 bool = StdErrorsGo_Is(value_6, StdSqlGo_NoRows())
-	if !value_7 {
+	var value_1 bool = StdErrorsGo_Is(result.Error, StdSqlGo_NoRows())
+	if !value_1 {
 		return result
 	}
 	balance := TokenLedger_BalanceTx(transaction, context, input.AccountID, "waozi:token")
@@ -409,8 +377,7 @@ func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, i
 	}
 	if balance.Value+input.AmountDelta < 0 {
 		result.Balance = balance.Value
-		var value_8 Error = StdErrorsGo_New("insufficient balance")
-		result.Error = value_8
+		result.Error = StdErrorsGo_New("insufficient balance")
 		return result
 	}
 	inserted := TokenLedger_Insert(transaction, context, signer, input, unavailable)
@@ -418,9 +385,7 @@ func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, i
 	if result.Error != nil {
 		return result
 	}
-	var value_9 string = "INSERT INTO token_spend_nonces(account_id,app_id,idempotency_key,receipt_id,request_hash)\nVALUES(?1,?2,?3,?4,?5)"
-	var value_10 zir_12f423bfc5846945_ExecResult = TokenLedger_InsertNonce(transaction, context, value_9, input.AccountID, input.AppID, key, inserted.Value.ReceiptID, requestHash)
-	written := value_10
+	written := TokenLedger_InsertNonce(transaction, context, "INSERT INTO token_spend_nonces(account_id,app_id,idempotency_key,receipt_id,request_hash)\nVALUES(?1,?2,?3,?4,?5)", input.AccountID, input.AppID, key, inserted.Value.ReceiptID, requestHash)
 	result.Error = written.Error
 	if result.Error != nil {
 		return result
@@ -428,7 +393,6 @@ func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, i
 	result.Value = inserted.Value
 	result.Balance = balance.Value + input.AmountDelta
 	result.Created = true
-	var value_11 Error = StdSqlGo_Commit(transaction)
-	result.Error = value_11
+	result.Error = StdSqlGo_Commit(transaction)
 	return result
 }

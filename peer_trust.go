@@ -13,11 +13,9 @@ type PeerKeyResult struct {
 func PeerTrust_PublicKey(database *Database, context Context, nodeID string) PeerKeyResult {
 	var result PeerKeyResult = PeerKeyResult{}
 	var key []uint8 = nil
-	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT public_key FROM trusted_node_peers WHERE node_id=?1 AND revoked_at=''", nodeID)
-	row := value_0
+	row := (*sql.DB).QueryRowContext(database, context, "SELECT public_key FROM trusted_node_peers WHERE node_id=?1 AND revoked_at=''", nodeID)
 	error := (*sql.Row).Scan(row, &(key))
-	var value_1 Error = error
-	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {
@@ -25,8 +23,7 @@ func PeerTrust_PublicKey(database *Database, context Context, nodeID string) Pee
 		return result
 	}
 	if int64(len(key)) != 32 {
-		var value_2 Error = StdErrorsGo_New("stored peer key is invalid")
-		result.Error = value_2
+		result.Error = StdErrorsGo_New("stored peer key is invalid")
 		return result
 	}
 	result.Value = PublicKey(key)

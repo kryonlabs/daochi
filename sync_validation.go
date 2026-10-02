@@ -24,8 +24,8 @@ func SyncValidation_Validate(database *Database, context Context, request SyncRe
 		var value_1 bool = request.ProtocolVersion >= int(6) && selected.Value.ManifestExpiresAt > 0
 		var value_2 bool = value_1
 		if value_2 {
-			var value_3 int64 = StdTimeGo_Unix(StdTimeGo_Now())
-			value_2 = (value_3 > selected.Value.ManifestExpiresAt)
+			var value_3 bool = StdTimeGo_Unix(StdTimeGo_Now()) > selected.Value.ManifestExpiresAt
+			value_2 = value_3
 		}
 		if value_2 {
 			return StdErrorsGo_New("app manifest expired")

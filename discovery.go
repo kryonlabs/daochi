@@ -67,10 +67,7 @@ func Discovery_Run(configuration *Config, identity *NodeIdentity, value Context,
 	}
 	var interfaces []Interface = nil
 	var value_0 RegisterService = register
-	var value_1 string = Discovery_InstanceName(configuration.NodeDisplayName, identity.ID)
-	var value_2 int = port.Value
-	var value_3 []string = Discovery_Text(identity.ID)
-	registered := value_0(value_1, "_daochi._tcp", "local.", value_2, value_3, interfaces)
+	registered := value_0(Discovery_InstanceName(configuration.NodeDisplayName, identity.ID), "_daochi._tcp", "local.", port.Value, Discovery_Text(identity.ID), interfaces)
 	if registered.Error != nil {
 		slog.Warn("LAN discovery unavailable", "error", registered.Error)
 		return
@@ -78,8 +75,8 @@ func Discovery_Run(configuration *Config, identity *NodeIdentity, value Context,
 	slog.Info("advertising Daochi node on LAN", "node_id", identity.ID, "port", int(port.Value))
 	defer Discovery_ShutdownAtReturn(shutdown, registered.Value)
 	var cases [1]Case
-	var value_4 Case = StdSelectGo_Receive(StdContextGo_Done(value))
-	cases[0] = value_4
+	var value_1 Case = StdSelectGo_Receive(StdContextGo_Done(value))
+	cases[0] = value_1
 	StdSelectGo_Select(cases[0:1:1])
 }
 

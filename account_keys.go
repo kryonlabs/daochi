@@ -13,11 +13,9 @@ type AccountKeyResult struct {
 func AccountKeys_PublicKey(database *Database, context Context, accountID string) AccountKeyResult {
 	var result AccountKeyResult = AccountKeyResult{}
 	var key []uint8 = nil
-	var value_0 *Row = (*sql.DB).QueryRowContext(database, context, "SELECT public_key FROM server_users WHERE user_id_hash=?1", accountID)
-	row := value_0
+	row := (*sql.DB).QueryRowContext(database, context, "SELECT public_key FROM server_users WHERE user_id_hash=?1", accountID)
 	error := (*sql.Row).Scan(row, &(key))
-	var value_1 Error = error
-	if StdErrorsGo_Is(value_1, StdSqlGo_NoRows()) {
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
 		return result
 	}
 	if error != nil {

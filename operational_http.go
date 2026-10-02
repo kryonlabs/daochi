@@ -38,8 +38,7 @@ func OperationalHttp_LiveUsage(operations Operations, usage NodeUsage) NodeUsage
 func OperationalHttp_Usage(operations Operations, context Context) NodeUsageResult {
 	result := StoreStats_Usage(operations.Database, context, StdTimeGo_Now())
 	if result.Error == nil {
-		var value_0 NodeUsage = OperationalHttp_LiveUsage(operations, result.Value)
-		result.Value = value_0
+		result.Value = OperationalHttp_LiveUsage(operations, result.Value)
 	}
 	return result
 }
@@ -312,8 +311,7 @@ func OperationalHttp_Metrics(operations Operations, writer ResponseWriter, reque
 	if usage.Error != nil {
 		slog.Error("load metrics usage", "error", usage.Error)
 		var empty NodeUsage = NodeUsage{}
-		var value_2 NodeUsage = OperationalHttp_LiveUsage(operations, empty)
-		usage.Value = value_2
+		usage.Value = OperationalHttp_LiveUsage(operations, empty)
 	}
 	storage := StoreStats_Storage(operations.Database, StdHttpGo_Context(request), operations.Path)
 	if storage.Error != nil {

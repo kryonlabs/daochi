@@ -82,14 +82,12 @@ func MoneroInvoiceStore_List(database *Database, context Context, query string, 
 		for index := int64(0); index <= 11; index++ {
 			values[(index + 1)] = invoiceValues[index]
 		}
-		var value_0 Error = StdSqlGo_ScanRows(rows.Value, values[0:13:13])
-		result.Error = value_0
+		result.Error = StdSqlGo_ScanRows(rows.Value, values[0:13:13])
 		if result.Error != nil {
 			return result
 		}
 		if attachReceipt {
-			var value_1 Error = MoneroInvoiceStore_AttachReceipt(database, context, &(record.Invoice), receiptID)
-			result.Error = value_1
+			result.Error = MoneroInvoiceStore_AttachReceipt(database, context, &(record.Invoice), receiptID)
 			if result.Error != nil {
 				return result
 			}
@@ -97,8 +95,7 @@ func MoneroInvoiceStore_List(database *Database, context Context, query string, 
 		records = append(records, record)
 	}
 	result.Value = records
-	var value_2 Error = StdSqlGo_RowsError(rows.Value)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows.Value)
 	return result
 }
 
@@ -127,8 +124,7 @@ func MoneroInvoiceStore_MarkPaid(database *Database, context Context, query stri
 func MoneroInvoiceStore_Create(database *Database, context Context, accountID string, appID string, product TokenProduct, config Config, unavailable Error) InvoiceResult {
 	var result InvoiceResult = InvoiceResult{}
 	if product.MoneroAtomicAmount <= 0 {
-		var value_0 Error = StdErrorsGo_New("monero amount required")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("monero amount required")
 		return result
 	}
 	identifier := ResourceId_New()
@@ -136,37 +132,33 @@ func MoneroInvoiceStore_Create(database *Database, context Context, accountID st
 	if result.Error != nil {
 		return result
 	}
-	var value_1 [2]string
-	value_1[0] = "daochi-"
-	value_1[1] = identifier.Value
-	label := value_1
+	var value_0 [2]string
+	value_0[0] = "daochi-"
+	value_0[1] = identifier.Value
+	label := value_0
 	_ = label
-	var value_2 Context = context
-	var value_3 Config = config
-	var value_4 string = strings.Join(label[0:2:2], "")
-	address := MoneroWallet_CreateAddress(value_2, value_3, value_4, unavailable)
+	address := MoneroWallet_CreateAddress(context, config, strings.Join(label[0:2:2], ""), unavailable)
 	result.Error = address.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_5 string = StdTimeGo_Format(StdTimeGo_Add(StdTimeGo_UTC(StdTimeGo_Now()), Duration(2700000000000)), "2006-01-02T15:04:05.000000000Z07:00")
-	expiresAt := value_5
-	var value_6 [10]Any
-	value_6[0] = identifier.Value
-	value_6[1] = accountID
-	value_6[2] = appID
-	value_6[3] = product.ProductID
-	value_6[4] = "waozi:token"
-	value_6[5] = product.TokenUnits
-	value_6[6] = product.MoneroAtomicAmount
-	value_6[7] = address.Address
-	var value_7 string = strconv.Itoa(int(address.Index))
-	value_6[8] = value_7
-	value_6[9] = expiresAt
-	arguments := value_6
+	expiresAt := StdTimeGo_Format(StdTimeGo_Add(StdTimeGo_UTC(StdTimeGo_Now()), Duration(2700000000000)), "2006-01-02T15:04:05.000000000Z07:00")
+	var value_1 [10]Any
+	value_1[0] = identifier.Value
+	value_1[1] = accountID
+	value_1[2] = appID
+	value_1[3] = product.ProductID
+	value_1[4] = "waozi:token"
+	value_1[5] = product.TokenUnits
+	value_1[6] = product.MoneroAtomicAmount
+	value_1[7] = address.Address
+	var value_2 string = strconv.Itoa(int(address.Index))
+	value_1[8] = value_2
+	value_1[9] = expiresAt
+	arguments := value_1
 	_ = arguments
-	var value_8 string = "INSERT INTO token_payment_intents(id,provider,account_id,app_id,product_id,asset_id,token_units,\n    provider_amount,provider_address,provider_ref,status,expires_at)\nVALUES(?1,'monero',?2,?3,?4,?5,?6,?7,?8,?9,'pending',?10)\n"
-	inserted := StdSqlGo_Exec(database, context, value_8, arguments[0:10:10])
+	var value_3 string = "INSERT INTO token_payment_intents(id,provider,account_id,app_id,product_id,asset_id,token_units,\n    provider_amount,provider_address,provider_ref,status,expires_at)\nVALUES(?1,'monero',?2,?3,?4,?5,?6,?7,?8,?9,'pending',?10)\n"
+	inserted := StdSqlGo_Exec(database, context, value_3, arguments[0:10:10])
 	result.Error = inserted.Error
 	if result.Error != nil {
 		return result
@@ -198,18 +190,15 @@ func MoneroInvoiceStore_Invoice(database *Database, context Context, accountID s
 	var receiptID string = ""
 	destinations := MoneroInvoiceStore_Destinations(&(invoice), &(receiptID))
 	_ = destinations
-	var value_2 Error = StdSqlGo_ScanRow(row, destinations[0:12:12])
-	result.Error = value_2
-	var value_3 Error = result.Error
-	if StdErrorsGo_Is(value_3, StdSqlGo_NoRows()) {
+	result.Error = StdSqlGo_ScanRow(row, destinations[0:12:12])
+	if StdErrorsGo_Is(result.Error, StdSqlGo_NoRows()) {
 		result.Error = nil
 		return result
 	}
 	if result.Error != nil {
 		return result
 	}
-	var value_4 Error = MoneroInvoiceStore_AttachReceipt(database, context, &(invoice), receiptID)
-	result.Error = value_4
+	result.Error = MoneroInvoiceStore_AttachReceipt(database, context, &(invoice), receiptID)
 	if result.Error != nil {
 		return result
 	}
@@ -234,21 +223,19 @@ func MoneroInvoiceStore_Expired(database *Database, context Context, limit int) 
 	if limit <= int(0) {
 		limit = int(50)
 	}
-	var value_0 string = StdTimeGo_Format(StdTimeGo_Add(StdTimeGo_UTC(StdTimeGo_Now()), Duration(-2592000000000000)), "2006-01-02T15:04:05.000000000Z07:00")
-	cutoff := value_0
-	var value_1 [2]Any
-	value_1[0] = cutoff
-	value_1[1] = limit
-	arguments := value_1
+	cutoff := StdTimeGo_Format(StdTimeGo_Add(StdTimeGo_UTC(StdTimeGo_Now()), Duration(-2592000000000000)), "2006-01-02T15:04:05.000000000Z07:00")
+	var value_0 [2]Any
+	value_0[0] = cutoff
+	value_0[1] = limit
+	arguments := value_0
 	_ = arguments
-	var value_2 string = "SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,\n    provider_address,provider_ref,provider_payment_id,expires_at,receipt_id\nFROM token_payment_intents\nWHERE provider='monero' AND status='expired' AND receipt_id='' AND expires_at>=?1\nORDER BY created_at\nLIMIT ?2\n"
-	return MoneroInvoiceStore_List(database, context, value_2, arguments[0:2:2], false)
+	var value_1 string = "SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,\n    provider_address,provider_ref,provider_payment_id,expires_at,receipt_id\nFROM token_payment_intents\nWHERE provider='monero' AND status='expired' AND receipt_id='' AND expires_at>=?1\nORDER BY created_at\nLIMIT ?2\n"
+	return MoneroInvoiceStore_List(database, context, value_1, arguments[0:2:2], false)
 }
 
 func MoneroInvoiceStore_MarkPendingPaid(database *Database, context Context, accountID string, id string, receiptID string, paymentRef string) Error {
 	var value_0 string = "UPDATE token_payment_intents\nSET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP\nWHERE account_id=?1 AND id=?2 AND provider='monero' AND status='pending'\n"
-	var value_1 Error = MoneroInvoiceStore_MarkPaid(database, context, value_0, accountID, id, receiptID, paymentRef, "invoice not pending")
-	return value_1
+	return MoneroInvoiceStore_MarkPaid(database, context, value_0, accountID, id, receiptID, paymentRef, "invoice not pending")
 }
 
 func MoneroInvoiceStore_MarkExpired(database *Database, context Context, accountID string, id string) Error {
@@ -264,6 +251,5 @@ func MoneroInvoiceStore_MarkExpired(database *Database, context Context, account
 
 func MoneroInvoiceStore_SettleExpired(database *Database, context Context, accountID string, id string, receiptID string, paymentRef string) Error {
 	var value_0 string = "UPDATE token_payment_intents\nSET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP\nWHERE account_id=?1 AND id=?2 AND provider='monero' AND status='expired' AND receipt_id=''\n"
-	var value_1 Error = MoneroInvoiceStore_MarkPaid(database, context, value_0, accountID, id, receiptID, paymentRef, "expired invoice no longer unsettled")
-	return value_1
+	return MoneroInvoiceStore_MarkPaid(database, context, value_0, accountID, id, receiptID, paymentRef, "expired invoice no longer unsettled")
 }

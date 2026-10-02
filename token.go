@@ -124,12 +124,11 @@ func Token_ParseInteger(text string) ParsedInteger {
 func Token_IssueAuthToken(secret []uint8, userID string, expiresAt int64) AuthTokenResult {
 	var result AuthTokenResult = AuthTokenResult{}
 	var value_0 bool = int64(len(secret)) == 0
-	var value_1 bool = value_0
-	if !value_1 {
-		var value_2 bool = Identity_ValidUserID(userID)
-		value_1 = !value_2
+	if !value_0 {
+		var value_1 bool = Identity_ValidUserID(userID)
+		value_0 = !value_1
 	}
-	if value_1 {
+	if value_0 {
 		result.Error = "invalid token input"
 		return result
 	}
@@ -137,12 +136,12 @@ func Token_IssueAuthToken(secret []uint8, userID string, expiresAt int64) AuthTo
 	if expiry.Error != "" {
 		return expiry
 	}
-	var value_3 [4]string
-	value_3[0] = "v1"
-	value_3[1] = userID
-	value_3[2] = expiry.Value
-	value_3[3] = ""
-	parts := value_3
+	var value_2 [4]string
+	value_2[0] = "v1"
+	value_2[1] = userID
+	value_2[2] = expiry.Value
+	value_2[3] = ""
+	parts := value_2
 	_ = parts
 	payload := strings.Join(parts[0:4:4], "\n")
 	mac := StdHmacSha256Go_HMACSHA256(secret, payload)
@@ -156,13 +155,12 @@ func Token_IssueAuthToken(secret []uint8, userID string, expiresAt int64) AuthTo
 		result.Error = "token allocation failed"
 		return result
 	}
-	var value_4 [2]string
-	value_4[0] = encodedPayload.Value
-	value_4[1] = encodedMAC.Value
-	tokenParts := value_4
+	var value_3 [2]string
+	value_3[0] = encodedPayload.Value
+	value_3[1] = encodedMAC.Value
+	tokenParts := value_3
 	_ = tokenParts
-	var value_5 string = strings.Join(tokenParts[0:2:2], ".")
-	result.Value = value_5
+	result.Value = strings.Join(tokenParts[0:2:2], ".")
 	return result
 }
 

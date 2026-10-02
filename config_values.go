@@ -42,20 +42,18 @@ func ConfigValues_Bool(value string, fallback bool) bool {
 
 func ConfigValues_SyncDirection(value string) string {
 	normalized := strings.ToLower(strings.TrimSpace(value))
-	var value_0 bool = normalized == "pull" || normalized == "receive" || normalized == "from_peer" || normalized == "from-peer"
-	if value_0 {
+	if normalized == "pull" || normalized == "receive" || normalized == "from_peer" || normalized == "from-peer" {
 		return "pull"
 	}
-	var value_1 bool = normalized == "push" || normalized == "send" || normalized == "to_peer" || normalized == "to-peer"
-	if value_1 {
+	if normalized == "push" || normalized == "send" || normalized == "to_peer" || normalized == "to-peer" {
 		return "push"
 	}
-	var value_2 bool = normalized == "bidirectional" || normalized == "both" || normalized == "mirror" || normalized == "readwrite"
-	if value_2 || normalized == "read-write" {
+	var value_0 bool = normalized == "bidirectional" || normalized == "both" || normalized == "mirror" || normalized == "readwrite"
+	if value_0 || normalized == "read-write" {
 		return "bidirectional"
 	}
-	var value_3 bool = normalized == "none" || normalized == "off" || normalized == "disabled" || normalized == "false" || normalized == "0"
-	if value_3 || normalized == "no" {
+	var value_1 bool = normalized == "none" || normalized == "off" || normalized == "disabled" || normalized == "false" || normalized == "0"
+	if value_1 || normalized == "no" {
 		return "none"
 	}
 	return normalized
@@ -100,29 +98,24 @@ func ConfigValues_SyncPolicy(fields []string) *NodeSyncPolicy {
 		key := strings.ToLower(strings.TrimSpace(parts.Before))
 		value := strings.TrimSpace(parts.After)
 		if key == "sync" || key == "mode" || key == "direction" {
-			var value_0 string = ConfigValues_SyncDirection(value)
-			policy.Direction = value_0
+			policy.Direction = ConfigValues_SyncDirection(value)
 		} else if key == "app" || key == "apps" || key == "app_id" || key == "app_ids" {
-			var value_1 []string = ConfigValues_SyncList(value)
-			policy.Apps = value_1
+			policy.Apps = ConfigValues_SyncList(value)
 		} else if key == "collection" || key == "collections" {
-			var value_2 []string = ConfigValues_SyncList(value)
-			policy.Collections = value_2
+			policy.Collections = ConfigValues_SyncList(value)
 		} else if key == "space" || key == "spaces" || key == "space_id" || key == "space_ids" {
-			var value_3 []string = ConfigValues_SyncList(value)
-			policy.Spaces = value_3
+			policy.Spaces = ConfigValues_SyncList(value)
 		} else if key == "data" || key == "type" || key == "types" {
-			var value_4 []string = ConfigValues_SyncList(value)
-			policy.Data = value_4
+			policy.Data = ConfigValues_SyncList(value)
 		} else if key == "enabled" {
-			var value_5 bool = ConfigValues_Bool(value, true)
-			if !value_5 {
+			var value_0 bool = ConfigValues_Bool(value, true)
+			if !value_0 {
 				policy.Direction = "none"
 			}
 		}
 	}
-	var value_6 bool = policy.Direction == "" && int64(len(policy.Apps)) == 0 && int64(len(policy.Collections)) == 0 && int64(len(policy.Spaces)) == 0
-	if value_6 && int64(len(policy.Data)) == 0 {
+	var value_1 bool = policy.Direction == "" && int64(len(policy.Apps)) == 0 && int64(len(policy.Collections)) == 0 && int64(len(policy.Spaces)) == 0
+	if value_1 && int64(len(policy.Data)) == 0 {
 		return nil
 	}
 	if policy.Direction == "" {
@@ -141,8 +134,7 @@ func ConfigValues_Peers(raw string) []NodePeer {
 	}
 	var seen __type_c922d3f56b74fd5a = *new(__type_c922d3f56b74fd5a)
 	items := strings.Split(normalized, ",")
-	for it_index := int64(0); it_index < int64(len(items)); it_index++ {
-		rawItem := items[it_index]
+	for _, rawItem := range items {
 		item := strings.TrimSpace(rawItem)
 		if item == "" {
 			continue
@@ -168,28 +160,26 @@ func ConfigValues_Peers(raw string) []NodePeer {
 		}
 		url = strings.TrimRight(strings.TrimSpace(url), "/")
 		var value_1 bool = url == ""
-		var value_2 bool = value_1
-		if !value_2 {
-			var value_3 __type_c922d3f56b74fd5a = seen
-			var value_4 string = url
-			var value_5 bool = value_3[value_4]
-			value_2 = value_5
+		if !value_1 {
+			var value_2 __type_c922d3f56b74fd5a = seen
+			var value_3 string = url
+			var value_4 bool = value_2[value_3]
+			value_1 = value_4
 		}
-		if value_2 {
+		if value_1 {
 			continue
 		}
-		var value_6 *__type_c922d3f56b74fd5a = &(seen)
-		var value_7 string = url
-		var value_8 bool = true
-		if (*value_6) == nil {
-			(*value_6) = make(__type_c922d3f56b74fd5a)
+		var value_5 *__type_c922d3f56b74fd5a = &(seen)
+		var value_6 string = url
+		var value_7 bool = true
+		if (*value_5) == nil {
+			(*value_5) = make(__type_c922d3f56b74fd5a)
 		}
-		(*value_6)[value_7] = value_8
+		(*value_5)[value_6] = value_7
 		var peer NodePeer = NodePeer{}
 		peer.Name = name
 		peer.URL = url
-		var value_9 *NodeSyncPolicy = ConfigValues_SyncPolicy(policyFields)
-		peer.Sync = value_9
+		peer.Sync = ConfigValues_SyncPolicy(policyFields)
 		result = append(result, peer)
 	}
 	return result

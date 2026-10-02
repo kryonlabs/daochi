@@ -23,8 +23,7 @@ func SyncWrites_ReplaceData(transaction *Transaction, context Context, userID st
 	value_1[0] = userID
 	arguments := value_1
 	_ = arguments
-	for it_index := int64(0); it_index < 8; it_index++ {
-		query := queries[it_index]
+	for _, query := range queries {
 		removed := StdSqlGo_ExecTx(transaction, context, query, arguments[0:1:1])
 		if removed.Error != nil {
 			return removed.Error
@@ -79,33 +78,32 @@ func SyncWrites_UpsertSession(transaction *Transaction, context Context, userID 
 	value_4[1] = session.ID
 	identifiers := value_4
 	_ = identifiers
-	var value_5 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "DELETE FROM server_session_rounds WHERE user_id_hash=?1 AND session_id=?2", identifiers[0:2:2])
-	cleared := value_5
+	cleared := StdSqlGo_ExecTx(transaction, context, "DELETE FROM server_session_rounds WHERE user_id_hash=?1 AND session_id=?2", identifiers[0:2:2])
 	result.Error = cleared.Error
 	if result.Error != nil {
 		return result
 	}
 	{
-		value_6 := session.Rounds[:]
-		if int64(0) < 0 || int64(int64(len(value_6))) < int64(0) || int64(int64(len(value_6))) > int64(len(value_6)) {
+		value_5 := session.Rounds[:]
+		if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_23 := value_6[0:int64(len(value_6)):int64(len(value_6))]
+		loop_view_23 := value_5[0:int64(len(value_5)):int64(len(value_5))]
 		loop_count_23 := int64(len(loop_view_23))
 		var loop_cursor_23 int64 = 0
 		for loop_cursor_23 < loop_count_23 {
 			loop_index_23 := loop_cursor_23
 			round := loop_view_23[loop_index_23]
-			var value_7 [5]Any
-			value_7[0] = userID
-			value_7[1] = session.ID
-			value_7[2] = round.RoundIndex
-			value_7[3] = round.Breaths
-			value_7[4] = round.HoldSeconds
-			values := value_7
+			var value_6 [5]Any
+			value_6[0] = userID
+			value_6[1] = session.ID
+			value_6[2] = round.RoundIndex
+			value_6[3] = round.Breaths
+			value_6[4] = round.HoldSeconds
+			values := value_6
 			_ = values
-			var value_8 string = "\nINSERT INTO server_session_rounds(user_id_hash,session_id,round_index,breaths,hold_seconds)\nVALUES(?1,?2,?3,?4,?5)"
-			inserted := StdSqlGo_ExecTx(transaction, context, value_8, values[0:5:5])
+			var value_7 string = "\nINSERT INTO server_session_rounds(user_id_hash,session_id,round_index,breaths,hold_seconds)\nVALUES(?1,?2,?3,?4,?5)"
+			inserted := StdSqlGo_ExecTx(transaction, context, value_7, values[0:5:5])
 			result.Error = inserted.Error
 			if result.Error != nil {
 				return result
@@ -144,8 +142,7 @@ func SyncWrites_UpsertRecord(transaction *Transaction, context Context, userID s
 	written := StdSqlGo_ExecTx(transaction, context, value_2, arguments[0:12:12])
 	result.Error = written.Error
 	if result.Error == nil {
-		var value_3 int = AccountState_Affected(written.Value)
-		result.Applied = value_3
+		result.Applied = AccountState_Affected(written.Value)
 	}
 	return result
 }
@@ -159,8 +156,7 @@ func SyncWrites_DeleteHabit(transaction *Transaction, context Context, userID st
 	value_0[2] = updatedAt
 	arguments := value_0
 	_ = arguments
-	var value_1 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habits\nWHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3", arguments[0:3:3])
-	removed := value_1
+	removed := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habits\nWHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3", arguments[0:3:3])
 	result.Error = removed.Error
 	if result.Error != nil {
 		return result
@@ -169,20 +165,19 @@ func SyncWrites_DeleteHabit(transaction *Transaction, context Context, userID st
 	if applied == int(0) {
 		return result
 	}
-	var value_2 [2]Any
-	value_2[0] = userID
-	value_2[1] = habit.ID
-	identifiers := value_2
+	var value_1 [2]Any
+	value_1[0] = userID
+	value_1[1] = habit.ID
+	identifiers := value_1
 	_ = identifiers
-	var value_3 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2", identifiers[0:2:2])
-	children := value_3
+	children := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_habit_days\nWHERE user_id_hash=?1 AND habit_id=?2", identifiers[0:2:2])
 	result.Error = children.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_4 int = applied
-	var value_5 int = AccountState_Affected(children.Value)
-	applied = value_4 + value_5
+	var value_2 int = applied
+	var value_3 int = AccountState_Affected(children.Value)
+	applied = value_2 + value_3
 	version := AccountState_NextVersion(transaction, context, userID)
 	result.Error = version.Error
 	if result.Error == nil {
@@ -228,8 +223,7 @@ func SyncWrites_DeleteSession(transaction *Transaction, context Context, userID 
 	value_0[2] = updatedAt
 	arguments := value_0
 	_ = arguments
-	var value_1 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_sessions\nWHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3", arguments[0:3:3])
-	removed := value_1
+	removed := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_sessions\nWHERE user_id_hash=?1 AND id=?2 AND updated_at<=?3", arguments[0:3:3])
 	result.Error = removed.Error
 	if result.Error != nil {
 		return result
@@ -238,20 +232,19 @@ func SyncWrites_DeleteSession(transaction *Transaction, context Context, userID 
 	if applied == int(0) {
 		return result
 	}
-	var value_2 [2]Any
-	value_2[0] = userID
-	value_2[1] = session.ID
-	identifiers := value_2
+	var value_1 [2]Any
+	value_1[0] = userID
+	value_1[1] = session.ID
+	identifiers := value_1
 	_ = identifiers
-	var value_3 zir_519e32da2199d006_ExecResult = StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_session_rounds\nWHERE user_id_hash=?1 AND session_id=?2", identifiers[0:2:2])
-	children := value_3
+	children := StdSqlGo_ExecTx(transaction, context, "\nDELETE FROM server_session_rounds\nWHERE user_id_hash=?1 AND session_id=?2", identifiers[0:2:2])
 	result.Error = children.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_4 int = applied
-	var value_5 int = AccountState_Affected(children.Value)
-	applied = value_4 + value_5
+	var value_2 int = applied
+	var value_3 int = AccountState_Affected(children.Value)
+	applied = value_2 + value_3
 	version := AccountState_NextVersion(transaction, context, userID)
 	result.Error = version.Error
 	if result.Error == nil {
@@ -298,8 +291,7 @@ func SyncWrites_UpsertMeditation(transaction *Transaction, context Context, user
 	written := StdSqlGo_ExecTx(transaction, context, value_2, arguments[0:6:6])
 	result.Error = written.Error
 	if result.Error == nil {
-		var value_3 int = AccountState_Affected(written.Value)
-		result.Applied = value_3
+		result.Applied = AccountState_Affected(written.Value)
 	}
 	return result
 }
@@ -331,8 +323,7 @@ func SyncWrites_WriteHabit(transaction *Transaction, context Context, userID str
 	written := StdSqlGo_ExecTx(transaction, context, query, arguments[0:13:13])
 	result.Error = written.Error
 	if result.Error == nil {
-		var value_2 int = AccountState_Affected(written.Value)
-		result.Applied = value_2
+		result.Applied = AccountState_Affected(written.Value)
 	}
 	return result
 }
@@ -360,8 +351,7 @@ func SyncWrites_WriteDay(transaction *Transaction, context Context, userID strin
 	written := StdSqlGo_ExecTx(transaction, context, query, arguments[0:7:7])
 	result.Error = written.Error
 	if result.Error == nil {
-		var value_4 int = AccountState_Affected(written.Value)
-		result.Applied = value_4
+		result.Applied = AccountState_Affected(written.Value)
 	}
 	return result
 }

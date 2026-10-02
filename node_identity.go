@@ -144,19 +144,17 @@ func NodeIdentity_New(privateKey PrivateKey) NodeIdentityResult {
 		privateBytes = []uint8(privateKey)
 	}
 	if int64(len(privateBytes)) != 64 {
-		var value_0 Error = StdErrorsGo_New("invalid Ed25519 node identity key")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("invalid Ed25519 node identity key")
 		return result
 	}
 	if int64(32) < 0 || int64(64) < int64(32) || int64(64) > int64(len(privateBytes)) {
 		panic("slice range out of bounds")
 	}
 	publicBytes := NodeIdentity_CopyBytes(privateBytes[32:64:64])
-	var value_2 string = Signing_SHA256Hex(publicBytes)
-	result.Value.ID = value_2
+	result.Value.ID = Signing_SHA256Hex(publicBytes)
 	result.Value.PublicKey = PublicKey(publicBytes)
-	var value_3 []uint8 = NodeIdentity_CopyBytes(privateBytes)
-	result.Value.PrivateKey = PrivateKey(value_3)
+	var value_1 []uint8 = NodeIdentity_CopyBytes(privateBytes)
+	result.Value.PrivateKey = PrivateKey(value_1)
 	return result
 }
 
@@ -164,38 +162,33 @@ func NodeIdentity_LoadOrCreateKey(rawPath string) zir_e94080a3b50d4b7c_PrivateKe
 	var result zir_e94080a3b50d4b7c_PrivateKeyResult = zir_e94080a3b50d4b7c_PrivateKeyResult{}
 	path := strings.TrimSpace(rawPath)
 	if path == "" {
-		var value_0 Error = StdErrorsGo_New("empty node identity key path")
-		result.Error = value_0
+		result.Error = StdErrorsGo_New("empty node identity key path")
 		return result
 	}
 	read := StdFileGo_ReadFile(path)
 	if read.Error == nil {
 		decoded := NodeIdentity_DecodeHex(strings.TrimSpace(StdTextGo_FromBytes(read.Value)))
 		if decoded.Error != nil {
-			var value_1 Error = fmt.Errorf("decode %s: %w", path, decoded.Error)
-			result.Error = value_1
+			result.Error = fmt.Errorf("decode %s: %w", path, decoded.Error)
 			return result
 		}
 		if int64(len(decoded.Value)) == 32 {
-			var value_2 PrivateKey = StdEd25519Go_NewKeyFromSeed(decoded.Value)
-			result.Value = value_2
+			result.Value = StdEd25519Go_NewKeyFromSeed(decoded.Value)
 			return result
 		}
 		if int64(len(decoded.Value)) != 64 {
-			var value_3 Error = StdErrorsGo_New(NodeIdentity_Concat(path, " has invalid key length"))
-			result.Error = value_3
+			result.Error = StdErrorsGo_New(NodeIdentity_Concat(path, " has invalid key length"))
 			return result
 		}
 		result.Value = PrivateKey(decoded.Value)
 		return result
 	}
-	var value_4 bool = StdErrorsGo_Is(read.Error, StdFileGo_NotExist())
-	if !value_4 {
+	var value_0 bool = StdErrorsGo_Is(read.Error, StdFileGo_NotExist())
+	if !value_0 {
 		result.Error = read.Error
 		return result
 	}
-	var value_5 Error = StdFileGo_MkdirAll(StdFileGo_Dir(path), FileMode(448))
-	result.Error = value_5
+	result.Error = StdFileGo_MkdirAll(StdFileGo_Dir(path), FileMode(448))
 	if result.Error != nil {
 		return result
 	}
@@ -206,13 +199,11 @@ func NodeIdentity_LoadOrCreateKey(rawPath string) zir_e94080a3b50d4b7c_PrivateKe
 	}
 	temporary := NodeIdentity_Concat(path, ".tmp")
 	encoded := NodeIdentity_Concat(hex.EncodeToString([]uint8(generated.PrivateKey)), "\n")
-	var value_6 Error = StdFileGo_WriteFile(temporary, StdTextGo_ToBytes(encoded), FileMode(384))
-	result.Error = value_6
+	result.Error = StdFileGo_WriteFile(temporary, StdTextGo_ToBytes(encoded), FileMode(384))
 	if result.Error != nil {
 		return result
 	}
-	var value_7 Error = StdFileGo_Rename(temporary, path)
-	result.Error = value_7
+	result.Error = StdFileGo_Rename(temporary, path)
 	if result.Error != nil {
 		StdFileGo_Remove(temporary)
 		return result
@@ -315,48 +306,42 @@ func NodeIdentity_ValidateAcceptance(invite PairingInvite, acceptance PairingAcc
 		value_0 = !value_1
 	}
 	if value_0 || acceptance.Nonce == "" {
-		var value_2 Error = StdErrorsGo_New("invalid pairing acceptance")
-		result.Error = value_2
+		result.Error = StdErrorsGo_New("invalid pairing acceptance")
 		return result
 	}
 	var window int64 = 300000000000
-	var value_3 bool = acceptance.AcceptedAt < StdTimeGo_Unix(StdTimeGo_Add(now, Duration(0-window)))
-	var value_4 bool = value_3
-	if !value_4 {
-		var value_5 bool = acceptance.AcceptedAt > StdTimeGo_Unix(StdTimeGo_Add(now, Duration(window)))
-		value_4 = value_5
+	var value_2 bool = acceptance.AcceptedAt < StdTimeGo_Unix(StdTimeGo_Add(now, Duration(0-window)))
+	var value_3 bool = value_2
+	if !value_3 {
+		var value_4 bool = acceptance.AcceptedAt > StdTimeGo_Unix(StdTimeGo_Add(now, Duration(window)))
+		value_3 = value_4
 	}
-	if value_4 {
-		var value_6 Error = StdErrorsGo_New("pairing acceptance time is outside the allowed window")
-		result.Error = value_6
+	if value_3 {
+		result.Error = StdErrorsGo_New("pairing acceptance time is outside the allowed window")
 		return result
 	}
-	var value_7 Error = NodeIdentity_ValidateAddresses(acceptance.Addresses)
-	result.Error = value_7
+	result.Error = NodeIdentity_ValidateAddresses(acceptance.Addresses)
 	if result.Error != nil {
 		return result
 	}
 	publicBytes := NodeIdentity_DecodeHex(acceptance.PublicKey)
 	if publicBytes.Error != nil || int64(len(publicBytes.Value)) != 32 {
-		var value_8 Error = StdErrorsGo_New("invalid pairing acceptance public key")
-		result.Error = value_8
+		result.Error = StdErrorsGo_New("invalid pairing acceptance public key")
 		return result
 	}
 	if Signing_SHA256Hex(publicBytes.Value) != acceptance.NodeID {
-		var value_9 Error = StdErrorsGo_New("pairing acceptance node ID does not match public key")
-		result.Error = value_9
+		result.Error = StdErrorsGo_New("pairing acceptance node ID does not match public key")
 		return result
 	}
 	signature := Codec_DecodeBase64(acceptance.Signature, true, false)
 	key := PublicKey(publicBytes.Value)
-	var value_10 bool = signature.Error != ""
-	if !value_10 {
-		var value_11 bool = StdEd25519Go_Verify(key, NodeIdentity_AcceptanceMessage(invite, acceptance), StdTextGo_ToBytes(signature.Value))
-		value_10 = !value_11
+	var value_5 bool = signature.Error != ""
+	if !value_5 {
+		var value_6 bool = StdEd25519Go_Verify(key, NodeIdentity_AcceptanceMessage(invite, acceptance), StdTextGo_ToBytes(signature.Value))
+		value_5 = !value_6
 	}
-	if value_10 {
-		var value_12 Error = StdErrorsGo_New("invalid pairing acceptance signature")
-		result.Error = value_12
+	if value_5 {
+		result.Error = StdErrorsGo_New("invalid pairing acceptance signature")
 		return result
 	}
 	result.Value = key
@@ -371,47 +356,41 @@ func NodeIdentity_ValidateInvite(invite PairingInvite, now Time) PublicKeyResult
 		value_0 = !value_1
 	}
 	if value_0 || invite.InviteID == "" || invite.Nonce == "" {
-		var value_2 Error = StdErrorsGo_New("invalid pairing invite")
-		result.Error = value_2
+		result.Error = StdErrorsGo_New("invalid pairing invite")
 		return result
 	}
 	lifetime := Duration(86400000000000)
-	var value_3 bool = invite.ExpiresAt <= StdTimeGo_Unix(now)
-	var value_4 bool = value_3
-	if !value_4 {
-		var value_5 bool = invite.ExpiresAt > StdTimeGo_Unix(StdTimeGo_Add(now, lifetime))
-		value_4 = value_5
+	var value_2 bool = invite.ExpiresAt <= StdTimeGo_Unix(now)
+	var value_3 bool = value_2
+	if !value_3 {
+		var value_4 bool = invite.ExpiresAt > StdTimeGo_Unix(StdTimeGo_Add(now, lifetime))
+		value_3 = value_4
 	}
-	if value_4 {
-		var value_6 Error = StdErrorsGo_New("pairing invite expired or too far in the future")
-		result.Error = value_6
+	if value_3 {
+		result.Error = StdErrorsGo_New("pairing invite expired or too far in the future")
 		return result
 	}
 	publicBytes := NodeIdentity_DecodeHex(invite.PublicKey)
 	if publicBytes.Error != nil || int64(len(publicBytes.Value)) != 32 {
-		var value_7 Error = StdErrorsGo_New("invalid pairing public key")
-		result.Error = value_7
+		result.Error = StdErrorsGo_New("invalid pairing public key")
 		return result
 	}
 	if Signing_SHA256Hex(publicBytes.Value) != invite.NodeID {
-		var value_8 Error = StdErrorsGo_New("pairing node ID does not match public key")
-		result.Error = value_8
+		result.Error = StdErrorsGo_New("pairing node ID does not match public key")
 		return result
 	}
 	signature := Codec_DecodeBase64(invite.Signature, true, false)
 	key := PublicKey(publicBytes.Value)
-	var value_9 bool = signature.Error != ""
-	if !value_9 {
-		var value_10 bool = StdEd25519Go_Verify(key, NodeIdentity_InviteMessage(invite), StdTextGo_ToBytes(signature.Value))
-		value_9 = !value_10
+	var value_5 bool = signature.Error != ""
+	if !value_5 {
+		var value_6 bool = StdEd25519Go_Verify(key, NodeIdentity_InviteMessage(invite), StdTextGo_ToBytes(signature.Value))
+		value_5 = !value_6
 	}
-	if value_9 {
-		var value_11 Error = StdErrorsGo_New("invalid pairing signature")
-		result.Error = value_11
+	if value_5 {
+		result.Error = StdErrorsGo_New("invalid pairing signature")
 		return result
 	}
-	var value_12 Error = NodeIdentity_ValidateAddresses(invite.Addresses)
-	result.Error = value_12
+	result.Error = NodeIdentity_ValidateAddresses(invite.Addresses)
 	if result.Error != nil {
 		return result
 	}

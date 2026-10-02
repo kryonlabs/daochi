@@ -170,10 +170,8 @@ func GooglePlay_FormSet(form __type_f70dc01c9cc634ef, name string, value string)
 func GooglePlay_RequestToken(context Context, target string, form __type_f70dc01c9cc634ef, failure string) AccessTokenResult {
 	var result AccessTokenResult = AccessTokenResult{}
 	body := (url.Values).Encode(url.Values(form))
-	var value_0 Context = context
-	var value_1 string = target
-	var value_2 *StringReader = strings.NewReader(body)
-	request := StdHttpGo_NewRequest(value_0, "POST", value_1, Reader(value_2))
+	var value_0 *StringReader = strings.NewReader(body)
+	request := StdHttpGo_NewRequest(context, "POST", target, Reader(value_0))
 	result.Error = request.Error
 	if result.Error != nil {
 		return result
@@ -189,19 +187,16 @@ func GooglePlay_RequestToken(context Context, target string, form __type_f70dc01
 	bytes := StdIoGo_ReadAll(StdIoGo_LimitReader(Reader(stream), 1048576))
 	status := StdHttpGo_StatusCode(response.Value)
 	if status < 200 || status >= 300 {
-		var value_3 Error = StdErrorsGo_New(failure)
-		result.Error = value_3
+		result.Error = StdErrorsGo_New(failure)
 		return result
 	}
 	var payload TokenPayload = TokenPayload{}
-	var value_4 Error = StdJsonGo_Unmarshal(bytes.Value, &(payload))
-	result.Error = value_4
+	result.Error = StdJsonGo_Unmarshal(bytes.Value, &(payload))
 	if result.Error != nil {
 		return result
 	}
 	if payload.AccessToken == "" {
-		var value_5 Error = StdErrorsGo_New("google oauth missing access token")
-		result.Error = value_5
+		result.Error = StdErrorsGo_New("google oauth missing access token")
 		return result
 	}
 	result.Value = payload.AccessToken
@@ -209,23 +204,20 @@ func GooglePlay_RequestToken(context Context, target string, form __type_f70dc01
 }
 
 func GooglePlay_HasVerifier(configuration Config) bool {
-	var value_0 bool = configuration.GoogleServiceAccountJSON != "" || (configuration.GoogleOAuthClientJSON != "" && configuration.GoogleOAuthRefreshToken != "")
-	return value_0
+	return configuration.GoogleServiceAccountJSON != "" || (configuration.GoogleOAuthClientJSON != "" && configuration.GoogleOAuthRefreshToken != "")
 }
 
 func GooglePlay_AccessToken(context Context, configuration Config) AccessTokenResult {
 	if configuration.GoogleServiceAccountJSON != "" {
 		return GooglePlay_ServiceAccountAccessToken(context, configuration.GoogleServiceAccountJSON)
 	}
-	var value_0 AccessTokenResult = GooglePlay_RefreshAccessToken(context, configuration.GoogleOAuthClientJSON, configuration.GoogleOAuthRefreshToken)
-	return value_0
+	return GooglePlay_RefreshAccessToken(context, configuration.GoogleOAuthClientJSON, configuration.GoogleOAuthRefreshToken)
 }
 
 func GooglePlay_ServiceAccountAccessToken(context Context, raw string) AccessTokenResult {
 	var result AccessTokenResult = AccessTokenResult{}
 	var account GoogleServiceAccount = GoogleServiceAccount{}
-	var value_0 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(raw), &(account))
-	result.Error = value_0
+	result.Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(raw), &(account))
 	if result.Error != nil {
 		return result
 	}
@@ -234,8 +226,7 @@ func GooglePlay_ServiceAccountAccessToken(context Context, raw string) AccessTok
 	}
 	block := GooglePlay_DecodePEM(StdTextGo_ToBytes(account.PrivateKey))
 	if block.Value == nil {
-		var value_1 Error = StdErrorsGo_New("invalid google private key")
-		result.Error = value_1
+		result.Error = StdErrorsGo_New("invalid google private key")
 		return result
 	}
 	parsed := GooglePlay_ParsePrivateKey(GooglePlay_PEMBytes(block.Value))
@@ -245,106 +236,100 @@ func GooglePlay_ServiceAccountAccessToken(context Context, raw string) AccessTok
 	}
 	key := GooglePlay_AsRSAKey(parsed.Value)
 	if !key.Present {
-		var value_2 Error = StdErrorsGo_New("google private key must be rsa")
-		result.Error = value_2
+		result.Error = StdErrorsGo_New("google private key must be rsa")
 		return result
 	}
 	now := StdTimeGo_Unix(StdTimeGo_Now())
 	var header __type_9ff0571749a9f227 = *new(__type_9ff0571749a9f227)
-	var value_3 *__type_9ff0571749a9f227 = &(header)
-	if (*value_3) == nil {
-		(*value_3) = make(__type_9ff0571749a9f227)
+	var value_0 *__type_9ff0571749a9f227 = &(header)
+	if (*value_0) == nil {
+		(*value_0) = make(__type_9ff0571749a9f227)
 	}
+	var value_1 *__type_9ff0571749a9f227 = &(header)
+	var value_2 string = "alg"
+	var value_3 string = "RS256"
+	if (*value_1) == nil {
+		(*value_1) = make(__type_9ff0571749a9f227)
+	}
+	(*value_1)[value_2] = value_3
 	var value_4 *__type_9ff0571749a9f227 = &(header)
-	var value_5 string = "alg"
-	var value_6 string = "RS256"
+	var value_5 string = "typ"
+	var value_6 string = "JWT"
 	if (*value_4) == nil {
 		(*value_4) = make(__type_9ff0571749a9f227)
 	}
 	(*value_4)[value_5] = value_6
-	var value_7 *__type_9ff0571749a9f227 = &(header)
-	var value_8 string = "typ"
-	var value_9 string = "JWT"
-	if (*value_7) == nil {
-		(*value_7) = make(__type_9ff0571749a9f227)
-	}
-	(*value_7)[value_8] = value_9
 	var claims __type_7d6cc8a85f09fc88 = *new(__type_7d6cc8a85f09fc88)
-	var value_10 *__type_7d6cc8a85f09fc88 = &(claims)
-	if (*value_10) == nil {
-		(*value_10) = make(__type_7d6cc8a85f09fc88)
+	var value_7 *__type_7d6cc8a85f09fc88 = &(claims)
+	if (*value_7) == nil {
+		(*value_7) = make(__type_7d6cc8a85f09fc88)
 	}
+	var value_8 *__type_7d6cc8a85f09fc88 = &(claims)
+	var value_9 string = "iss"
+	var value_10 Any = account.ClientEmail
+	if (*value_8) == nil {
+		(*value_8) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_8)[value_9] = value_10
 	var value_11 *__type_7d6cc8a85f09fc88 = &(claims)
-	var value_12 string = "iss"
-	var value_13 Any = account.ClientEmail
+	var value_12 string = "scope"
+	var value_13 Any = "https://www.googleapis.com/auth/androidpublisher"
 	if (*value_11) == nil {
 		(*value_11) = make(__type_7d6cc8a85f09fc88)
 	}
 	(*value_11)[value_12] = value_13
 	var value_14 *__type_7d6cc8a85f09fc88 = &(claims)
-	var value_15 string = "scope"
-	var value_16 Any = "https://www.googleapis.com/auth/androidpublisher"
+	var value_15 string = "aud"
+	var value_16 Any = account.TokenURI
 	if (*value_14) == nil {
 		(*value_14) = make(__type_7d6cc8a85f09fc88)
 	}
 	(*value_14)[value_15] = value_16
 	var value_17 *__type_7d6cc8a85f09fc88 = &(claims)
-	var value_18 string = "aud"
-	var value_19 Any = account.TokenURI
+	var value_18 string = "iat"
+	var value_19 Any = now
 	if (*value_17) == nil {
 		(*value_17) = make(__type_7d6cc8a85f09fc88)
 	}
 	(*value_17)[value_18] = value_19
 	var value_20 *__type_7d6cc8a85f09fc88 = &(claims)
-	var value_21 string = "iat"
-	var value_22 Any = now
+	var value_21 string = "exp"
+	var value_22 Any = now + 3600
 	if (*value_20) == nil {
 		(*value_20) = make(__type_7d6cc8a85f09fc88)
 	}
 	(*value_20)[value_21] = value_22
-	var value_23 *__type_7d6cc8a85f09fc88 = &(claims)
-	var value_24 string = "exp"
-	var value_25 Any = now + 3600
-	if (*value_23) == nil {
-		(*value_23) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_23)[value_24] = value_25
 	var parts [3]string
-	var value_26 string = GooglePlay_Base64JSON(header)
-	parts[0] = value_26
-	var value_27 string = GooglePlay_Base64JSON(claims)
-	parts[1] = value_27
+	var value_23 string = GooglePlay_Base64JSON(header)
+	parts[0] = value_23
+	var value_24 string = GooglePlay_Base64JSON(claims)
+	parts[1] = value_24
 	message := strings.Join(parts[0:2:2], ".")
 	digest := sha256.Sum256(StdTextGo_ToBytes(message))
 	_ = digest
 	var random Reader = *new(Reader)
-	var value_28 Reader = random
-	var value_29 *RSAPrivateKey = key.Value
-	var value_30 CryptoHash = GooglePlay_SHA256()
-	signature := GooglePlay_Sign(value_28, value_29, value_30, digest[0:32:32])
+	var value_25 CryptoHash = GooglePlay_SHA256()
+	signature := GooglePlay_Sign(random, key.Value, value_25, digest[0:32:32])
 	result.Error = signature.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_31 *zir_b554ab8e6713f587_Encoding = GooglePlay_RawURL()
-	var value_32 string = (*base64.Encoding).EncodeToString(value_31, signature.Value)
-	parts[2] = value_32
+	var value_26 string = (*base64.Encoding).EncodeToString(GooglePlay_RawURL(), signature.Value)
+	parts[2] = value_26
 	var form __type_f70dc01c9cc634ef = *new(__type_f70dc01c9cc634ef)
-	var value_33 *__type_f70dc01c9cc634ef = &(form)
-	if (*value_33) == nil {
-		(*value_33) = make(__type_f70dc01c9cc634ef)
+	var value_27 *__type_f70dc01c9cc634ef = &(form)
+	if (*value_27) == nil {
+		(*value_27) = make(__type_f70dc01c9cc634ef)
 	}
 	GooglePlay_FormSet(form, "grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
-	var value_34 __type_f70dc01c9cc634ef = form
-	GooglePlay_FormSet(value_34, "assertion", strings.Join(parts[0:3:3], "."))
+	GooglePlay_FormSet(form, "assertion", strings.Join(parts[0:3:3], "."))
 	return GooglePlay_RequestToken(context, account.TokenURI, form, "google oauth rejected")
 }
 
 func GooglePlay_RefreshAccessToken(context Context, rawClient string, refreshToken string) AccessTokenResult {
 	var result AccessTokenResult = AccessTokenResult{}
 	var file GoogleOAuthClientFile = GoogleOAuthClientFile{}
-	var value_0 Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(rawClient), &(file))
-	result.Error = value_0
+	result.Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(rawClient), &(file))
 	if result.Error != nil {
 		return result
 	}
@@ -353,23 +338,21 @@ func GooglePlay_RefreshAccessToken(context Context, rawClient string, refreshTok
 		client = file.Installed
 	}
 	if client.ClientID == "" || client.ClientSecret == "" {
-		var value_1 Error = StdErrorsGo_New("invalid google oauth client")
-		result.Error = value_1
+		result.Error = StdErrorsGo_New("invalid google oauth client")
 		return result
 	}
 	if client.TokenURI == "" {
 		client.TokenURI = "https://oauth2.googleapis.com/token"
 	}
 	var form __type_f70dc01c9cc634ef = *new(__type_f70dc01c9cc634ef)
-	var value_2 *__type_f70dc01c9cc634ef = &(form)
-	if (*value_2) == nil {
-		(*value_2) = make(__type_f70dc01c9cc634ef)
+	var value_0 *__type_f70dc01c9cc634ef = &(form)
+	if (*value_0) == nil {
+		(*value_0) = make(__type_f70dc01c9cc634ef)
 	}
 	GooglePlay_FormSet(form, "grant_type", "refresh_token")
 	GooglePlay_FormSet(form, "client_id", client.ClientID)
 	GooglePlay_FormSet(form, "client_secret", client.ClientSecret)
-	var value_3 __type_f70dc01c9cc634ef = form
-	GooglePlay_FormSet(value_3, "refresh_token", strings.TrimSpace(refreshToken))
+	GooglePlay_FormSet(form, "refresh_token", strings.TrimSpace(refreshToken))
 	return GooglePlay_RequestToken(context, client.TokenURI, form, "google oauth refresh rejected")
 }
 
@@ -386,9 +369,7 @@ func GooglePlay_VerifyPurchase(context Context, configuration Config, purchase G
 		return result
 	}
 	var body Reader = *new(Reader)
-	var value_1 Context = context
-	var value_2 string = GooglePlay_Endpoint(purchase)
-	request := StdHttpGo_NewRequest(value_1, "GET", value_2, body)
+	request := StdHttpGo_NewRequest(context, "GET", GooglePlay_Endpoint(purchase), body)
 	result.Error = request.Error
 	if result.Error != nil {
 		return result
@@ -404,26 +385,21 @@ func GooglePlay_VerifyPurchase(context Context, configuration Config, purchase G
 	bytes := StdIoGo_ReadAll(StdIoGo_LimitReader(Reader(stream), 1048576))
 	status := StdHttpGo_StatusCode(response.Value)
 	if status < 200 || status >= 300 {
-		var value_3 Error = StdErrorsGo_New("google purchase rejected")
-		result.Error = value_3
+		result.Error = StdErrorsGo_New("google purchase rejected")
 		return result
 	}
 	var payload PurchasePayload = PurchasePayload{}
-	var value_4 Error = StdJsonGo_Unmarshal(bytes.Value, &(payload))
-	result.Error = value_4
+	result.Error = StdJsonGo_Unmarshal(bytes.Value, &(payload))
 	if result.Error != nil {
-		var value_5 Error = StdErrorsGo_New("invalid google purchase response")
-		result.Error = value_5
+		result.Error = StdErrorsGo_New("invalid google purchase response")
 		return result
 	}
 	if payload.PurchaseState != 0 {
-		var value_6 Error = StdErrorsGo_New("google purchase is not purchased")
-		result.Error = value_6
+		result.Error = StdErrorsGo_New("google purchase is not purchased")
 		return result
 	}
 	if payload.ConsumptionState == 1 {
-		var value_7 Error = StdErrorsGo_New("google purchase already consumed")
-		result.Error = value_7
+		result.Error = StdErrorsGo_New("google purchase already consumed")
 		return result
 	}
 	reference := payload.OrderID
@@ -436,8 +412,7 @@ func GooglePlay_VerifyPurchase(context Context, configuration Config, purchase G
 	parts[2] = purchase.ProductID
 	parts[3] = ":"
 	parts[4] = reference
-	var value_8 string = strings.Join(parts[0:5:5], "")
-	result.Value = value_8
+	result.Value = strings.Join(parts[0:5:5], "")
 	return result
 }
 
@@ -455,9 +430,7 @@ func GooglePlay_ConsumePurchase(context Context, configuration Config, purchase 
 	parts[0] = value_1
 	parts[1] = ":consume"
 	var body Reader = *new(Reader)
-	var value_2 Context = context
-	var value_3 string = strings.Join(parts[0:2:2], "")
-	request := StdHttpGo_NewRequest(value_2, "POST", value_3, body)
+	request := StdHttpGo_NewRequest(context, "POST", strings.Join(parts[0:2:2], ""), body)
 	if request.Error != nil {
 		return request.Error
 	}

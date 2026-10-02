@@ -40,8 +40,7 @@ func GooglePlayHttp_Verify(server Tokens, writer ResponseWriter, request *Reques
 	}
 	decoded := PaymentRequest_ReadGoogle(writer, request, server.Configuration.MaxBodyBytes)
 	if decoded.Error != nil {
-		var value_0 ResponseWriter = writer
-		Response_Error(value_0, int(400), StdErrorsGo_Message(decoded.Error))
+		Response_Error(writer, int(400), StdErrorsGo_Message(decoded.Error))
 		return
 	}
 	issuer := TokenPolicy_Issuer(*(server.Configuration), server.IssuerUnavailable)
@@ -49,21 +48,18 @@ func GooglePlayHttp_Verify(server Tokens, writer ResponseWriter, request *Reques
 		Response_Error(writer, int(503), "token issuer unavailable")
 		return
 	}
-	var value_1 __type_cd75cecb5feef7fa = server.Configuration.TokenProducts
-	var value_2 string = decoded.Value.ProductID
-	var value_3 __type_31c6478de00191c0 = __type_31c6478de00191c0{}
-	value_3.Value, value_3.HasValue = value_1[value_2]
-	product := value_3
+	var value_0 __type_cd75cecb5feef7fa = server.Configuration.TokenProducts
+	var value_1 string = decoded.Value.ProductID
+	var value_2 __type_31c6478de00191c0 = __type_31c6478de00191c0{}
+	value_2.Value, value_2.HasValue = value_0[value_1]
+	product := value_2
 	if !product.HasValue {
 		Response_Error(writer, int(400), "unknown product_id")
 		return
 	}
-	var value_4 *Database = server.Database
-	var value_5 Context = StdHttpGo_Context(request)
-	existence := AppStore_Exists(value_4, value_5, decoded.Value.AppID)
+	existence := AppStore_Exists(server.Database, StdHttpGo_Context(request), decoded.Value.AppID)
 	if existence.Error != nil {
-		var value_6 string = LogSafety_LogText(decoded.Value.AppID)
-		slog.Error("google token purchase app lookup", "app", value_6, "error", existence.Error)
+		slog.Error("google token purchase app lookup", "app", LogSafety_LogText(decoded.Value.AppID), "error", existence.Error)
 		Response_Error(writer, int(500), "token purchase failed")
 		return
 	}
@@ -71,42 +67,34 @@ func GooglePlayHttp_Verify(server Tokens, writer ResponseWriter, request *Reques
 		Response_Error(writer, int(400), "unknown app_id")
 		return
 	}
-	var value_7 *Database = server.Database
-	var value_8 Context = StdHttpGo_Context(request)
-	var value_9 TokenAuthorizationResult = TokenPolicy_Authorize(value_7, value_8, request, decoded.Body, user.Value, decoded.Value.AppID, "waozi:token", "purchase", server.Verify, server.ReplayError)
-	authorization := value_9
+	authorization := TokenPolicy_Authorize(server.Database, StdHttpGo_Context(request), request, decoded.Body, user.Value, decoded.Value.AppID, "waozi:token", "purchase", server.Verify, server.ReplayError)
 	if authorization.Authentication.Error != nil || authorization.Authentication.Status != 0 {
 		if authorization.Signed {
-			var value_10 *Database = server.Database
-			var value_11 Context = StdHttpGo_Context(request)
-			SignedTx_Forget(value_10, value_11, authorization.Value)
+			SignedTx_Forget(server.Database, StdHttpGo_Context(request), authorization.Value)
 		}
 		HttpAuth_Respond(writer, server.Counters, authorization.Authentication)
 		return
 	}
 	completed := false
-	var value_16 zir_7973e71b215e8962_ReplayCleanup = func(value_12 *Database, value_13 Context, value_14 TokenAuthorizationResult, value_15 *bool) {
-		GooglePlayHttp_ForgetOnFailure(value_12, value_13, value_14, value_15)
+	var value_7 zir_7973e71b215e8962_ReplayCleanup = func(value_3 *Database, value_4 Context, value_5 TokenAuthorizationResult, value_6 *bool) {
+		GooglePlayHttp_ForgetOnFailure(value_3, value_4, value_5, value_6)
 	}
-	var value_17 zir_7973e71b215e8962_ReplayCleanup = value_16
-	var value_18 *Database = server.Database
-	var value_19 Context = StdHttpGo_Context(request)
-	defer GooglePlayHttp_CleanupAtReturn(value_17, value_18, value_19, authorization, &(completed))
-	var value_20 __type_c922d3f56b74fd5a = server.Configuration.GooglePackageNames
-	var value_21 int64 = int64(len(value_20))
-	var value_22 bool = value_21 > 0
-	if value_22 {
-		var value_23 __type_c922d3f56b74fd5a = server.Configuration.GooglePackageNames
-		var value_24 string = decoded.Value.PackageName
-		var value_25 bool = value_23[value_24]
-		value_22 = !value_25
+	defer GooglePlayHttp_CleanupAtReturn(value_7, server.Database, StdHttpGo_Context(request), authorization, &(completed))
+	var value_8 __type_c922d3f56b74fd5a = server.Configuration.GooglePackageNames
+	var value_9 int64 = int64(len(value_8))
+	var value_10 bool = value_9 > 0
+	if value_10 {
+		var value_11 __type_c922d3f56b74fd5a = server.Configuration.GooglePackageNames
+		var value_12 string = decoded.Value.PackageName
+		var value_13 bool = value_11[value_12]
+		value_10 = !value_13
 	}
-	if value_22 {
+	if value_10 {
 		Response_Error(writer, int(400), "package not allowed")
 		return
 	}
-	var value_26 Context = StdHttpGo_Context(request)
-	verified := GooglePlay_VerifyPurchase(value_26, *(server.Configuration), decoded.Value)
+	var value_14 Context = StdHttpGo_Context(request)
+	verified := GooglePlay_VerifyPurchase(value_14, *(server.Configuration), decoded.Value)
 	if verified.Error != nil {
 		GooglePlayHttp_PaymentError(writer, verified.Error)
 		return
@@ -118,27 +106,18 @@ func GooglePlayHttp_Verify(server Tokens, writer ResponseWriter, request *Reques
 	event.AmountDelta = product.Value.TokenUnits
 	event.SourceType = "google_play"
 	event.SourceRef = verified.Value
-	var value_27 *Database = server.Database
-	var value_28 Context = StdHttpGo_Context(request)
-	var value_29 CreditResult = TokenLedger_CreditPayment(value_27, value_28, issuer.Value, "google_play", verified.Value, event, server.IssuerUnavailable)
-	credited := value_29
+	credited := TokenLedger_CreditPayment(server.Database, StdHttpGo_Context(request), issuer.Value, "google_play", verified.Value, event, server.IssuerUnavailable)
 	if credited.Error != nil {
-		var value_30 string = LogSafety_LogText(user.Value)
-		var value_31 string = LogSafety_LogText(verified.Value)
-		slog.Error("google token credit", "user", value_30, "payment", value_31, "error", credited.Error)
+		slog.Error("google token credit", "user", LogSafety_LogText(user.Value), "payment", LogSafety_LogText(verified.Value), "error", credited.Error)
 		Response_Error(writer, int(500), "token credit failed")
 		return
 	}
-	var value_32 Context = StdHttpGo_Context(request)
-	consumed := GooglePlay_ConsumePurchase(value_32, *(server.Configuration), decoded.Value)
+	var value_15 Context = StdHttpGo_Context(request)
+	consumed := GooglePlay_ConsumePurchase(value_15, *(server.Configuration), decoded.Value)
 	if consumed != nil {
-		var value_33 string = LogSafety_LogText(user.Value)
-		var value_34 string = LogSafety_LogText(verified.Value)
-		slog.Warn("google purchase consume failed after token credit", "user", value_33, "payment", value_34, "error", consumed)
+		slog.Warn("google purchase consume failed after token credit", "user", LogSafety_LogText(user.Value), "payment", LogSafety_LogText(verified.Value), "error", consumed)
 	}
-	var value_35 *Database = server.Database
-	var value_36 Context = StdHttpGo_Context(request)
-	balance := TokenLedger_Balance(value_35, value_36, user.Value, "waozi:token")
+	balance := TokenLedger_Balance(server.Database, StdHttpGo_Context(request), user.Value, "waozi:token")
 	if balance.Error != nil {
 		Response_Error(writer, int(500), "token balance failed")
 		return

@@ -176,16 +176,14 @@ func Leaderboard_VisibleUsers(database *Database, context Context, userID string
 		destinations[1] = &(user.Alias)
 		destinations[2] = &(user.ProfileIcon)
 		destinations[3] = &(user.SourceVersion)
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:4:4])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:4:4])
 		if result.Error != nil {
 			return result
 		}
 		users = append(users, user)
 	}
 	result.Value = users
-	var value_2 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_2
+	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
 
@@ -218,13 +216,12 @@ func Leaderboard_Cached(database *Database, context Context, user VisibleStatsUs
 		return result
 	}
 	var value_4 bool = metric == "streak"
-	var value_5 bool = value_4
-	if value_5 {
-		var value_6 int = result.Value.LocalDate
-		var value_7 bool = value_6 != Leaderboard_TodayDate()
-		value_5 = value_7
+	if value_4 {
+		var value_5 int = result.Value.LocalDate
+		var value_6 bool = value_5 != Leaderboard_TodayDate()
+		value_4 = value_6
 	}
-	if value_5 {
+	if value_4 {
 		return result
 	}
 	result.Value.UserIDHash = user.UserIDHash
@@ -259,41 +256,38 @@ func Leaderboard_Streak(database *Database, context Context, userID string, acti
 		var destinations [2]Any
 		destinations[0] = &(localDate)
 		destinations[1] = &(updated)
-		var value_1 Error = StdSqlGo_ScanRows(rows, destinations[0:2:2])
-		result.Error = value_1
+		result.Error = StdSqlGo_ScanRows(rows, destinations[0:2:2])
 		if result.Error != nil {
 			return result
 		}
 		if localDate > int(0) {
-			var value_2 *__type_77c3e7d6148beac1 = &(seen)
-			var value_3 int = localDate
-			var value_4 bool = true
-			if (*value_2) == nil {
-				(*value_2) = make(__type_77c3e7d6148beac1)
+			var value_1 *__type_77c3e7d6148beac1 = &(seen)
+			var value_2 int = localDate
+			var value_3 bool = true
+			if (*value_1) == nil {
+				(*value_1) = make(__type_77c3e7d6148beac1)
 			}
-			(*value_2)[value_3] = value_4
+			(*value_1)[value_2] = value_3
 		}
 		if strings.Compare(updated, updatedAt) > int(0) {
 			updatedAt = updated
 		}
 	}
-	var value_5 Error = StdSqlGo_RowsError(rows)
-	result.Error = value_5
+	result.Error = StdSqlGo_RowsError(rows)
 	if result.Error != nil {
 		return result
 	}
 	today := StdTimeGo_UTC(StdTimeGo_Now())
-	var value_6 int = Leaderboard_TodayDate()
-	result.Date = value_6
+	result.Date = Leaderboard_TodayDate()
 	for result.Value <= int(370) {
 		day := (time.Time).AddDate(today, int(int(0)), int(int(0)), int(-result.Value))
-		var value_7 zir_6eb4a12e7d5dd633_IntegerResult = Leaderboard_DateInteger(StdTimeGo_Format(day, "20060102"))
-		localDate := value_7.Value
+		var value_4 zir_6eb4a12e7d5dd633_IntegerResult = Leaderboard_DateInteger(StdTimeGo_Format(day, "20060102"))
+		localDate := value_4.Value
 		_ = localDate
-		var value_8 __type_77c3e7d6148beac1 = seen
-		var value_9 int = localDate
-		var value_10 bool = value_8[value_9]
-		if !value_10 {
+		var value_5 __type_77c3e7d6148beac1 = seen
+		var value_6 int = localDate
+		var value_7 bool = value_5[value_6]
+		if !value_7 {
 			break
 		}
 		result.Value += int(1)
@@ -310,16 +304,14 @@ func Leaderboard_Average(database *Database, context Context, userID string, pra
 		if practice != "whm" {
 			return result
 		}
-		var value_0 string = "\nSELECT COALESCE(AVG(sr.hold_seconds),0)\nFROM server_sessions s\nJOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id\nWHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=0 AND sr.hold_seconds>0"
-		query = value_0
+		query = "\nSELECT COALESCE(AVG(sr.hold_seconds),0)\nFROM server_sessions s\nJOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id\nWHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=0 AND sr.hold_seconds>0"
 	} else if metric == "avg_time" {
 		if practice != "meditation" {
-			var value_1 string = Leaderboard_TimeLabel(int(0))
-			result.Label = value_1
+			var value_0 string = Leaderboard_TimeLabel(int(0))
+			result.Label = value_0
 			return result
 		}
-		var value_2 string = "\nWITH session_totals AS (\n  SELECT s.id, SUM(sr.hold_seconds) AS seconds\n  FROM server_sessions s\n  JOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id\n  WHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=1 AND sr.hold_seconds>0\n  GROUP BY s.id\n),\nlog_totals AS (\n  SELECT ml.session_id AS id, ml.duration_seconds AS seconds\n  FROM server_meditation_logs ml\n  WHERE ml.user_id_hash=?1 AND ml.duration_seconds>0\n    AND NOT EXISTS (SELECT 1 FROM session_totals st WHERE st.id=ml.session_id)\n),\nall_totals AS (\n  SELECT seconds FROM session_totals\n  UNION ALL\n  SELECT seconds FROM log_totals\n)\nSELECT COALESCE(AVG(seconds),0) FROM all_totals"
-		query = value_2
+		query = "\nWITH session_totals AS (\n  SELECT s.id, SUM(sr.hold_seconds) AS seconds\n  FROM server_sessions s\n  JOIN server_session_rounds sr ON sr.user_id_hash=s.user_id_hash AND sr.session_id=s.id\n  WHERE s.user_id_hash=?1 AND s.deleted_at=0 AND s.activity=1 AND sr.hold_seconds>0\n  GROUP BY s.id\n),\nlog_totals AS (\n  SELECT ml.session_id AS id, ml.duration_seconds AS seconds\n  FROM server_meditation_logs ml\n  WHERE ml.user_id_hash=?1 AND ml.duration_seconds>0\n    AND NOT EXISTS (SELECT 1 FROM session_totals st WHERE st.id=ml.session_id)\n),\nall_totals AS (\n  SELECT seconds FROM session_totals\n  UNION ALL\n  SELECT seconds FROM log_totals\n)\nSELECT COALESCE(AVG(seconds),0) FROM all_totals"
 	} else {
 		return result
 	}
@@ -327,25 +319,22 @@ func Leaderboard_Average(database *Database, context Context, userID string, pra
 	arguments[0] = userID
 	var destinations [1]Any
 	destinations[0] = &(result.Value)
-	var value_3 *Row = StdSqlGo_QueryRow(database, context, query, arguments[0:1:1])
-	var value_4 Error = StdSqlGo_ScanRow(value_3, destinations[0:1:1])
-	result.Error = value_4
+	var value_1 *Row = StdSqlGo_QueryRow(database, context, query, arguments[0:1:1])
+	var value_2 Error = StdSqlGo_ScanRow(value_1, destinations[0:1:1])
+	result.Error = value_2
 	if metric == "avg_hold" {
-		var value_5 string = fmt.Sprintf("%.0f", float64(result.Value))
-		result.Label = value_5
+		var value_3 string = fmt.Sprintf("%.0f", float64(result.Value))
+		result.Label = value_3
 	} else {
-		var value_6 string = Leaderboard_TimeLabel(int((result.Value + 0.5)))
-		result.Label = value_6
+		var value_4 string = Leaderboard_TimeLabel(int((result.Value + 0.5)))
+		result.Label = value_4
 	}
 	return result
 }
 
 func Leaderboard_Compute(database *Database, context Context, user VisibleStatsUser, app string, practice string, metric string) LeaderboardRowResult {
 	var result LeaderboardRowResult = LeaderboardRowResult{}
-	var value_0 *Database = database
-	var value_1 Context = context
-	var value_2 string = user.UserIDHash
-	streak := Leaderboard_Streak(value_0, value_1, value_2, Leaderboard_Activity(practice))
+	streak := Leaderboard_Streak(database, context, user.UserIDHash, Leaderboard_Activity(practice))
 	result.Error = streak.Error
 	if result.Error != nil {
 		return result
@@ -360,8 +349,7 @@ func Leaderboard_Compute(database *Database, context Context, user VisibleStatsU
 	result.Value.UpdatedAt = streak.UpdatedAt
 	if metric == "streak" {
 		result.Value.Value = float64(streak.Value)
-		var value_3 string = fmt.Sprintf("%d", int(streak.Value))
-		result.Value.Label = value_3
+		result.Value.Label = fmt.Sprintf("%d", int(streak.Value))
 	} else {
 		average := Leaderboard_Average(database, context, user.UserIDHash, practice, metric)
 		result.Error = average.Error
@@ -382,9 +370,9 @@ func Leaderboard_Compute(database *Database, context Context, user VisibleStatsU
 	arguments[7] = result.Value.Label
 	arguments[8] = result.Value.LocalDate
 	arguments[9] = result.Value.UpdatedAt
-	var value_4 string = "\nINSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,calc_version,value,label,local_date,updated_at)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)\nON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET\n\tsource_version=excluded.source_version,\n\tcalc_version=excluded.calc_version,\n\tvalue=excluded.value,\n\tlabel=excluded.label,\n\tlocal_date=excluded.local_date,\n\tupdated_at=excluded.updated_at"
-	var value_5 zir_519e32da2199d006_ExecResult = StdSqlGo_Exec(database, context, value_4, arguments[0:10:10])
-	result.Error = value_5.Error
+	var value_0 string = "\nINSERT INTO server_leaderboard_stats(user_id_hash,app,practice,metric,source_version,calc_version,value,label,local_date,updated_at)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)\nON CONFLICT(user_id_hash,app,practice,metric) DO UPDATE SET\n\tsource_version=excluded.source_version,\n\tcalc_version=excluded.calc_version,\n\tvalue=excluded.value,\n\tlabel=excluded.label,\n\tlocal_date=excluded.local_date,\n\tupdated_at=excluded.updated_at"
+	var value_1 zir_519e32da2199d006_ExecResult = StdSqlGo_Exec(database, context, value_0, arguments[0:10:10])
+	result.Error = value_1.Error
 	return result
 }
 

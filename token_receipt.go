@@ -120,8 +120,7 @@ func TokenReceipt_FromPayload(payload ReceiptPayload, signature []uint8) TokenRe
 	result.CreatedAt = payload.CreatedAt
 	result.SourceType = payload.SourceType
 	result.SourceRef = payload.SourceRef
-	var value_0 string = hex.EncodeToString(signature)
-	result.Signature = value_0
+	result.Signature = hex.EncodeToString(signature)
 	return result
 }
 

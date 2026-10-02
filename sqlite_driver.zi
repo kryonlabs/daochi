@@ -1,0 +1,9 @@
+native :: #system_library "go:github.com/mattn/go-sqlite3";
+
+#scope_file
+InitializeRaw :: () #foreign native "init";
+
+#scope_export
+Initialize :: () {
+    InitializeRaw()
+}

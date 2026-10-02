@@ -2,7 +2,7 @@
 
 The target is a complete port of Daochi's first-party code to Ziran. This is
 an incremental implementation: the running server currently combines generated
-Go from canonical `.zi` files with a small handwritten startup and crypto
+Go from canonical `.zi` files with a small handwritten entry and crypto
 boundary. Caller changes alone do not count as a completed module.
 
 The goal is Daochi's complete port. Ziran's existing C compiler/bootstrap is
@@ -77,7 +77,7 @@ field names, Go storage types, order and reflection tags.
 | `docs.go` | Ziran | `docs.zi`: public HTML, typed OpenAPI map builders, cached JSON and both HTTP handlers; public statistics remain a storage dependency |
 | `inspect.go` | Ziran | `inspect.zi`: read-only database access, native flag parsing, summary/user/doctor commands, warnings, ordered queries, byte-preserving redaction and output |
 | `log_safety.go` | Ziran | `log_safety.zi`: byte-preserving CR/LF removal |
-| `main.go` | Go | Startup, worker supervision, HTTP lifecycle |
+| `main.go` | Ziran; Go entry bridge | Startup, inspection dispatch, worker supervision and HTTP lifecycle in `startup.zi`; native entry and verifier-factory adaptation remain Go |
 | `mesh.go` | Ziran | `mesh.zi`: HTTP export/import, signed/token authentication, approved-scope checks, configured/trusted peer selection, signed outbound requests, pagination, cursor persistence and the cancellable recurring worker; wire records, cursors and scope predicates in `mesh_types.zi`, `mesh_cursor.zi` and `mesh_policy.zi`; native authentication error conversion is supplied by the caller |
 | `mesh_apps.go` | Ziran | `mesh_apps.zi`: scoped signed registry export/import, manifest decoding, signature verification, version queries, downgrade/fork rejection and per-app transactions; native authentication error conversion remains supplied by the Go caller |
 | `mesh_store.go` | Ziran | `mesh_store.zi`: encrypted-record export/import, stable change ordering, account tombstones, conflicts, deletion propagation, cursor persistence and atomic rollback; collection ownership in `collection_scope.zi`, record validation in `encrypted_record.zi` |
@@ -790,10 +790,31 @@ nil verifier failures, constructor validation and dependency/storage identity.
 Existing Go fixtures access the generated Server fields and adapt their native
 verifier implementations through test-only helpers.
 
-Five handwritten production Go files remain, totaling 239 lines, including
-forwarding adapters. Process startup, SQLite driver registration and the native
-liboqs/signing provider still require porting. The Go regression tests and the
-final CLI, deployment and released-client compatibility audit also remain.
+`startup.zi` owns configuration and node-key preparation, inspection dispatch,
+Store and verifier construction, worker supervision, native HTTP settings and
+signal-driven shutdown. CLI arguments are read after node-key loading, preserving
+changes made by native entropy callbacks. Invoice reconciliation runs whenever
+purchases are enabled or a wallet is configured; mesh and discovery workers
+always start. Each worker completes its native WaitGroup during ordinary return
+or panic unwinding. HTTP shutdown uses a fresh background context with the
+released fifteen-second deadline. Ordinary serving completion cancels the
+runtime and waits for its supervised workers; deferred cleanup stops signal
+notifications and closes Store during return and panic unwinding.
+
+Independent Go startup fixtures compare URL bytes, worker selection, dependency
+identity, cancellation/wait ordering, timeout/logger settings, shutdown errors
+and native panic cleanup. CLI subprocesses compare inspection output and startup
+fatal messages, exercise key creation and argument-read timing, serve the real
+health endpoint and exit cleanly on SIGINT/SIGTERM. Child environments omit both
+display variables and isolate configuration from the developer's environment.
+The ten-line Go entry bridge adapts the remaining native crypto factory and
+invokes canonical startup; it is still counted as unported code.
+
+Five handwritten production Go files remain, totaling 140 lines, including
+forwarding adapters. The native entry/verifier-factory bridge, SQLite driver
+registration and the liboqs/signing provider still require porting. The Go
+regression tests and the final CLI, deployment and released-client compatibility
+audit also remain.
 
 ## Compiler work exercised by this port
 
@@ -920,7 +941,7 @@ type identity, interface values, zero values and custom JSON methods in source
 and saved IR. Go primitives now provide method calls, multiple results,
 HTTP field access, error interfaces, mutex synchronization, variadic SQL
 arguments, cancellation/deadlines, native channel selection and worker callbacks.
-Remaining server work includes startup supervision, ML-DSA-44 integration
+Remaining server work includes the native entry bridge, ML-DSA-44 integration
 and native driver registration. Add missing reusable compiler/runtime
 capabilities upstream in Ziran as that application code moves; wrapping existing
 Go application functions does not complete their port.

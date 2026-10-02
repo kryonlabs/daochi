@@ -7,6 +7,11 @@ Verifier :: struct {
     verify: auth.VerifySignature
 }
 
+VerifierResult :: struct {
+    value: *Verifier
+    error: Error
+}
+
 ErrVerifierUnavailable: Error = errors.New("ML-DSA-44 verifier unavailable");
 
 #scope_file

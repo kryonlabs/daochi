@@ -6,6 +6,11 @@ type Verifier struct {
 	Verify VerifySignature
 }
 
+type VerifierResult struct {
+	Value *Verifier
+	Error Error
+}
+
 var ErrVerifierUnavailable Error
 
 func Verifier_New(verify VerifySignature) *Verifier {

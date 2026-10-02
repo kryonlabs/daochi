@@ -32,11 +32,11 @@ type EventResult struct {
 
 type ReaderWorker func(Connection, *BufferedReader, CancelFunc)
 
-type CancelCallback func(CancelFunc)
+type zir_9de58f4e2bed614c_CancelCallback func(CancelFunc)
 
 type UnsubscribeCallback func(*SyncHub, string, *Subscription)
 
-func SyncWs_CancelAtReturn(Callback CancelCallback, Cancel CancelFunc) {
+func SyncWs_CancelAtReturn(Callback zir_9de58f4e2bed614c_CancelCallback, Cancel CancelFunc) {
 	Callback(Cancel)
 }
 
@@ -58,7 +58,7 @@ func SyncWs_AsEvent(Value Any) EventResult {
 	return result
 }
 
-const Minute = 60000000000
+const zir_d_d198031cff175a95 = 60000000000
 const ReadWindow = 90000000000
 const WriteWindow = 10000000000
 const PingInterval = 30000000000
@@ -174,7 +174,7 @@ func SyncWs_Handle(value SyncSocket, writer ResponseWriter, request *Request) {
 		Websocket_WriteJSON(accepted.Connection, ready)
 	}
 	child := StdContextGo_WithCancel(StdHttpGo_Context(request))
-	var value_12 CancelCallback = func(value_11 CancelFunc) { StdContextGo_Cancel(value_11) }
+	var value_12 zir_9de58f4e2bed614c_CancelCallback = func(value_11 CancelFunc) { StdContextGo_Cancel(value_11) }
 	defer SyncWs_CancelAtReturn(value_12, child.Cancel)
 	var value_16 ReaderWorker = func(value_13 Connection, value_14 *BufferedReader, value_15 CancelFunc) {
 		SyncWs_ReadLoop(value_13, value_14, value_15)

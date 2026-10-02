@@ -1,0 +1,267 @@
+#import "std/go_types"
+config :: #import "config";
+storage :: #import "store";
+verification :: #import "verifier";
+node :: #import "node_identity";
+application :: #import "server";
+access :: #import "account_access";
+inspection :: #import "inspect";
+invoices :: #import "monero_invoices";
+mesh :: #import "mesh";
+discovery :: #import "discovery";
+middleware :: #import "middleware";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+net :: #import "std/net_go";
+selection :: #import "std/select_go";
+io :: #import "std/io_go";
+errors :: #import "std/errors_go";
+go_os :: #system_library "go:os";
+go_signal :: #system_library "go:os/signal";
+go_syscall :: #system_library "go:syscall";
+go_sync :: #system_library "go:sync";
+go_http :: #system_library "go:net/http";
+go_log :: #system_library "go:log";
+go_slog :: #system_library "go:log/slog";
+go_strings :: #system_library "go:strings";
+go_net :: #system_library "go:net";
+builtin :: #system_library "go:builtin";
+
+HTTPServer :: #type #foreign go_http "Server";
+WorkerGroup :: #type #foreign go_sync "WaitGroup";
+Worker :: #type (server: *application.Server, context: ctx.Context) -> void;
+Workers :: struct {
+    invoices: Worker
+    mesh: Worker
+    discovery: Worker
+}
+VerifierFactory :: #type () -> verification.VerifierResult;
+Listen :: #type (server: *HTTPServer) -> Error;
+Shutdown :: #type (server: *HTTPServer, context: ctx.Context) -> Error;
+
+#scope_file
+Signal :: #type #foreign go_os "Signal";
+Logger :: #type #foreign go_log "Logger";
+CancelCallback :: #type (callback: ctx.CancelFunc) -> void;
+CloseCallback :: #type (store: *storage.Store) -> void;
+WorkerTask :: struct {
+    group: *WorkerGroup
+    callback: Worker
+    server: *application.Server
+    context: ctx.Context
+}
+ShutdownTask :: struct {
+    server: *HTTPServer
+    context: ctx.Context
+    shutdown: Shutdown
+}
+WorkerCallback :: #type (task: WorkerTask) -> void;
+ShutdownCallback :: #type (task: ShutdownTask) -> void;
+Arguments :: () -> []string #go_field #foreign go_os "Args";
+Interrupt :: () -> Signal #go_field #foreign go_os "Interrupt";
+Terminate :: () -> Signal #go_field #foreign go_syscall "SIGTERM";
+NotifyContext :: (parent: ctx.Context, interrupt: Signal, terminate: Signal) -> ctx.Cancellation #go_results #foreign go_signal;
+CancelAtReturn :: (callback: CancelCallback, cancel: ctx.CancelFunc) #go_defer #foreign builtin "call";
+CloseAtReturn :: (callback: CloseCallback, store: *storage.Store) #go_defer #foreign builtin "call";
+CompleteAtReturn :: (group: *WorkerGroup) #go_defer #foreign go_sync "(*WaitGroup).Done";
+AddWorker :: (group: *WorkerGroup, count: isize) #foreign go_sync "(*WaitGroup).Add";
+WaitWorkers :: (group: *WorkerGroup) #foreign go_sync "(*WaitGroup).Wait";
+SpawnWorker :: (callback: WorkerCallback, task: WorkerTask) #foreign builtin "spawn";
+SpawnShutdown :: (callback: ShutdownCallback, task: ShutdownTask) #foreign builtin "spawn";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Join :: (parts: []string, separator: string) -> string #foreign go_strings;
+JoinHostPort :: (host: string, port: string) -> string #foreign go_net;
+FatalError :: (format: string, error: Error) #foreign go_log "Fatalf";
+FatalMessage :: (message: string) #foreign go_log "Fatal";
+LogError :: (message: string, key: string, error: Error) #foreign go_slog "Error";
+LogListening :: (message: string, urlKey: string, url: string, addressKey: string, address: string,
+    baseURLKey: string, baseURL: string, databaseKey: string, database: string) #foreign go_slog "Info";
+AllocateHTTP :: () -> *HTTPServer #foreign builtin "new";
+SetAddress :: (server: *HTTPServer, address: string) #go_field #foreign go_http "(*Server).Addr";
+SetHandler :: (server: *HTTPServer, handler: middleware.Handler) #go_field #foreign go_http "(*Server).Handler";
+SetReadHeaderTimeout :: (server: *HTTPServer, duration: clock.Duration) #go_field #foreign go_http "(*Server).ReadHeaderTimeout";
+SetReadTimeout :: (server: *HTTPServer, duration: clock.Duration) #go_field #foreign go_http "(*Server).ReadTimeout";
+SetWriteTimeout :: (server: *HTTPServer, duration: clock.Duration) #go_field #foreign go_http "(*Server).WriteTimeout";
+SetIdleTimeout :: (server: *HTTPServer, duration: clock.Duration) #go_field #foreign go_http "(*Server).IdleTimeout";
+SetErrorLog :: (server: *HTTPServer, logger: *Logger) #go_field #foreign go_http "(*Server).ErrorLog";
+StandardError :: () -> io.Writer #go_field #foreign go_os "Stderr";
+StandardLogFlags :: () -> isize #go_field #foreign go_log "LstdFlags";
+NewLogger :: (writer: io.Writer, prefix: string, flags: isize) -> *Logger #foreign go_log "New";
+ListenHTTP :: (server: *HTTPServer) -> Error #foreign go_http "(*Server).ListenAndServe";
+ShutdownHTTP :: (server: *HTTPServer, context: ctx.Context) -> Error #foreign go_http "(*Server).Shutdown";
+ServerClosed :: () -> Error #go_field #foreign go_http "ErrServerClosed";
+Minute :: 60000000000;
+Second :: 1000000000;
+
+CloseStore :: (store: *storage.Store) {
+    storage.Close(store)
+}
+
+RunWorker :: (task: WorkerTask) {
+    CompleteAtReturn(task.group)
+    task.callback(task.server, task.context)
+}
+
+StartWorker :: (group: *WorkerGroup, callback: Worker, server: *application.Server, context: ctx.Context) {
+    task: WorkerTask
+    task.group = group
+    task.callback = callback
+    task.server = server
+    task.context = context
+    AddWorker(group, cast(isize)1)
+    SpawnWorker(RunWorker, task)
+}
+
+RunShutdown :: (task: ShutdownTask) {
+    ShutdownOnCancel(task.server, task.context, task.shutdown)
+}
+
+ListenNative :: (server: *HTTPServer) -> Error {
+    return ListenHTTP(server)
+}
+
+ShutdownNative :: (server: *HTTPServer, context: ctx.Context) -> Error {
+    return ShutdownHTTP(server, context)
+}
+
+RunInvoices :: (server: *application.Server, context: ctx.Context) {
+    invoices.Run(application.Monero(server), context, cast(clock.Duration)Minute)
+}
+
+RunMesh :: (server: *application.Server, context: ctx.Context) {
+    mesh.Run(application.Mesh(server), context)
+}
+
+RunDiscovery :: (server: *application.Server, context: ctx.Context) {
+    discovery.Run(*server.cfg, *server.node, context, discovery.Register, discovery.Shutdown)
+}
+
+#scope_export
+LocalHTTPURL :: (address: string) -> string {
+    split := net.SplitHostPort(address)
+    host := split.host
+    if split.error != null {
+        parts: [2]string = .["http://", address]
+        return Join(parts[:], "")
+    }
+    if host == "" || host == "0.0.0.0" || host == "::" {
+        host = "127.0.0.1"
+    }
+    parts: [2]string = .["http://", JoinHostPort(host, split.port)]
+    return Join(parts[:], "")
+}
+
+NativeWorkers :: () -> Workers {
+    result: Workers
+    result.invoices = RunInvoices
+    result.mesh = RunMesh
+    result.discovery = RunDiscovery
+    return result
+}
+
+StartWorkers :: (server: *application.Server, context: ctx.Context, group: *WorkerGroup, workers: Workers) {
+    // A configured wallet must settle deposits and late invoices even when purchases are disabled.
+    if server.cfg.TokenDirectPurchasesEnabled || TrimSpace(server.cfg.MoneroWalletRPCURL) != "" {
+        StartWorker(group, workers.invoices, server, context)
+    }
+    StartWorker(group, workers.mesh, server, context)
+    StartWorker(group, workers.discovery, server, context)
+}
+
+NewHTTPServer :: (address: string, handler: middleware.Handler) -> *HTTPServer {
+    server := AllocateHTTP()
+    SetAddress(server, address)
+    SetHandler(server, handler)
+    SetReadHeaderTimeout(server, cast(clock.Duration)(5 * Second))
+    SetReadTimeout(server, cast(clock.Duration)(15 * Second))
+    SetWriteTimeout(server, cast(clock.Duration)(15 * Second))
+    SetIdleTimeout(server, cast(clock.Duration)(60 * Second))
+    SetErrorLog(server, NewLogger(StandardError(), "http: ", StandardLogFlags()))
+    return server
+}
+
+ShutdownOnCancel :: (server: *HTTPServer, context: ctx.Context, shutdown: Shutdown) {
+    cases: [1]selection.Case
+    cases[0] = selection.Receive(ctx.Done(context))
+    selection.Select(cases[:])
+    deadline := ctx.WithTimeout(ctx.Background(), cast(clock.Duration)(15 * Second))
+    CancelAtReturn(ctx.Cancel, deadline.cancel)
+    error := shutdown(server, deadline.value)
+    if error != null {
+        LogError("HTTP shutdown failed", "error", error)
+    }
+}
+
+Serve :: (server: *HTTPServer, configuration: config.Config, context: ctx.Context,
+    stop: ctx.CancelFunc, group: *WorkerGroup, listen: Listen, shutdown: Shutdown) {
+    task: ShutdownTask
+    task.server = server
+    task.context = context
+    task.shutdown = shutdown
+    SpawnShutdown(RunShutdown, task)
+    LogListening("Daochi sync server listening", "url", LocalHTTPURL(configuration.Addr), "addr", configuration.Addr,
+        "base_url", configuration.BaseURL, "db", configuration.DBPath)
+    error := listen(server)
+    if error != null && error != ServerClosed() {
+        LogError("serve failed", "error", error)
+    }
+    ctx.Cancel(stop)
+    WaitWorkers(group)
+}
+
+WithNodeKey :: (configuration: config.Config) -> config.Config {
+    privateKey := cast([]u8)configuration.NodeIdentityPrivateKey
+    if privateKey.count == 0 {
+        key := node.LoadOrCreateKey(configuration.NodeIdentityKeyFile)
+        if key.error != null {
+            FatalError("load node identity: %v", key.error)
+        }
+        configuration.NodeIdentityPrivateKey = key.value
+    }
+    return configuration
+}
+
+#scope_file
+RunPrepared :: (configuration: config.Config, arguments: []string, createVerifier: VerifierFactory,
+    signer: access.SignPrivateKey) {
+    if arguments.count > 1 && arguments[1] == "inspect" {
+        options: inspection.InspectOptions
+        options.DBPath = configuration.DBPath
+        error := inspection.Run(ctx.Background(), arguments[2:], options)
+        if error != null {
+            FatalError("inspect: %v", error)
+        }
+        return
+    }
+    opened := storage.Open(configuration.DBPath)
+    if opened.error != null {
+        FatalError("open store: %v", opened.error)
+    }
+    store := opened.value
+    CloseAtReturn(CloseStore, store)
+    verifier := createVerifier()
+    if verifier.error != null {
+        if errors.Is(verifier.error, verification.ErrVerifierUnavailable) {
+            FatalMessage("ML-DSA-44 verifier unavailable: build with CGO_ENABLED=1 and liboqs installed")
+        }
+        FatalError("create verifier: %v", verifier.error)
+    }
+    server := application.New(configuration, store, verifier.value, signer)
+    runtime := NotifyContext(ctx.Background(), Interrupt(), Terminate())
+    CancelAtReturn(ctx.Cancel, runtime.cancel)
+    group: WorkerGroup
+    StartWorkers(server, runtime.value, *group, NativeWorkers())
+    http := NewHTTPServer(configuration.Addr, application.Routes(server))
+    Serve(http, configuration, runtime.value, runtime.cancel, *group, ListenNative, ShutdownNative)
+}
+
+#scope_export
+Run :: (configuration: config.Config, arguments: []string, createVerifier: VerifierFactory,
+    signer: access.SignPrivateKey) {
+    RunPrepared(WithNodeKey(configuration), arguments, createVerifier, signer)
+}
+
+Main :: (createVerifier: VerifierFactory, signer: access.SignPrivateKey) {
+    configuration := WithNodeKey(config.Load())
+    RunPrepared(configuration, Arguments(), createVerifier, signer)
+}

@@ -41,7 +41,7 @@ func compareRegistrationVerification(t *testing.T, request SignedAppRegistration
 	t.Helper()
 	got := AppRegistration_Verify(request, nodeKey)
 	data, hash, err := baselineValidateSignedAppRegistration(request, nodeKey)
-	if !equalAuthenticationError(authenticationError(got.Authentication), err) ||
+	if !equalAuthenticationError(AuthenticationError_Convert(got.Authentication), err) ||
 		!bytes.Equal(got.Value, data) || (got.Value == nil) != (data == nil) || got.Hash != hash {
 		t.Fatalf("manifest verification = %#v, baseline = %q, %q, %v", got, data, hash, err)
 	}

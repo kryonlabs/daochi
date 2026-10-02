@@ -60,7 +60,7 @@ func (s *Server) baselineAccessHandleLogin(w http.ResponseWriter, r *http.Reques
 	signature, context := signed.Value, signed.Context
 	publicKey, err := s.baselineAccessAuthenticateSignature(r.Context(), req.UserIDHash, req.PublicKey, signature, context, r.Method, r.URL.Path, body)
 	if err != nil {
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	if err := s.store.RegisterUser(r.Context(), req.UserIDHash, publicKey); err != nil {
@@ -116,7 +116,7 @@ func (s *Server) baselineAccessHandleDeleteAccount(w http.ResponseWriter, r *htt
 	signature, context := signed.Value, signed.Context
 	_, err = s.baselineAccessAuthenticateSignature(r.Context(), req.UserIDHash, "", signature, context, r.Method, r.URL.Path, body)
 	if err != nil {
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	if err := s.store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {

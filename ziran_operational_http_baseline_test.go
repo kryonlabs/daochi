@@ -151,7 +151,7 @@ func (s *Server) baselineOpsNodeUsage(ctx context.Context) (NodeUsage, error) {
 }
 
 func (s *Server) baselineOpsHandleSyncDiagnostics(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}

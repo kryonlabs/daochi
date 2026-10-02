@@ -40,7 +40,7 @@ func (s *Server) baselineHandleAccountDevices(w http.ResponseWriter, r *http.Req
 	}
 	DeviceKeys_NormalizeRegistration(&request)
 	if err := s.baselineVerifyDeviceRegistration(r.Context(), accountID, request); err != nil {
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	device := DeviceKey{
@@ -75,7 +75,7 @@ func (s *Server) baselineHandleDeviceRevocation(w http.ResponseWriter, r *http.R
 	}
 	DeviceKeys_NormalizeRevocation(&request)
 	if err := s.baselineVerifyDeviceRevocation(r.Context(), accountID, request); err != nil {
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	if err := DeviceKeys_Revoke(s.store.Database, r.Context(), accountID, request, errSignedTxReplay); err != nil {

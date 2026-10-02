@@ -319,7 +319,7 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 	if len(registrations) != 1 {
 		t.Fatalf("exported apps = %d, want 1", len(registrations))
 	}
-	importedApps := MeshApps_Import(targetStore.Database, t.Context(), target.cfg.NodeRegistryPublicKey, policy, registrations, authenticationError)
+	importedApps := MeshApps_Import(targetStore.Database, t.Context(), target.cfg.NodeRegistryPublicKey, policy, registrations, AuthenticationError_Convert)
 	applied, err := importedApps.Value, importedApps.Error
 	if err != nil {
 		t.Fatal(err)
@@ -336,7 +336,7 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 		t.Fatal("replicated app registry does not authorize its collection")
 	}
 
-	importedAgain := MeshApps_Import(targetStore.Database, t.Context(), target.cfg.NodeRegistryPublicKey, policy, registrations, authenticationError)
+	importedAgain := MeshApps_Import(targetStore.Database, t.Context(), target.cfg.NodeRegistryPublicKey, policy, registrations, AuthenticationError_Convert)
 	applied, err = importedAgain.Value, importedAgain.Error
 	if err != nil {
 		t.Fatal(err)

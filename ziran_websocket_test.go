@@ -331,7 +331,7 @@ func TestZiranWebSocketAuthenticationMatchesBaseline(t *testing.T) {
 					request.Header.Set("Authorization", authorization)
 					want, err := server.baselineAuthenticateWebSocket(request)
 					got := SyncWs_Authenticate(server.syncSocket(), request)
-					if got.Value != want || websocketErrorText(authenticationError(got.Authentication)) != websocketErrorText(err) {
+					if got.Value != want || websocketErrorText(AuthenticationError_Convert(got.Authentication)) != websocketErrorText(err) {
 						t.Fatalf("auth closed=%v query=%q protocol=%q header=%q changed", cancelled, query, protocol, authorization)
 					}
 				}

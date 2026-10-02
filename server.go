@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -153,13 +152,13 @@ func (s *Server) mesh() Mesh {
 		Database:      s.store.Database,
 		Configuration: &s.cfg,
 		Identity:      &s.node,
-		ConvertError:  authenticationError,
+		ConvertError:  AuthenticationError_Convert,
 	}
 }
 
 func (s *Server) authenticateToken(r *http.Request) (string, error) {
 	result := HttpAuth_AuthenticateToken(s.store.Database, r, s.cfg.TokenSecret)
-	return result.Value, authenticationError(result.Authentication)
+	return result.Value, AuthenticationError_Convert(result.Authentication)
 }
 
 func (s *Server) bearerUser(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -394,28 +393,7 @@ func (s *Server) handleDeleteAccountWithKey(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyText, signatureText, signatureContext, method, path string, signedPayload []byte) ([]byte, error) {
 	result := AccountSignature_Authenticate(s.store.Database, s.challenges, s.access().Verify, ctx, userID, publicKeyText, signatureText, signatureContext, method, path, signedPayload)
-	return result.Value, authenticationError(result.Authentication)
-}
-
-type authError struct {
-	status  int
-	message string
-}
-
-func (e authError) Error() string {
-	return e.message
-}
-
-func (s *Server) writeAuthError(w http.ResponseWriter, err error) {
-	var ae authError
-	if errors.As(err, &ae) {
-		Metrics_RecordAuthFailure(s.metrics, ae.status, ae.message)
-		Response_Error(w, ae.status, ae.message)
-		return
-	}
-	slog.Error("auth", "error", err)
-	Metrics_RecordAuthFailure(s.metrics, http.StatusInternalServerError, "authentication failed")
-	Response_Error(w, http.StatusInternalServerError, "authentication failed")
+	return result.Value, AuthenticationError_Convert(result.Authentication)
 }
 
 func (s *Server) withCommonHeaders(next http.Handler) http.Handler {

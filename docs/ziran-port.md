@@ -761,10 +761,22 @@ uses `Store_Open`. Existing Go regression oracles keep a test-only constructor
 spelling; their storage operations and assertions are unchanged. SQLite's native
 package registration is still supplied by the small `store_driver.go` bridge.
 
-Seven handwritten production Go files remain, totaling 700 lines, including
+`authentication_error.zi` owns the native authentication error value, its
+`Error` method, result conversion and HTTP error responses. Native errors retain
+their interface identity and take precedence over result status/message fields.
+Wrapped and joined errors use native `errors.As`, including custom matching and
+unwrapping. Responses read the current counter pointer after error matching or
+logging, preserving replacements made by native callbacks. HTTP authentication
+results and mesh verification use this canonical conversion directly. The
+original Go error type, converter and response flow remain independent test
+oracles. Comparisons cover exact message/response bytes, value versus pointer
+errors, typed nil errors, invalid statuses, callback/logger/writer panics,
+counter replacement and concurrent failure recording.
+
+Six handwritten production Go files remain, totaling 666 lines, including
 forwarding adapters. Server construction and route wiring, process
-startup, SQLite driver registration, authentication error conversion and verifier integration
-still require porting. The Go regression tests and the final CLI, deployment
+startup, SQLite driver registration and verifier integration still require
+porting. The Go regression tests and the final CLI, deployment
 and released-client compatibility audit also remain.
 
 ## Compiler work exercised by this port

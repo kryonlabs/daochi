@@ -1,0 +1,46 @@
+#import "std/go_types"
+auth :: #import "authentication";
+http :: #import "std/http_go";
+metrics :: #import "metrics";
+response :: #import "response";
+go_errors :: #system_library "go:errors";
+go_slog :: #system_library "go:log/slog";
+
+AuthError :: struct {
+    status: isize
+    message: string
+}
+
+#scope_file
+As :: (error: Error, target: Any) -> bool #foreign go_errors;
+LogError :: (message: string, key: string, error: Error) #foreign go_slog "Error";
+
+#scope_export
+Message :: (error: AuthError) -> string #go_method "Error" {
+    return error.message
+}
+
+Convert :: (result: auth.AuthenticationResult) -> Error {
+    if result.error != null {
+        return result.error
+    }
+    if result.status != 0 {
+        error: AuthError
+        error.status = result.status
+        error.message = result.message
+        return cast(Error)error
+    }
+    return null
+}
+
+Respond :: (writer: http.ResponseWriter, counters: **metrics.ServerMetrics, error: Error) {
+    failure: AuthError
+    if As(error, cast(Any)*failure) {
+        metrics.RecordAuthFailure(<<counters, failure.status, failure.message)
+        response.Error(writer, failure.status, failure.message)
+        return
+    }
+    LogError("auth", "error", error)
+    metrics.RecordAuthFailure(<<counters, cast(isize)500, "authentication failed")
+    response.Error(writer, cast(isize)500, "authentication failed")
+}

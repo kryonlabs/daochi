@@ -226,7 +226,7 @@ func TestZiranHTTPAuthenticationAgainstBaseline(t *testing.T) {
 			}
 			got := HttpAuth_AuthenticateToken(server.store.Database, request, server.cfg.TokenSecret)
 			want, err := server.baselineAuthenticateToken(request)
-			if got.Value != want || !equalAuthenticationError(authenticationError(got.Authentication), err) {
+			if got.Value != want || !equalAuthenticationError(AuthenticationError_Convert(got.Authentication), err) {
 				t.Fatalf("token authentication = %#v, baseline = %q, %v", got, want, err)
 			}
 			actual, expected := httptest.NewRecorder(), httptest.NewRecorder()

@@ -94,7 +94,7 @@ func (s *Server) baselineMeshHandleNodeMeshImport(w http.ResponseWriter, r *http
 	if !s.baselineMeshAuthorizeRequestedPolicy(w, r, req.Policy, "import") {
 		return
 	}
-	importedApps := MeshApps_Import(s.store.Database, r.Context(), s.cfg.NodeRegistryPublicKey, req.Policy, req.Apps, authenticationError)
+	importedApps := MeshApps_Import(s.store.Database, r.Context(), s.cfg.NodeRegistryPublicKey, req.Policy, req.Apps, baselineAuthenticationError)
 	appCount, err := importedApps.Value, importedApps.Error
 	if err != nil {
 		slog.Error("mesh app registry import", "error", err)
@@ -247,7 +247,7 @@ func (s *Server) baselineMeshPullNodePeer(ctx context.Context, peer NodePeer) er
 			len(exported.Names) == 0 {
 			return nil
 		}
-		importedApps := MeshApps_Import(s.store.Database, ctx, s.cfg.NodeRegistryPublicKey, policy, exported.Apps, authenticationError)
+		importedApps := MeshApps_Import(s.store.Database, ctx, s.cfg.NodeRegistryPublicKey, policy, exported.Apps, baselineAuthenticationError)
 		appCount, err := importedApps.Value, importedApps.Error
 		if err != nil {
 			return err

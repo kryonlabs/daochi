@@ -28,7 +28,7 @@ func baselineHandleMoneroAddress(s *Server, w http.ResponseWriter, r *http.Reque
 	var accountID string
 	if r.URL.Path == "/api/v1/tokens/purchases/monero/address" || ref == "" {
 		var ok bool
-		accountID, ok = s.bearerUser(w, r)
+		accountID, ok = s.baselineBearerUser(w, r)
 		if !ok {
 			return
 		}
@@ -85,7 +85,7 @@ func baselineHandleMoneroAddress(s *Server, w http.ResponseWriter, r *http.Reque
 }
 
 func baselineHandleMoneroDeposits(s *Server, w http.ResponseWriter, r *http.Request) {
-	accountID, ok := s.bearerUser(w, r)
+	accountID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}

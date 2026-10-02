@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -23,14 +22,13 @@ func meshAppRegistration(t *testing.T, appID string, version int) (SignedAppRegi
 
 func compareMeshAppImport(t *testing.T, actual, expected *Store, ctx context.Context, key ed25519.PublicKey, policy NodeSyncPolicy, registrations []SignedAppRegistrationRequest) MeshAppsImportResult {
 	t.Helper()
-	got := MeshApps_Import(actual.Database, ctx, key, policy, registrations, authenticationError)
+	got := MeshApps_Import(actual.Database, ctx, key, policy, registrations, AuthenticationError_Convert)
 	baseline := &Server{store: expected, cfg: Config{NodeRegistryPublicKey: key}}
 	want, err := baseline.baselineImportMeshApps(ctx, policy, registrations)
 	if got.Value != want || !sameIdentityError(got.Error, err) {
 		t.Fatalf("mesh app import = %#v, %v; baseline = %d, %v", got, got.Error, want, err)
 	}
-	var gotAuthentication, wantAuthentication authError
-	if errors.As(got.Error, &gotAuthentication) != errors.As(err, &wantAuthentication) || gotAuthentication != wantAuthentication {
+	if !equalAuthenticationError(got.Error, err) {
 		t.Fatal("mesh app verification changed the wrapped authentication error", got.Error, err)
 	}
 	if got, want := appStoreSnapshot(t, actual), appStoreSnapshot(t, expected); !reflect.DeepEqual(got, want) {

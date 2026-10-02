@@ -37,9 +37,19 @@ func (verifier *transactionVerifier) Verify(key, message, signature []byte) bool
 	return verifier.accept
 }
 
+func authenticationErrorFields(err error) (authError, bool) {
+	var generated AuthError
+	if errors.As(err, &generated) {
+		return authError{status: generated.Status, message: generated.Message}, true
+	}
+	var baseline authError
+	present := errors.As(err, &baseline)
+	return baseline, present
+}
+
 func equalAuthenticationError(actual, expected error) bool {
-	var got, want authError
-	gotAuth, wantAuth := errors.As(actual, &got), errors.As(expected, &want)
+	got, gotAuth := authenticationErrorFields(actual)
+	want, wantAuth := authenticationErrorFields(expected)
 	if gotAuth || wantAuth {
 		return gotAuth && wantAuth && got == want
 	}
@@ -64,7 +74,7 @@ func TestZiranSignedTransactionHeaderAgainstBaseline(t *testing.T) {
 		request.Header.Set("X-Daochi-Tx", value)
 		got := SignedTx_ReadHeader(request)
 		want, err := baselineReadSignedTxHeader(request)
-		if !reflect.DeepEqual(got.Value, want) || !equalAuthenticationError(authenticationError(got.Authentication), err) {
+		if !reflect.DeepEqual(got.Value, want) || !equalAuthenticationError(AuthenticationError_Convert(got.Authentication), err) {
 			t.Fatalf("header %q = %#v, baseline = %#v, %v", value, got, want, err)
 		}
 	}
@@ -228,7 +238,7 @@ func TestZiranSignedTransactionVerificationAgainstBaseline(t *testing.T) {
 				ctx = canceled
 			}
 			accountID := "\u2003" + strings.ToUpper(strings.Repeat("a", 64)) + "\t"
-			got := authenticationError(SignedTx_Verify(actual.Database, ctx, request, body, tx, accountID, " inbe ", gotVerifier.Verify, errSignedTxReplay))
+			got := AuthenticationError_Convert(SignedTx_Verify(actual.Database, ctx, request, body, tx, accountID, " inbe ", gotVerifier.Verify, errSignedTxReplay))
 			server := &Server{store: expected, verifier: wantVerifier}
 			want := server.baselineVerifySignedTx(ctx, request, body, tx, accountID, " inbe ")
 			if !equalAuthenticationError(got, want) || !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls) {
@@ -270,7 +280,7 @@ func TestZiranSignedTransactionConcurrentVerificationIsSingleUse(t *testing.T) {
 	close(results)
 	accepted := 0
 	for result := range results {
-		if err := authenticationError(result); err == nil {
+		if err := AuthenticationError_Convert(result); err == nil {
 			accepted++
 		} else if !equalAuthenticationError(err, authError{409, "signed transaction replay"}) {
 			t.Fatalf("concurrent verification = %v", err)
@@ -352,7 +362,7 @@ func TestZiranSignedHeaderJSONKeepsReleasedTags(t *testing.T) {
 	}
 	request.Header.Set("X-Daochi-Tx", string(raw))
 	got := SignedTx_ReadHeader(request)
-	if err := authenticationError(got.Authentication); err != nil || !reflect.DeepEqual(got.Value, tx) {
+	if err := AuthenticationError_Convert(got.Authentication); err != nil || !reflect.DeepEqual(got.Value, tx) {
 		t.Fatalf("signed header JSON = %#v, %v", got, err)
 	}
 }
@@ -403,7 +413,7 @@ func TestZiranDeviceSignatureValidationAgainstBaseline(t *testing.T) {
 				ctx = canceled
 			}
 			server := &Server{store: expected, verifier: wantVerifier}
-			got := authenticationError(DeviceKeys_VerifyRegistration(actual.Database, ctx, tx.AccountID, registration, gotVerifier.Verify))
+			got := AuthenticationError_Convert(DeviceKeys_VerifyRegistration(actual.Database, ctx, tx.AccountID, registration, gotVerifier.Verify))
 			want := server.baselineVerifyDeviceRegistration(ctx, tx.AccountID, registration)
 			if !equalAuthenticationError(got, want) || !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls) {
 				t.Fatalf("registration verification = %v, baseline = %v; signature arguments differ = %v", got, want, !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls))
@@ -414,7 +424,7 @@ func TestZiranDeviceSignatureValidationAgainstBaseline(t *testing.T) {
 			gotVerifier.calls, wantVerifier.calls = nil, nil
 			revocation := DeviceRevocationRequest{AppID: registration.AppID, KeyID: registration.KeyID,
 				Nonce: registration.Nonce, ExpiresAt: registration.ExpiresAt, Signature: registration.Signature}
-			got = authenticationError(DeviceKeys_VerifyRevocation(actual.Database, ctx, tx.AccountID, revocation, gotVerifier.Verify))
+			got = AuthenticationError_Convert(DeviceKeys_VerifyRevocation(actual.Database, ctx, tx.AccountID, revocation, gotVerifier.Verify))
 			want = server.baselineVerifyDeviceRevocation(ctx, tx.AccountID, revocation)
 			if !equalAuthenticationError(got, want) || !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls) {
 				t.Fatalf("revocation verification = %v, baseline = %v; signature arguments differ = %v", got, want, !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls))

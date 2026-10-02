@@ -89,7 +89,7 @@ func (s *Server) baselineImportMeshApps(
 		}
 
 		verified := AppRegistration_Verify(registration, s.cfg.NodeRegistryPublicKey)
-		manifestBytes, manifestHash, err := verified.Value, verified.Hash, authenticationError(verified.Authentication)
+		manifestBytes, manifestHash, err := verified.Value, verified.Hash, baselineAuthenticationError(verified.Authentication)
 		if err != nil {
 			return 0, fmt.Errorf("verify mesh app %q: %w", registration.Manifest.AppID, err)
 		}

@@ -105,7 +105,7 @@ func (s *Server) baselineHandleSyncWebSocket(w http.ResponseWriter, r *http.Requ
 	userID, err := s.baselineAuthenticateWebSocket(r)
 	if err != nil {
 		Metrics_RecordWebSocketReject(s.metrics, "auth")
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	if !s.allowRequest(r, "ws:ip:"+ClientAddress_FromRequest(r), 120, time.Minute) ||
@@ -177,7 +177,7 @@ func (s *Server) baselineAuthenticateWebSocket(r *http.Request) (string, error) 
 		}
 		return verified.Value, nil
 	}
-	return s.authenticateToken(r)
+	return s.baselineAuthenticateToken(r)
 }
 
 func baselineAcceptWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, *bufio.ReadWriter, error) {

@@ -316,7 +316,7 @@ func TestZiranPaymentAuthorizationAndReplayMatchBaseline(t *testing.T) {
 			}
 			got := TokenPolicy_Authorize(actual.store.Database, requests[0].Context(), requests[0], body, account, "target", AssetID, permission, actual.verifier.Verify, errSignedTxReplay)
 			want, signed, wantError := baseline.baselinePaymentAuthorizeTokenApp(requests[1].Context(), requests[1], body, account, "target", AssetID, permission)
-			if got.Signed != signed || !reflect.DeepEqual(got.Value, want) || !equalAuthenticationError(authenticationError(got.Authentication), wantError) {
+			if got.Signed != signed || !reflect.DeepEqual(got.Value, want) || !equalAuthenticationError(AuthenticationError_Convert(got.Authentication), wantError) {
 				t.Fatalf("authorization %s changed: %#v; baseline %#v/%t/%v", mode, got, want, signed, wantError)
 			}
 			if got, want := signedTransactionRows(t, actual.store), signedTransactionRows(t, baseline.store); !reflect.DeepEqual(got, want) {

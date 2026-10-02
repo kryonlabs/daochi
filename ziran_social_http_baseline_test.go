@@ -21,9 +21,9 @@ func (s *Server) baselineSocialHttpHandleAlias(w http.ResponseWriter, r *http.Re
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	tokenUser, err := s.authenticateToken(r)
+	tokenUser, err := s.baselineAuthenticateToken(r)
 	if err != nil {
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	if tokenUser != req.UserIDHash {
@@ -61,9 +61,9 @@ func (s *Server) baselineSocialHttpHandleProfileIcon(w http.ResponseWriter, r *h
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	tokenUser, err := s.authenticateToken(r)
+	tokenUser, err := s.baselineAuthenticateToken(r)
 	if err != nil {
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	if tokenUser != req.UserIDHash {
@@ -87,7 +87,7 @@ func (s *Server) baselineSocialHttpHandleProfileIcon(w http.ResponseWriter, r *h
 }
 
 func (s *Server) baselineSocialHttpHandleFriends(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -103,7 +103,7 @@ func (s *Server) baselineSocialHttpHandleFriends(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) baselineSocialHttpHandleFriendRoute(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -124,7 +124,7 @@ func (s *Server) baselineSocialHttpHandleFriendRoute(w http.ResponseWriter, r *h
 }
 
 func (s *Server) baselineSocialHttpHandleFriendRequests(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -140,7 +140,7 @@ func (s *Server) baselineSocialHttpHandleFriendRequests(w http.ResponseWriter, r
 }
 
 func (s *Server) baselineSocialHttpHandleFriendRequestCreate(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -182,7 +182,7 @@ func (s *Server) baselineSocialHttpHandleFriendRequestCreate(w http.ResponseWrit
 }
 
 func (s *Server) baselineSocialHttpHandleFriendRequestRoute(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -225,7 +225,7 @@ func (s *Server) baselineSocialHttpHandleFriendRequestRoute(w http.ResponseWrite
 }
 
 func (s *Server) baselineSocialHttpHandleProfileStatsPut(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -254,7 +254,7 @@ func (s *Server) baselineSocialHttpHandleProfileStatsPut(w http.ResponseWriter, 
 }
 
 func (s *Server) baselineSocialHttpHandleFriendStats(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}

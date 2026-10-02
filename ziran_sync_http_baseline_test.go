@@ -49,9 +49,9 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		Response_Error(w, http.StatusBadRequest, "invalid client_id")
 		return
 	}
-	tokenUser, err := s.authenticateToken(r)
+	tokenUser, err := s.baselineAuthenticateToken(r)
 	if err != nil {
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	if tokenUser != req.UserIDHash {
@@ -70,13 +70,13 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 	}
 	if req.ProtocolVersion >= 6 {
 		header := SignedTx_ReadHeader(r)
-		tx, err := header.Value, authenticationError(header.Authentication)
+		tx, err := header.Value, baselineAuthenticationError(header.Authentication)
 		if err != nil {
-			s.writeAuthError(w, err)
+			s.baselineWriteAuthError(w, err)
 			return
 		}
-		if err := authenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, body, tx, req.UserIDHash, req.AppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
-			s.writeAuthError(w, err)
+		if err := baselineAuthenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, body, tx, req.UserIDHash, req.AppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+			s.baselineWriteAuthError(w, err)
 			return
 		}
 		signedTx = &tx
@@ -352,13 +352,13 @@ func (s *Server) baselineSyncHTTPHandleEncryptedSyncEnvelope(w http.ResponseWrit
 		Response_Error(w, http.StatusBadRequest, "invalid "+headerName)
 		return false
 	}
-	tokenUser, err := s.authenticateToken(r)
+	tokenUser, err := s.baselineAuthenticateToken(r)
 	if err != nil {
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return false
 	}
 	if tokenUser != userID {
-		s.writeAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
+		s.baselineWriteAuthError(w, authError{status: http.StatusUnauthorized, message: "token user mismatch"})
 		return false
 	}
 	clientID := HttpAuth_HeaderAlias(r, []string{"X-Daochi-Client", "X-Ksync-Client"})

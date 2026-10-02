@@ -1,6 +1,7 @@
 #import "std/go_types"
 #import "metrics"
 auth :: #import "authentication";
+auth_errors :: #import "authentication_error";
 accounts :: #import "account_keys";
 state :: #import "account_state";
 token :: #import "token";
@@ -13,7 +14,6 @@ metrics :: #import "metrics";
 net :: #import "std/net_go";
 constant_time :: #import "std/constant_time";
 go_strings :: #system_library "go:strings";
-go_slog :: #system_library "go:log/slog";
 
 UserHeaderResult :: struct {
     value: string
@@ -32,7 +32,6 @@ PrefixResult :: struct {
 TrimSpace :: (value: string) -> string #foreign go_strings;
 ToLower :: (value: string) -> string #foreign go_strings;
 CutPrefix :: (value: string, prefix: string) -> PrefixResult #go_results #foreign go_strings "CutPrefix";
-LogError :: (message: string, key: string, error: Error) #foreign go_slog "Error";
 
 #scope_export
 HeaderAlias :: (request: *http.Request, names: []string) -> string {
@@ -146,12 +145,5 @@ BearerUser :: (database: *sql.Database, request: *http.Request, secret: []u8) ->
 }
 
 Respond :: (writer: http.ResponseWriter, counters: *ServerMetrics, result: auth.AuthenticationResult) {
-    if result.error == null && result.status != cast(isize)0 {
-        metrics.RecordAuthFailure(counters, result.status, result.message)
-        response.Error(writer, result.status, result.message)
-        return
-    }
-    LogError("auth", "error", result.error)
-    metrics.RecordAuthFailure(counters, cast(isize)500, "authentication failed")
-    response.Error(writer, cast(isize)500, "authentication failed")
+    auth_errors.Respond(writer, *counters, auth_errors.Convert(result))
 }

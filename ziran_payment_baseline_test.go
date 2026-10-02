@@ -68,7 +68,7 @@ func (s *Server) baselinePaymentHandleTokenIssuer(w http.ResponseWriter, r *http
 }
 
 func (s *Server) baselinePaymentHandleTokenBalance(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -99,7 +99,7 @@ func (s *Server) baselinePaymentHandleTokenBalance(w http.ResponseWriter, r *htt
 }
 
 func (s *Server) baselinePaymentHandleTokenLedger(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -151,7 +151,7 @@ func (s *Server) baselinePaymentHandleTokenReceipt(w http.ResponseWriter, r *htt
 }
 
 func (s *Server) baselinePaymentHandleTokenSpend(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -183,7 +183,7 @@ func (s *Server) baselinePaymentHandleTokenSpend(w http.ResponseWriter, r *http.
 		if hasSignedTx {
 			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
 		}
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	completed := false
@@ -402,11 +402,11 @@ func (s *Server) baselinePaymentAuthorizeTokenApp(ctx context.Context, r *http.R
 	var signedTx SignedTxEnvelope
 	if hasSignedTx {
 		header := SignedTx_ReadHeader(r)
-		tx, err := header.Value, authenticationError(header.Authentication)
+		tx, err := header.Value, baselineAuthenticationError(header.Authentication)
 		if err != nil {
 			return signedTx, false, err
 		}
-		if err := authenticationError(SignedTx_Verify(s.store.Database, ctx, r, body, tx, accountID, appID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+		if err := baselineAuthenticationError(SignedTx_Verify(s.store.Database, ctx, r, body, tx, accountID, appID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 			return signedTx, false, err
 		}
 		signedTx = tx

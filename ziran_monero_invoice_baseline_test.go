@@ -18,7 +18,7 @@ type baselineInvoiceMoneroInvoiceRecord struct {
 }
 
 func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}
@@ -47,12 +47,12 @@ func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *h
 		return
 	}
 	authorization := TokenPolicy_Authorize(s.store.Database, r.Context(), r, body, userID, req.AppID, AssetID, "purchase", s.verifier.Verify, errSignedTxReplay)
-	signedTx, hasSignedTx, err := authorization.Value, authorization.Signed, authenticationError(authorization.Authentication)
+	signedTx, hasSignedTx, err := authorization.Value, authorization.Signed, baselineAuthenticationError(authorization.Authentication)
 	if err != nil {
 		if hasSignedTx {
 			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
 		}
-		s.writeAuthError(w, err)
+		s.baselineWriteAuthError(w, err)
 		return
 	}
 	completed := false
@@ -72,7 +72,7 @@ func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *h
 }
 
 func (s *Server) baselineInvoiceHandleMoneroInvoiceRoute(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}

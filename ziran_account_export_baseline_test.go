@@ -173,7 +173,7 @@ func baselineExportRowValue(column string, value any, jsonFields map[string]bool
 }
 
 func (s *Server) baselineHandleAccountExport(w http.ResponseWriter, r *http.Request) {
-	userID, ok := s.bearerUser(w, r)
+	userID, ok := s.baselineBearerUser(w, r)
 	if !ok {
 		return
 	}

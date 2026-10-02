@@ -179,7 +179,7 @@ func (s *Server) baselineHandleSignedAppGrant(w http.ResponseWriter, r *http.Req
 		req.Tx.BodySHA256 = Signing_SHA256Hex(grantBody)
 	}
 	_ = body
-	if err := authenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, grantBody, req.Tx, userID, req.Grant.TargetAppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+	if err := baselineAuthenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, grantBody, req.Tx, userID, req.Grant.TargetAppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 		s.baselineWriteAuthError(w, err)
 		return
 	}
@@ -243,12 +243,12 @@ func (s *Server) baselineHandleAppRecords(w http.ResponseWriter, r *http.Request
 		return
 	}
 	header := SignedTx_ReadHeader(r)
-	tx, err := header.Value, authenticationError(header.Authentication)
+	tx, err := header.Value, baselineAuthenticationError(header.Authentication)
 	if err != nil {
 		s.baselineWriteAuthError(w, err)
 		return
 	}
-	if err := authenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, nil, tx, userID, targetAppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+	if err := baselineAuthenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, nil, tx, userID, targetAppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
 		s.baselineWriteAuthError(w, err)
 		return
 	}
@@ -327,7 +327,7 @@ func (s *Server) baselineHandleSignedAppRegister(w http.ResponseWriter, r *http.
 		return
 	}
 	verified := AppRegistration_Verify(req, s.cfg.NodeRegistryPublicKey)
-	manifestBytes, manifestHash, err := verified.Value, verified.Hash, authenticationError(verified.Authentication)
+	manifestBytes, manifestHash, err := verified.Value, verified.Hash, baselineAuthenticationError(verified.Authentication)
 	if err != nil {
 		s.baselineWriteAuthError(w, err)
 		return
@@ -461,7 +461,7 @@ func (s *Server) baselineWriteAuthError(w http.ResponseWriter, err error) {
 
 func (s *Store) baselineAccountTombstoned(ctx context.Context, userID string) (bool, error) {
 	var exists int
-	err := s.Database.QueryRowContext(ctx, `
-SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)`, userID).Scan(&exists)
+	// Match the active authentication query spelling at 258536f.
+	err := s.Database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)", userID).Scan(&exists)
 	return exists != 0, err
 }

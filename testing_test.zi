@@ -1,0 +1,45 @@
+#import "std/go_types"
+native :: #system_library "go:testing";
+format :: #system_library "go:fmt";
+
+Test :: #type #foreign native "T";
+Fuzzer :: #type #foreign native "F";
+TestCase :: #type (test: *Test) -> void;
+StringFuzzCase :: #type (test: *Test, value: string) -> void;
+
+#scope_file
+HelperRaw :: (test: *Test) #foreign native "(*T).Helper";
+FatalRaw :: (test: *Test, message: string) #foreign native "(*T).Fatal";
+RenderRaw :: (pattern: string, arguments: []Any) -> string #go_variadic #foreign format "Sprintf";
+RunRaw :: (test: *Test, name: string, callback: TestCase) -> bool #foreign native "(*T).Run";
+AddStringRaw :: (test: *Fuzzer, value: string) #foreign native "(*F).Add";
+FuzzStringRaw :: (test: *Fuzzer, callback: StringFuzzCase) #foreign native "(*F).Fuzz";
+
+#scope_export
+Helper :: (test: *Test) {
+    HelperRaw(test)
+}
+
+Fatal :: (test: *Test, message: string) {
+    HelperRaw(test)
+    FatalRaw(test, message)
+}
+
+Fatalf :: (test: *Test, format: string, arguments: []Any) {
+    HelperRaw(test)
+    message := RenderRaw(format, arguments)
+    FatalRaw(test, message)
+}
+
+Run :: (test: *Test, name: string, callback: TestCase) -> bool {
+    HelperRaw(test)
+    return RunRaw(test, name, callback)
+}
+
+AddString :: (test: *Fuzzer, value: string) {
+    AddStringRaw(test, value)
+}
+
+FuzzString :: (test: *Fuzzer, callback: StringFuzzCase) {
+    FuzzStringRaw(test, callback)
+}

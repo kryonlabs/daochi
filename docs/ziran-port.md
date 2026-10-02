@@ -52,6 +52,14 @@ runs the same suite through a Go overlay. No alternate source checkout is used.
 The existing Go tests remain regression oracles during the port; they have not
 yet been ported in full.
 
+The original signing, LAN discovery and rate-limit test files now have canonical
+`signing_test.zi`, `discovery_test.zi` and `rate_limit_test.zi` sources. Their
+generated Go preserves all five test names, the seven proxy-trust subtests and
+the independent SHA-256/hex expectations. `testing_test.zi` supplies native Go
+testing calls and typed subtest callbacks. Quoted `#program_export` names make
+the generated entry points discoverable by `go test`; the compiler emits native
+test modules as `_test.go`, keeping their helpers out of production builds.
+
 Additional regression cases compare binary decoding, identifier grammars,
 bearer-token bytes, HMAC results, malformed inputs, Gregorian dates,
 manifest scope/key policy, integer limits, expiry boundaries, concurrent
@@ -783,8 +791,8 @@ when a request arrives. Access and sync verification read the current verifier
 at invocation; token, Monero, registry and device dependencies retain the
 verifier selected by their getter. Configuration/identity pointers, Monero
 locks, native storage and shared error identities are preserved. `verifier.zi`
-owns the verifier callback handle and unavailable-error sentinel. Its native
-liboqs provider and the small signer bridge still require porting.
+owns the verifier callback handle and unavailable-error sentinel. The canonical
+native liboqs provider and signer are implemented in `ml_dsa44.zi`.
 
 The original Go Server wiring remains an independent test fixture. Comparisons
 cover all route patterns, native method/redirect matching, dispatch responses,

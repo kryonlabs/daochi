@@ -1,0 +1,40 @@
+#import "std/go_types"
+testing :: #import "testing_test";
+discovery :: #import "discovery";
+reflection :: #system_library "go:reflect";
+format :: #system_library "go:fmt";
+
+#scope_file
+EqualRaw :: (left: Any, right: Any) -> bool #foreign reflection "DeepEqual";
+PrefixRaw :: (pattern: string, value: string) -> string #foreign format "Sprintf";
+
+#scope_export
+#program_export "TestLANDiscoveryMetadataContainsIdentityButNoTrustSecret"
+LANDiscoveryMetadataContainsIdentityButNoTrustSecret :: (test: *testing.Test) {
+    nodeID := "0123456789abcdef"
+    name := discovery.InstanceName("Home", nodeID)
+    if name != "Home 0123456789ab" {
+        arguments: [1]Any = .[name]
+        testing.Fatalf(test, "instance name = %q", arguments[:])
+    }
+    want: [4]string = .[PrefixRaw("id=%s", nodeID), "protocol=6",
+        "trust=pairing-required", "path=/api/v1/node"]
+    got := discovery.Text(nodeID)
+    if !EqualRaw(got, want[:]) {
+        arguments: [2]Any = .[got, want[:]]
+        testing.Fatalf(test, "discovery text = %#v, want %#v", arguments[:])
+    }
+}
+
+#program_export "TestListenerPort"
+ListenerPort :: (test: *testing.Test) {
+    parsed := discovery.ListenerPort("0.0.0.0:8080")
+    if parsed.error != null {
+        arguments: [1]Any = .[parsed.error]
+        testing.Fatalf(test, "%v", arguments[:])
+    }
+    if parsed.value != 8080 {
+        arguments: [1]Any = .[parsed.value]
+        testing.Fatalf(test, "port = %d, want 8080", arguments[:])
+    }
+}

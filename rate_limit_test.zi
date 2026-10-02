@@ -1,0 +1,78 @@
+#import "std/go_types"
+testing :: #import "testing_test";
+address :: #import "client_address";
+limits :: #import "rate_limit";
+clock :: #import "std/time_go";
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+native_http :: #system_library "go:net/http";
+requests :: #system_library "go:net/http/httptest";
+builtin :: #system_library "go:builtin";
+
+AddressCase :: struct {
+    name: string
+    remote: string
+    forwarded: string
+    want: string
+}
+CapturedAddressCase :: #type (value: AddressCase, test: *testing.Test) -> void;
+
+#scope_file
+NewRequestRaw :: (method: string, target: string, body: io.Reader) -> *http.Request #foreign requests "NewRequest";
+SetRemoteRaw :: (request: *http.Request, value: string) #go_field #foreign native_http "(*Request).RemoteAddr";
+HeaderRaw :: (request: *http.Request) -> http.Header #go_field #foreign native_http "(*Request).Header";
+SetHeaderRaw :: (header: http.Header, key: string, value: string) #foreign native_http "Header.Set";
+CaptureCaseRaw :: (callback: CapturedAddressCase, value: AddressCase) -> testing.TestCase #foreign builtin "bind";
+
+CheckAddress :: (value: AddressCase, test: *testing.Test) {
+    body: io.Reader
+    request := NewRequestRaw("GET", "/healthz", body)
+    SetRemoteRaw(request, value.remote)
+    if value.forwarded != "" {
+        SetHeaderRaw(HeaderRaw(request), "X-Forwarded-For", value.forwarded)
+    }
+    got := address.FromRequest(request)
+    if got != value.want {
+        arguments: [4]Any = .[value.remote, value.forwarded, got, value.want]
+        testing.Fatalf(test, "ClientAddress_FromRequest(%q, %q) = %q, want %q", arguments[:])
+    }
+}
+
+#scope_export
+// A remote peer cannot choose its bucket through X-Forwarded-For.
+#program_export "TestClientAddressForwardedForTrust"
+ClientAddressForwardedForTrust :: (test: *testing.Test) {
+    cases: [7]AddressCase = .[
+        AddressCase.{"loopback trusts proxy header", "127.0.0.1:8080", "203.0.113.9", "203.0.113.9"},
+        AddressCase.{"loopback uses first hop only", "127.0.0.1:8080", "203.0.113.9, 198.51.100.7", "203.0.113.9"},
+        AddressCase.{"loopback ignores garbage header", "127.0.0.1:8080", "not-an-ip", "127.0.0.1"},
+        AddressCase.{"loopback without header", "[::1]:9000", "", "::1"},
+        AddressCase.{"remote peer ignores header", "203.0.113.50:5555", "198.51.100.7", "203.0.113.50"},
+        AddressCase.{"no port", "203.0.113.50", "", "203.0.113.50"},
+        AddressCase.{"empty address", "", "", "unknown"}
+    ]
+    for value: cases[:] {
+        testing.Run(test, value.name, CaptureCaseRaw(CheckAddress, value))
+    }
+}
+
+#program_export "TestRateLimiterWindow"
+RateLimiterWindow :: (test: *testing.Test) {
+    limiter := limits.New()
+    hour := cast(clock.Duration)3600000000000
+    for index: 0..2 {
+        if !limits.Allow(limiter, "bucket", 3, hour) {
+            arguments: [1]Any = .[index + 1]
+            testing.Fatalf(test, "request %d denied inside limit", arguments[:])
+        }
+    }
+    if limits.Allow(limiter, "bucket", 3, hour) {
+        testing.Fatal(test, "4th request allowed past limit")
+    }
+    if !limits.Allow(limiter, "other-bucket", 3, hour) {
+        testing.Fatal(test, "unrelated bucket denied")
+    }
+    if !limits.Allow(limiter, "", 3, hour) || !limits.Allow(limiter, "bucket", 0, hour) {
+        testing.Fatal(test, "degenerate parameters should bypass limiting")
+    }
+}

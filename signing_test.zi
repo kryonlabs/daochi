@@ -1,0 +1,27 @@
+#import "std/go_types"
+text :: #import "std/text_go";
+testing :: #import "testing_test";
+signing :: #import "signing";
+sha256 :: #system_library "go:crypto/sha256";
+hex :: #system_library "go:encoding/hex";
+format :: #system_library "go:fmt";
+
+#scope_file
+Sum256Raw :: (value: []u8) -> [32]u8 #foreign sha256 "Sum256";
+EncodeHexRaw :: (value: []u8) -> string #foreign hex "EncodeToString";
+ExpectedRaw :: (pattern: string, hash: string, nonce: string) -> string #foreign format "Sprintf";
+
+#scope_export
+#program_export "TestCanonicalMessageSignsRawBodyHash"
+CanonicalMessageSignsRawBodyHash :: (test: *testing.Test) {
+    nonce := text.ToBytes("01234567890123456789012345678901")
+    body := text.ToBytes("{\"user_id_hash\":\"u\",\"habits\":[{\"id\":\"habit-1\",\"name\":\"Meditate\"}]}")
+    bodyHash := Sum256Raw(body)
+    got := signing.CanonicalMessage(nonce, "post", "/api/v1/sync", body)
+    want := ExpectedRaw("ksync-sync-v1\nPOST\n/api/v1/sync\n%s\n%s\n",
+        EncodeHexRaw(bodyHash[:]), EncodeHexRaw(nonce))
+    if got != want {
+        arguments: [2]Any = .[got, want]
+        testing.Fatalf(test, "message mismatch\n got: %q\nwant: %q", arguments[:])
+    }
+}

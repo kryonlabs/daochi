@@ -968,8 +968,8 @@ and saved IR. Go primitives now provide method calls, multiple results,
 HTTP field access, error interfaces, mutex synchronization, variadic SQL
 arguments, cancellation/deadlines, native channel selection and worker callbacks.
 Remaining server work includes the native entry bridge and driver registration.
-Add missing reusable compiler/runtime
-capabilities upstream in Ziran as that application code moves; wrapping existing
+Add missing reusable compiler/runtime capabilities upstream in Ziran as that
+application code moves; wrapping existing
 Go application functions does not complete their port.
 
 Completion requires auditing every remaining production module, the test

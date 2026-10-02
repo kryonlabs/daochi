@@ -15,7 +15,7 @@ import (
 )
 
 func (s *Server) baselineMeshHandleNodeMeshExport(w http.ResponseWriter, r *http.Request) {
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -38,22 +38,22 @@ func (s *Server) baselineMeshHandleNodeMeshExport(w http.ResponseWriter, r *http
 	if !s.baselineMeshAuthorizeRequestedPolicy(w, r, req.Policy, "export") {
 		return
 	}
-	exportedApps := MeshApps_Export(s.store.Database, r.Context(), req.Policy)
+	exportedApps := MeshApps_Export(s.Store.Database, r.Context(), req.Policy)
 	apps, err := exportedApps.Value, exportedApps.Error
 	if err != nil {
 		slog.Error("mesh app registry export", "error", err)
 		Response_Error(w, http.StatusInternalServerError, "mesh app registry export failed")
 		return
 	}
-	limit := MeshCursor_BatchLimit(req.Limit, s.cfg.NodeSyncBatchLimit)
-	exportedRecords := MeshStore_ExportEncryptedRecords(s.store.Database, r.Context(), req.Policy, req.Cursor, limit)
+	limit := MeshCursor_BatchLimit(req.Limit, s.Cfg.NodeSyncBatchLimit)
+	exportedRecords := MeshStore_ExportEncryptedRecords(s.Store.Database, r.Context(), req.Policy, req.Cursor, limit)
 	records, deletions, nextCursor, truncated, err := exportedRecords.Records, exportedRecords.Deletions, exportedRecords.NextCursor, exportedRecords.Truncated, exportedRecords.Error
 	if err != nil {
 		slog.Error("mesh export", "error", err)
 		Response_Error(w, http.StatusInternalServerError, "mesh export failed")
 		return
 	}
-	exportedNames := TrustStore_ExportMeshNames(s.store.Database, r.Context(), req.Policy)
+	exportedNames := TrustStore_ExportMeshNames(s.Store.Database, r.Context(), req.Policy)
 	spaces, names, err := exportedNames.Spaces, exportedNames.Names, exportedNames.Error
 	if err != nil {
 		slog.Error("mesh name export", "error", err)
@@ -73,7 +73,7 @@ func (s *Server) baselineMeshHandleNodeMeshExport(w http.ResponseWriter, r *http
 }
 
 func (s *Server) baselineMeshHandleNodeMeshImport(w http.ResponseWriter, r *http.Request) {
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -94,21 +94,21 @@ func (s *Server) baselineMeshHandleNodeMeshImport(w http.ResponseWriter, r *http
 	if !s.baselineMeshAuthorizeRequestedPolicy(w, r, req.Policy, "import") {
 		return
 	}
-	importedApps := MeshApps_Import(s.store.Database, r.Context(), s.cfg.NodeRegistryPublicKey, req.Policy, req.Apps, baselineAuthenticationError)
+	importedApps := MeshApps_Import(s.Store.Database, r.Context(), s.Cfg.NodeRegistryPublicKey, req.Policy, req.Apps, baselineAuthenticationError)
 	appCount, err := importedApps.Value, importedApps.Error
 	if err != nil {
 		slog.Error("mesh app registry import", "error", err)
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	importedRecords := MeshStore_ImportEncryptedBatch(s.store.Database, r.Context(), req.Policy, req.Records, req.Deletions)
+	importedRecords := MeshStore_ImportEncryptedBatch(s.Store.Database, r.Context(), req.Policy, req.Records, req.Deletions)
 	applied, err := importedRecords.Value, importedRecords.Error
 	if err != nil {
 		slog.Error("mesh import", "error", err)
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	importedNames := TrustStore_ImportMeshNames(s.store.Database, r.Context(), req.Policy, req.Spaces, req.Names)
+	importedNames := TrustStore_ImportMeshNames(s.Store.Database, r.Context(), req.Policy, req.Spaces, req.Names)
 	nameCount, err := importedNames.Value, importedNames.Error
 	if err != nil {
 		slog.Error("mesh name import", "error", err)
@@ -124,13 +124,13 @@ func (s *Server) baselineMeshHandleNodeMeshImport(w http.ResponseWriter, r *http
 
 func (s *Server) baselineMeshAuthorizeNodeSync(w http.ResponseWriter, r *http.Request, body []byte) bool {
 	if nodeID := strings.TrimSpace(r.Header.Get("X-Daochi-Node-ID")); nodeID != "" {
-		if err := NodeAuth_Verify(s.store.Database, r.Context(), r, body); err != nil {
+		if err := NodeAuth_Verify(s.Store.Database, r.Context(), r, body); err != nil {
 			Response_Error(w, http.StatusUnauthorized, err.Error())
 			return false
 		}
 		return true
 	}
-	token := strings.TrimSpace(s.cfg.NodeSyncToken)
+	token := strings.TrimSpace(s.Cfg.NodeSyncToken)
 	if token == "" {
 		Response_Error(w, http.StatusServiceUnavailable, "node sync disabled")
 		return false
@@ -156,7 +156,7 @@ func (s *Server) baselineMeshAuthorizeRequestedPolicy(
 	if nodeID == "" {
 		return true
 	}
-	trustedPolicy := TrustStore_TrustedPeerPolicy(s.store.Database, r.Context(), nodeID)
+	trustedPolicy := TrustStore_TrustedPeerPolicy(s.Store.Database, r.Context(), nodeID)
 	approved, found, err := trustedPolicy.Value, trustedPolicy.Found, trustedPolicy.Error
 	if err != nil {
 		Response_Error(w, http.StatusInternalServerError, "peer policy lookup failed")
@@ -177,10 +177,10 @@ func baselineMeshBearerToken(header string) string {
 }
 
 func (s *Server) baselineMeshRunNodeSync(ctx context.Context) {
-	if s.cfg.NodeSyncInterval <= 0 {
+	if s.Cfg.NodeSyncInterval <= 0 {
 		return
 	}
-	ticker := time.NewTicker(s.cfg.NodeSyncInterval)
+	ticker := time.NewTicker(s.Cfg.NodeSyncInterval)
 	defer ticker.Stop()
 	s.baselineMeshPullConfiguredNodePeers(ctx)
 	for {
@@ -194,8 +194,8 @@ func (s *Server) baselineMeshRunNodeSync(ctx context.Context) {
 }
 
 func (s *Server) baselineMeshPullConfiguredNodePeers(ctx context.Context) {
-	peers := append([]NodePeer(nil), s.cfg.KnownNodes...)
-	listedPeers := TrustStore_ListTrustedPeers(s.store.Database, ctx)
+	peers := append([]NodePeer(nil), s.Cfg.KnownNodes...)
+	listedPeers := TrustStore_ListTrustedPeers(s.Store.Database, ctx)
 	trusted, err := listedPeers.Value, listedPeers.Error
 	if err != nil {
 		slog.Warn("load paired mesh peers", "error", err)
@@ -228,7 +228,7 @@ func (s *Server) baselineMeshPullNodePeer(ctx context.Context, peer NodePeer) er
 	}
 	policy := baselineMeshEffectiveNodeSyncPolicy(peer.Sync)
 	peerKey := MeshCursor_PeerKey(baseURL, policy)
-	loadedCursor := MeshStore_LoadCursor(s.store.Database, ctx, peerKey)
+	loadedCursor := MeshStore_LoadCursor(s.Store.Database, ctx, peerKey)
 	cursor, err := loadedCursor.Value, loadedCursor.Error
 	if err != nil {
 		return err
@@ -236,7 +236,7 @@ func (s *Server) baselineMeshPullNodePeer(ctx context.Context, peer NodePeer) er
 	for {
 		req := NodeMeshExportRequest{
 			Cursor: cursor,
-			Limit:  MeshCursor_BatchLimit(0, s.cfg.NodeSyncBatchLimit),
+			Limit:  MeshCursor_BatchLimit(0, s.Cfg.NodeSyncBatchLimit),
 			Policy: policy,
 		}
 		var exported NodeMeshExportResponse
@@ -247,17 +247,17 @@ func (s *Server) baselineMeshPullNodePeer(ctx context.Context, peer NodePeer) er
 			len(exported.Names) == 0 {
 			return nil
 		}
-		importedApps := MeshApps_Import(s.store.Database, ctx, s.cfg.NodeRegistryPublicKey, policy, exported.Apps, baselineAuthenticationError)
+		importedApps := MeshApps_Import(s.Store.Database, ctx, s.Cfg.NodeRegistryPublicKey, policy, exported.Apps, baselineAuthenticationError)
 		appCount, err := importedApps.Value, importedApps.Error
 		if err != nil {
 			return err
 		}
-		importedRecords := MeshStore_ImportEncryptedBatch(s.store.Database, ctx, policy, exported.Records, exported.Deletions)
+		importedRecords := MeshStore_ImportEncryptedBatch(s.Store.Database, ctx, policy, exported.Records, exported.Deletions)
 		applied, err := importedRecords.Value, importedRecords.Error
 		if err != nil {
 			return err
 		}
-		importedNames := TrustStore_ImportMeshNames(s.store.Database, ctx, policy, exported.Spaces, exported.Names)
+		importedNames := TrustStore_ImportMeshNames(s.Store.Database, ctx, policy, exported.Spaces, exported.Names)
 		nameCount, err := importedNames.Value, importedNames.Error
 		if err != nil {
 			return err
@@ -285,7 +285,7 @@ func (s *Server) baselineMeshPullNodePeer(ctx context.Context, peer NodePeer) er
 				return err
 			}
 		}
-		if err := MeshStore_SaveCursor(s.store.Database, ctx, peerKey, lastCursor); err != nil {
+		if err := MeshStore_SaveCursor(s.Store.Database, ctx, peerKey, lastCursor); err != nil {
 			return err
 		}
 		if !exported.Truncated || exported.NextCursor == "" {
@@ -306,9 +306,9 @@ func (s *Server) baselineMeshPostNodeMeshJSON(ctx context.Context, peerNodeID, t
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if peerNodeID != "" {
-		NodeAuth_Sign(s.node.ID, s.node.PrivateKey, httpReq, body)
+		NodeAuth_Sign(s.Node.ID, s.Node.PrivateKey, httpReq, body)
 	} else {
-		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.NodeSyncToken)
+		httpReq.Header.Set("Authorization", "Bearer "+s.Cfg.NodeSyncToken)
 	}
 	client := &http.Client{Timeout: 20 * time.Second}
 	httpResp, err := client.Do(httpReq)

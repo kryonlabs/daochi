@@ -33,7 +33,7 @@ func TestZiranAdminAuthenticationAgainstBaseline(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := &Server{cfg: Config{AdminToken: test.expected}}
+			server := &Server{Cfg: Config{AdminToken: test.expected}, Signer: signAccountProof}
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/tokens/manual-credit", nil)
 			request.Header.Set("X-Daochi-Admin", test.current)
 			request.Header.Set("X-Ksync-Admin", test.legacy)
@@ -74,7 +74,7 @@ func TestZiranLocalOperatorAuthenticationAgainstBaseline(t *testing.T) {
 	for _, address := range addresses {
 		for _, mode := range []string{"no token", "correct token", "wrong token", "missing token"} {
 			t.Run(address.value+"/"+mode, func(t *testing.T) {
-				server := &Server{}
+				server := &Server{Signer: signAccountProof}
 				request := httptest.NewRequest(http.MethodPost, "/api/v1/node/pairing/invite", nil)
 				request.RemoteAddr = address.value
 				request.Header.Set("X-Forwarded-For", "127.0.0.1")
@@ -83,7 +83,7 @@ func TestZiranLocalOperatorAuthenticationAgainstBaseline(t *testing.T) {
 				allowed := address.loopback
 				status := http.StatusOK
 				if mode != "no token" {
-					server.cfg.AdminToken = "operator-secret"
+					server.Cfg.AdminToken = "operator-secret"
 					allowed = mode == "correct token"
 					if mode == "correct token" {
 						request.Header.Set("X-Daochi-Admin", "operator-secret")
@@ -97,7 +97,7 @@ func TestZiranLocalOperatorAuthenticationAgainstBaseline(t *testing.T) {
 					status = http.StatusForbidden
 				}
 				actual, expected := httptest.NewRecorder(), httptest.NewRecorder()
-				got := HttpAuth_RequireLocalOperator(actual, request, server.cfg.AdminToken)
+				got := HttpAuth_RequireLocalOperator(actual, request, server.Cfg.AdminToken)
 				want := server.baselineRequireLocalOperator(expected, request)
 				if got != want || got != allowed || actual.Code != status {
 					t.Fatalf("operator guard = %v/%d, baseline = %v; expected %v/%d", got, actual.Code, want, allowed, status)

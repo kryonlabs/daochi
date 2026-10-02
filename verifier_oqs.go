@@ -55,8 +55,8 @@ import "unsafe"
 
 type OQSVerifier struct{}
 
-func NewVerifier() (Verifier, error) {
-	return OQSVerifier{}, nil
+func NewVerifier() (*Verifier, error) {
+	return Verifier_New(OQSVerifier{}.Verify), nil
 }
 
 func (OQSVerifier) Verify(publicKey, message, signature []byte) bool {

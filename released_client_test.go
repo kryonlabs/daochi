@@ -21,7 +21,7 @@ func TestReleasedClientRealKeyLoginAndSync(t *testing.T) {
 	} {
 		t.Run(format.header, func(t *testing.T) {
 			server, _, _ := testServer(t)
-			server.verifier = OQSVerifier{}
+			server.Verifier = testVerifier(OQSVerifier{})
 			handler := server.Routes()
 			publicKey, privateKey, err := generateMLDSA44Keypair()
 			if err != nil {

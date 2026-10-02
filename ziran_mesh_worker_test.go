@@ -25,17 +25,17 @@ func TestZiranMeshWorkerLifecycleAgainstBaseline(t *testing.T) {
 			for implementation := 0; implementation < 2; implementation++ {
 				server := meshHTTPFixture(t)
 				policy := meshHTTPPolicy()
-				server.cfg.NodeSyncInterval = time.Hour
-				server.cfg.KnownNodes = []NodePeer{{Name: "worker", URL: "http://first.test", Sync: &policy}}
+				server.Cfg.NodeSyncInterval = time.Hour
+				server.Cfg.KnownNodes = []NodePeer{{Name: "worker", URL: "http://first.test", Sync: &policy}}
 				switch mode {
 				case "disabled":
-					server.cfg.NodeSyncInterval = 0
-					server.store = nil
+					server.Cfg.NodeSyncInterval = 0
+					server.Store = nil
 				case "negative interval":
-					server.cfg.NodeSyncInterval = -1
-					server.store = nil
+					server.Cfg.NodeSyncInterval = -1
+					server.Store = nil
 				case "periodic pull":
-					server.cfg.NodeSyncInterval = 5 * time.Millisecond
+					server.Cfg.NodeSyncInterval = 5 * time.Millisecond
 				}
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
@@ -48,7 +48,7 @@ func TestZiranMeshWorkerLifecycleAgainstBaseline(t *testing.T) {
 					if mode != "periodic pull" || len(requests) == 2 {
 						cancel()
 					}
-					server.cfg.KnownNodes[0].URL = "http://second.test"
+					server.Cfg.KnownNodes[0].URL = "http://second.test"
 					if mode == "transport failure" {
 						return nil, sentinel
 					}
@@ -64,7 +64,7 @@ func TestZiranMeshWorkerLifecycleAgainstBaseline(t *testing.T) {
 					if mode == "disabled" || mode == "negative interval" {
 						// No database or identity dependency is touched when disabled.
 						if implementation == 0 {
-							Mesh_Run(Mesh{Configuration: &server.cfg}, ctx)
+							Mesh_Run(Mesh{Configuration: &server.Cfg}, ctx)
 						} else {
 							server.baselineMeshRunNodeSync(ctx)
 						}
@@ -113,7 +113,7 @@ func TestZiranMeshWorkerNilContextAgainstBaseline(t *testing.T) {
 	implementation := os.Getenv("DAOCHI_MESH_WORKER_IMPLEMENTATION")
 	if implementation != "" {
 		server := meshHTTPFixture(t)
-		server.cfg.NodeSyncInterval = time.Hour
+		server.Cfg.NodeSyncInterval = time.Hour
 		// Native database/sql panics with its mutex held for a nil context.
 		// Exit the isolated process before fixture cleanup tries to close it.
 		defer func() {

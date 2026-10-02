@@ -181,9 +181,9 @@ func TestZiranAuthenticationErrorResponseAgainstBaseline(t *testing.T) {
 			var observations [2]observation
 			for index := range observations {
 				original := &ServerMetrics{}
-				server := &Server{metrics: original}
+				server := &Server{Metrics: original, Signer: signAccountProof}
 				if mode == "nil metrics" {
-					server.metrics = nil
+					server.Metrics = nil
 				}
 				status, message := 401, "Bearer Token Required!"
 				switch mode {
@@ -242,7 +242,7 @@ func TestZiranAuthenticationErrorResponseAgainstBaseline(t *testing.T) {
 						custom.panic = marker
 					}
 					if mode == "as replaces metrics" {
-						custom.action = func() { server.metrics = &ServerMetrics{} }
+						custom.action = func() { server.Metrics = &ServerMetrics{} }
 					}
 					failure = custom
 				case "custom unwrap", "custom unwrap panic":
@@ -260,7 +260,7 @@ func TestZiranAuthenticationErrorResponseAgainstBaseline(t *testing.T) {
 					})
 					logs = append(logs, entry)
 					if mode == "log replaces metrics" {
-						server.metrics = &ServerMetrics{}
+						server.Metrics = &ServerMetrics{}
 					}
 					if mode == "log panic" {
 						panic(marker)
@@ -282,7 +282,7 @@ func TestZiranAuthenticationErrorResponseAgainstBaseline(t *testing.T) {
 				func() {
 					defer func() { panicValue = recover() }()
 					if index == 0 {
-						AuthenticationError_Respond(writer, &server.metrics, failure)
+						AuthenticationError_Respond(writer, &server.Metrics, failure)
 					} else {
 						server.baselineWriteAuthError(writer, failure)
 					}
@@ -292,9 +292,9 @@ func TestZiranAuthenticationErrorResponseAgainstBaseline(t *testing.T) {
 					writerEvents: writer.events, errorEvents: errorEvents, logs: logs, panic: panicValue,
 					originalCount: original.AuthFailures.Load(), originalReasons: original.AuthFailuresBy,
 				}
-				if server.metrics != nil {
-					observations[index].currentCount = server.metrics.AuthFailures.Load()
-					observations[index].currentReasons = server.metrics.AuthFailuresBy
+				if server.Metrics != nil {
+					observations[index].currentCount = server.Metrics.AuthFailures.Load()
+					observations[index].currentReasons = server.Metrics.AuthFailuresBy
 				}
 			}
 			if !reflect.DeepEqual(observations[0], observations[1]) {
@@ -343,7 +343,7 @@ func TestZiranHTTPAuthenticationErrorResponse(t *testing.T) {
 					if index == 0 {
 						HttpAuth_Respond(actual, actualMetrics, results[index])
 					} else {
-						server := &Server{metrics: expectedMetrics}
+						server := &Server{Metrics: expectedMetrics, Signer: signAccountProof}
 						server.baselineWriteAuthError(expected, baselineAuthenticationError(results[index]))
 					}
 				}()

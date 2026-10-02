@@ -26,8 +26,8 @@ func deviceHTTPFixture(t *testing.T) (*Server, string, *transactionVerifier) {
 	t.Helper()
 	server, user, _ := registryHTTPFixture(t)
 	verifier := &transactionVerifier{accept: true}
-	server.verifier = verifier
-	if _, err := server.store.Database.Exec(`
+	server.Verifier = testVerifier(verifier)
+	if _, err := server.Store.Database.Exec(`
 UPDATE server_device_keys SET created_at='fixture',last_used_at='fixture';
 CREATE TRIGGER device_clock_insert AFTER INSERT ON server_device_keys BEGIN
  UPDATE server_device_keys SET created_at='fixture',last_used_at='fixture'
@@ -137,17 +137,17 @@ func TestZiranDeviceHTTPAgainstBaseline(t *testing.T) {
 							query = "CREATE TRIGGER reject_device_http BEFORE UPDATE ON server_device_keys BEGIN SELECT RAISE(ABORT,'revocation rejected'); END"
 						}
 					case "replay":
-						if _, err := server.store.Database.Exec("INSERT INTO server_device_registration_nonces(account_id,nonce,created_at) VALUES(?1,?2,?3)", user, registration.Nonce, Timestamp_CanonicalNow()); err != nil {
+						if _, err := server.Store.Database.Exec("INSERT INTO server_device_registration_nonces(account_id,nonce,created_at) VALUES(?1,?2,?3)", user, registration.Nonce, Timestamp_CanonicalNow()); err != nil {
 							t.Fatal(err)
 						}
 					case "other account":
 						account = strings.Repeat("b", 64)
-						if _, err := server.store.Database.Exec("INSERT INTO server_users(user_id_hash,public_key) VALUES(?1,?2)", account, bytes.Repeat([]byte{0x35}, mlDSA44PublicKeySize)); err != nil {
+						if _, err := server.Store.Database.Exec("INSERT INTO server_users(user_id_hash,public_key) VALUES(?1,?2)", account, bytes.Repeat([]byte{0x35}, mlDSA44PublicKeySize)); err != nil {
 							t.Fatal(err)
 						}
 					}
 					if query != "" {
-						if _, err := server.store.Database.Exec(query); err != nil {
+						if _, err := server.Store.Database.Exec(query); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -156,7 +156,7 @@ func TestZiranDeviceHTTPAgainstBaseline(t *testing.T) {
 						body.Reader = deviceHTTPReadFailure{failure: errors.New("device body read failed")}
 					}
 					request := httptest.NewRequest(method, "/api/v1/account/devices", body)
-					token := Token_IssueAuthToken(server.cfg.TokenSecret, account, time.Now().Add(time.Hour).Unix()).Value
+					token := Token_IssueAuthToken(server.Cfg.TokenSecret, account, time.Now().Add(time.Hour).Unix()).Value
 					request.Header.Set("Authorization", "Bearer "+token)
 					switch mode {
 					case "missing token":
@@ -164,9 +164,9 @@ func TestZiranDeviceHTTPAgainstBaseline(t *testing.T) {
 					case "user mismatch":
 						request.Header.Set("X-Daochi-User", strings.Repeat("b", 64))
 					case "body limit":
-						server.cfg.MaxBodyBytes = 1
+						server.Cfg.MaxBodyBytes = 1
 					case "closed":
-						if err := server.store.Database.Close(); err != nil {
+						if err := server.Store.Database.Close(); err != nil {
 							t.Fatal(err)
 						}
 					case "cancelled":
@@ -206,16 +206,16 @@ func TestZiranDeviceHTTPAgainstBaseline(t *testing.T) {
 				if closeCounts[0] != closeCounts[1] || !reflect.DeepEqual(actualVerifier.calls, expectedVerifier.calls) {
 					t.Fatal("device HTTP body closure or signature arguments changed")
 				}
-				if actual.metrics.AuthFailures.Load() != expected.metrics.AuthFailures.Load() || !reflect.DeepEqual(actual.metrics.AuthFailuresBy, expected.metrics.AuthFailuresBy) {
+				if actual.Metrics.AuthFailures.Load() != expected.Metrics.AuthFailures.Load() || !reflect.DeepEqual(actual.Metrics.AuthFailuresBy, expected.Metrics.AuthFailuresBy) {
 					t.Fatal("device HTTP authentication counters changed")
 				}
 				if mode != "closed" && mode != "list failure" {
-					got, want := deviceSnapshot(t, actual.store), deviceSnapshot(t, expected.store)
+					got, want := deviceSnapshot(t, actual.Store), deviceSnapshot(t, expected.Store)
 					if !reflect.DeepEqual(got, want) {
 						t.Fatalf("device HTTP database state = %#v, baseline = %#v", got, want)
 					}
 					if mode == "other account" {
-						original := DeviceKeys_Active(actual.store.Database, t.Context(), user, "target", "device-key")
+						original := DeviceKeys_Active(actual.Store.Database, t.Context(), user, "target", "device-key")
 						if original.Error != nil || !original.Found {
 							t.Fatal("a request from another account changed the original device", original)
 						}

@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Server) baselineSocialHttpHandleAlias(w http.ResponseWriter, r *http.Request) {
-	_, req, err := baselineSocialHttpReadAliasRequest(w, r, s.cfg.MaxBodyBytes)
+	_, req, err := baselineSocialHttpReadAliasRequest(w, r, s.Cfg.MaxBodyBytes)
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -35,7 +35,7 @@ func (s *Server) baselineSocialHttpHandleAlias(w http.ResponseWriter, r *http.Re
 		Response_Error(w, http.StatusBadRequest, "invalid alias")
 		return
 	}
-	if err := s.store.baselineSocialSetAccountAlias(r.Context(), req.UserIDHash, alias); err != nil {
+	if err := s.Store.baselineSocialSetAccountAlias(r.Context(), req.UserIDHash, alias); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			Response_Error(w, http.StatusConflict, "alias unavailable")
 			return
@@ -52,7 +52,7 @@ func (s *Server) baselineSocialHttpHandleAlias(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) baselineSocialHttpHandleProfileIcon(w http.ResponseWriter, r *http.Request) {
-	_, req, err := baselineSocialHttpReadProfileIconRequest(w, r, s.cfg.MaxBodyBytes)
+	_, req, err := baselineSocialHttpReadProfileIconRequest(w, r, s.Cfg.MaxBodyBytes)
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -74,7 +74,7 @@ func (s *Server) baselineSocialHttpHandleProfileIcon(w http.ResponseWriter, r *h
 		Response_Error(w, http.StatusBadRequest, "invalid profile_icon")
 		return
 	}
-	if err := s.store.baselineSocialSetAccountProfileIcon(r.Context(), req.UserIDHash, req.ProfileIcon); err != nil {
+	if err := s.Store.baselineSocialSetAccountProfileIcon(r.Context(), req.UserIDHash, req.ProfileIcon); err != nil {
 		if errors.Is(err, ErrSyncUserNotFound) {
 			Response_Error(w, http.StatusNotFound, "sync account not found")
 			return
@@ -91,7 +91,7 @@ func (s *Server) baselineSocialHttpHandleFriends(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	friends, err := s.store.baselineSocialListFriends(r.Context(), userID)
+	friends, err := s.Store.baselineSocialListFriends(r.Context(), userID)
 	if err != nil {
 		slog.Error("list friends", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "friends failed")
@@ -113,13 +113,13 @@ func (s *Server) baselineSocialHttpHandleFriendRoute(w http.ResponseWriter, r *h
 		Response_Error(w, http.StatusNotFound, "friend not found")
 		return
 	}
-	if err := s.store.baselineSocialRemoveFriend(r.Context(), userID, friendID); err != nil {
+	if err := s.Store.baselineSocialRemoveFriend(r.Context(), userID, friendID); err != nil {
 		slog.Error("remove friend", "user", LogSafety_LogText(userID), "friend", LogSafety_LogText(friendID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "friend remove failed")
 		return
 	}
-	SyncHub_Publish(s.syncHub, userID, 0)
-	SyncHub_Publish(s.syncHub, friendID, 0)
+	SyncHub_Publish(s.SyncHub, userID, 0)
+	SyncHub_Publish(s.SyncHub, friendID, 0)
 	Response_JSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
@@ -128,7 +128,7 @@ func (s *Server) baselineSocialHttpHandleFriendRequests(w http.ResponseWriter, r
 	if !ok {
 		return
 	}
-	incoming, outgoing, err := s.store.baselineSocialListFriendRequests(r.Context(), userID)
+	incoming, outgoing, err := s.Store.baselineSocialListFriendRequests(r.Context(), userID)
 	if err != nil {
 		slog.Error("list friend requests", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "friend requests failed")
@@ -144,12 +144,12 @@ func (s *Server) baselineSocialHttpHandleFriendRequestCreate(w http.ResponseWrit
 	if !ok {
 		return
 	}
-	req, err := baselineSocialHttpReadFriendRequestCreateRequest(w, r, s.cfg.MaxBodyBytes)
+	req, err := baselineSocialHttpReadFriendRequestCreateRequest(w, r, s.Cfg.MaxBodyBytes)
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	target, found, err := s.store.baselineSocialResolveAccountRef(r.Context(), req.Target)
+	target, found, err := s.Store.baselineSocialResolveAccountRef(r.Context(), req.Target)
 	if err != nil {
 		slog.Error("resolve friend target", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "friend request failed")
@@ -166,7 +166,7 @@ func (s *Server) baselineSocialHttpHandleFriendRequestCreate(w http.ResponseWrit
 		Response_Error(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
-	item, err := s.store.baselineSocialCreateFriendRequest(r.Context(), id, userID, target)
+	item, err := s.Store.baselineSocialCreateFriendRequest(r.Context(), id, userID, target)
 	if err != nil {
 		if strings.Contains(err.Error(), "self") || strings.Contains(err.Error(), "already friends") {
 			Response_Error(w, http.StatusConflict, err.Error())
@@ -176,8 +176,8 @@ func (s *Server) baselineSocialHttpHandleFriendRequestCreate(w http.ResponseWrit
 		Response_Error(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
-	SyncHub_Publish(s.syncHub, userID, 0)
-	SyncHub_Publish(s.syncHub, target, 0)
+	SyncHub_Publish(s.SyncHub, userID, 0)
+	SyncHub_Publish(s.SyncHub, target, 0)
 	Response_JSON(w, http.StatusCreated, FriendRequestResponse{Status: "ok", Request: item})
 }
 
@@ -195,9 +195,9 @@ func (s *Server) baselineSocialHttpHandleFriendRequestRoute(w http.ResponseWrite
 	var err error
 	switch action {
 	case "accept":
-		item, err = s.store.baselineSocialAcceptFriendRequest(r.Context(), userID, requestID)
+		item, err = s.Store.baselineSocialAcceptFriendRequest(r.Context(), userID, requestID)
 	case "decline":
-		item, err = s.store.baselineSocialDeclineFriendRequest(r.Context(), userID, requestID)
+		item, err = s.Store.baselineSocialDeclineFriendRequest(r.Context(), userID, requestID)
 	default:
 		Response_Error(w, http.StatusNotFound, "friend request not found")
 		return
@@ -219,8 +219,8 @@ func (s *Server) baselineSocialHttpHandleFriendRequestRoute(w http.ResponseWrite
 		Response_Error(w, http.StatusInternalServerError, "friend request failed")
 		return
 	}
-	SyncHub_Publish(s.syncHub, item.RequesterUserID, 0)
-	SyncHub_Publish(s.syncHub, item.TargetUserID, 0)
+	SyncHub_Publish(s.SyncHub, item.RequesterUserID, 0)
+	SyncHub_Publish(s.SyncHub, item.TargetUserID, 0)
 	Response_JSON(w, http.StatusOK, FriendRequestResponse{Status: item.Status, Request: item})
 }
 
@@ -229,22 +229,22 @@ func (s *Server) baselineSocialHttpHandleProfileStatsPut(w http.ResponseWriter, 
 	if !ok {
 		return
 	}
-	req, err := baselineSocialHttpReadProfileStatsRequest(w, r, s.cfg.MaxBodyBytes)
+	req, err := baselineSocialHttpReadProfileStatsRequest(w, r, s.Cfg.MaxBodyBytes)
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	applied, err := s.store.baselineSocialUpsertProfileStats(r.Context(), userID, req.App, req.Metrics)
+	applied, err := s.Store.baselineSocialUpsertProfileStats(r.Context(), userID, req.App, req.Metrics)
 	if err != nil {
 		slog.Error("upsert profile stats", "user", LogSafety_LogText(userID), "app", LogSafety_LogText(req.App), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "profile stats failed")
 		return
 	}
 	if applied > 0 {
-		SyncHub_Publish(s.syncHub, userID, 0)
-		if friends, err := s.store.baselineSocialListFriends(r.Context(), userID); err == nil {
+		SyncHub_Publish(s.SyncHub, userID, 0)
+		if friends, err := s.Store.baselineSocialListFriends(r.Context(), userID); err == nil {
 			for _, friend := range friends {
-				SyncHub_Publish(s.syncHub, friend.UserIDHash, 0)
+				SyncHub_Publish(s.SyncHub, friend.UserIDHash, 0)
 			}
 		} else {
 			slog.Error("notify profile stats friends", "user", LogSafety_LogText(userID), "error", err)
@@ -266,7 +266,7 @@ func (s *Server) baselineSocialHttpHandleFriendStats(w http.ResponseWriter, r *h
 		Response_Error(w, http.StatusBadRequest, "invalid stats query")
 		return
 	}
-	rows, err := s.store.baselineLeaderboardFriendStats(r.Context(), userID, app, practice, metric)
+	rows, err := s.Store.baselineLeaderboardFriendStats(r.Context(), userID, app, practice, metric)
 	if err != nil {
 		slog.Error("friend stats", "user", LogSafety_LogText(userID), "app", LogSafety_LogText(app), "practice", LogSafety_LogText(practice), "metric", LogSafety_LogText(metric), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "friend stats failed")
@@ -284,13 +284,13 @@ func (s *Server) baselineSocialHttpCacheSocialSnapshot(ctx context.Context, user
 		slog.Error("marshal social cache", "user", LogSafety_LogText(userID), "kind", LogSafety_LogText(kind), "error", err)
 		return
 	}
-	applied, err := s.store.baselineSnapshotSet(ctx, userID, kind, payload)
+	applied, err := s.Store.baselineSnapshotSet(ctx, userID, kind, payload)
 	if err != nil {
 		slog.Error("write social cache", "user", LogSafety_LogText(userID), "kind", LogSafety_LogText(kind), "error", err)
 		return
 	}
 	if applied > 0 {
-		SyncHub_Publish(s.syncHub, userID, 0)
+		SyncHub_Publish(s.SyncHub, userID, 0)
 	}
 }
 

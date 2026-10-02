@@ -118,11 +118,11 @@ func TestSignedNodeRequestRejectsReplay(t *testing.T) {
 
 	body := []byte(`{"policy":{"apps":["inbe"],"data":["encrypted_records"]}}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/node/mesh/export", bytes.NewReader(body))
-	NodeAuth_Sign(source.node.ID, source.node.PrivateKey, req, body)
-	if err := NodeAuth_Verify(target.store.Database, req.Context(), req, body); err != nil {
+	NodeAuth_Sign(source.Node.ID, source.Node.PrivateKey, req, body)
+	if err := NodeAuth_Verify(target.Store.Database, req.Context(), req, body); err != nil {
 		t.Fatalf("signed request rejected: %v", err)
 	}
-	if err := NodeAuth_Verify(target.store.Database, req.Context(), req, body); err == nil {
+	if err := NodeAuth_Verify(target.Store.Database, req.Context(), req, body); err == nil {
 		t.Fatal("replayed request accepted")
 	}
 }
@@ -167,7 +167,7 @@ func TestTrustSpaceNameRegistrationAndResolution(t *testing.T) {
 	claim := NameClaim{
 		SpaceID: spaceID,
 		Name:    "home",
-		NodeID:  server.node.ID,
+		NodeID:  server.Node.ID,
 		Services: []ServiceRecord{{
 			Service:   "sync",
 			Endpoints: []string{"http://192.168.1.10:8080"},
@@ -184,7 +184,7 @@ func TestTrustSpaceNameRegistrationAndResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !found || resolved.NodeID != server.node.ID || resolved.Sequence != 1 {
+	if !found || resolved.NodeID != server.Node.ID || resolved.Sequence != 1 {
 		t.Fatalf("unexpected resolved claim: %#v", resolved)
 	}
 	if stored.Signature == "" || resolved.Signature != stored.Signature {
@@ -203,7 +203,7 @@ func TestTrustSpaceNamesReplicateWithoutAuthorityPrivateKey(t *testing.T) {
 	claim := NameClaim{
 		SpaceID:   spaceID,
 		Name:      "home",
-		NodeID:    source.node.ID,
+		NodeID:    source.Node.ID,
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
 		Services: []ServiceRecord{{
 			Service:   "sync",
@@ -236,7 +236,7 @@ func TestTrustSpaceNamesReplicateWithoutAuthorityPrivateKey(t *testing.T) {
 	}
 	resolvedClaim := TrustStore_ResolveNameClaim(targetStore.Database, t.Context(), spaceID, "home")
 	resolved, found, err := resolvedClaim.Value, resolvedClaim.Found, resolvedClaim.Error
-	if err != nil || !found || resolved.NodeID != source.node.ID {
+	if err != nil || !found || resolved.NodeID != source.Node.ID {
 		t.Fatalf("replicated name resolution = %#v, %v, %v", resolved, found, err)
 	}
 	var privateKey []byte
@@ -261,8 +261,8 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source.cfg.NodeRegistryPublicKey = registryPublicKey
-	target.cfg.NodeRegistryPublicKey = registryPublicKey
+	source.Cfg.NodeRegistryPublicKey = registryPublicKey
+	target.Cfg.NodeRegistryPublicKey = registryPublicKey
 
 	manifest := AppManifest{
 		ManifestVersion: 1,
@@ -319,7 +319,7 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 	if len(registrations) != 1 {
 		t.Fatalf("exported apps = %d, want 1", len(registrations))
 	}
-	importedApps := MeshApps_Import(targetStore.Database, t.Context(), target.cfg.NodeRegistryPublicKey, policy, registrations, AuthenticationError_Convert)
+	importedApps := MeshApps_Import(targetStore.Database, t.Context(), target.Cfg.NodeRegistryPublicKey, policy, registrations, AuthenticationError_Convert)
 	applied, err := importedApps.Value, importedApps.Error
 	if err != nil {
 		t.Fatal(err)
@@ -336,7 +336,7 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 		t.Fatal("replicated app registry does not authorize its collection")
 	}
 
-	importedAgain := MeshApps_Import(targetStore.Database, t.Context(), target.cfg.NodeRegistryPublicKey, policy, registrations, AuthenticationError_Convert)
+	importedAgain := MeshApps_Import(targetStore.Database, t.Context(), target.Cfg.NodeRegistryPublicKey, policy, registrations, AuthenticationError_Convert)
 	applied, err = importedAgain.Value, importedAgain.Error
 	if err != nil {
 		t.Fatal(err)
@@ -349,12 +349,12 @@ func TestSignedAppManifestReplicatesBeforeOfflineRecords(t *testing.T) {
 func TestPairingHandlersRequireOperatorAndConsumeInvite(t *testing.T) {
 	source, sourceStore, _ := testServer(t)
 	target, targetStore, _ := testServer(t)
-	source.cfg.AdminToken = "operator-secret"
-	target.cfg.AdminToken = "operator-secret"
+	source.Cfg.AdminToken = "operator-secret"
+	target.Cfg.AdminToken = "operator-secret"
 	sourceHTTP := httptest.NewServer(source.Routes())
 	t.Cleanup(sourceHTTP.Close)
-	source.cfg.BaseURL = sourceHTTP.URL
-	target.cfg.BaseURL = "http://192.168.1.11:8080"
+	source.Cfg.BaseURL = sourceHTTP.URL
+	target.Cfg.BaseURL = "http://192.168.1.11:8080"
 
 	requestBody, err := json.Marshal(createInviteRequest{
 		DisplayName: "Home",
@@ -399,10 +399,10 @@ func TestPairingHandlersRequireOperatorAndConsumeInvite(t *testing.T) {
 	if response := accept(); response.Code != http.StatusConflict {
 		t.Fatalf("reused invite status = %d, want 409", response.Code)
 	}
-	if peer := PeerTrust_PublicKey(sourceStore.Database, t.Context(), target.node.ID); peer.Error != nil || !peer.Found {
+	if peer := PeerTrust_PublicKey(sourceStore.Database, t.Context(), target.Node.ID); peer.Error != nil || !peer.Found {
 		t.Fatalf("inviter reciprocal trust = %v, %v", peer.Found, peer.Error)
 	}
-	if peer := PeerTrust_PublicKey(targetStore.Database, t.Context(), source.node.ID); peer.Error != nil || !peer.Found {
+	if peer := PeerTrust_PublicKey(targetStore.Database, t.Context(), source.Node.ID); peer.Error != nil || !peer.Found {
 		t.Fatalf("acceptor trust = %v, %v", peer.Found, peer.Error)
 	}
 	meshBody := []byte(`{"policy":{"direction":"bidirectional","apps":["inbe"],"data":["encrypted_records"]}}`)
@@ -411,8 +411,8 @@ func TestPairingHandlersRequireOperatorAndConsumeInvite(t *testing.T) {
 		"/api/v1/node/mesh/export",
 		bytes.NewReader(meshBody),
 	)
-	NodeAuth_Sign(target.node.ID, target.node.PrivateKey, meshRequest, meshBody)
-	if err := NodeAuth_Verify(source.store.Database, t.Context(), meshRequest, meshBody); err != nil {
+	NodeAuth_Sign(target.Node.ID, target.Node.PrivateKey, meshRequest, meshBody)
+	if err := NodeAuth_Verify(source.Store.Database, t.Context(), meshRequest, meshBody); err != nil {
 		t.Fatalf("reciprocally paired request rejected: %v", err)
 	}
 }
@@ -422,14 +422,14 @@ func trustServer(t *testing.T, store *Store, peer *Server) {
 	invite := PairingInvite{
 		Version:     1,
 		InviteID:    NodeAuth_RandomHex(16),
-		NodeID:      peer.node.ID,
-		PublicKey:   encodeHex(peer.node.PublicKey),
+		NodeID:      peer.Node.ID,
+		PublicKey:   encodeHex(peer.Node.PublicKey),
 		DisplayName: "Peer",
 		Addresses:   []string{"http://192.168.1.11:8080"},
 		ExpiresAt:   time.Now().Add(time.Minute).Unix(),
 		Nonce:       NodeAuth_RandomHex(16),
 	}
-	NodeIdentity_SignInvite(peer.node, &invite)
+	NodeIdentity_SignInvite(peer.Node, &invite)
 	publicKey := NodeIdentity_ValidateInvite(invite, time.Now())
 	if publicKey.Error != nil {
 		t.Fatal(publicKey.Error)

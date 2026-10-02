@@ -42,7 +42,7 @@ func accessIdentity() (string, []byte, string) {
 }
 
 func accessChallenge(server *Server, user string) {
-	server.challenges.ByUser[user] = Challenge{
+	server.Challenges.ByUser[user] = Challenge{
 		Nonce: bytes.Repeat([]byte{0x71}, 32), ExpiresAt: time.Unix(4_000_000_000, 0),
 	}
 }
@@ -62,10 +62,10 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 			newAccount := strings.Contains(mode, "public key") || mode == "new account" || mode == "wrong account hash"
 			for index, server := range servers {
 				verifiers[index] = &accessVerifier{transactionVerifier: transactionVerifier{accept: mode != "rejected"}}
-				server.verifier = verifiers[index]
+				server.Verifier = testVerifier(verifiers[index])
 				accessChallenge(server, user)
 				if !newAccount {
-					if err := server.store.RegisterUser(t.Context(), user, key); err != nil {
+					if err := server.Store.RegisterUser(t.Context(), user, key); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -83,13 +83,13 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 				user = "!"
 			case "missing challenge":
 				for _, server := range servers {
-					delete(server.challenges.ByUser, user)
+					delete(server.Challenges.ByUser, user)
 				}
 			case "expired challenge":
 				for _, server := range servers {
-					item := server.challenges.ByUser[user]
+					item := server.Challenges.ByUser[user]
 					item.ExpiresAt = time.Unix(1, 0)
-					server.challenges.ByUser[user] = item
+					server.Challenges.ByUser[user] = item
 				}
 			case "missing public key":
 				publicKeyText = ""
@@ -101,7 +101,7 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 				publicKeyText = hex.EncodeToString(bytes.Repeat([]byte{0x43}, mlDSA44PublicKeySize))
 			case "empty stored key":
 				for _, server := range servers {
-					lifecycleExecute(t, server.store, "UPDATE server_users SET public_key=x'' WHERE user_id_hash=?1", user)
+					lifecycleExecute(t, server.Store, "UPDATE server_users SET public_key=x'' WHERE user_id_hash=?1", user)
 				}
 			case "malformed signature":
 				signature = "!"
@@ -115,7 +115,7 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 				ctx = cancelled
 			case "closed":
 				for _, server := range servers {
-					if err := server.store.Close(); err != nil {
+					if err := server.Store.Close(); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -137,7 +137,7 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 				})
 			}
 			if !reflect.DeepEqual(values[0], values[1]) || !equalAuthenticationError(failures[0], failures[1]) || panics[0] != panics[1] ||
-				!reflect.DeepEqual(verifiers[0].calls, verifiers[1].calls) || !reflect.DeepEqual(actual.challenges.ByUser, expected.challenges.ByUser) {
+				!reflect.DeepEqual(verifiers[0].calls, verifiers[1].calls) || !reflect.DeepEqual(actual.Challenges.ByUser, expected.Challenges.ByUser) {
 				t.Fatal("account signature result, callback, panic or challenge state changed", failures, panics)
 			}
 			if mode == "registered" || mode == "new account" || mode == "normalized user" || mode == "registered key supplied" || mode == "base64 signature" || mode == "empty stored key" {
@@ -151,7 +151,7 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 			if mode == "callback panic" && panics[0] != sentinel {
 				t.Fatal("verifier panic identity changed", panics)
 			}
-			if mode != "invalid user" && len(actual.challenges.ByUser) != 0 {
+			if mode != "invalid user" && len(actual.Challenges.ByUser) != 0 {
 				t.Fatal("a used or expired challenge survived authentication")
 			}
 			if mode != "invalid user" {
@@ -161,7 +161,7 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 				}
 			}
 			for _, server := range servers {
-				if server.store.Database.Stats().InUse != 0 {
+				if server.Store.Database.Stats().InUse != 0 {
 					t.Fatal("account signature retained a database connection")
 				}
 			}
@@ -193,7 +193,7 @@ func TestZiranAccountSignatureNativeFailuresAgainstBaseline(t *testing.T) {
 				case "rows panic":
 					plan.rowsPanic = sentinel
 				}
-				server := &Server{store: lifecycleDriverStore(t, plan), challenges: Challenge_New(time.Minute), verifier: &transactionVerifier{accept: true}}
+				server := &Server{Store: lifecycleDriverStore(t, plan), Challenges: Challenge_New(time.Minute), Verifier: testVerifier(&transactionVerifier{accept: true}), Signer: signAccountProof}
 				accessChallenge(server, user)
 				panics[index] = boundaryRecover(func() {
 					if index == 0 {
@@ -202,7 +202,7 @@ func TestZiranAccountSignatureNativeFailuresAgainstBaseline(t *testing.T) {
 						values[index], failures[index] = server.baselineAccessAuthenticateSignature(t.Context(), user, "", signature, "daochi-sync-v1", "POST", "/login", nil)
 					}
 				})
-				if len(server.challenges.ByUser) != 0 || server.store.Database.Stats().InUse != 0 {
+				if len(server.Challenges.ByUser) != 0 || server.Store.Database.Stats().InUse != 0 {
 					t.Fatal("native failure retained a challenge or connection")
 				}
 			}
@@ -279,13 +279,13 @@ func accessNormalizeLogin(t *testing.T, recorder *httptest.ResponseRecorder, ser
 		t.Fatal("login token payload changed", string(payload))
 	}
 	expiry, err := strconv.ParseInt(fields[2], 10, 64)
-	if err != nil || expiry < before.Add(server.cfg.TokenTTL).Unix() || expiry > after.Add(server.cfg.TokenTTL).Unix() {
+	if err != nil || expiry < before.Add(server.Cfg.TokenTTL).Unix() || expiry > after.Add(server.Cfg.TokenTTL).Unix() {
 		t.Fatal("token expiration changed", expiry, err)
 	}
-	verified := Token_VerifyAuthToken(server.cfg.TokenSecret, response.AuthToken, before.Unix())
-	issued := Token_IssueAuthToken(server.cfg.TokenSecret, user, expiry)
+	verified := Token_VerifyAuthToken(server.Cfg.TokenSecret, response.AuthToken, before.Unix())
+	issued := Token_IssueAuthToken(server.Cfg.TokenSecret, user, expiry)
 	if verified.Error != "" || verified.Value != user || issued.Value != response.AuthToken || response.ServerTime < before.Unix() || response.ServerTime > after.Unix() ||
-		response.ExpiresIn != int64(server.cfg.TokenTTL.Seconds()) {
+		response.ExpiresIn != int64(server.Cfg.TokenTTL.Seconds()) {
 		t.Fatal("login token or timestamps are invalid", response)
 	}
 	response.AuthToken, response.ServerTime = "<validated token>", 0
@@ -333,10 +333,10 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 					restore()
 					server, store, _ := testServer(t)
 					verifier := &accessVerifier{transactionVerifier: transactionVerifier{accept: mode != "rejected"}}
-					verifiers[index], server.verifier = verifier, verifier
-					server.cfg.ChallengeTTL = time.Minute + 500*time.Millisecond
-					server.challenges.Ttl = server.cfg.ChallengeTTL
-					server.cfg.TokenTTL = time.Hour + 1300*time.Millisecond
+					verifiers[index], server.Verifier = verifier, testVerifier(verifier)
+					server.Cfg.ChallengeTTL = time.Minute + 500*time.Millisecond
+					server.Challenges.Ttl = server.Cfg.ChallengeTTL
+					server.Cfg.TokenTTL = time.Hour + 1300*time.Millisecond
 					if mode == "callback panic" {
 						verifier.panicValue = sentinel
 					}
@@ -359,18 +359,18 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 					}
 					accessChallenge(server, user)
 					if mode == "missing challenge" {
-						delete(server.challenges.ByUser, user)
+						delete(server.Challenges.ByUser, user)
 					}
 					if mode == "expired challenge" {
-						item := server.challenges.ByUser[user]
+						item := server.Challenges.ByUser[user]
 						item.ExpiresAt = time.Unix(1, 0)
-						server.challenges.ByUser[user] = item
+						server.Challenges.ByUser[user] = item
 					}
 					if mode == "nil limiter" {
-						server.limiter = nil
+						server.Limiter = nil
 					}
 					if mode == "nil verifier" {
-						server.verifier = nil
+						server.Verifier = testVerifier(nil)
 					}
 					if mode == "register failure" {
 						lifecycleExecute(t, store, "CREATE TRIGGER fail_registration BEFORE INSERT ON server_users BEGIN SELECT RAISE(ABORT,'registration failed'); END")
@@ -382,7 +382,7 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 						lifecycleExecute(t, store, "CREATE TRIGGER fail_deletion BEFORE DELETE ON server_users BEGIN SELECT RAISE(ABORT,'deletion failed'); END")
 					}
 					if mode == "token failure" {
-						server.cfg.TokenSecret = nil
+						server.Cfg.TokenSecret = nil
 					}
 					if mode == "closed" || mode == "log panic" {
 						if err := store.Close(); err != nil {
@@ -407,7 +407,7 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 								limit = 4
 							}
 						}
-						server.limiter.Windows[prefix+":"+subject] = RateWindow{Count: limit, ResetAt: time.Unix(4_000_000_000, 0)}
+						server.Limiter.Windows[prefix+":"+subject] = RateWindow{Count: limit, ResetAt: time.Unix(4_000_000_000, 0)}
 					}
 					exported := "inbe-sync-key-v1\nalgorithm=ML-DSA-44\npublic_id=" + user + "\nprivate_key=" + hex.EncodeToString(bytes.Repeat([]byte{0x23}, mlDSA44PrivateKeySize))
 					if mode == "wrong public ID" {
@@ -441,7 +441,7 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 						body = []byte("{bad")
 					}
 					if mode == "oversized body" {
-						server.cfg.MaxBodyBytes = 3
+						server.Cfg.MaxBodyBytes = 3
 					}
 					request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 					request.RemoteAddr = "192.0.2.1:1234"
@@ -543,21 +543,21 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 						if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 							t.Fatal(err)
 						}
-						issued := server.challenges.ByUser[user]
+						issued := server.Challenges.ByUser[user]
 						if response.UserIDHash != user || response.Nonce != hex.EncodeToString(bytes.Repeat([]byte{0x52}, 32)) || response.Nonce != hex.EncodeToString(issued.Nonce) ||
-							response.ExpiresIn != int64(server.cfg.ChallengeTTL.Seconds()) || issued.ExpiresAt.Before(before.Add(server.cfg.ChallengeTTL)) || issued.ExpiresAt.After(after.Add(server.cfg.ChallengeTTL)) {
+							response.ExpiresIn != int64(server.Cfg.ChallengeTTL.Seconds()) || issued.ExpiresAt.Before(before.Add(server.Cfg.ChallengeTTL)) || issued.ExpiresAt.After(after.Add(server.Cfg.ChallengeTTL)) {
 							t.Fatal("challenge nonce, account or expiration changed", response)
 						}
 					}
-					bodyClosed[index], challenges[index] = reader.closed, len(server.challenges.ByUser)
+					bodyClosed[index], challenges[index] = reader.closed, len(server.Challenges.ByUser)
 					windows[index] = map[string]int{}
-					if server.limiter != nil {
-						for windowKey, window := range server.limiter.Windows {
+					if server.Limiter != nil {
+						for windowKey, window := range server.Limiter.Windows {
 							windows[index][windowKey] = window.Count
 						}
 					}
 					metrics := httptest.NewRecorder()
-					Metrics_Prometheus(server.metrics, metrics, NodeUsage{}, NodeStorageUsage{}, "fixture")
+					Metrics_Prometheus(server.Metrics, metrics, NodeUsage{}, NodeStorageUsage{}, "fixture")
 					counters[index] = metrics.Body.String()
 					if mode != "closed" && mode != "log panic" {
 						states[index] = accessStoreState(t, store)

@@ -234,7 +234,7 @@ func (s *Server) baselineVerifyDeviceRegistration(ctx context.Context, accountID
 	if !baselineValidDeviceRegistration(request) {
 		return authError{status: http.StatusBadRequest, message: "invalid device registration"}
 	}
-	accountKey, found, err := s.store.baselineAccountPublicKey(ctx, accountID)
+	accountKey, found, err := s.Store.baselineAccountPublicKey(ctx, accountID)
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,7 @@ func (s *Server) baselineVerifyDeviceRegistration(ctx context.Context, accountID
 		return authError{status: http.StatusBadRequest, message: "invalid device registration signature"}
 	}
 	message := baselineDeviceRegistrationMessage(accountID, request)
-	if !s.verifier.Verify(accountKey, message, signature) {
+	if !s.Verifier.Verify(accountKey, message, signature) {
 		return authError{status: http.StatusUnauthorized, message: "device registration rejected"}
 	}
 	return nil
@@ -258,7 +258,7 @@ func (s *Server) baselineVerifyDeviceRevocation(ctx context.Context, accountID s
 		!Identity_ValidClientID(request.Nonce) || !baselineValidDeviceRequestExpiry(request.ExpiresAt) {
 		return authError{status: http.StatusBadRequest, message: "invalid device revocation"}
 	}
-	accountKey, found, err := s.store.baselineAccountPublicKey(ctx, accountID)
+	accountKey, found, err := s.Store.baselineAccountPublicKey(ctx, accountID)
 	if err != nil {
 		return err
 	}
@@ -270,7 +270,7 @@ func (s *Server) baselineVerifyDeviceRevocation(ctx context.Context, accountID s
 	if signatureField.Error != "" || len(signature) != mlDSA44SignatureSize {
 		return authError{status: http.StatusBadRequest, message: "invalid device revocation signature"}
 	}
-	if !s.verifier.Verify(accountKey, baselineDeviceRevocationMessage(accountID, request), signature) {
+	if !s.Verifier.Verify(accountKey, baselineDeviceRevocationMessage(accountID, request), signature) {
 		return authError{status: http.StatusUnauthorized, message: "device revocation rejected"}
 	}
 	return nil

@@ -25,24 +25,24 @@ func (s *Server) baselineGoogleHandlePurchaseVerify(w http.ResponseWriter, r *ht
 	if !ok {
 		return
 	}
-	decoded := PaymentRequest_ReadGoogle(w, r, s.cfg.MaxBodyBytes)
+	decoded := PaymentRequest_ReadGoogle(w, r, s.Cfg.MaxBodyBytes)
 	req, body, err := decoded.Value, decoded.Body, decoded.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	issuer := TokenPolicy_Issuer(s.cfg, errTokenIssuerReadOnly)
+	issuer := TokenPolicy_Issuer(s.Cfg, errTokenIssuerReadOnly)
 	signer, err := issuer.Value, issuer.Error
 	if err != nil {
 		Response_Error(w, http.StatusServiceUnavailable, "token issuer unavailable")
 		return
 	}
-	product, ok := s.cfg.TokenProducts[req.ProductID]
+	product, ok := s.Cfg.TokenProducts[req.ProductID]
 	if !ok {
 		Response_Error(w, http.StatusBadRequest, "unknown product_id")
 		return
 	}
-	existence := AppStore_Exists(s.store.Database, r.Context(), req.AppID)
+	existence := AppStore_Exists(s.Store.Database, r.Context(), req.AppID)
 	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("google token purchase app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "token purchase failed")
@@ -51,11 +51,11 @@ func (s *Server) baselineGoogleHandlePurchaseVerify(w http.ResponseWriter, r *ht
 		Response_Error(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
-	authorization := TokenPolicy_Authorize(s.store.Database, r.Context(), r, body, userID, req.AppID, AssetID, "purchase", s.verifier.Verify, errSignedTxReplay)
+	authorization := TokenPolicy_Authorize(s.Store.Database, r.Context(), r, body, userID, req.AppID, AssetID, "purchase", s.Verifier.Verify, errSignedTxReplay)
 	signedTx, hasSignedTx, err := authorization.Value, authorization.Signed, baselineAuthenticationError(authorization.Authentication)
 	if err != nil {
 		if hasSignedTx {
-			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
+			SignedTx_Forget(s.Store.Database, r.Context(), signedTx)
 		}
 		s.baselineWriteAuthError(w, err)
 		return
@@ -63,19 +63,19 @@ func (s *Server) baselineGoogleHandlePurchaseVerify(w http.ResponseWriter, r *ht
 	completed := false
 	defer func() {
 		if hasSignedTx && !completed {
-			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
+			SignedTx_Forget(s.Store.Database, r.Context(), signedTx)
 		}
 	}()
-	if len(s.cfg.GooglePackageNames) > 0 && !s.cfg.GooglePackageNames[req.PackageName] {
+	if len(s.Cfg.GooglePackageNames) > 0 && !s.Cfg.GooglePackageNames[req.PackageName] {
 		Response_Error(w, http.StatusBadRequest, "package not allowed")
 		return
 	}
-	paymentID, err := baselineGoogleVerifyPurchase(r.Context(), s.cfg, req)
+	paymentID, err := baselineGoogleVerifyPurchase(r.Context(), s.Cfg, req)
 	if err != nil {
 		baselineGoogleWritePaymentError(w, err)
 		return
 	}
-	paymentResult := TokenLedger_CreditPayment(s.store.Database, r.Context(), signer, "google_play", paymentID, TokenEventInput{
+	paymentResult := TokenLedger_CreditPayment(s.Store.Database, r.Context(), signer, "google_play", paymentID, TokenEventInput{
 		AccountID:   userID,
 		AppID:       req.AppID,
 		EventType:   "credit",
@@ -89,10 +89,10 @@ func (s *Server) baselineGoogleHandlePurchaseVerify(w http.ResponseWriter, r *ht
 		Response_Error(w, http.StatusInternalServerError, "token credit failed")
 		return
 	}
-	if err := baselineGoogleConsumePurchase(r.Context(), s.cfg, req); err != nil {
+	if err := baselineGoogleConsumePurchase(r.Context(), s.Cfg, req); err != nil {
 		slog.Warn("google purchase consume failed after token credit", "user", LogSafety_LogText(userID), "payment", LogSafety_LogText(paymentID), "error", err)
 	}
-	balanceResult := TokenLedger_Balance(s.store.Database, r.Context(), userID, AssetID)
+	balanceResult := TokenLedger_Balance(s.Store.Database, r.Context(), userID, AssetID)
 	balance, err := balanceResult.Value, balanceResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusInternalServerError, "token balance failed")

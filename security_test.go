@@ -10,7 +10,7 @@ func TestMetricsAdminGate(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
 
-	server.cfg.AdminToken = "admin-secret"
+	server.Cfg.AdminToken = "admin-secret"
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if unauthorized.Code != http.StatusUnauthorized {
@@ -35,7 +35,7 @@ func TestMetricsAdminGate(t *testing.T) {
 
 	// Without a configured admin token the endpoint stays public, matching
 	// the historical behavior for tokenless self-hosted deployments.
-	server.cfg.AdminToken = ""
+	server.Cfg.AdminToken = ""
 	public := httptest.NewRecorder()
 	handler.ServeHTTP(public, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if public.Code != http.StatusOK {

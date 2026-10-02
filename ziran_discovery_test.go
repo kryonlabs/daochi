@@ -106,16 +106,16 @@ func TestZiranDiscoveryLifecycleAgainstBaseline(t *testing.T) {
 			var panicValues []any
 			for implementation := 0; implementation < 2; implementation++ {
 				server := &Server{
-					cfg:  Config{LANDiscovery: true, Addr: "[::1]:8080", NodeDisplayName: " \u2003Home\t"},
-					node: NodeIdentity{ID: strings.Repeat("a", 64)},
-				}
+					Cfg:    Config{LANDiscovery: true, Addr: "[::1]:8080", NodeDisplayName: " \u2003Home\t"},
+					Node:   NodeIdentity{ID: strings.Repeat("a", 64)},
+					Signer: signAccountProof}
 				switch mode {
 				case "disabled":
-					server.cfg.LANDiscovery = false
+					server.Cfg.LANDiscovery = false
 				case "invalid address":
-					server.cfg.Addr = "invalid"
+					server.Cfg.Addr = "invalid"
 				case "invalid port":
-					server.cfg.Addr = "localhost:port"
+					server.Cfg.Addr = "localhost:port"
 				}
 				var events []string
 				slog.SetDefault(slog.New(discoveryLogHandler{record: func(record slog.Record) {
@@ -142,7 +142,7 @@ func TestZiranDiscoveryLifecycleAgainstBaseline(t *testing.T) {
 						panic(sentinel)
 					}
 					if mode == "updated identity" {
-						server.node.ID = "updated-node"
+						server.Node.ID = "updated-node"
 					}
 					return service, nil
 				}
@@ -182,7 +182,7 @@ func TestZiranDiscoveryLifecycleAgainstBaseline(t *testing.T) {
 				func() {
 					defer func() { panicValue = recover() }()
 					if implementation == 0 {
-						Discovery_Run(&server.cfg, &server.node, ctx,
+						Discovery_Run(&server.Cfg, &server.Node, ctx,
 							func(instance, name, domain string, port int, text []string, interfaces []Interface) RegistrationResult {
 								value, err := register(instance, name, domain, port, text, interfaces)
 								return RegistrationResult{Value: value, Error: err}

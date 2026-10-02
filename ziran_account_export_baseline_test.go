@@ -177,7 +177,7 @@ func (s *Server) baselineHandleAccountExport(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	response, err := s.store.baselineExportAccount(r.Context(), userID)
+	response, err := s.Store.baselineExportAccount(r.Context(), userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			Response_Error(w, http.StatusNotFound, "sync account not found")

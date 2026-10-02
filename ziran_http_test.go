@@ -123,7 +123,7 @@ func compareHTTPResponse(t *testing.T, actual, expected *httptest.ResponseRecord
 func registryHTTPFixture(t *testing.T) (*Server, string, ed25519.PrivateKey) {
 	t.Helper()
 	server, store, _ := testServer(t)
-	server.cfg.AdminToken = "registry-admin"
+	server.Cfg.AdminToken = "registry-admin"
 	user := strings.Repeat("a", 64)
 	if _, err := store.Database.Exec("INSERT INTO server_users(user_id_hash,public_key) VALUES(?1,?2)", user, bytes.Repeat([]byte{0x35}, mlDSA44PublicKeySize)); err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestZiranHTTPAuthenticationAgainstBaseline(t *testing.T) {
 	for _, mode := range []string{"valid", "missing", "invalid", "empty", "wrong scheme", "whitespace", "header mismatch", "legacy user", "header precedence", "missing account", "bootstrap", "deleted bootstrap", "query error", "cancelled"} {
 		t.Run(mode, func(t *testing.T) {
 			server, user, _ := registryHTTPFixture(t)
-			token := Token_IssueAuthToken(server.cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+			token := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
 			request := httptest.NewRequest("GET", "/api/v1/account/app-grants", nil)
 			request.Header.Set("Authorization", "Bearer "+token)
 			switch mode {
@@ -204,19 +204,19 @@ func TestZiranHTTPAuthenticationAgainstBaseline(t *testing.T) {
 				request.Header.Set("X-Daochi-User", user)
 				request.Header.Set("X-Ksync-User", strings.Repeat("b", 64))
 			case "missing account", "bootstrap", "deleted bootstrap":
-				if _, err := server.store.Database.Exec("DELETE FROM server_users WHERE user_id_hash=?1", user); err != nil {
+				if _, err := server.Store.Database.Exec("DELETE FROM server_users WHERE user_id_hash=?1", user); err != nil {
 					t.Fatal(err)
 				}
 				if mode != "missing account" {
 					request.URL.Path = "/api/v1/sync"
 				}
 				if mode == "deleted bootstrap" {
-					if _, err := server.store.Database.Exec("INSERT INTO server_account_tombstones(user_id_hash) VALUES(?1)", user); err != nil {
+					if _, err := server.Store.Database.Exec("INSERT INTO server_account_tombstones(user_id_hash) VALUES(?1)", user); err != nil {
 						t.Fatal(err)
 					}
 				}
 			case "query error":
-				if err := server.store.Database.Close(); err != nil {
+				if err := server.Store.Database.Close(); err != nil {
 					t.Fatal(err)
 				}
 			case "cancelled":
@@ -224,7 +224,7 @@ func TestZiranHTTPAuthenticationAgainstBaseline(t *testing.T) {
 				cancel()
 				request = request.WithContext(ctx)
 			}
-			got := HttpAuth_AuthenticateToken(server.store.Database, request, server.cfg.TokenSecret)
+			got := HttpAuth_AuthenticateToken(server.Store.Database, request, server.Cfg.TokenSecret)
 			want, err := server.baselineAuthenticateToken(request)
 			if got.Value != want || !equalAuthenticationError(AuthenticationError_Convert(got.Authentication), err) {
 				t.Fatalf("token authentication = %#v, baseline = %q, %v", got, want, err)
@@ -278,23 +278,23 @@ func TestZiranRegistryHTTPAgainstBaseline(t *testing.T) {
 			defer func() { rand.Reader = original }()
 			for index, server := range []*Server{actual, expected} {
 				if test.name == "create grant" {
-					if _, err := server.store.Database.Exec("DELETE FROM server_app_grants"); err != nil {
+					if _, err := server.Store.Database.Exec("DELETE FROM server_app_grants"); err != nil {
 						t.Fatal(err)
 					}
 				}
 				request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
-				token := Token_IssueAuthToken(server.cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+				token := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
 				request.Header.Set("Authorization", "Bearer "+token)
-				request.Header.Set("X-Ksync-Admin", server.cfg.AdminToken)
+				request.Header.Set("X-Ksync-Admin", server.Cfg.AdminToken)
 				switch test.mutation {
 				case "admin disabled":
-					server.cfg.AdminToken = ""
+					server.Cfg.AdminToken = ""
 				case "admin rejected":
 					request.Header.Set("X-Daochi-Admin", "wrong")
 				case "body limit":
-					server.cfg.MaxBodyBytes = 1
+					server.Cfg.MaxBodyBytes = 1
 				case "closed":
-					_ = server.store.Database.Close()
+					_ = server.Store.Database.Close()
 				case "cancelled":
 					ctx, cancel := context.WithCancel(t.Context())
 					cancel()
@@ -341,12 +341,12 @@ func TestZiranRegistryHTTPAgainstBaseline(t *testing.T) {
 				responses = append(responses, writer)
 			}
 			compareHTTPResponse(t, responses[0], responses[1])
-			if actual.metrics.AuthFailures.Load() != expected.metrics.AuthFailures.Load() || !reflect.DeepEqual(actual.metrics.AuthFailuresBy, expected.metrics.AuthFailuresBy) {
+			if actual.Metrics.AuthFailures.Load() != expected.Metrics.AuthFailures.Load() || !reflect.DeepEqual(actual.Metrics.AuthFailuresBy, expected.Metrics.AuthFailuresBy) {
 				t.Fatal("HTTP authentication metrics changed")
 			}
 			if test.mutation != "closed" {
-				compareGrantState(t, actual.store, expected.store)
-				compareAppStores(t, actual.store, expected.store)
+				compareGrantState(t, actual.Store, expected.Store)
+				compareAppStores(t, actual.Store, expected.Store)
 			}
 		})
 	}
@@ -383,17 +383,17 @@ func TestZiranRegistrySignedRegistrationAgainstBaseline(t *testing.T) {
 			}
 			var responses []*httptest.ResponseRecorder
 			for index, server := range []*Server{actual, expected} {
-				server.cfg.NodeRegistryPublicKey = nodeKey
+				server.Cfg.NodeRegistryPublicKey = nodeKey
 				request := httptest.NewRequest("POST", "/api/v1/apps/register-signed", bytes.NewReader(body))
 				switch mode {
 				case "body limit":
-					server.cfg.MaxBodyBytes = 1
+					server.Cfg.MaxBodyBytes = 1
 				case "failed write":
-					if _, err := server.store.Database.Exec("CREATE TRIGGER reject_http_manifest BEFORE INSERT ON server_app_manifests BEGIN SELECT RAISE(ABORT,'manifest rejected'); END"); err != nil {
+					if _, err := server.Store.Database.Exec("CREATE TRIGGER reject_http_manifest BEFORE INSERT ON server_app_manifests BEGIN SELECT RAISE(ABORT,'manifest rejected'); END"); err != nil {
 						t.Fatal(err)
 					}
 				case "closed":
-					if err := server.store.Database.Close(); err != nil {
+					if err := server.Store.Database.Close(); err != nil {
 						t.Fatal(err)
 					}
 				case "cancelled":
@@ -413,12 +413,12 @@ func TestZiranRegistrySignedRegistrationAgainstBaseline(t *testing.T) {
 			if responses[0].Code != status {
 				t.Fatalf("signed registration status = %d, expected %d", responses[0].Code, status)
 			}
-			if actual.metrics.AuthFailures.Load() != expected.metrics.AuthFailures.Load() || !reflect.DeepEqual(actual.metrics.AuthFailuresBy, expected.metrics.AuthFailuresBy) {
+			if actual.Metrics.AuthFailures.Load() != expected.Metrics.AuthFailures.Load() || !reflect.DeepEqual(actual.Metrics.AuthFailuresBy, expected.Metrics.AuthFailuresBy) {
 				t.Fatal("signed registration authentication metrics changed")
 			}
 			if mode != "closed" {
-				compareAppStores(t, actual.store, expected.store, registration.Manifest.AppID)
-				stored := AppStore_Exists(actual.store.Database, t.Context(), registration.Manifest.AppID)
+				compareAppStores(t, actual.Store, expected.Store, registration.Manifest.AppID)
+				stored := AppStore_Exists(actual.Store.Database, t.Context(), registration.Manifest.AppID)
 				if stored.Error != nil || stored.Value != (mode == "valid") {
 					t.Fatal("signed registration persistence or rollback changed", stored)
 				}
@@ -497,7 +497,7 @@ func TestZiranRegistrySignedRequestCleanupAgainstBaseline(t *testing.T) {
 			var responses []*httptest.ResponseRecorder
 			for index, server := range []*Server{actual, expected} {
 				if !records {
-					if _, err := server.store.Database.Exec("DELETE FROM server_app_grants"); err != nil {
+					if _, err := server.Store.Database.Exec("DELETE FROM server_app_grants"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -511,7 +511,7 @@ func TestZiranRegistrySignedRequestCleanupAgainstBaseline(t *testing.T) {
 					query = "UPDATE server_encrypted_records SET schema_version='broken'"
 				}
 				if query != "" {
-					if _, err := server.store.Database.Exec(query); err != nil {
+					if _, err := server.Store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -520,7 +520,7 @@ func TestZiranRegistrySignedRequestCleanupAgainstBaseline(t *testing.T) {
 					t.Fatal(err)
 				}
 				request := httptest.NewRequest(method, path, bytes.NewReader(body))
-				token := Token_IssueAuthToken(server.cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+				token := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
 				request.Header.Set("Authorization", "Bearer "+token)
 				if records {
 					header, err := json.Marshal(wire)
@@ -565,7 +565,7 @@ func TestZiranRegistrySignedRequestCleanupAgainstBaseline(t *testing.T) {
 				responses = append(responses, writer)
 			}
 			compareHTTPResponse(t, responses[0], responses[1])
-			got, want := signedTransactionRows(t, actual.store), signedTransactionRows(t, expected.store)
+			got, want := signedTransactionRows(t, actual.Store), signedTransactionRows(t, expected.Store)
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("HTTP replay state = %#v, baseline = %#v", got, want)
 			}
@@ -573,7 +573,7 @@ func TestZiranRegistrySignedRequestCleanupAgainstBaseline(t *testing.T) {
 			if (len(got) == 1) != retain {
 				t.Fatalf("HTTP replay retained incorrectly for %s: %#v", mode, got)
 			}
-			compareGrantState(t, actual.store, expected.store)
+			compareGrantState(t, actual.Store, expected.Store)
 		})
 	}
 }

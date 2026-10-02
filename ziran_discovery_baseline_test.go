@@ -17,27 +17,27 @@ const (
 )
 
 func (s *Server) baselineRunLANDiscovery(ctx context.Context, register func(string, string, string, int, []string, []net.Interface) (*zeroconf.Server, error), shutdown func(*zeroconf.Server)) {
-	if !s.cfg.LANDiscovery {
+	if !s.Cfg.LANDiscovery {
 		return
 	}
-	port, err := baselineListenerPort(s.cfg.Addr)
+	port, err := baselineListenerPort(s.Cfg.Addr)
 	if err != nil {
 		slog.Warn("LAN discovery disabled", "error", err)
 		return
 	}
 	server, err := register(
-		baselineDiscoveryInstanceName(s.cfg.NodeDisplayName, s.node.ID),
+		baselineDiscoveryInstanceName(s.Cfg.NodeDisplayName, s.Node.ID),
 		baselineDiscoveryService,
 		baselineDiscoveryDomain,
 		port,
-		baselineDiscoveryText(s.node.ID),
+		baselineDiscoveryText(s.Node.ID),
 		nil,
 	)
 	if err != nil {
 		slog.Warn("LAN discovery unavailable", "error", err)
 		return
 	}
-	slog.Info("advertising Daochi node on LAN", "node_id", s.node.ID, "port", port)
+	slog.Info("advertising Daochi node on LAN", "node_id", s.Node.ID, "port", port)
 	defer shutdown(server)
 	<-ctx.Done()
 }

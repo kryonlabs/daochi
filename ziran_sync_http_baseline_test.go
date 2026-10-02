@@ -12,18 +12,18 @@ import (
 )
 
 func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Request) {
-	s.metrics.SyncRequests.Add(1)
+	s.Metrics.SyncRequests.Add(1)
 	syncOK := false
 	var signedTx *SignedTxEnvelope
 	defer func() {
 		if !syncOK {
-			s.metrics.SyncFailures.Add(1)
+			s.Metrics.SyncFailures.Add(1)
 			if signedTx != nil {
-				SignedTx_Forget(s.store.Database, r.Context(), *signedTx)
+				SignedTx_Forget(s.Store.Database, r.Context(), *signedTx)
 			}
 		}
 	}()
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -75,7 +75,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			s.baselineWriteAuthError(w, err)
 			return
 		}
-		if err := baselineAuthenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, body, tx, req.UserIDHash, req.AppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+		if err := baselineAuthenticationError(SignedTx_Verify(s.Store.Database, r.Context(), r, body, tx, req.UserIDHash, req.AppID, s.Verifier.Verify, errSignedTxReplay)); err != nil {
 			s.baselineWriteAuthError(w, err)
 			return
 		}
@@ -83,7 +83,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 	}
 	SyncRequest_NormalizeMeditationDurations(req.MeditationLogs)
 
-	baseHash, err := s.store.StateHash(r.Context(), req.UserIDHash)
+	baseHash, err := s.Store.StateHash(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("hash sync state", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "state hash failed")
@@ -107,7 +107,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		sinceVersion = 0
 		snapshotReason = "state_hash_mismatch"
 	} else if req.ProtocolVersion >= 2 && !req.FullSyncRequested {
-		compacted, through, err := s.store.SyncOpsCompacted(r.Context(), req.UserIDHash, req.ClientClock)
+		compacted, through, err := s.Store.SyncOpsCompacted(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
 			slog.Error("check sync op compaction", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "compaction check failed")
@@ -120,7 +120,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			sinceVersion = 0
 			snapshotReason = "sync_ops_compacted"
 		} else {
-			result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
+			result, acceptedOps, err = s.Store.ApplySyncDetailed(r.Context(), req, publicKey)
 			if err != nil {
 				slog.Error("apply sync", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 				Response_Error(w, http.StatusInternalServerError, "sync failed")
@@ -128,7 +128,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	} else {
-		result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
+		result, acceptedOps, err = s.Store.ApplySyncDetailed(r.Context(), req, publicKey)
 		if err != nil {
 			slog.Error("apply sync", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "sync failed")
@@ -136,7 +136,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	if fullSnapshotRequired && SyncRequest_HasLocalChanges(req) {
-		result, acceptedOps, err = s.store.ApplySyncDetailed(r.Context(), req, publicKey)
+		result, acceptedOps, err = s.Store.ApplySyncDetailed(r.Context(), req, publicKey)
 		if err != nil {
 			slog.Error("apply stale sync uploads", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "sync failed")
@@ -144,16 +144,16 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	if fullSnapshotRequired {
-		Metrics_RecordFullSnapshot(s.metrics, snapshotReason)
+		Metrics_RecordFullSnapshot(s.Metrics, snapshotReason)
 	}
 
-	changes, serverVersion, err := s.store.ChangesSince(r.Context(), req.UserIDHash, sinceVersion)
+	changes, serverVersion, err := s.Store.ChangesSince(r.Context(), req.UserIDHash, sinceVersion)
 	if err != nil {
 		slog.Error("load sync changes", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "changes failed")
 		return
 	}
-	changes.SocialCache, err = s.store.AuthoritativeSocial(r.Context(), req.UserIDHash)
+	changes.SocialCache, err = s.Store.AuthoritativeSocial(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("load authoritative social state", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "social state failed")
@@ -164,7 +164,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			remoteOps = []SyncOp{}
 			recordedClientClock = serverVersion
 		} else {
-			remoteOps, err = s.store.OpsSince(r.Context(), req.UserIDHash, req.ClientClock)
+			remoteOps, err = s.Store.OpsSince(r.Context(), req.UserIDHash, req.ClientClock)
 			if err != nil {
 				slog.Error("load sync ops", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 				Response_Error(w, http.StatusInternalServerError, "ops failed")
@@ -172,34 +172,34 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}
-	serverHash, err := s.store.StateHash(r.Context(), req.UserIDHash)
+	serverHash, err := s.Store.StateHash(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("hash sync response", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "state hash failed")
 		return
 	}
-	if err := s.store.RecordClientSync(r.Context(), req.UserIDHash, req.ClientID, req.SinceServerVersion, serverVersion, req.ProtocolVersion, recordedClientClock); err != nil {
+	if err := s.Store.RecordClientSync(r.Context(), req.UserIDHash, req.ClientID, req.SinceServerVersion, serverVersion, req.ProtocolVersion, recordedClientClock); err != nil {
 		slog.Error("record sync client", "user", LogSafety_LogText(req.UserIDHash), "client", LogSafety_LogText(req.ClientID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "client state failed")
 		return
 	}
 	if req.ProtocolVersion >= 2 {
-		if err := s.store.CompactSyncOps(r.Context(), req.UserIDHash); err != nil {
+		if err := s.Store.CompactSyncOps(r.Context(), req.UserIDHash); err != nil {
 			slog.Error("compact sync ops", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "compaction failed")
 			return
 		}
 	}
 	if baselineSyncHTTPSyncResultApplied(result) {
-		SyncHub_Publish(s.syncHub, req.UserIDHash, serverVersion)
+		SyncHub_Publish(s.SyncHub, req.UserIDHash, serverVersion)
 	}
-	accountAlias, err := s.store.AccountAlias(r.Context(), req.UserIDHash)
+	accountAlias, err := s.Store.AccountAlias(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("load account alias", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "alias failed")
 		return
 	}
-	profileIcon, err := s.store.AccountProfileIcon(r.Context(), req.UserIDHash)
+	profileIcon, err := s.Store.AccountProfileIcon(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("load profile icon", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "profile icon failed")
@@ -239,18 +239,18 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		},
 	}
 	if req.ProtocolVersion >= 3 {
-		if err := s.store.AutoMigrateAccountForProtocol(r.Context(), req.UserIDHash, req.ProtocolVersion); err != nil {
+		if err := s.Store.AutoMigrateAccountForProtocol(r.Context(), req.UserIDHash, req.ProtocolVersion); err != nil {
 			slog.Error("auto migrate account", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "migration failed")
 			return
 		}
-		serverVersion, err = s.store.currentUserVersion(r.Context(), req.UserIDHash)
+		serverVersion, err = s.Store.currentUserVersion(r.Context(), req.UserIDHash)
 		if err != nil {
 			slog.Error("load migrated server version", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "version failed")
 			return
 		}
-		serverHash, err = s.store.StateHash(r.Context(), req.UserIDHash)
+		serverHash, err = s.Store.StateHash(r.Context(), req.UserIDHash)
 		if err != nil {
 			slog.Error("hash migrated sync response", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "state hash failed")
@@ -259,7 +259,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		response.ServerVersion = serverVersion
 		response.ServerClock = serverVersion
 		response.ServerStateHash = serverHash
-		response.Data, err = s.store.CleanData(r.Context(), req.UserIDHash)
+		response.Data, err = s.Store.CleanData(r.Context(), req.UserIDHash)
 		if err != nil {
 			slog.Error("load clean data", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "clean data failed")
@@ -286,19 +286,19 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		response.Changes.MeditationLogs = response.Data.MeditationLogs
 		response.Changes.SocialCache = response.Data.Social
 		response.Changes.EncryptedRecords = response.Data.EncryptedRecords
-		response.Logs, err = s.store.SyncLogs(r.Context(), req.UserIDHash, req.ClientClock)
+		response.Logs, err = s.Store.SyncLogs(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
 			slog.Error("load sync logs", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "logs failed")
 			return
 		}
-		response.Deletes, err = s.store.DeleteLogs(r.Context(), req.UserIDHash, req.ClientClock)
+		response.Deletes, err = s.Store.DeleteLogs(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
 			slog.Error("load delete logs", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "delete logs failed")
 			return
 		}
-		response.LegacyClients, err = s.store.LegacyClients(
+		response.LegacyClients, err = s.Store.LegacyClients(
 			r.Context(), req.UserIDHash, LatestProtocol)
 		if err != nil {
 			slog.Error("load legacy clients", "user", LogSafety_LogText(req.UserIDHash), "error", err)
@@ -306,11 +306,11 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		if len(response.LegacyClients) > 0 {
-			s.metrics.LegacyClientHints.Add(uint64(len(response.LegacyClients)))
+			s.Metrics.LegacyClientHints.Add(uint64(len(response.LegacyClients)))
 		}
 	}
 	response.LegacyWriteRequired, response.LegacyProjectionEpoch, err =
-		s.store.LegacyWritePolicy(r.Context(), req.UserIDHash)
+		s.Store.LegacyWritePolicy(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("load legacy write policy", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "legacy write policy failed")
@@ -320,9 +320,9 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		response.Diagnostics.ReturnedChanges = baselineSyncHTTPSyncChangesResult(response.Changes)
 	}
 	if result.EncryptedRecords > 0 {
-		s.metrics.SyncEncryptedRecords.Add(uint64(result.EncryptedRecords))
+		s.Metrics.SyncEncryptedRecords.Add(uint64(result.EncryptedRecords))
 	}
-	if err := s.store.RecordSyncAudit(r.Context(), SyncAuditEntry{
+	if err := s.Store.RecordSyncAudit(r.Context(), SyncAuditEntry{
 		UserIDHash:           req.UserIDHash,
 		ClientID:             req.ClientID,
 		AppID:                req.AppID,
@@ -375,44 +375,44 @@ func (s *Server) baselineSyncHTTPHandleEncryptedSyncEnvelope(w http.ResponseWrit
 		}
 		sinceVersion = parsed
 	}
-	payloadLimit := SyncRequest_EncryptedPayloadLimit(r, s.cfg.EncryptedPayloadMaxReturn)
+	payloadLimit := SyncRequest_EncryptedPayloadLimit(r, s.Cfg.EncryptedPayloadMaxReturn)
 	limit, err := payloadLimit.Value, payloadLimit.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return false
 	}
-	if s.cfg.EncryptedPayloadMaxAccountBytes > 0 {
-		currentBytes, err := s.store.EncryptedPayloadBytes(r.Context(), userID)
+	if s.Cfg.EncryptedPayloadMaxAccountBytes > 0 {
+		currentBytes, err := s.Store.EncryptedPayloadBytes(r.Context(), userID)
 		if err != nil {
 			slog.Error("load encrypted payload usage", "user", LogSafety_LogText(userID), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "encrypted sync failed")
 			return false
 		}
-		if int64(len(body)) > s.cfg.EncryptedPayloadMaxAccountBytes ||
-			currentBytes+int64(len(body)) > s.cfg.EncryptedPayloadMaxAccountBytes {
+		if int64(len(body)) > s.Cfg.EncryptedPayloadMaxAccountBytes ||
+			currentBytes+int64(len(body)) > s.Cfg.EncryptedPayloadMaxAccountBytes {
 			Response_Error(w, http.StatusRequestEntityTooLarge, "encrypted payload quota exceeded")
 			return false
 		}
 	}
-	accountAlias, err := s.store.AccountAlias(r.Context(), userID)
+	accountAlias, err := s.Store.AccountAlias(r.Context(), userID)
 	if err != nil {
 		slog.Error("load encrypted sync account alias", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "alias failed")
 		return false
 	}
-	profileIcon, err := s.store.AccountProfileIcon(r.Context(), userID)
+	profileIcon, err := s.Store.AccountProfileIcon(r.Context(), userID)
 	if err != nil {
 		slog.Error("load encrypted sync profile icon", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "profile icon failed")
 		return false
 	}
-	social, err := s.store.AuthoritativeSocial(r.Context(), userID)
+	social, err := s.Store.AuthoritativeSocial(r.Context(), userID)
 	if err != nil {
 		slog.Error("load encrypted sync social state", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "social state failed")
 		return false
 	}
-	serverVersion, err := s.store.StoreEncryptedPayload(r.Context(), userID, clientID, body)
+	serverVersion, err := s.Store.StoreEncryptedPayload(r.Context(), userID, clientID, body)
 	if err != nil {
 		if errors.Is(err, ErrSyncUserNotFound) {
 			Response_Error(w, http.StatusNotFound, "sync account not found")
@@ -422,21 +422,21 @@ func (s *Server) baselineSyncHTTPHandleEncryptedSyncEnvelope(w http.ResponseWrit
 		Response_Error(w, http.StatusInternalServerError, "encrypted sync failed")
 		return false
 	}
-	if result, err := s.store.PruneEncryptedPayloads(r.Context(), userID, s.cfg.EncryptedPayloadRetention, 0); err != nil {
+	if result, err := s.Store.PruneEncryptedPayloads(r.Context(), userID, s.Cfg.EncryptedPayloadRetention, 0); err != nil {
 		slog.Error("prune encrypted payloads", "user", LogSafety_LogText(userID), "error", err)
 	} else if result.Deleted > 0 {
 		slog.Info("pruned encrypted payloads", "user", LogSafety_LogText(userID), "deleted", result.Deleted)
 	}
-	payloads, truncated, err := s.store.EncryptedPayloadsSince(r.Context(), userID, sinceVersion, limit)
+	payloads, truncated, err := s.Store.EncryptedPayloadsSince(r.Context(), userID, sinceVersion, limit)
 	if err != nil {
 		slog.Error("load encrypted payloads", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "encrypted sync failed")
 		return false
 	}
-	if err := s.store.RecordClientSync(r.Context(), userID, clientID, sinceVersion, serverVersion, LatestProtocol, serverVersion); err != nil {
+	if err := s.Store.RecordClientSync(r.Context(), userID, clientID, sinceVersion, serverVersion, LatestProtocol, serverVersion); err != nil {
 		slog.Error("record encrypted sync client", "user", LogSafety_LogText(userID), "client", LogSafety_LogText(clientID), "error", err)
 	}
-	if err := s.store.RecordSyncAudit(r.Context(), SyncAuditEntry{
+	if err := s.Store.RecordSyncAudit(r.Context(), SyncAuditEntry{
 		UserIDHash:            userID,
 		ClientID:              clientID,
 		ProtocolVersion:       LatestProtocol,
@@ -448,8 +448,8 @@ func (s *Server) baselineSyncHTTPHandleEncryptedSyncEnvelope(w http.ResponseWrit
 	}); err != nil {
 		slog.Error("record encrypted sync audit", "user", LogSafety_LogText(userID), "client", LogSafety_LogText(clientID), "error", err)
 	}
-	s.metrics.SyncEncryptedPayloads.Add(1)
-	SyncHub_Publish(s.syncHub, userID, serverVersion)
+	s.Metrics.SyncEncryptedPayloads.Add(1)
+	SyncHub_Publish(s.SyncHub, userID, serverVersion)
 	response := SyncResponse{
 		ProtocolVersion:      LatestProtocol,
 		Status:               "ok",
@@ -479,7 +479,7 @@ func (s *Server) baselineSyncHTTPValidateSyncRequest(ctx context.Context, req Sy
 		if !Identity_ValidNamespace(req.AppID) {
 			return errors.New("invalid app_id")
 		}
-		appResult := AppStore_ByID(s.store.Database, ctx, req.AppID)
+		appResult := AppStore_ByID(s.Store.Database, ctx, req.AppID)
 		app, exists, err := appResult.Value, appResult.Found, appResult.Error
 		if err != nil {
 			return err
@@ -495,7 +495,7 @@ func (s *Server) baselineSyncHTTPValidateSyncRequest(ctx context.Context, req Sy
 			return errors.New("app manifest expired")
 		}
 		if req.ProtocolVersion < 6 {
-			legacyResult := AppStore_AllowsLegacyProtocol(s.store.Database, ctx, req.AppID, req.ProtocolVersion)
+			legacyResult := AppStore_AllowsLegacyProtocol(s.Store.Database, ctx, req.AppID, req.ProtocolVersion)
 			allowed, err := legacyResult.Value, legacyResult.Error
 			if err != nil {
 				return err
@@ -513,7 +513,7 @@ func (s *Server) baselineSyncHTTPValidateSyncRequest(ctx context.Context, req Sy
 			return errors.New("invalid encrypted record")
 		}
 		if req.AppID != "" {
-			ownership := AppStore_OwnsCollection(s.store.Database, ctx, req.AppID, item.Collection)
+			ownership := AppStore_OwnsCollection(s.Store.Database, ctx, req.AppID, item.Collection)
 			owns, err := ownership.Value, ownership.Error
 			if err != nil {
 				return err

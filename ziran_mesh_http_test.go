@@ -29,14 +29,14 @@ func meshHTTPFixture(t *testing.T) *Server {
 		t.Fatal(identity.Error)
 	}
 	return &Server{
-		store: store,
-		node:  identity.Value,
-		cfg: Config{
+		Store: store,
+		Node:  identity.Value,
+		Cfg: Config{
 			NodeSyncToken:      "mesh-secret",
 			NodeSyncBatchLimit: 1,
 			MaxBodyBytes:       1 << 20,
 		},
-	}
+		Signer: signAccountProof}
 }
 
 func meshHTTPPolicy() NodeSyncPolicy {
@@ -53,7 +53,7 @@ func meshHTTPPeer(t *testing.T, server *Server, identity NodeIdentity, approved 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.store.Database.Exec(`INSERT INTO trusted_node_peers(node_id,public_key,display_name,addresses_json,policy_json,trusted_at)
+	if _, err := server.Store.Database.Exec(`INSERT INTO trusted_node_peers(node_id,public_key,display_name,addresses_json,policy_json,trusted_at)
 VALUES(?1,?2,'peer','[]',?3,'fixture')`, identity.ID, identity.PublicKey, string(encoded)); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestZiranMeshTokenAuthenticationAgainstBaseline(t *testing.T) {
 			{"X-Daochi-Node-Token": {"\xff\x00"}}, {"X-Daochi-Node-ID": {"invalid"}, "X-Daochi-Node-Token": {"mesh-secret"}},
 		} {
 			server := meshHTTPFixture(t)
-			server.cfg.NodeSyncToken = token
+			server.Cfg.NodeSyncToken = token
 			request := httptest.NewRequest("POST", "/api/v1/node/mesh/export", nil)
 			request.Header = headers.Clone()
 			actual, expected := httptest.NewRecorder(), httptest.NewRecorder()
@@ -165,21 +165,21 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 				panicValue := errors.New("mesh response panic")
 				var results []*httptest.ResponseRecorder
 				for index, server := range []*Server{actual, expected} {
-					server.cfg.NodeRegistryPublicKey = registryKey
+					server.Cfg.NodeRegistryPublicKey = registryKey
 					if signed && mode != "unpaired" {
 						meshHTTPPeer(t, server, identity, approved)
 					}
 					if mode == "replayed" {
-						if err := NodeAuth_Verify(server.store.Database, t.Context(), request, encoded); err != nil {
+						if err := NodeAuth_Verify(server.Store.Database, t.Context(), request, encoded); err != nil {
 							t.Fatal(err)
 						}
 					}
 					query := ""
 					switch mode {
 					case "disabled":
-						server.cfg.NodeSyncToken = ""
+						server.Cfg.NodeSyncToken = ""
 					case "body limit":
-						server.cfg.MaxBodyBytes = 1
+						server.Cfg.MaxBodyBytes = 1
 					case "apps query failure":
 						query = "ALTER TABLE server_app_manifests RENAME TO broken_manifests"
 					case "record query failure":
@@ -192,7 +192,7 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 						query = "CREATE TRIGGER reject_mesh_http BEFORE INSERT ON server_encrypted_records BEGIN SELECT RAISE(ABORT,'record rejected'); END"
 					}
 					if query != "" {
-						if _, err := server.store.Database.Exec(query); err != nil {
+						if _, err := server.Store.Database.Exec(query); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -208,7 +208,7 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 						local = local.WithContext(cancelled)
 					}
 					if mode == "closed" {
-						server.store.Database.Close()
+						server.Store.Database.Close()
 					}
 					writer := httptest.NewRecorder()
 					var destination http.ResponseWriter = writer
@@ -249,11 +249,11 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 					}
 				}
 				if mode != "closed" && mode != "apps query failure" && mode != "record query failure" && mode != "name query failure" {
-					compareMeshState(t, actual.store, expected.store)
-					if got, want := appStoreSnapshot(t, actual.store), appStoreSnapshot(t, expected.store); !reflect.DeepEqual(got, want) {
+					compareMeshState(t, actual.Store, expected.Store)
+					if got, want := appStoreSnapshot(t, actual.Store), appStoreSnapshot(t, expected.Store); !reflect.DeepEqual(got, want) {
 						t.Fatal("mesh HTTP changed app registry state", got, want)
 					}
-					if got, want := trustSnapshot(t, actual.store), trustSnapshot(t, expected.store); !reflect.DeepEqual(got, want) {
+					if got, want := trustSnapshot(t, actual.Store), trustSnapshot(t, expected.Store); !reflect.DeepEqual(got, want) {
 						t.Fatal("mesh HTTP changed trust state", got, want)
 					}
 				}
@@ -270,7 +270,7 @@ func TestZiranMeshPostJSONAgainstBaseline(t *testing.T) {
 		for _, mode := range []string{"success", "trailing JSON", "invalid JSON", "EOF", "HTTP failure", "redirect status", "read failure", "failure read", "transport failure", "invalid URL", "nil context", "cancelled", "marshal failure", "read panic"} {
 			t.Run(mode+map[bool]string{false: "/token", true: "/signed"}[signed], func(t *testing.T) {
 				server := meshHTTPFixture(t)
-				server.cfg.NodeSyncToken = " raw mesh-secret "
+				server.Cfg.NodeSyncToken = " raw mesh-secret "
 				contextValue := t.Context()
 				if mode == "nil context" {
 					contextValue = nil
@@ -307,11 +307,11 @@ func TestZiranMeshPostJSONAgainstBaseline(t *testing.T) {
 						}
 						if signed {
 							signature, err := base64.RawURLEncoding.DecodeString(request.Header.Get("X-Daochi-Node-Signature"))
-							message := baselineNodeMessage("daochi-node-request-v1", server.node.ID, request.Header.Get("X-Daochi-Node-Time"), request.Header.Get("X-Daochi-Node-Nonce"), request.Method, request.URL.EscapedPath(), data)
-							if err != nil || !ed25519.Verify(server.node.PublicKey, []byte(message), signature) || request.Header.Get("X-Daochi-Node-ID") != server.node.ID || request.Header.Get("Authorization") != "" {
+							message := baselineNodeMessage("daochi-node-request-v1", server.Node.ID, request.Header.Get("X-Daochi-Node-Time"), request.Header.Get("X-Daochi-Node-Nonce"), request.Method, request.URL.EscapedPath(), data)
+							if err != nil || !ed25519.Verify(server.Node.PublicKey, []byte(message), signature) || request.Header.Get("X-Daochi-Node-ID") != server.Node.ID || request.Header.Get("Authorization") != "" {
 								t.Fatal("mesh request lost node authentication")
 							}
-						} else if request.Header.Get("Authorization") != "Bearer "+server.cfg.NodeSyncToken {
+						} else if request.Header.Get("Authorization") != "Bearer "+server.Cfg.NodeSyncToken {
 							t.Fatal("mesh request token was normalized")
 						}
 						if mode == "transport failure" {

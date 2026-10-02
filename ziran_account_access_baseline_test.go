@@ -22,7 +22,7 @@ func (s *Server) baselineAccessHandleChallenge(w http.ResponseWriter, r *http.Re
 		Response_Error(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
-	issued := Challenge_Issue(s.challenges, userID)
+	issued := Challenge_Issue(s.Challenges, userID)
 	nonce, err := issued.Nonce, issued.Error
 	if err != nil {
 		slog.Error("issue challenge", "error", err)
@@ -32,12 +32,12 @@ func (s *Server) baselineAccessHandleChallenge(w http.ResponseWriter, r *http.Re
 	Response_JSON(w, http.StatusOK, ChallengeResponse{
 		UserIDHash: userID,
 		Nonce:      hex.EncodeToString(nonce),
-		ExpiresIn:  int64(s.cfg.ChallengeTTL.Seconds()),
+		ExpiresIn:  int64(s.Cfg.ChallengeTTL.Seconds()),
 	})
 }
 
 func (s *Server) baselineAccessHandleLogin(w http.ResponseWriter, r *http.Request) {
-	read := SyncRequest_ReadLogin(w, r, s.cfg.MaxBodyBytes)
+	read := SyncRequest_ReadLogin(w, r, s.Cfg.MaxBodyBytes)
 	body, req, err := read.Body, read.Value, read.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -63,29 +63,29 @@ func (s *Server) baselineAccessHandleLogin(w http.ResponseWriter, r *http.Reques
 		s.baselineWriteAuthError(w, err)
 		return
 	}
-	if err := s.store.RegisterUser(r.Context(), req.UserIDHash, publicKey); err != nil {
+	if err := s.Store.RegisterUser(r.Context(), req.UserIDHash, publicKey); err != nil {
 		slog.Error("register sync user", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "login failed")
 		return
 	}
-	if err := s.store.RecordClientLogin(r.Context(), req.UserIDHash, req.ClientID); err != nil {
+	if err := s.Store.RecordClientLogin(r.Context(), req.UserIDHash, req.ClientID); err != nil {
 		slog.Error("record login client", "user", LogSafety_LogText(req.UserIDHash), "client", LogSafety_LogText(req.ClientID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "login failed")
 		return
 	}
-	token := Token_IssueAuthToken(s.cfg.TokenSecret, req.UserIDHash, time.Now().Add(s.cfg.TokenTTL).Unix())
+	token := Token_IssueAuthToken(s.Cfg.TokenSecret, req.UserIDHash, time.Now().Add(s.Cfg.TokenTTL).Unix())
 	if token.Error != "" {
 		slog.Error("issue auth token", "user", LogSafety_LogText(req.UserIDHash), "error", token.Error)
 		Response_Error(w, http.StatusInternalServerError, "login failed")
 		return
 	}
-	accountAlias, err := s.store.AccountAlias(r.Context(), req.UserIDHash)
+	accountAlias, err := s.Store.AccountAlias(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("load account alias", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "alias failed")
 		return
 	}
-	profileIcon, err := s.store.AccountProfileIcon(r.Context(), req.UserIDHash)
+	profileIcon, err := s.Store.AccountProfileIcon(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("load profile icon", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "profile icon failed")
@@ -94,7 +94,7 @@ func (s *Server) baselineAccessHandleLogin(w http.ResponseWriter, r *http.Reques
 	Response_JSON(w, http.StatusOK, LoginResponse{
 		Status:       "ok",
 		AuthToken:    token.Value,
-		ExpiresIn:    int64(s.cfg.TokenTTL.Seconds()),
+		ExpiresIn:    int64(s.Cfg.TokenTTL.Seconds()),
 		ServerTime:   time.Now().Unix(),
 		AccountAlias: accountAlias,
 		ProfileIcon:  profileIcon,
@@ -102,7 +102,7 @@ func (s *Server) baselineAccessHandleLogin(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) baselineAccessHandleDeleteAccount(w http.ResponseWriter, r *http.Request) {
-	read := SyncRequest_ReadDelete(w, r, s.cfg.MaxBodyBytes)
+	read := SyncRequest_ReadDelete(w, r, s.Cfg.MaxBodyBytes)
 	body, req, err := read.Body, read.Value, read.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -119,7 +119,7 @@ func (s *Server) baselineAccessHandleDeleteAccount(w http.ResponseWriter, r *htt
 		s.baselineWriteAuthError(w, err)
 		return
 	}
-	if err := s.store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
+	if err := s.Store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
 		slog.Error("delete account", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -128,7 +128,7 @@ func (s *Server) baselineAccessHandleDeleteAccount(w http.ResponseWriter, r *htt
 }
 
 func (s *Server) baselineAccessHandleDeleteAccountWithKey(w http.ResponseWriter, r *http.Request, sign func([]byte, []byte) ([]byte, error)) {
-	read := SyncRequest_ReadDeleteWithKey(w, r, s.cfg.MaxBodyBytes)
+	read := SyncRequest_ReadDeleteWithKey(w, r, s.Cfg.MaxBodyBytes)
 	req, err := read.Value, read.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -139,7 +139,7 @@ func (s *Server) baselineAccessHandleDeleteAccountWithKey(w http.ResponseWriter,
 		Response_Error(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
-	account := AccountKeys_PublicKey(s.store.Database, r.Context(), req.UserIDHash)
+	account := AccountKeys_PublicKey(s.Store.Database, r.Context(), req.UserIDHash)
 	publicKey, found, err := account.Value, account.Found, account.Error
 	if err != nil {
 		slog.Error("load account key", "user", LogSafety_LogText(req.UserIDHash), "error", err)
@@ -162,11 +162,11 @@ func (s *Server) baselineAccessHandleDeleteAccountWithKey(w http.ResponseWriter,
 	}
 	message := []byte("inbe-delete-account-v1\n" + req.UserIDHash + "\n")
 	signature, err := sign(message, exportedKey.PrivateKey)
-	if err != nil || !s.verifier.Verify(publicKey, []byte(message), signature) {
+	if err != nil || !s.Verifier.Verify(publicKey, []byte(message), signature) {
 		Response_Error(w, http.StatusUnauthorized, "exported key does not match sync account")
 		return
 	}
-	if err := s.store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
+	if err := s.Store.DeleteAccount(r.Context(), req.UserIDHash); err != nil {
 		slog.Error("delete account with key", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -179,12 +179,12 @@ func (s *Server) baselineAccessAuthenticateSignature(ctx context.Context, userID
 	if !Identity_ValidUserID(userID) {
 		return nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
 	}
-	consumed := Challenge_Consume(s.challenges, userID)
+	consumed := Challenge_Consume(s.Challenges, userID)
 	nonce, ok := consumed.Nonce, consumed.Found
 	if !ok {
 		return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
 	}
-	account := AccountKeys_PublicKey(s.store.Database, ctx, userID)
+	account := AccountKeys_PublicKey(s.Store.Database, ctx, userID)
 	publicKey, found, err := account.Value, account.Found, account.Error
 	if err != nil {
 		return nil, err
@@ -220,19 +220,19 @@ func (s *Server) baselineAccessAuthenticateSignature(ctx context.Context, userID
 		return nil, authError{status: http.StatusBadRequest, message: "wrong signature size"}
 	}
 	message := Signing_CanonicalMessageWithContext(signatureContext, nonce, method, path, signedPayload)
-	if !s.verifier.Verify(publicKey, []byte(message), signature) {
+	if !s.Verifier.Verify(publicKey, []byte(message), signature) {
 		return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
 	}
 	return publicKey, nil
 }
 
 func (s *Server) baselineAccessAllowRequest(r *http.Request, key string, limit int, window time.Duration) bool {
-	if s.limiter == nil {
+	if s.Limiter == nil {
 		return true
 	}
-	allowed := RateLimit_Allow(s.limiter, key, limit, window)
+	allowed := RateLimit_Allow(s.Limiter, key, limit, window)
 	if !allowed {
-		s.metrics.RateLimitedRequests.Add(1)
+		s.Metrics.RateLimitedRequests.Add(1)
 	}
 	return allowed
 }

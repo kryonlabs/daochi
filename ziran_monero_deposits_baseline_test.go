@@ -15,7 +15,7 @@ import (
 )
 
 func baselineHandleMoneroAddress(s *Server, w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.TokenDirectPurchasesEnabled || !MoneroWallet_ValidRate(s.cfg) || strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
+	if !s.Cfg.TokenDirectPurchasesEnabled || !MoneroWallet_ValidRate(s.Cfg) || strings.TrimSpace(s.Cfg.MoneroWalletRPCURL) == "" {
 		Response_Error(w, http.StatusServiceUnavailable, "monero purchases disabled")
 		return
 	}
@@ -35,7 +35,7 @@ func baselineHandleMoneroAddress(s *Server, w http.ResponseWriter, r *http.Reque
 	} else {
 		var found bool
 		var err error
-		accountID, found, err = s.store.ResolveAccountRef(r.Context(), ref)
+		accountID, found, err = s.Store.ResolveAccountRef(r.Context(), ref)
 		if err != nil {
 			slog.Error("resolve monero recipient", "error", err)
 			Response_Error(w, http.StatusInternalServerError, "recipient lookup failed")
@@ -50,12 +50,12 @@ func baselineHandleMoneroAddress(s *Server, w http.ResponseWriter, r *http.Reque
 	// Serialize allocation per account (the store row's primary key is the
 	// real guard); different accounts must not block each other behind one
 	// wallet RPC.
-	lockAny, _ := s.moneroAddressLocks.LoadOrStore(accountID, &sync.Mutex{})
+	lockAny, _ := s.MoneroAddressLocks.LoadOrStore(accountID, &sync.Mutex{})
 	addressLock := lockAny.(*sync.Mutex)
 	addressLock.Lock()
-	address, found, err := baselineMoneroAccountAddress(s.store, r.Context(), accountID)
+	address, found, err := baselineMoneroAccountAddress(s.Store, r.Context(), accountID)
 	if err == nil && !found {
-		address, err = baselineCreateMoneroAccountAddress(s.store, r.Context(), accountID, s.cfg)
+		address, err = baselineCreateMoneroAccountAddress(s.Store, r.Context(), accountID, s.Cfg)
 	}
 	addressLock.Unlock()
 	if err != nil {
@@ -63,7 +63,7 @@ func baselineHandleMoneroAddress(s *Server, w http.ResponseWriter, r *http.Reque
 		Response_Error(w, http.StatusInternalServerError, "monero address unavailable")
 		return
 	}
-	network := strings.ToLower(strings.TrimSpace(s.cfg.MoneroNetwork))
+	network := strings.ToLower(strings.TrimSpace(s.Cfg.MoneroNetwork))
 	if network != "mainnet" && network != "stagenet" && network != "testnet" {
 		network = "mainnet"
 	}
@@ -75,11 +75,11 @@ func baselineHandleMoneroAddress(s *Server, w http.ResponseWriter, r *http.Reque
 		Address:               address.Address,
 		URI:                   "monero:" + url.PathEscape(address.Address),
 		Network:               network,
-		ConfirmationsRequired: MoneroWallet_ConfirmationsRequired(s.cfg),
-		MinimumAtomicAmount:   MoneroWallet_MinimumAtomicAmount(s.cfg),
+		ConfirmationsRequired: MoneroWallet_ConfirmationsRequired(s.Cfg),
+		MinimumAtomicAmount:   MoneroWallet_MinimumAtomicAmount(s.Cfg),
 		Rate: MoneroRate{
-			AtomicAmount: s.cfg.MoneroRateAtomicAmount,
-			TokenUnits:   s.cfg.MoneroRateTokenUnits,
+			AtomicAmount: s.Cfg.MoneroRateAtomicAmount,
+			TokenUnits:   s.Cfg.MoneroRateTokenUnits,
 		},
 	})
 }
@@ -89,7 +89,7 @@ func baselineHandleMoneroDeposits(s *Server, w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	deposits, err := baselineMoneroDeposits(s.store, r.Context(), accountID, 100)
+	deposits, err := baselineMoneroDeposits(s.Store, r.Context(), accountID, 100)
 	if err != nil {
 		slog.Error("list monero deposits", "account", LogSafety_LogText(accountID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "monero deposits unavailable")
@@ -199,7 +199,7 @@ WHERE disabled_at=''`)
 // are requested from the persisted scan bookmark onward, pool transfers
 // (height 0, filtered out by min_height) are fetched separately.
 func baselineListMoneroTransfers(s *Server, ctx context.Context) ([]WalletTransfer, error) {
-	bookmark, err := baselineMoneroScanHeight(s.store, ctx)
+	bookmark, err := baselineMoneroScanHeight(s.Store, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func baselineListMoneroTransfers(s *Server, ctx context.Context) ([]WalletTransf
 		In      []WalletTransfer `json:"in"`
 		Pending []WalletTransfer `json:"pending"`
 	}
-	if err := MoneroWallet_Request(ctx, s.cfg, "get_transfers", map[string]any{
+	if err := MoneroWallet_Request(ctx, s.Cfg, "get_transfers", map[string]any{
 		"in": true, "pending": true, "failed": false, "account_index": 0,
 		"min_height": bookmark,
 	}, &confirmed, errPaymentUnavailable); err != nil {
@@ -216,7 +216,7 @@ func baselineListMoneroTransfers(s *Server, ctx context.Context) ([]WalletTransf
 	var pool struct {
 		Pool []WalletTransfer `json:"pool"`
 	}
-	if err := MoneroWallet_Request(ctx, s.cfg, "get_transfers", map[string]any{
+	if err := MoneroWallet_Request(ctx, s.Cfg, "get_transfers", map[string]any{
 		"pool": true, "account_index": 0,
 	}, &pool, errPaymentUnavailable); err != nil {
 		return nil, err
@@ -225,7 +225,7 @@ func baselineListMoneroTransfers(s *Server, ctx context.Context) ([]WalletTransf
 	var walletHeight struct {
 		Height int64 `json:"height"`
 	}
-	if err := MoneroWallet_Request(ctx, s.cfg, "get_height", map[string]any{}, &walletHeight, errPaymentUnavailable); err == nil && walletHeight.Height > maxHeight {
+	if err := MoneroWallet_Request(ctx, s.Cfg, "get_height", map[string]any{}, &walletHeight, errPaymentUnavailable); err == nil && walletHeight.Height > maxHeight {
 		maxHeight = walletHeight.Height
 	}
 	for _, transfer := range confirmed.In {
@@ -234,7 +234,7 @@ func baselineListMoneroTransfers(s *Server, ctx context.Context) ([]WalletTransf
 		}
 	}
 	if maxHeight > bookmark {
-		if err := baselineSaveMoneroScanHeight(s.store, ctx, maxHeight); err != nil {
+		if err := baselineSaveMoneroScanHeight(s.Store, ctx, maxHeight); err != nil {
 			return nil, err
 		}
 	}
@@ -253,10 +253,10 @@ func baselineListMoneroTransfers(s *Server, ctx context.Context) ([]WalletTransf
 }
 
 func baselineReconcileMoneroAccountDeposits(s *Server, ctx context.Context) error {
-	if !MoneroWallet_ValidRate(s.cfg) {
+	if !MoneroWallet_ValidRate(s.Cfg) {
 		return nil
 	}
-	owners, err := baselineMoneroAddressOwners(s.store, ctx)
+	owners, err := baselineMoneroAddressOwners(s.Store, ctx)
 	if err != nil {
 		return err
 	}
@@ -284,27 +284,27 @@ func baselineReconcileMoneroAccountDeposits(s *Server, ctx context.Context) erro
 }
 
 func baselineSettleMoneroAccountDeposit(s *Server, ctx context.Context, accountID string, transfer WalletTransfer) error {
-	conversion := MoneroWallet_TokenUnits(transfer.Amount, s.cfg.MoneroRateAtomicAmount, s.cfg.MoneroRateTokenUnits)
+	conversion := MoneroWallet_TokenUnits(transfer.Amount, s.Cfg.MoneroRateAtomicAmount, s.Cfg.MoneroRateTokenUnits)
 	units, conversionErr := conversion.Value, conversion.Error
 	status := "confirming"
 	switch {
 	case transfer.DoubleSpendSeen:
 		status = "double_spend"
-	case transfer.Amount < MoneroWallet_MinimumAtomicAmount(s.cfg) || conversionErr != nil || units <= 0:
+	case transfer.Amount < MoneroWallet_MinimumAtomicAmount(s.Cfg) || conversionErr != nil || units <= 0:
 		status = "below_minimum"
-	case transfer.Confirmations >= MoneroWallet_ConfirmationsRequired(s.cfg) && !transfer.Locked && transfer.UnlockTime == 0:
+	case transfer.Confirmations >= MoneroWallet_ConfirmationsRequired(s.Cfg) && !transfer.Locked && transfer.UnlockTime == 0:
 		status = "confirmed"
 	}
-	deposit, err := baselineUpsertMoneroDeposit(s.store, ctx, accountID, transfer, status, s.cfg)
+	deposit, err := baselineUpsertMoneroDeposit(s.Store, ctx, accountID, transfer, status, s.Cfg)
 	if err != nil || status != "confirmed" || deposit.Receipt != nil {
 		return err
 	}
-	issuer := TokenPolicy_Issuer(s.cfg, errTokenIssuerReadOnly)
+	issuer := TokenPolicy_Issuer(s.Cfg, errTokenIssuerReadOnly)
 	signer, err := issuer.Value, issuer.Error
 	if err != nil {
 		return err
 	}
-	_, _, err = baselineCreditMoneroDeposit(s.store, ctx, signer, transfer.TxID,
+	_, _, err = baselineCreditMoneroDeposit(s.Store, ctx, signer, transfer.TxID,
 		transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
 	return err
 }

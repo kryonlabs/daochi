@@ -25,7 +25,7 @@ func (s *Server) baselineHandleAppList(w http.ResponseWriter, r *http.Request) {
 		s.baselineHandleAppRegister(w, r)
 		return
 	}
-	appsResult := AppStore_List(s.store.Database, r.Context())
+	appsResult := AppStore_List(s.Store.Database, r.Context())
 	apps, err := appsResult.Value, appsResult.Error
 	if err != nil {
 		slog.Error("list apps", "error", err)
@@ -40,7 +40,7 @@ func (s *Server) baselineHandleAppRoute(w http.ResponseWriter, r *http.Request) 
 	if strings.HasSuffix(appID, "/collections") {
 		appID = strings.TrimSuffix(appID, "/collections")
 		appID = strings.Trim(appID, "/")
-		collectionsResult := AppStore_Collections(s.store.Database, r.Context(), appID)
+		collectionsResult := AppStore_Collections(s.Store.Database, r.Context(), appID)
 		collections, err := collectionsResult.Value, collectionsResult.Error
 		if err != nil {
 			slog.Error("app collections", "app", LogSafety_LogText(appID), "error", err)
@@ -48,7 +48,7 @@ func (s *Server) baselineHandleAppRoute(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if len(collections) == 0 {
-			existence := AppStore_Exists(s.store.Database, r.Context(), appID)
+			existence := AppStore_Exists(s.Store.Database, r.Context(), appID)
 			if exists, err := existence.Value, existence.Error; err != nil || !exists {
 				if err != nil {
 					slog.Error("app exists", "app", LogSafety_LogText(appID), "error", err)
@@ -70,7 +70,7 @@ func (s *Server) baselineHandleAppRoute(w http.ResponseWriter, r *http.Request) 
 		baselineWriteError(w, http.StatusNotFound, "app not found")
 		return
 	}
-	appResult := AppStore_ByID(s.store.Database, r.Context(), appID)
+	appResult := AppStore_ByID(s.Store.Database, r.Context(), appID)
 	app, found, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil {
 		slog.Error("load app", "app", LogSafety_LogText(appID), "error", err)
@@ -88,7 +88,7 @@ func (s *Server) baselineHandleAppRegister(w http.ResponseWriter, r *http.Reques
 	if !s.baselineAuthenticateAdmin(w, r) {
 		return
 	}
-	req, err := baselineReadAppRegistrationRequest(w, r, s.cfg.MaxBodyBytes)
+	req, err := baselineReadAppRegistrationRequest(w, r, s.Cfg.MaxBodyBytes)
 	if err != nil {
 		baselineWriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -101,12 +101,12 @@ func (s *Server) baselineHandleAppRegister(w http.ResponseWriter, r *http.Reques
 		baselineWriteError(w, http.StatusBadRequest, "app_id path mismatch")
 		return
 	}
-	if err := AppStore_Upsert(s.store.Database, r.Context(), req); err != nil {
+	if err := AppStore_Upsert(s.Store.Database, r.Context(), req); err != nil {
 		slog.Error("register app", "app", LogSafety_LogText(req.AppID), "error", err)
 		baselineWriteError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
-	appResult := AppStore_ByID(s.store.Database, r.Context(), req.AppID)
+	appResult := AppStore_ByID(s.Store.Database, r.Context(), req.AppID)
 	app, _, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil {
 		slog.Error("load registered app", "app", LogSafety_LogText(req.AppID), "error", err)
@@ -122,12 +122,12 @@ func (s *Server) baselineHandleAppGrants(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if r.Method == http.MethodPost {
-		req, err := baselineReadAppGrantRequest(w, r, s.cfg.MaxBodyBytes)
+		req, err := baselineReadAppGrantRequest(w, r, s.Cfg.MaxBodyBytes)
 		if err != nil {
 			baselineWriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		createdGrant := AppGrants_Create(s.store.Database, r.Context(), userID, req, ErrSyncUserNotFound)
+		createdGrant := AppGrants_Create(s.Store.Database, r.Context(), userID, req, ErrSyncUserNotFound)
 		grant, err := createdGrant.Value, createdGrant.Error
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -145,7 +145,7 @@ func (s *Server) baselineHandleAppGrants(w http.ResponseWriter, r *http.Request)
 		baselineWriteJSON(w, http.StatusCreated, grant)
 		return
 	}
-	listedGrants := AppGrants_List(s.store.Database, r.Context(), userID)
+	listedGrants := AppGrants_List(s.Store.Database, r.Context(), userID)
 	grants, err := listedGrants.Value, listedGrants.Error
 	if err != nil {
 		slog.Error("list app grants", "user", LogSafety_LogText(userID), "error", err)
@@ -160,7 +160,7 @@ func (s *Server) baselineHandleSignedAppGrant(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	req, body, err := baselineReadSignedAppGrantRequest(w, r, s.cfg.MaxBodyBytes)
+	req, body, err := baselineReadSignedAppGrantRequest(w, r, s.Cfg.MaxBodyBytes)
 	if err != nil {
 		baselineWriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -179,17 +179,17 @@ func (s *Server) baselineHandleSignedAppGrant(w http.ResponseWriter, r *http.Req
 		req.Tx.BodySHA256 = Signing_SHA256Hex(grantBody)
 	}
 	_ = body
-	if err := baselineAuthenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, grantBody, req.Tx, userID, req.Grant.TargetAppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+	if err := baselineAuthenticationError(SignedTx_Verify(s.Store.Database, r.Context(), r, grantBody, req.Tx, userID, req.Grant.TargetAppID, s.Verifier.Verify, errSignedTxReplay)); err != nil {
 		s.baselineWriteAuthError(w, err)
 		return
 	}
 	created := false
 	defer func() {
 		if !created {
-			SignedTx_Forget(s.store.Database, r.Context(), req.Tx)
+			SignedTx_Forget(s.Store.Database, r.Context(), req.Tx)
 		}
 	}()
-	createdGrant := AppGrants_Create(s.store.Database, r.Context(), userID, req.Grant, ErrSyncUserNotFound)
+	createdGrant := AppGrants_Create(s.Store.Database, r.Context(), userID, req.Grant, ErrSyncUserNotFound)
 	grant, err := createdGrant.Value, createdGrant.Error
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -218,7 +218,7 @@ func (s *Server) baselineHandleAppGrantRoute(w http.ResponseWriter, r *http.Requ
 		baselineWriteError(w, http.StatusNotFound, "app grant not found")
 		return
 	}
-	if err := AppGrants_Revoke(s.store.Database, r.Context(), userID, id); err != nil {
+	if err := AppGrants_Revoke(s.Store.Database, r.Context(), userID, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			baselineWriteError(w, http.StatusNotFound, "app grant not found")
 			return
@@ -248,17 +248,17 @@ func (s *Server) baselineHandleAppRecords(w http.ResponseWriter, r *http.Request
 		s.baselineWriteAuthError(w, err)
 		return
 	}
-	if err := baselineAuthenticationError(SignedTx_Verify(s.store.Database, r.Context(), r, nil, tx, userID, targetAppID, s.verifier.Verify, errSignedTxReplay)); err != nil {
+	if err := baselineAuthenticationError(SignedTx_Verify(s.Store.Database, r.Context(), r, nil, tx, userID, targetAppID, s.Verifier.Verify, errSignedTxReplay)); err != nil {
 		s.baselineWriteAuthError(w, err)
 		return
 	}
 	readCompleted := false
 	defer func() {
 		if !readCompleted {
-			SignedTx_Forget(s.store.Database, r.Context(), tx)
+			SignedTx_Forget(s.Store.Database, r.Context(), tx)
 		}
 	}()
-	authorized := AppGrants_AuthorizedRecords(s.store.Database, r.Context(), userID, sourceAppID, targetAppID, collectionPrefix, errAppScopeNotOwned, ErrSyncUserNotFound)
+	authorized := AppGrants_AuthorizedRecords(s.Store.Database, r.Context(), userID, sourceAppID, targetAppID, collectionPrefix, errAppScopeNotOwned, ErrSyncUserNotFound)
 	records, err := authorized.Value, authorized.Error
 	if err != nil {
 		if errors.Is(err, ErrSyncUserNotFound) {
@@ -282,11 +282,11 @@ func (s *Server) baselineHandleAppRecords(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) baselineAuthenticateAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if s.cfg.AdminToken == "" {
+	if s.Cfg.AdminToken == "" {
 		baselineWriteError(w, http.StatusForbidden, "admin registration disabled")
 		return false
 	}
-	if baselineRequestHeaderAlias(r, "X-Daochi-Admin", "X-Ksync-Admin") != s.cfg.AdminToken {
+	if baselineRequestHeaderAlias(r, "X-Daochi-Admin", "X-Ksync-Admin") != s.Cfg.AdminToken {
 		baselineWriteError(w, http.StatusUnauthorized, "admin token required")
 		return false
 	}
@@ -321,23 +321,23 @@ func baselineReadSignedAppGrantRequest(w http.ResponseWriter, r *http.Request, m
 }
 
 func (s *Server) baselineHandleSignedAppRegister(w http.ResponseWriter, r *http.Request) {
-	req, err := baselineReadSignedAppRegistrationRequest(w, r, s.cfg.MaxBodyBytes)
+	req, err := baselineReadSignedAppRegistrationRequest(w, r, s.Cfg.MaxBodyBytes)
 	if err != nil {
 		baselineWriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	verified := AppRegistration_Verify(req, s.cfg.NodeRegistryPublicKey)
+	verified := AppRegistration_Verify(req, s.Cfg.NodeRegistryPublicKey)
 	manifestBytes, manifestHash, err := verified.Value, verified.Hash, baselineAuthenticationError(verified.Authentication)
 	if err != nil {
 		s.baselineWriteAuthError(w, err)
 		return
 	}
-	if err := AppStore_UpsertSignedManifest(s.store.Database, r.Context(), req.Manifest, manifestBytes, manifestHash, req.ManifestSignature, req.ApprovalSignature); err != nil {
+	if err := AppStore_UpsertSignedManifest(s.Store.Database, r.Context(), req.Manifest, manifestBytes, manifestHash, req.ManifestSignature, req.ApprovalSignature); err != nil {
 		slog.Error("register signed app manifest", "app", LogSafety_LogText(req.Manifest.AppID), "error", err)
 		baselineWriteError(w, http.StatusInternalServerError, "app registration failed")
 		return
 	}
-	appResult := AppStore_ByID(s.store.Database, r.Context(), req.Manifest.AppID)
+	appResult := AppStore_ByID(s.Store.Database, r.Context(), req.Manifest.AppID)
 	app, _, err := appResult.Value, appResult.Found, appResult.Error
 	if err != nil {
 		slog.Error("load signed app manifest", "app", LogSafety_LogText(req.Manifest.AppID), "error", err)
@@ -376,12 +376,12 @@ func (s *Server) baselineAuthenticateToken(r *http.Request) (string, error) {
 	if !ok || strings.TrimSpace(token) == "" {
 		return "", authError{status: http.StatusUnauthorized, message: "bearer token required"}
 	}
-	verified := Token_VerifyAuthToken(s.cfg.TokenSecret, strings.TrimSpace(token), time.Now().Unix())
+	verified := Token_VerifyAuthToken(s.Cfg.TokenSecret, strings.TrimSpace(token), time.Now().Unix())
 	if verified.Error != "" {
 		return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
 	}
 	userID := verified.Value
-	account := AccountKeys_PublicKey(s.store.Database, r.Context(), userID)
+	account := AccountKeys_PublicKey(s.Store.Database, r.Context(), userID)
 	found, err := account.Found, account.Error
 	if err != nil {
 		return "", err
@@ -390,7 +390,7 @@ func (s *Server) baselineAuthenticateToken(r *http.Request) (string, error) {
 		// Released Inbe clients can bootstrap a missing account through sync by
 		// presenting the matching public key in the signed payload.
 		if r.URL.Path == "/api/v1/sync" {
-			deleted, err := s.store.baselineAccountTombstoned(r.Context(), userID)
+			deleted, err := s.Store.baselineAccountTombstoned(r.Context(), userID)
 			if err != nil {
 				return "", err
 			}
@@ -450,12 +450,12 @@ func baselineWriteError(w http.ResponseWriter, status int, message string) {
 func (s *Server) baselineWriteAuthError(w http.ResponseWriter, err error) {
 	var ae authError
 	if errors.As(err, &ae) {
-		Metrics_RecordAuthFailure(s.metrics, ae.status, ae.message)
+		Metrics_RecordAuthFailure(s.Metrics, ae.status, ae.message)
 		baselineWriteError(w, ae.status, ae.message)
 		return
 	}
 	slog.Error("auth", "error", err)
-	Metrics_RecordAuthFailure(s.metrics, http.StatusInternalServerError, "authentication failed")
+	Metrics_RecordAuthFailure(s.Metrics, http.StatusInternalServerError, "authentication failed")
 	baselineWriteError(w, http.StatusInternalServerError, "authentication failed")
 }
 

@@ -104,33 +104,33 @@ func (s *Server) baselineHandleSyncWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 	userID, err := s.baselineAuthenticateWebSocket(r)
 	if err != nil {
-		Metrics_RecordWebSocketReject(s.metrics, "auth")
+		Metrics_RecordWebSocketReject(s.Metrics, "auth")
 		s.baselineWriteAuthError(w, err)
 		return
 	}
 	if !s.allowRequest(r, "ws:ip:"+ClientAddress_FromRequest(r), 120, time.Minute) ||
 		!s.allowRequest(r, "ws:user:"+userID, 40, time.Minute) {
-		Metrics_RecordWebSocketReject(s.metrics, "rate_limited")
+		Metrics_RecordWebSocketReject(s.Metrics, "rate_limited")
 		Response_Error(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
 	if hub.count(userID) >= 8 {
-		Metrics_RecordWebSocketReject(s.metrics, "too_many_connections")
+		Metrics_RecordWebSocketReject(s.Metrics, "too_many_connections")
 		Response_Error(w, http.StatusTooManyRequests, "too many websocket connections")
 		return
 	}
 	conn, rw, err := baselineAcceptWebSocket(w, r)
 	if err != nil {
-		Metrics_RecordWebSocketReject(s.metrics, "handshake")
+		Metrics_RecordWebSocketReject(s.Metrics, "handshake")
 		return
 	}
-	s.metrics.WebSocketAccepted.Add(1)
+	s.Metrics.WebSocketAccepted.Add(1)
 	defer conn.Close()
 
 	events := hub.subscribe(userID)
 	defer hub.unsubscribe(userID, events)
 
-	if version, err := s.store.currentUserVersion(r.Context(), userID); err == nil {
+	if version, err := s.Store.currentUserVersion(r.Context(), userID); err == nil {
 		_ = baselineWriteWebSocketJSON(conn, baselineSyncEvent{Type: "sync_ready", UserIDHash: userID, ServerVersion: version})
 	}
 
@@ -171,7 +171,7 @@ func (s *Server) baselineAuthenticateWebSocket(r *http.Request) (string, error) 
 		return "", authError{status: http.StatusUnauthorized, message: "websocket query tokens are not accepted"}
 	}
 	if token := baselineBearerTokenFromWebSocketProtocol(r.Header.Get("Sec-WebSocket-Protocol")); token != "" {
-		verified := Token_VerifyAuthToken(s.cfg.TokenSecret, token, time.Now().Unix())
+		verified := Token_VerifyAuthToken(s.Cfg.TokenSecret, token, time.Now().Unix())
 		if verified.Error != "" {
 			return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
 		}

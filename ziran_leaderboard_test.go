@@ -55,13 +55,13 @@ func compareLeaderboard(t *testing.T, actual, expected *Store, context context.C
 func TestZiranLeaderboardAgainstBaseline(t *testing.T) {
 	actual, users := socialHTTPFixture(t)
 	expected, _ := socialHTTPFixture(t)
-	seedLeaderboard(t, actual.store, users)
-	seedLeaderboard(t, expected.store, users)
+	seedLeaderboard(t, actual.Store, users)
+	seedLeaderboard(t, expected.Store, users)
 	for _, user := range append(users, "missing", "' OR 1=1 --") {
 		for _, practice := range []string{"whm", "meditation", "sun_salutation", "unknown"} {
 			for _, metric := range []string{"streak", "avg_hold", "avg_time", "unknown"} {
-				compareLeaderboard(t, actual.store, expected.store, t.Context(), user, practice, metric)
-				compareLeaderboard(t, actual.store, expected.store, t.Context(), user, practice, metric)
+				compareLeaderboard(t, actual.Store, expected.Store, t.Context(), user, practice, metric)
+				compareLeaderboard(t, actual.Store, expected.Store, t.Context(), user, practice, metric)
 			}
 		}
 	}
@@ -72,19 +72,19 @@ func TestZiranLeaderboardAgainstBaseline(t *testing.T) {
 		"UPDATE server_users SET alias=NULL,profile_icon=11",
 		"UPDATE server_sessions SET deleted_at=1",
 	} {
-		for _, store := range []*Store{actual.store, expected.store} {
+		for _, store := range []*Store{actual.Store, expected.Store} {
 			if _, err := store.Database.Exec(query); err != nil {
 				t.Fatal(err)
 			}
 		}
 		for _, metric := range []string{"streak", "avg_hold", "avg_time"} {
-			compareLeaderboard(t, actual.store, expected.store, t.Context(), users[0], "meditation", metric)
+			compareLeaderboard(t, actual.Store, expected.Store, t.Context(), users[0], "meditation", metric)
 		}
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	compareLeaderboard(t, actual.store, expected.store, cancelled, users[0], "whm", "streak")
-	if result := Leaderboard_Friends(actual.store.Database, cancelled, users[0], "inbe", "whm", "streak"); !errors.Is(result.Error, context.Canceled) {
+	compareLeaderboard(t, actual.Store, expected.Store, cancelled, users[0], "whm", "streak")
+	if result := Leaderboard_Friends(actual.Store.Database, cancelled, users[0], "inbe", "whm", "streak"); !errors.Is(result.Error, context.Canceled) {
 		t.Fatal("cancelled leaderboard lost native context error")
 	}
 }
@@ -101,12 +101,12 @@ func TestZiranLeaderboardFailureBoundaries(t *testing.T) {
 		t.Run(query, func(t *testing.T) {
 			actual, users := socialHTTPFixture(t)
 			expected, _ := socialHTTPFixture(t)
-			for _, store := range []*Store{actual.store, expected.store} {
+			for _, store := range []*Store{actual.Store, expected.Store} {
 				if _, err := store.Database.Exec(query); err != nil {
 					t.Fatal(err)
 				}
 			}
-			compareLeaderboard(t, actual.store, expected.store, t.Context(), users[0], "whm", "avg_hold")
+			compareLeaderboard(t, actual.Store, expected.Store, t.Context(), users[0], "whm", "avg_hold")
 		})
 	}
 }

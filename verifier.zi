@@ -1,0 +1,20 @@
+#import "std/go_types"
+auth :: #import "authentication";
+errors :: #import "std/errors_go";
+builtin :: #system_library "go:builtin";
+
+Verifier :: struct {
+    verify: auth.VerifySignature
+}
+
+ErrVerifierUnavailable: Error = errors.New("ML-DSA-44 verifier unavailable");
+
+#scope_file
+Allocate :: () -> *Verifier #foreign builtin "new";
+
+#scope_export
+New :: (verify: auth.VerifySignature) -> *Verifier {
+    verifier := Allocate()
+    verifier.verify = verify
+    return verifier
+}

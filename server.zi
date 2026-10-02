@@ -1,0 +1,569 @@
+#import "std/go_types"
+protocol :: #import "protocol";
+config :: #import "config";
+storage :: #import "store";
+challenge :: #import "challenge";
+verification :: #import "verifier";
+hub :: #import "sync_hub";
+rate :: #import "rate_limit";
+metrics :: #import "metrics";
+node :: #import "node_identity";
+locks :: #import "std/sync_go";
+auth :: #import "authentication";
+auth_errors :: #import "authentication_error";
+http_auth :: #import "http_auth";
+access :: #import "account_access";
+account_signature :: #import "account_signature";
+operations :: #import "operational_http";
+tokens :: #import "token_http";
+monero :: #import "monero_deposits";
+invoices :: #import "monero_invoices";
+google :: #import "google_play_http";
+accounts :: #import "account_http";
+social :: #import "social_http";
+registry :: #import "app_http";
+devices :: #import "device_http";
+trust :: #import "trust_http";
+mesh :: #import "mesh";
+sync_http :: #import "sync_http";
+sync_ws :: #import "sync_ws";
+middleware :: #import "middleware";
+request_rate :: #import "request_rate";
+docs :: #import "docs";
+types :: #import "types";
+http :: #import "std/http_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+payment :: #import "payment_state";
+go_http :: #system_library "go:net/http";
+builtin :: #system_library "go:builtin";
+
+daochiSignatureContext :: "daochi-sync-v1";
+legacySyncSignatureContext :: "ksync-sync-v1";
+legacyInbeSignatureContext :: "inbe-sync-v1";
+errSignedTxReplay: Error = errors.New("signed transaction replay");
+errAppScopeNotOwned: Error = errors.New("app does not own collection scope");
+
+Server :: struct {
+    cfg: config.Config
+    store: *storage.Store
+    challenges: *challenge.ChallengeStore
+    verifier: *verification.Verifier
+    syncHub: *hub.SyncHub
+    limiter: *rate.RateLimiter
+    metrics: *metrics.ServerMetrics
+    node: node.NodeIdentity
+    // Shared account address allocation locks.
+    moneroAddressLocks: locks.ConcurrentMap
+    // Invoice IDs reported once during the expired-invoice sweep.
+    moneroStuckNotified: locks.ConcurrentMap
+    signer: access.SignPrivateKey
+}
+
+#scope_file
+Mux :: #type #foreign go_http "ServeMux";
+HTTPCallback :: #type (writer: http.ResponseWriter, request: *http.Request) -> void;
+ServerHandler :: #type (server: *Server, writer: http.ResponseWriter, request: *http.Request) -> void;
+ServerVerifier :: #type (server: *Server, publicKey: []u8, message: []u8, signature: []u8) -> bool;
+ServerStats :: #type (server: *Server, context: ctx.Context, databasePath: string) -> types.PublicStatsResult;
+BindHandler :: (callback: ServerHandler, server: *Server) -> HTTPCallback #foreign builtin "bind";
+BindVerifier :: (callback: ServerVerifier, server: *Server) -> auth.VerifySignature #foreign builtin "bind";
+BindStats :: (callback: ServerStats, server: *Server) -> docs.ReadPublicStats #foreign builtin "bind";
+Allocate :: () -> *Server #foreign builtin "new";
+AllocateMetrics :: () -> *metrics.ServerMetrics #foreign builtin "new";
+Panic :: (error: Error) #foreign builtin "panic";
+NewMux :: () -> *Mux #foreign go_http "NewServeMux";
+HandleFunc :: (mux: *Mux, pattern: string, callback: HTTPCallback) #foreign go_http "(*ServeMux).HandleFunc";
+RetainPath :: (value: string) -> string #foreign builtin "retain";
+RetainIdentity :: (value: node.NodeIdentity) -> node.NodeIdentity #foreign builtin "retain";
+
+Verify :: (server: *Server, publicKey: []u8, message: []u8, signature: []u8) -> bool {
+    return server.verifier.verify(publicKey, message, signature)
+}
+
+PublicStats :: (server: *Server, context: ctx.Context, databasePath: string) -> types.PublicStatsResult {
+    value, error := storage.PublicStats(server.store, context, databasePath)
+    result: types.PublicStatsResult
+    result.value = value
+    result.error = error
+    return result
+}
+
+Route :: (mux: *Mux, pattern: string, server: *Server, handler: ServerHandler) {
+    HandleFunc(mux, pattern, BindHandler(handler, server))
+}
+
+#scope_export
+New :: (configuration: config.Config, store: *storage.Store, verifier: *verification.Verifier,
+    signer: access.SignPrivateKey) -> *Server {
+    identity := node.New(configuration.NodeIdentityPrivateKey)
+    if identity.error != null {
+        Panic(identity.error)
+    }
+    server := Allocate()
+    server.cfg = configuration
+    server.store = store
+    server.challenges = challenge.New(configuration.ChallengeTTL)
+    server.verifier = verifier
+    server.syncHub = hub.New()
+    server.limiter = rate.New()
+    server.metrics = AllocateMetrics()
+    server.node = identity.value
+    server.signer = signer
+    return server
+}
+
+Access :: (server: *Server) -> access.AccountAccess #go_method "access" {
+    result: access.AccountAccess
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.challenges = server.challenges
+    result.limiter = server.limiter
+    result.counters = server.metrics
+    result.verify = BindVerifier(Verify, server)
+    result.sign = server.signer
+    return result
+}
+
+Operations :: (server: *Server) -> operations.Operations #go_method "operations" {
+    result: operations.Operations
+    result.database = server.store.database
+    result.path = RetainPath(server.store.path)
+    result.configuration = *server.cfg
+    result.identity = *server.node
+    result.notifications = server.syncHub
+    result.counters = server.metrics
+    result.verifierAvailable = server.verifier != null
+    return result
+}
+
+Tokens :: (server: *Server) -> tokens.Tokens #go_method "tokens" {
+    result: tokens.Tokens
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.limiter = server.limiter
+    result.verify = server.verifier.verify
+    result.replayError = errSignedTxReplay
+    result.issuerUnavailable = payment.errTokenIssuerReadOnly
+    return result
+}
+
+Monero :: (server: *Server) -> monero.Monero #go_method "monero" {
+    result: monero.Monero
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.limiter = server.limiter
+    result.addressLocks = *server.moneroAddressLocks
+    result.stuckNotified = *server.moneroStuckNotified
+    result.verify = server.verifier.verify
+    result.replayError = errSignedTxReplay
+    result.unavailable = payment.errPaymentUnavailable
+    result.issuerUnavailable = payment.errTokenIssuerReadOnly
+    result.missingUser = storage.ErrSyncUserNotFound
+    return result
+}
+
+Accounts :: (server: *Server) -> accounts.Accounts #go_method "accounts" {
+    result: accounts.Accounts
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.missingUser = storage.ErrSyncUserNotFound
+    return result
+}
+
+Social :: (server: *Server) -> social.Social #go_method "social" {
+    result: social.Social
+    result.accounts = Accounts(server)
+    result.notifications = server.syncHub
+    return result
+}
+
+AppRegistry :: (server: *Server) -> registry.Registry #go_method "appRegistry" {
+    result: registry.Registry
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.verify = server.verifier.verify
+    result.replayError = errSignedTxReplay
+    result.missingUser = storage.ErrSyncUserNotFound
+    result.scopeNotOwned = errAppScopeNotOwned
+    return result
+}
+
+Devices :: (server: *Server) -> devices.Devices #go_method "devices" {
+    result: devices.Devices
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.verify = server.verifier.verify
+    result.replayError = errSignedTxReplay
+    return result
+}
+
+Trust :: (server: *Server) -> trust.Trust #go_method "trust" {
+    result: trust.Trust
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.identity = RetainIdentity(server.node)
+    return result
+}
+
+Mesh :: (server: *Server) -> mesh.Mesh #go_method "mesh" {
+    result: mesh.Mesh
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.identity = *server.node
+    result.convertError = auth_errors.Convert
+    return result
+}
+
+AuthenticateToken :: (server: *Server, request: *http.Request) -> string, Error #go_method "authenticateToken" #go_results {
+    result := http_auth.AuthenticateToken(server.store.database, request, server.cfg.TokenSecret)
+    return result.value, auth_errors.Convert(result.authentication)
+}
+
+BearerUser :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) -> string, bool #go_method "bearerUser" #go_results {
+    result := http_auth.BearerUser(server.store.database, request, server.cfg.TokenSecret)
+    if result.authentication.error != null || result.authentication.status != 0 {
+        http_auth.Respond(writer, server.metrics, result.authentication)
+        return "", false
+    }
+    return result.value, true
+}
+
+Synchronization :: (server: *Server) -> sync_http.Synchronization #go_method "synchronization" {
+    result: sync_http.Synchronization
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.notifications = server.syncHub
+    result.verify = BindVerifier(Verify, server)
+    result.replayError = errSignedTxReplay
+    result.missingUser = storage.ErrSyncUserNotFound
+    return result
+}
+
+AuthenticateSignature :: (server: *Server, context: ctx.Context, userID: string,
+    publicKey: string, signed: string, signatureContext: string, method: string,
+    path: string, payload: []u8) -> []u8, Error #go_method "authenticateSignature" #go_results {
+    result := account_signature.Authenticate(server.store.database, server.challenges, Access(server).verify,
+        context, userID, publicKey, signed, signatureContext, method, path, payload)
+    return result.value, auth_errors.Convert(result.authentication)
+}
+
+WithCommonHeaders :: (server: *Server, next: middleware.Handler) -> middleware.Handler #go_method "withCommonHeaders" {
+    return middleware.New(*server.metrics, next)
+}
+
+AllowRequest :: (server: *Server, request: *http.Request, key: string, limit: isize,
+    window: clock.Duration) -> bool #go_method "allowRequest" {
+    return request_rate.Allow(server.limiter, server.metrics, key, limit, window)
+}
+
+SyncSocket :: (server: *Server) -> sync_ws.SyncSocket #go_method "syncSocket" {
+    result: sync_ws.SyncSocket
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.limiter = server.limiter
+    result.hub = server.syncHub
+    return result
+}
+
+NodeUsage :: (server: *Server, context: ctx.Context) -> protocol.NodeUsage, Error #go_method "nodeUsage" #go_results {
+    result := operations.Usage(Operations(server), context)
+    return result.value, result.error
+}
+
+Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
+    mux := NewMux()
+    Route(mux, "GET /", server, HandleDocs)
+    Route(mux, "GET /openapi.json", server, HandleOpenAPI)
+    Route(mux, "GET /healthz", server, HandleHealth)
+    Route(mux, "GET /readyz", server, HandleReady)
+    Route(mux, "GET /api/v1/node", server, HandleNodeInfo)
+    Route(mux, "POST /api/v1/node/pairing/invites", server, HandleTrustHttpCreateInvite)
+    Route(mux, "POST /api/v1/node/pairing/accept", server, HandleTrustHttpAcceptInvite)
+    Route(mux, "POST /api/v1/node/pairing/complete", server, HandleTrustHttpCompletePairing)
+    Route(mux, "GET /api/v1/node/peers", server, HandleTrustHttpListPeers)
+    Route(mux, "POST /api/v1/namespaces", server, HandleTrustHttpCreateSpace)
+    Route(mux, "POST /api/v1/namespaces/claims", server, HandleTrustHttpRegisterName)
+    Route(mux, "GET /api/v1/namespaces/resolve", server, HandleTrustHttpResolveName)
+    Route(mux, "POST /api/v1/node/mesh/export", server, HandleMeshExport)
+    Route(mux, "POST /api/v1/node/mesh/import", server, HandleMeshImport)
+    Route(mux, "GET /metrics", server, HandleMetrics)
+    Route(mux, "GET /api/v1/apps", server, HandleAppHttpList)
+    Route(mux, "POST /api/v1/apps", server, HandleAppHttpList)
+    Route(mux, "POST /api/v1/apps/register-signed", server, HandleAppHttpRegisterSigned)
+    Route(mux, "GET /api/v1/apps/", server, HandleAppHttpRoute)
+    Route(mux, "PUT /api/v1/apps/", server, HandleAppHttpRoute)
+    Route(mux, "GET /api/v1/tokens/assets", server, HandleTokenHttpAssets)
+    Route(mux, "GET /api/v1/tokens/products", server, HandleTokenHttpProducts)
+    Route(mux, "GET /api/v1/tokens/issuer", server, HandleTokenHttpIssuer)
+    Route(mux, "GET /api/v1/tokens/balance", server, HandleTokenHttpBalance)
+    Route(mux, "GET /api/v1/tokens/ledger", server, HandleTokenHttpLedger)
+    Route(mux, "POST /api/v1/tokens/spend", server, HandleTokenHttpSpend)
+    Route(mux, "POST /api/v1/tokens/purchases/google/verify", server, HandleGooglePlayHttpVerify)
+    Route(mux, "POST /api/v1/tokens/purchases/monero/invoices", server, HandleMoneroInvoicesCreate)
+    Route(mux, "GET /api/v1/tokens/purchases/monero/invoices/", server, HandleMoneroInvoicesRead)
+    Route(mux, "GET /api/v1/tokens/purchases/monero/address", server, HandleMoneroDepositsAddress)
+    Route(mux, "GET /api/v1/tokens/purchases/monero/address/", server, HandleMoneroDepositsAddress)
+    Route(mux, "GET /api/v1/tokens/purchases/monero/deposits", server, HandleMoneroDepositsDeposits)
+    Route(mux, "GET /api/v1/tokens/checkpoints/latest", server, HandleTokenHttpLatestCheckpoint)
+    Route(mux, "GET /api/v1/tokens/receipts/", server, HandleTokenHttpReceipt)
+    Route(mux, "POST /api/v1/admin/tokens/manual-credit", server, HandleTokenHttpManualCredit)
+    Route(mux, "POST /api/v1/admin/tokens/checkpoint", server, HandleTokenHttpCreateCheckpoint)
+    Route(mux, "GET /api/v1/sync/diagnostics", server, HandleSyncDiagnostics)
+    Route(mux, "GET /api/v1/sync/challenge", server, HandleChallenge)
+    Route(mux, "GET /api/v1/sync/ws", server, HandleSyncWebSocket)
+    Route(mux, "POST /api/v1/sync/login", server, HandleLogin)
+    Route(mux, "POST /api/v1/sync", server, HandleSync)
+    Route(mux, "POST /api/v1/account/alias", server, HandleAccountHttpAlias)
+    Route(mux, "POST /api/v1/account/profile-icon", server, HandleAccountHttpProfileIcon)
+    Route(mux, "GET /api/v1/account/export", server, HandleAccountHttpExport)
+    Route(mux, "GET /api/v1/account/devices", server, HandleDeviceHttpRoute)
+    Route(mux, "POST /api/v1/account/devices", server, HandleDeviceHttpRoute)
+    Route(mux, "DELETE /api/v1/account/devices", server, HandleDeviceHttpRoute)
+    Route(mux, "GET /api/v1/account/app-grants", server, HandleAppHttpGrants)
+    Route(mux, "POST /api/v1/account/app-grants", server, HandleAppHttpGrants)
+    Route(mux, "POST /api/v1/account/app-grants/signed", server, HandleAppHttpGrantSigned)
+    Route(mux, "DELETE /api/v1/account/app-grants/", server, HandleAppHttpGrantRoute)
+    Route(mux, "GET /api/v1/account/app-records", server, HandleAppHttpRecords)
+    Route(mux, "DELETE /api/v1/account", server, HandleDeleteAccount)
+    Route(mux, "POST /api/v1/account/delete", server, HandleDeleteAccount)
+    Route(mux, "POST /api/v1/account/delete-with-key", server, HandleDeleteAccountWithKey)
+    Route(mux, "GET /api/v1/friends", server, HandleSocialHttpFriends)
+    Route(mux, "DELETE /api/v1/friends/", server, HandleSocialHttpRemoveFriend)
+    Route(mux, "GET /api/v1/friends/requests", server, HandleSocialHttpRequests)
+    Route(mux, "POST /api/v1/friends/requests", server, HandleSocialHttpCreateRequest)
+    Route(mux, "POST /api/v1/friends/requests/", server, HandleSocialHttpRequestAction)
+    Route(mux, "PUT /api/v1/profile/stats", server, HandleSocialHttpPutStats)
+    Route(mux, "GET /api/v1/friends/stats", server, HandleSocialHttpFriendStats)
+    return WithCommonHeaders(server, cast(middleware.Handler)mux)
+}
+
+#scope_file
+HandleDocs :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    docs.Handle(writer, request, server.cfg.DBPath, BindStats(PublicStats, server))
+}
+HandleOpenAPI :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    docs.OpenAPI(writer, request)
+}
+
+HandleTrustHttpCreateInvite :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    trust.CreateInvite(Trust(server), writer, request)
+}
+
+HandleTrustHttpAcceptInvite :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    trust.AcceptInvite(Trust(server), writer, request)
+}
+
+HandleTrustHttpCompletePairing :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    trust.CompletePairing(Trust(server), writer, request)
+}
+
+HandleTrustHttpListPeers :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    trust.ListPeers(Trust(server), writer, request)
+}
+
+HandleTrustHttpCreateSpace :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    trust.CreateSpace(Trust(server), writer, request)
+}
+
+HandleTrustHttpRegisterName :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    trust.RegisterName(Trust(server), writer, request)
+}
+
+HandleTrustHttpResolveName :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    trust.ResolveName(Trust(server), writer, request)
+}
+
+HandleMeshExport :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    mesh.Export(Mesh(server), writer, request)
+}
+
+HandleMeshImport :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    mesh.Import(Mesh(server), writer, request)
+}
+
+HandleAppHttpList :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    registry.List(AppRegistry(server), writer, request)
+}
+
+HandleAppHttpRegisterSigned :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    registry.RegisterSigned(AppRegistry(server), writer, request)
+}
+
+HandleAppHttpRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    registry.Route(AppRegistry(server), writer, request)
+}
+
+HandleTokenHttpAssets :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.Assets(Tokens(server), writer, request)
+}
+
+HandleTokenHttpProducts :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.Products(Tokens(server), writer, request)
+}
+
+HandleTokenHttpIssuer :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.Issuer(Tokens(server), writer, request)
+}
+
+HandleTokenHttpBalance :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.Balance(Tokens(server), writer, request)
+}
+
+HandleTokenHttpLedger :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.Ledger(Tokens(server), writer, request)
+}
+
+HandleTokenHttpSpend :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.Spend(Tokens(server), writer, request)
+}
+
+HandleGooglePlayHttpVerify :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    google.Verify(Tokens(server), writer, request)
+}
+
+HandleMoneroInvoicesCreate :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    invoices.Create(Monero(server), writer, request)
+}
+
+HandleMoneroInvoicesRead :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    invoices.Read(Monero(server), writer, request)
+}
+
+HandleMoneroDepositsAddress :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    monero.Address(Monero(server), writer, request)
+}
+
+HandleMoneroDepositsDeposits :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    monero.Deposits(Monero(server), writer, request)
+}
+
+HandleTokenHttpLatestCheckpoint :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.LatestCheckpoint(Tokens(server), writer, request)
+}
+
+HandleTokenHttpReceipt :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.Receipt(Tokens(server), writer, request)
+}
+
+HandleTokenHttpManualCredit :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.ManualCredit(Tokens(server), writer, request)
+}
+
+HandleTokenHttpCreateCheckpoint :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.CreateCheckpoint(Tokens(server), writer, request)
+}
+
+HandleAccountHttpAlias :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    accounts.Alias(Accounts(server), writer, request)
+}
+
+HandleAccountHttpProfileIcon :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    accounts.ProfileIcon(Accounts(server), writer, request)
+}
+
+HandleAccountHttpExport :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    accounts.Export(Accounts(server), writer, request)
+}
+
+HandleDeviceHttpRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    devices.Route(Devices(server), writer, request)
+}
+
+HandleAppHttpGrants :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    registry.Grants(AppRegistry(server), writer, request)
+}
+
+HandleAppHttpGrantSigned :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    registry.GrantSigned(AppRegistry(server), writer, request)
+}
+
+HandleAppHttpGrantRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    registry.GrantRoute(AppRegistry(server), writer, request)
+}
+
+HandleAppHttpRecords :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    registry.Records(AppRegistry(server), writer, request)
+}
+
+HandleSocialHttpFriends :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    social.Friends(Social(server), writer, request)
+}
+
+HandleSocialHttpRemoveFriend :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    social.RemoveFriend(Social(server), writer, request)
+}
+
+HandleSocialHttpRequests :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    social.Requests(Social(server), writer, request)
+}
+
+HandleSocialHttpCreateRequest :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    social.CreateRequest(Social(server), writer, request)
+}
+
+HandleSocialHttpRequestAction :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    social.RequestAction(Social(server), writer, request)
+}
+
+HandleSocialHttpPutStats :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    social.PutStats(Social(server), writer, request)
+}
+
+HandleSocialHttpFriendStats :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    social.FriendStats(Social(server), writer, request)
+}
+
+#scope_export
+
+HandleHealth :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleHealth" {
+    operations.Health(writer, request)
+}
+
+HandleReady :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleReady" {
+    operations.Ready(Operations(server), writer, request)
+}
+
+HandleNodeInfo :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleNodeInfo" {
+    operations.Node(Operations(server), writer, request)
+}
+
+HandleMetrics :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleMetrics" {
+    operations.Metrics(Operations(server), writer, request)
+}
+
+HandleSyncDiagnostics :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleSyncDiagnostics" {
+    operations.Diagnostics(Operations(server), writer, request)
+}
+
+HandleChallenge :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleChallenge" {
+    access.Challenge(Access(server), writer, request)
+}
+
+HandleSync :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleSync" {
+    sync_http.Handle(Synchronization(server), writer, request)
+}
+
+HandleLogin :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleLogin" {
+    access.Login(Access(server), writer, request)
+}
+
+HandleDeleteAccount :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleDeleteAccount" {
+    access.Delete(Access(server), writer, request)
+}
+
+HandleDeleteAccountWithKey :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleDeleteAccountWithKey" {
+    access.DeleteWithKey(Access(server), writer, request)
+}
+
+HandleSyncWebSocket :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleSyncWebSocket" {
+    sync_ws.Handle(SyncSocket(server), writer, request)
+}

@@ -214,7 +214,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 	server, store, _ := testServer(t)
 	user, key, signature := accessIdentity()
 	verifier := &accessVerifier{transactionVerifier: transactionVerifier{accept: test.mode != "rejected"}}
-	server.verifier = verifier
+	server.Verifier = testVerifier(verifier)
 	if test.mode == "callback panic" {
 		verifier.panicValue = sentinel
 	}
@@ -314,8 +314,8 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 		lifecycleExecute(t, store, "CREATE TRIGGER reject_audit BEFORE INSERT ON server_sync_audit BEGIN SELECT RAISE(ABORT,'audit rejected'); END")
 	}
 	if test.mode == "prune" || test.mode == "prune failure" {
-		server.cfg.EncryptedPayloadRetention = time.Hour
-		server.cfg.EncryptedPayloadMaxAccountBytes = 1_000_000
+		server.Cfg.EncryptedPayloadRetention = time.Hour
+		server.Cfg.EncryptedPayloadMaxAccountBytes = 1_000_000
 		if test.mode == "prune failure" {
 			lifecycleExecute(t, store, "CREATE TRIGGER reject_prune BEFORE DELETE ON server_encrypted_payloads BEGIN SELECT RAISE(ABORT,'prune rejected'); END")
 		}
@@ -339,7 +339,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 	request.Header.Set("X-Daochi-User", user)
 	request.Header.Set("X-Daochi-Client", input.ClientID)
 	request.Header.Set("X-Daochi-Limit", "1")
-	request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.cfg.TokenSecret, user, 4_000_000_000).Value)
+	request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, user, 4_000_000_000).Value)
 	if test.version >= 6 && !test.envelope {
 		tx := SignedTxEnvelope{ProtocolVersion: 6, TxID: "transaction-1", AccountID: user, AppID: input.AppID, DeviceKeyID: "device-key",
 			Method: request.Method, Path: request.URL.Path, BodySHA256: Signing_SHA256Hex(data), Nonce: "transaction-nonce", ExpiresAt: test.expiry,
@@ -361,7 +361,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 		request.Header.Del("X-Daochi-Tx")
 	}
 	if test.mode == "token mismatch" {
-		request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.cfg.TokenSecret, other, 4_000_000_000).Value)
+		request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, other, 4_000_000_000).Value)
 	}
 	if test.mode == "missing header" {
 		request.Header.Del("X-Daochi-User")
@@ -382,10 +382,10 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 		request.Header.Set("X-Daochi-Since-Version", "-1")
 	}
 	if test.mode == "quota" {
-		server.cfg.EncryptedPayloadMaxAccountBytes = int64(len(data) - 1)
+		server.Cfg.EncryptedPayloadMaxAccountBytes = int64(len(data) - 1)
 	}
 	if test.mode == "oversized" {
-		server.cfg.MaxBodyBytes = 3
+		server.Cfg.MaxBodyBytes = 3
 	}
 	if test.mode == "cancelled" {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -402,10 +402,10 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 	if test.mode == "body panic" {
 		reader.panicValue = sentinel
 	}
-	subscription := SyncHub_Subscribe(server.syncHub, user)
-	foreign := SyncHub_Subscribe(server.syncHub, other)
-	defer SyncHub_Unsubscribe(server.syncHub, user, subscription)
-	defer SyncHub_Unsubscribe(server.syncHub, other, foreign)
+	subscription := SyncHub_Subscribe(server.SyncHub, user)
+	foreign := SyncHub_Subscribe(server.SyncHub, other)
+	defer SyncHub_Unsubscribe(server.SyncHub, user, subscription)
+	defer SyncHub_Unsubscribe(server.SyncHub, other, foreign)
 	plan := &lifecycleDriverPlan{failAt: failAt, failure: sentinel}
 	if test.mode != "closed" {
 		syncHTTPTrackStore(t, store, plan)
@@ -448,9 +448,9 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 	plan.failAt = 0
 	result.bodyClosed = reader.closed
 	result.verifications = verifier.calls
-	result.failures = server.metrics.SyncFailures.Load()
+	result.failures = server.Metrics.SyncFailures.Load()
 	metrics := httptest.NewRecorder()
-	Metrics_Prometheus(server.metrics, metrics, NodeUsage{}, NodeStorageUsage{}, "fixture")
+	Metrics_Prometheus(server.Metrics, metrics, NodeUsage{}, NodeStorageUsage{}, "fixture")
 	result.counters = metrics.Body.String()
 	for subscription.Channel.Len() > 0 {
 		value, _ := subscription.Channel.Recv()

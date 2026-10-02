@@ -48,13 +48,13 @@ func TestOpenAPISpecCoversRegisteredRoutes(t *testing.T) {
 	if len(paths) == 0 {
 		t.Fatal("openapi spec has no paths")
 	}
-	source, err := os.ReadFile("server.go")
+	source, err := os.ReadFile("server.zi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered := regexp.MustCompile(`HandleFunc\("([A-Z]+) (/[^"]*)"`).FindAllStringSubmatch(string(source), -1)
+	registered := regexp.MustCompile(`(?m)^\s*Route\(mux, "([A-Z]+) (/[^"]*)", server,`).FindAllStringSubmatch(string(source), -1)
 	if len(registered) == 0 {
-		t.Fatal("no HandleFunc registrations found in server.go")
+		t.Fatal("no route registrations found in server.zi")
 	}
 	for _, match := range registered {
 		route := match[2]

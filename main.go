@@ -57,7 +57,7 @@ func main() {
 		log.Fatalf("create verifier: %v", err)
 	}
 
-	daochi := NewServer(cfg, store, verifier)
+	daochi := Server_New(cfg, store, verifier, signAccountProof)
 	runtimeContext, stopRuntime := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopRuntime()
 	var workers sync.WaitGroup
@@ -79,7 +79,7 @@ func main() {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		Discovery_Run(&daochi.cfg, &daochi.node, runtimeContext, Discovery_Register, Discovery_Shutdown)
+		Discovery_Run(&daochi.Cfg, &daochi.Node, runtimeContext, Discovery_Register, Discovery_Shutdown)
 	}()
 	handler := daochi.Routes()
 	server := &http.Server{

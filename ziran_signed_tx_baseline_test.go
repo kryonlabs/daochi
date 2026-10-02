@@ -73,7 +73,7 @@ func (s *Server) baselineVerifySignedTx(ctx context.Context, r *http.Request, bo
 	if tx.ExpiresAt <= now.Unix() || time.Unix(tx.ExpiresAt, 0).After(now.Add(baselineTxMaxFutureSkew)) {
 		return authError{status: http.StatusUnauthorized, message: "signed transaction expired"}
 	}
-	publicKey, found, err := s.store.baselineAccountPublicKey(ctx, tx.AccountID)
+	publicKey, found, err := s.Store.baselineAccountPublicKey(ctx, tx.AccountID)
 	if err != nil {
 		return err
 	}
@@ -86,19 +86,19 @@ func (s *Server) baselineVerifySignedTx(ctx context.Context, r *http.Request, bo
 		return authError{status: http.StatusBadRequest, message: "invalid signed transaction signature"}
 	}
 	message := []byte(Transaction_CanonicalMessage(baselineTxContext, tx))
-	if !s.verifier.Verify(publicKey, message, signature) {
+	if !s.Verifier.Verify(publicKey, message, signature) {
 		return authError{status: http.StatusUnauthorized, message: "signed transaction rejected"}
 	}
 	if err := s.baselineVerifyDeviceSignedTx(ctx, tx, message); err != nil {
 		return err
 	}
-	if err := s.store.baselineRecordSignedTx(ctx, tx); err != nil {
+	if err := s.Store.baselineRecordSignedTx(ctx, tx); err != nil {
 		if errors.Is(err, errSignedTxReplay) {
 			return authError{status: http.StatusConflict, message: "signed transaction replay"}
 		}
 		return err
 	}
-	if err := s.store.baselineTouchDeviceKey(ctx, tx.AccountID, tx.AppID, tx.DeviceKeyID); err != nil {
+	if err := s.Store.baselineTouchDeviceKey(ctx, tx.AccountID, tx.AppID, tx.DeviceKeyID); err != nil {
 		return err
 	}
 	return nil
@@ -108,7 +108,7 @@ func (s *Server) baselineVerifyDeviceSignedTx(ctx context.Context, tx SignedTxEn
 	if !Identity_ValidClientID(tx.DeviceKeyID) {
 		return authError{status: http.StatusBadRequest, message: "invalid device key id"}
 	}
-	deviceKey, found, err := s.store.baselineActiveDeviceKey(ctx, tx.AccountID, tx.AppID, tx.DeviceKeyID)
+	deviceKey, found, err := s.Store.baselineActiveDeviceKey(ctx, tx.AccountID, tx.AppID, tx.DeviceKeyID)
 	if err != nil {
 		return err
 	}

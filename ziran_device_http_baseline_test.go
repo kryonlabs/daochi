@@ -15,7 +15,7 @@ func (s *Server) baselineHandleAccountDevices(w http.ResponseWriter, r *http.Req
 	}
 	switch r.Method {
 	case http.MethodGet:
-		listed := DeviceKeys_List(s.store.Database, r.Context(), accountID)
+		listed := DeviceKeys_List(s.Store.Database, r.Context(), accountID)
 		devices, err := listed.Value, listed.Error
 		if err != nil {
 			Response_Error(w, http.StatusInternalServerError, "device list failed")
@@ -27,7 +27,7 @@ func (s *Server) baselineHandleAccountDevices(w http.ResponseWriter, r *http.Req
 		s.baselineHandleDeviceRevocation(w, r, accountID)
 		return
 	}
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -50,7 +50,7 @@ func (s *Server) baselineHandleAccountDevices(w http.ResponseWriter, r *http.Req
 		ClientID:  request.ClientID,
 		PublicKey: request.PublicKey,
 	}
-	if err := DeviceKeys_Register(s.store.Database, r.Context(), device, request.Nonce, errSignedTxReplay); err != nil {
+	if err := DeviceKeys_Register(s.Store.Database, r.Context(), device, request.Nonce, errSignedTxReplay); err != nil {
 		if errors.Is(err, errSignedTxReplay) {
 			Response_Error(w, http.StatusConflict, "device registration replay")
 			return
@@ -62,7 +62,7 @@ func (s *Server) baselineHandleAccountDevices(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) baselineHandleDeviceRevocation(w http.ResponseWriter, r *http.Request, accountID string) {
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -78,7 +78,7 @@ func (s *Server) baselineHandleDeviceRevocation(w http.ResponseWriter, r *http.R
 		s.baselineWriteAuthError(w, err)
 		return
 	}
-	if err := DeviceKeys_Revoke(s.store.Database, r.Context(), accountID, request, errSignedTxReplay); err != nil {
+	if err := DeviceKeys_Revoke(s.Store.Database, r.Context(), accountID, request, errSignedTxReplay); err != nil {
 		if errors.Is(err, errSignedTxReplay) {
 			Response_Error(w, http.StatusConflict, "device revocation replay")
 			return

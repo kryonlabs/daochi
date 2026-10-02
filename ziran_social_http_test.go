@@ -139,7 +139,7 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 					}
 					body := &httpPortBody{Reader: strings.NewReader(bodyText)}
 					request := httptest.NewRequest(endpoint.method, endpoint.path, body)
-					request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value)
+					request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value)
 					request.Header.Set("X-Daochi-User", user)
 					switch mode {
 					case "legacy header":
@@ -152,7 +152,7 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 					case "mismatched bearer":
 						request.Header.Set("X-Daochi-User", strings.Repeat("f", 64))
 					case "body limit":
-						server.cfg.MaxBodyBytes = 1
+						server.Cfg.MaxBodyBytes = 1
 					case "cancelled":
 						context, cancel := context.WithCancel(context.Background())
 						cancel()
@@ -160,14 +160,14 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 					case "body panic":
 						body.panicValue = failure
 					case "database failure":
-						if _, err := server.store.Database.Exec("DROP TABLE server_social_snapshots; DROP TABLE server_friend_requests; DROP TABLE server_friendships; DROP TABLE server_profile_stats; DROP TABLE server_sessions"); err != nil {
+						if _, err := server.Store.Database.Exec("DROP TABLE server_social_snapshots; DROP TABLE server_friend_requests; DROP TABLE server_friendships; DROP TABLE server_profile_stats; DROP TABLE server_sessions"); err != nil {
 							t.Fatal(err)
 						}
 					case "write failure":
 						for _, table := range []string{"server_users", "server_friend_requests", "server_friendships", "server_profile_stats", "server_social_snapshots"} {
 							for _, event := range []string{"INSERT", "UPDATE", "DELETE"} {
 								query := fmt.Sprintf("CREATE TRIGGER reject_%s_%s BEFORE %s ON %s BEGIN SELECT RAISE(ABORT,'write rejected'); END", table, event, event, table)
-								if _, err := server.store.Database.Exec(query); err != nil {
+								if _, err := server.Store.Database.Exec(query); err != nil {
 									t.Fatal(err)
 								}
 							}
@@ -175,9 +175,9 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 					}
 					var channels []chan SyncEvent
 					for _, user := range users {
-						subscription := SyncHub_Subscribe(server.syncHub, user)
+						subscription := SyncHub_Subscribe(server.SyncHub, user)
 						channels = append(channels, StdChannelGo_Interface(subscription.Channel).(chan SyncEvent))
-						defer SyncHub_Unsubscribe(server.syncHub, user, subscription)
+						defer SyncHub_Unsubscribe(server.SyncHub, user, subscription)
 					}
 					writer := &httpPortWriter{header: make(http.Header)}
 					if mode == "response panic" {
@@ -197,11 +197,11 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 					if observed.status == http.StatusOK {
 						observed.body = socialHTTPResponseTimes(t, endpoint.name, observed.body, started, finished)
 					}
-					if err := server.store.Database.Ping(); err != nil {
+					if err := server.Store.Database.Ping(); err != nil {
 						t.Fatal("HTTP path retained the database connection", err)
 					}
 					for _, user := range users {
-						exported := AccountExport_Export(server.store.Database, context.Background(), user)
+						exported := AccountExport_Export(server.Store.Database, context.Background(), user)
 						observed.accounts = append(observed.accounts, exported.Value)
 					}
 					for _, channel := range channels {

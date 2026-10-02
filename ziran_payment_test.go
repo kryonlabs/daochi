@@ -96,7 +96,7 @@ func TestZiranPaymentPolicyValuesMatchBaseline(t *testing.T) {
 				WaoziIssuerPrivateKey: bytes.Repeat([]byte{42}, privateSize),
 				WaoziIssuerPublicKey:  bytes.Repeat([]byte{43}, publicSize),
 			}
-			server := &Server{cfg: configuration}
+			server := &Server{Cfg: configuration, Signer: signAccountProof}
 			if got, want := TokenPolicy_IssuerStatus(configuration), server.baselinePaymentTokenIssuerStatus(); got != want {
 				t.Fatalf("issuer status changed for key sizes %d/%d: %s/%s", privateSize, publicSize, got, want)
 			}
@@ -147,9 +147,9 @@ func TestZiranPaymentPolicyValuesMatchBaseline(t *testing.T) {
 func paymentHTTPFixture(t *testing.T) (*Server, string, ed25519.PrivateKey) {
 	t.Helper()
 	server, account, key := registryHTTPFixture(t)
-	server.cfg.WaoziIssuerPrivateKey = tokenLedgerSigner()
-	server.cfg.WaoziIssuerPublicKey = tokenLedgerSigner().Public().(ed25519.PublicKey)
-	server.cfg.TokenProducts = map[string]TokenProduct{
+	server.Cfg.WaoziIssuerPrivateKey = tokenLedgerSigner()
+	server.Cfg.WaoziIssuerPublicKey = tokenLedgerSigner().Public().(ed25519.PublicKey)
+	server.Cfg.TokenProducts = map[string]TokenProduct{
 		"z": {ProductID: "z", TokenUnits: 50, MoneroAtomicAmount: 100},
 		"a": {ProductID: "a", TokenUnits: 10, MoneroAtomicAmount: 20},
 	}
@@ -158,7 +158,7 @@ func paymentHTTPFixture(t *testing.T) (*Server, string, ed25519.PrivateKey) {
 
 func paymentHTTPRequest(server *Server, account string, method, path string, body []byte) *http.Request {
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
-	token := Token_IssueAuthToken(server.cfg.TokenSecret, account, time.Now().Add(time.Hour).Unix()).Value
+	token := Token_IssueAuthToken(server.Cfg.TokenSecret, account, time.Now().Add(time.Hour).Unix()).Value
 	request.Header.Set("Authorization", "Bearer "+token)
 	return request
 }
@@ -168,22 +168,22 @@ func TestZiranPaymentReadHandlersMatchBaseline(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			actual, account, _ := paymentHTTPFixture(t)
 			baseline, _, _ := paymentHTTPFixture(t)
-			seedMatchingTokenLedgers(t, actual.store, baseline.store)
+			seedMatchingTokenLedgers(t, actual.Store, baseline.Store)
 			for _, server := range []*Server{actual, baseline} {
 				switch mode {
 				case "direct purchases":
-					server.cfg.TokenDirectPurchasesEnabled = true
+					server.Cfg.TokenDirectPurchasesEnabled = true
 				case "empty products":
-					server.cfg.TokenProducts = nil
+					server.Cfg.TokenProducts = nil
 				case "read only":
-					server.cfg.WaoziIssuerPrivateKey = nil
+					server.Cfg.WaoziIssuerPrivateKey = nil
 				case "missing issuer":
-					server.cfg.WaoziIssuerPrivateKey = nil
-					server.cfg.WaoziIssuerPublicKey = nil
+					server.Cfg.WaoziIssuerPrivateKey = nil
+					server.Cfg.WaoziIssuerPublicKey = nil
 				case "closed database":
-					_ = server.store.Close()
+					_ = server.Store.Close()
 				case "no limiter":
-					server.limiter = nil
+					server.Limiter = nil
 				}
 			}
 			query := "?app_id=inbe&since=0"
@@ -191,7 +191,7 @@ func TestZiranPaymentReadHandlersMatchBaseline(t *testing.T) {
 				query = "?app_id=bad%2Fapp&since=bad"
 			}
 			var receiptID string
-			if err := baseline.store.Database.QueryRow("SELECT receipt_id FROM token_ledger ORDER BY ledger_seq LIMIT 1").Scan(&receiptID); err != nil && mode != "closed database" {
+			if err := baseline.Store.Database.QueryRow("SELECT receipt_id FROM token_ledger ORDER BY ledger_seq LIMIT 1").Scan(&receiptID); err != nil && mode != "closed database" {
 				t.Fatal(err)
 			}
 			if mode == "closed database" {
@@ -236,7 +236,7 @@ func TestZiranPaymentReadHandlersMatchBaseline(t *testing.T) {
 				}
 				compareHTTPResponse(t, writers[0], writers[1])
 			}
-			if actual.metrics.RateLimitedRequests != baseline.metrics.RateLimitedRequests || actual.metrics.AuthFailures != baseline.metrics.AuthFailures {
+			if actual.Metrics.RateLimitedRequests != baseline.Metrics.RateLimitedRequests || actual.Metrics.AuthFailures != baseline.Metrics.AuthFailures {
 				t.Fatal("payment rejection counters changed")
 			}
 		})
@@ -285,17 +285,17 @@ func TestZiranPaymentAuthorizationAndReplayMatchBaseline(t *testing.T) {
 					if mode == "legacy" {
 						until = time.Now().Add(time.Hour).Unix()
 					}
-					if _, err := server.store.Database.Exec("INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until) VALUES('target',?1,?2,'active',?3)", AssetID, allowedPermission, until); err != nil {
+					if _, err := server.Store.Database.Exec("INSERT INTO token_app_permissions(app_id,asset_id,permission,status,legacy_unsigned_until) VALUES('target',?1,?2,'active',?3)", AssetID, allowedPermission, until); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "query failure" {
-					if _, err := server.store.Database.Exec("DROP TABLE token_app_permissions"); err != nil {
+					if _, err := server.Store.Database.Exec("DROP TABLE token_app_permissions"); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "replay" {
-					if err := SignedTx_Record(server.store.Database, t.Context(), transaction, errSignedTxReplay); err != nil {
+					if err := SignedTx_Record(server.Store.Database, t.Context(), transaction, errSignedTxReplay); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -314,12 +314,12 @@ func TestZiranPaymentAuthorizationAndReplayMatchBaseline(t *testing.T) {
 					requests[index] = request.WithContext(ctx)
 				}
 			}
-			got := TokenPolicy_Authorize(actual.store.Database, requests[0].Context(), requests[0], body, account, "target", AssetID, permission, actual.verifier.Verify, errSignedTxReplay)
+			got := TokenPolicy_Authorize(actual.Store.Database, requests[0].Context(), requests[0], body, account, "target", AssetID, permission, actual.Verifier.Verify, errSignedTxReplay)
 			want, signed, wantError := baseline.baselinePaymentAuthorizeTokenApp(requests[1].Context(), requests[1], body, account, "target", AssetID, permission)
 			if got.Signed != signed || !reflect.DeepEqual(got.Value, want) || !equalAuthenticationError(AuthenticationError_Convert(got.Authentication), wantError) {
 				t.Fatalf("authorization %s changed: %#v; baseline %#v/%t/%v", mode, got, want, signed, wantError)
 			}
-			if got, want := signedTransactionRows(t, actual.store), signedTransactionRows(t, baseline.store); !reflect.DeepEqual(got, want) {
+			if got, want := signedTransactionRows(t, actual.Store), signedTransactionRows(t, baseline.Store); !reflect.DeepEqual(got, want) {
 				t.Fatalf("authorization replay state changed: %#v / %#v", got, want)
 			}
 		})
@@ -331,7 +331,7 @@ func TestZiranPaymentSpendFailureCleanupMatchesBaseline(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			actual, account, key := paymentHTTPFixture(t)
 			baseline, _, _ := paymentHTTPFixture(t)
-			seedMatchingTokenLedgers(t, actual.store, baseline.store)
+			seedMatchingTokenLedgers(t, actual.Store, baseline.Store)
 			amount := int64(10)
 			if mode == "insufficient" {
 				amount = 1000
@@ -353,12 +353,12 @@ func TestZiranPaymentSpendFailureCleanupMatchesBaseline(t *testing.T) {
 			responses := []*httptest.ResponseRecorder{httptest.NewRecorder(), httptest.NewRecorder()}
 			for index, server := range []*Server{actual, baseline} {
 				if mode == "denied" {
-					if _, err := server.store.Database.Exec("INSERT INTO token_app_permissions(app_id,asset_id,permission,status) VALUES('target',?1,'purchase','active')", AssetID); err != nil {
+					if _, err := server.Store.Database.Exec("INSERT INTO token_app_permissions(app_id,asset_id,permission,status) VALUES('target',?1,'purchase','active')", AssetID); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "write failure" || mode == "log panic" || mode == "error response panic" {
-					if _, err := server.store.Database.Exec("CREATE TRIGGER reject_payment BEFORE INSERT ON token_ledger BEGIN SELECT RAISE(ABORT,'payment write rejected'); END"); err != nil {
+					if _, err := server.Store.Database.Exec("CREATE TRIGGER reject_payment BEFORE INSERT ON token_ledger BEGIN SELECT RAISE(ABORT,'payment write rejected'); END"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -394,12 +394,12 @@ func TestZiranPaymentSpendFailureCleanupMatchesBaseline(t *testing.T) {
 				log.SetFlags(originalLogFlags)
 			}
 			compareHTTPResponse(t, responses[0], responses[1])
-			got, want := signedTransactionRows(t, actual.store), signedTransactionRows(t, baseline.store)
+			got, want := signedTransactionRows(t, actual.Store), signedTransactionRows(t, baseline.Store)
 			if !reflect.DeepEqual(got, want) || (len(got) == 1) != (mode == "success response panic") {
 				t.Fatalf("payment replay cleanup changed: %#v / %#v", got, want)
 			}
-			actualBalance := TokenLedger_Balance(actual.store.Database, t.Context(), account, AssetID)
-			baselineBalance := TokenLedger_Balance(baseline.store.Database, t.Context(), account, AssetID)
+			actualBalance := TokenLedger_Balance(actual.Store.Database, t.Context(), account, AssetID)
+			baselineBalance := TokenLedger_Balance(baseline.Store.Database, t.Context(), account, AssetID)
 			if actualBalance.Error != nil || baselineBalance.Error != nil || actualBalance.Value != baselineBalance.Value {
 				t.Fatal("payment balance changed")
 			}
@@ -419,7 +419,7 @@ func TestZiranPaymentAdminHandlersMatchBaseline(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			actual, account, _ := paymentHTTPFixture(t)
 			baseline, _, _ := paymentHTTPFixture(t)
-			seedMatchingTokenLedgers(t, actual.store, baseline.store)
+			seedMatchingTokenLedgers(t, actual.Store, baseline.Store)
 			payload := map[string]any{
 				"account_id": " " + strings.ToUpper(account) + " ",
 				"app_id":     " target ", "amount": int64(25), "source_ref": " payment-admin ",
@@ -443,13 +443,13 @@ func TestZiranPaymentAdminHandlersMatchBaseline(t *testing.T) {
 			for _, server := range []*Server{actual, baseline} {
 				switch mode {
 				case "too large":
-					server.cfg.MaxBodyBytes = 1
+					server.Cfg.MaxBodyBytes = 1
 				case "read only":
-					server.cfg.WaoziIssuerPrivateKey = nil
+					server.Cfg.WaoziIssuerPrivateKey = nil
 				case "closed database":
-					_ = server.store.Close()
+					_ = server.Store.Close()
 				case "write failure":
-					if _, err := server.store.Database.Exec(`CREATE TRIGGER reject_admin_payment BEFORE INSERT ON token_ledger BEGIN SELECT RAISE(ABORT,'admin payment rejected'); END;
+					if _, err := server.Store.Database.Exec(`CREATE TRIGGER reject_admin_payment BEFORE INSERT ON token_ledger BEGIN SELECT RAISE(ABORT,'admin payment rejected'); END;
 CREATE TRIGGER reject_admin_checkpoint BEFORE INSERT ON token_checkpoints BEGIN SELECT RAISE(ABORT,'admin checkpoint rejected'); END;`); err != nil {
 						t.Fatal(err)
 					}
@@ -467,7 +467,7 @@ CREATE TRIGGER reject_admin_checkpoint BEFORE INSERT ON token_checkpoints BEGIN 
 					cryptorand.Reader = bytes.NewReader(bytes.Repeat([]byte{0x42}, 4096))
 					request := httptest.NewRequest("POST", path, bytes.NewReader(body))
 					if mode != "unauthenticated" {
-						request.Header.Set("X-Daochi-Admin", server.cfg.AdminToken)
+						request.Header.Set("X-Daochi-Admin", server.Cfg.AdminToken)
 					}
 					if mode == "cancelled" {
 						ctx, cancel := context.WithCancel(t.Context())
@@ -504,7 +504,7 @@ CREATE TRIGGER reject_admin_checkpoint BEFORE INSERT ON token_checkpoints BEGIN 
 					// A credit created in the preceding request has its own clock
 					// value, so compare each checkpoint with its persisted result.
 					for index, value := range []TokenCheckpoint{got, want} {
-						store := []*Store{actual.store, baseline.store}[index]
+						store := []*Store{actual.Store, baseline.Store}[index]
 						stored := TokenCheckpoint_Latest(store.Database, t.Context())
 						if stored.Error != nil || !stored.Found || value != stored.Value || value.LedgerSeq != got.LedgerSeq || value.IssuerID != want.IssuerID || value.AssetID != want.AssetID {
 							t.Fatal("admin checkpoint response changed")
@@ -518,7 +518,7 @@ CREATE TRIGGER reject_admin_checkpoint BEFORE INSERT ON token_checkpoints BEGIN 
 					if err := json.Unmarshal(writers[1].Body.Bytes(), &want); err != nil {
 						t.Fatal(err)
 					}
-					if !TokenReceipt_ValidSignature(actual.cfg.WaoziIssuerPublicKey, got.Receipt) || !TokenReceipt_ValidSignature(baseline.cfg.WaoziIssuerPublicKey, want.Receipt) {
+					if !TokenReceipt_ValidSignature(actual.Cfg.WaoziIssuerPublicKey, got.Receipt) || !TokenReceipt_ValidSignature(baseline.Cfg.WaoziIssuerPublicKey, want.Receipt) {
 						t.Fatal("admin credit response has an invalid signature")
 					}
 					got.Receipt = receiptWithoutGeneratedFields(got.Receipt)

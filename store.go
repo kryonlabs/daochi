@@ -26,7 +26,7 @@ type Results__SyncResult__a_string__Error struct {
 	Value2 Error
 }
 
-type Results__string__Error struct {
+type zir_6bdd19c92c646557_Results__string__Error struct {
 	Value0 string
 	Value1 Error
 }
@@ -207,9 +207,9 @@ func (receiver *Store) RegisterUser(argument1 Context, argument2 string, argumen
 	return Store_RegisterUser(receiver, argument1, argument2, argument3)
 }
 
-func Store_AccountAlias(store *Store, context Context, userID string) Results__string__Error {
+func Store_AccountAlias(store *Store, context Context, userID string) zir_6bdd19c92c646557_Results__string__Error {
 	result := AccountProfile_Alias(store.Database, context, userID)
-	return Results__string__Error{Value0: result.Value, Value1: result.Error}
+	return zir_6bdd19c92c646557_Results__string__Error{Value0: result.Value, Value1: result.Error}
 }
 
 func (receiver *Store) AccountAlias(argument1 Context, argument2 string) (string, Error) {
@@ -571,9 +571,9 @@ func (receiver *Store) AutoMigrateAllAccounts(argument1 Context) Error {
 	return Store_AutoMigrateAllAccounts(receiver, argument1)
 }
 
-func Store_StateHash(store *Store, context Context, userID string) Results__string__Error {
+func Store_StateHash(store *Store, context Context, userID string) zir_6bdd19c92c646557_Results__string__Error {
 	result := StateHash_State(store.Database, context, userID)
-	return Results__string__Error{Value0: result.Value, Value1: result.Error}
+	return zir_6bdd19c92c646557_Results__string__Error{Value0: result.Value, Value1: result.Error}
 }
 
 func (receiver *Store) StateHash(argument1 Context, argument2 string) (string, Error) {

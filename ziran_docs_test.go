@@ -197,7 +197,7 @@ func TestZiranDocsHandlerAgainstBaseline(t *testing.T) {
 								return PublicStatsResult{Value: value, Error: err}
 							})
 						} else {
-							server := &Server{cfg: Config{DBPath: "private/database.sqlite"}}
+							server := &Server{Cfg: Config{DBPath: "private/database.sqlite"}, Signer: signAccountProof}
 							server.baselineHandleDocs(writer, request, read)
 						}
 					}()

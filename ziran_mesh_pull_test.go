@@ -65,7 +65,7 @@ func TestZiranMeshPullPaginationAndFailuresAgainstBaseline(t *testing.T) {
 			var outcomes []error
 			var allRequests [][]NodeMeshExportRequest
 			for implementation, server := range []*Server{actual, expected} {
-				server.cfg.NodeRegistryPublicKey = registryKey
+				server.Cfg.NodeRegistryPublicKey = registryKey
 				ctx := t.Context()
 				if mode == "cancelled" {
 					cancelled, cancel := context.WithCancel(ctx)
@@ -82,13 +82,13 @@ func TestZiranMeshPullPaginationAndFailuresAgainstBaseline(t *testing.T) {
 					query = "CREATE TRIGGER reject_record BEFORE INSERT ON server_encrypted_records WHEN NEW.id='pull-second' BEGIN SELECT RAISE(ABORT,'record rejected'); END"
 				}
 				if query != "" {
-					if _, err := server.store.Database.Exec(query); err != nil {
+					if _, err := server.Store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "resume" {
 					key := MeshCursor_PeerKey("http://peer.test", policy)
-					if err := MeshStore_SaveCursor(server.store.Database, ctx, key, " raw saved cursor "); err != nil {
+					if err := MeshStore_SaveCursor(server.Store.Database, ctx, key, " raw saved cursor "); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -154,12 +154,12 @@ func TestZiranMeshPullPaginationAndFailuresAgainstBaseline(t *testing.T) {
 				}
 			}
 			if mode != "cursor load" {
-				compareMeshState(t, actual.store, expected.store)
+				compareMeshState(t, actual.Store, expected.Store)
 			}
-			if got, want := appStoreSnapshot(t, actual.store), appStoreSnapshot(t, expected.store); !reflect.DeepEqual(got, want) {
+			if got, want := appStoreSnapshot(t, actual.Store), appStoreSnapshot(t, expected.Store); !reflect.DeepEqual(got, want) {
 				t.Fatal("mesh pull changed app transactions", got, want)
 			}
-			if got, want := trustSnapshot(t, actual.store), trustSnapshot(t, expected.store); !reflect.DeepEqual(got, want) {
+			if got, want := trustSnapshot(t, actual.Store), trustSnapshot(t, expected.Store); !reflect.DeepEqual(got, want) {
 				t.Fatal("mesh pull changed trust transactions", got, want)
 			}
 		})
@@ -176,7 +176,7 @@ func TestZiranMeshConfiguredPeersAgainstBaseline(t *testing.T) {
 				server := meshHTTPFixture(t)
 				pull := NodeSyncPolicy{Direction: " PULL ", Data: []string{"encrypted_records"}, Apps: []string{"source"}}
 				push := NodeSyncPolicy{Direction: "push", Data: []string{"encrypted_records"}}
-				server.cfg.KnownNodes = []NodePeer{
+				server.Cfg.KnownNodes = []NodePeer{
 					{Name: "failed", URL: "http://failed.test", Sync: &pull},
 					{Name: "configured", URL: "http://configured.test", Sync: &pull},
 					{Name: "disabled", URL: "http://disabled.test"},
@@ -189,18 +189,18 @@ func TestZiranMeshConfiguredPeersAgainstBaseline(t *testing.T) {
 					{"push", `["http://push.test"]`, string(encodedPush)},
 					{"no addresses", `[]`, string(encodedPull)},
 				} {
-					if _, err := server.store.Database.Exec(`INSERT INTO trusted_node_peers(node_id,public_key,display_name,addresses_json,policy_json,trusted_at)
-VALUES(?1,?2,?1,?3,?4,'fixture')`, peer.name, server.node.PublicKey, peer.addresses, peer.policy); err != nil {
+					if _, err := server.Store.Database.Exec(`INSERT INTO trusted_node_peers(node_id,public_key,display_name,addresses_json,policy_json,trusted_at)
+VALUES(?1,?2,?1,?3,?4,'fixture')`, peer.name, server.Node.PublicKey, peer.addresses, peer.policy); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "missing trust table" {
-					if _, err := server.store.Database.Exec("DROP TABLE trusted_node_peers"); err != nil {
+					if _, err := server.Store.Database.Exec("DROP TABLE trusted_node_peers"); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if mode == "invalid stored policy" {
-					if _, err := server.store.Database.Exec("UPDATE trusted_node_peers SET policy_json='{' WHERE display_name='z-last'"); err != nil {
+					if _, err := server.Store.Database.Exec("UPDATE trusted_node_peers SET policy_json='{' WHERE display_name='z-last'"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -213,7 +213,7 @@ VALUES(?1,?2,?1,?3,?4,'fixture')`, peer.name, server.node.PublicKey, peer.addres
 					}
 					requests = append(requests, request.URL.Host, string(data))
 					// The original worker snapshots configured peers before I/O.
-					server.cfg.KnownNodes[1].URL = "http://mutated.test"
+					server.Cfg.KnownNodes[1].URL = "http://mutated.test"
 					if request.URL.Host == "failed.test" {
 						return nil, errors.New("first peer unavailable")
 					}

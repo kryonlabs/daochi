@@ -239,7 +239,7 @@ func TestZiranSignedTransactionVerificationAgainstBaseline(t *testing.T) {
 			}
 			accountID := "\u2003" + strings.ToUpper(strings.Repeat("a", 64)) + "\t"
 			got := AuthenticationError_Convert(SignedTx_Verify(actual.Database, ctx, request, body, tx, accountID, " inbe ", gotVerifier.Verify, errSignedTxReplay))
-			server := &Server{store: expected, verifier: wantVerifier}
+			server := &Server{Store: expected, Verifier: testVerifier(wantVerifier), Signer: signAccountProof}
 			want := server.baselineVerifySignedTx(ctx, request, body, tx, accountID, " inbe ")
 			if !equalAuthenticationError(got, want) || !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls) {
 				t.Fatalf("verification = %v, baseline = %v; calls = %#v, baseline = %#v", got, want, gotVerifier.calls, wantVerifier.calls)
@@ -412,7 +412,7 @@ func TestZiranDeviceSignatureValidationAgainstBaseline(t *testing.T) {
 				cancel()
 				ctx = canceled
 			}
-			server := &Server{store: expected, verifier: wantVerifier}
+			server := &Server{Store: expected, Verifier: testVerifier(wantVerifier), Signer: signAccountProof}
 			got := AuthenticationError_Convert(DeviceKeys_VerifyRegistration(actual.Database, ctx, tx.AccountID, registration, gotVerifier.Verify))
 			want := server.baselineVerifyDeviceRegistration(ctx, tx.AccountID, registration)
 			if !equalAuthenticationError(got, want) || !reflect.DeepEqual(gotVerifier.calls, wantVerifier.calls) {

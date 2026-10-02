@@ -18,16 +18,16 @@ func moneroReconcileTestServer(t *testing.T) (*Server, *Store, *fakeMoneroWallet
 		t.Fatal(err)
 	}
 	wallet := newFakeMoneroWalletRPC(t)
-	server.cfg.WaoziIssuerPrivateKey = privateKey
-	server.cfg.TokenProducts = map[string]TokenProduct{
+	server.Cfg.WaoziIssuerPrivateKey = privateKey
+	server.Cfg.TokenProducts = map[string]TokenProduct{
 		"waozi_tokens_small": {
 			ProductID:          "waozi_tokens_small",
 			TokenUnits:         5000000,
 			MoneroAtomicAmount: 1000000000000,
 		},
 	}
-	server.cfg.TokenDirectPurchasesEnabled = true
-	server.cfg.MoneroWalletRPCURL = wallet.URL
+	server.Cfg.TokenDirectPurchasesEnabled = true
+	server.Cfg.MoneroWalletRPCURL = wallet.URL
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0xA1)
 	return server, store, wallet, handler, identity
@@ -116,7 +116,7 @@ func TestMoneroExpiredInvoicePartialFundsReportedStuck(t *testing.T) {
 	if err != nil || balance != 0 {
 		t.Fatalf("partial expired invoice must not credit: balance=%d err=%v", balance, err)
 	}
-	if stuck := server.metrics.MoneroStuckInvoices.Load(); stuck != 1 {
+	if stuck := server.Metrics.MoneroStuckInvoices.Load(); stuck != 1 {
 		t.Fatalf("stuck invoice counter=%d, want 1 (reported once)", stuck)
 	}
 }
@@ -125,9 +125,9 @@ func TestMoneroExpiredInvoicePartialFundsReportedStuck(t *testing.T) {
 // instead of rescanning the full history on every poll.
 func TestMoneroDepositScanBookmarkAdvances(t *testing.T) {
 	server, store, wallet, handler, identity := moneroReconcileTestServer(t)
-	server.cfg.MoneroRateAtomicAmount = 1000000000000
-	server.cfg.MoneroRateTokenUnits = 5000000
-	server.cfg.MoneroConfirmationsRequired = 10
+	server.Cfg.MoneroRateAtomicAmount = 1000000000000
+	server.Cfg.MoneroRateTokenUnits = 5000000
+	server.Cfg.MoneroConfirmationsRequired = 10
 
 	address := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/address", identity.Token, nil)
 	if address.Code != http.StatusOK {

@@ -128,9 +128,9 @@ func TestWaoziTokenCreditSpendAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.cfg.AdminToken = "admin-test-token"
-	server.cfg.WaoziIssuerPublicKey = publicKey
-	server.cfg.WaoziIssuerPrivateKey = privateKey
+	server.Cfg.AdminToken = "admin-test-token"
+	server.Cfg.WaoziIssuerPublicKey = publicKey
+	server.Cfg.WaoziIssuerPrivateKey = privateKey
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x61)
 
@@ -208,17 +208,17 @@ func TestTokenProductsAndMoneroInvoiceSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	wallet := newFakeMoneroWalletRPC(t)
-	server.cfg.WaoziIssuerPublicKey = publicKey
-	server.cfg.WaoziIssuerPrivateKey = privateKey
-	server.cfg.TokenProducts = map[string]TokenProduct{
+	server.Cfg.WaoziIssuerPublicKey = publicKey
+	server.Cfg.WaoziIssuerPrivateKey = privateKey
+	server.Cfg.TokenProducts = map[string]TokenProduct{
 		"waozi_tokens_small": {
 			ProductID:          "waozi_tokens_small",
 			TokenUnits:         5000000,
 			MoneroAtomicAmount: 1000000000000,
 		},
 	}
-	server.cfg.TokenDirectPurchasesEnabled = true
-	server.cfg.MoneroWalletRPCURL = wallet.URL
+	server.Cfg.TokenDirectPurchasesEnabled = true
+	server.Cfg.MoneroWalletRPCURL = wallet.URL
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x71)
 
@@ -282,16 +282,16 @@ func TestMoneroPaymentIDAllowsSameTxAcrossSubaddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	wallet := newFakeMoneroWalletRPC(t)
-	server.cfg.WaoziIssuerPrivateKey = privateKey
-	server.cfg.TokenProducts = map[string]TokenProduct{
+	server.Cfg.WaoziIssuerPrivateKey = privateKey
+	server.Cfg.TokenProducts = map[string]TokenProduct{
 		"waozi_tokens_small": {
 			ProductID:          "waozi_tokens_small",
 			TokenUnits:         5000000,
 			MoneroAtomicAmount: 1000000000000,
 		},
 	}
-	server.cfg.TokenDirectPurchasesEnabled = true
-	server.cfg.MoneroWalletRPCURL = wallet.URL
+	server.Cfg.TokenDirectPurchasesEnabled = true
+	server.Cfg.MoneroWalletRPCURL = wallet.URL
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x72)
 	body := []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`)
@@ -322,16 +322,16 @@ func TestMoneroInvoiceExpiresWithoutPayment(t *testing.T) {
 		t.Fatal(err)
 	}
 	wallet := newFakeMoneroWalletRPC(t)
-	server.cfg.WaoziIssuerPrivateKey = privateKey
-	server.cfg.TokenProducts = map[string]TokenProduct{
+	server.Cfg.WaoziIssuerPrivateKey = privateKey
+	server.Cfg.TokenProducts = map[string]TokenProduct{
 		"waozi_tokens_small": {
 			ProductID:          "waozi_tokens_small",
 			TokenUnits:         5000000,
 			MoneroAtomicAmount: 1000000000000,
 		},
 	}
-	server.cfg.TokenDirectPurchasesEnabled = true
-	server.cfg.MoneroWalletRPCURL = wallet.URL
+	server.Cfg.TokenDirectPurchasesEnabled = true
+	server.Cfg.MoneroWalletRPCURL = wallet.URL
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x73)
 	invoice := createTestMoneroInvoice(t, handler, identity.Token, []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`))
@@ -354,16 +354,16 @@ func TestMoneroInvoiceReconcilerSettlesPendingInvoice(t *testing.T) {
 		t.Fatal(err)
 	}
 	wallet := newFakeMoneroWalletRPC(t)
-	server.cfg.WaoziIssuerPrivateKey = privateKey
-	server.cfg.TokenProducts = map[string]TokenProduct{
+	server.Cfg.WaoziIssuerPrivateKey = privateKey
+	server.Cfg.TokenProducts = map[string]TokenProduct{
 		"waozi_tokens_small": {
 			ProductID:          "waozi_tokens_small",
 			TokenUnits:         5000000,
 			MoneroAtomicAmount: 1000000000000,
 		},
 	}
-	server.cfg.TokenDirectPurchasesEnabled = true
-	server.cfg.MoneroWalletRPCURL = wallet.URL
+	server.Cfg.TokenDirectPurchasesEnabled = true
+	server.Cfg.MoneroWalletRPCURL = wallet.URL
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x74)
 	invoice := createTestMoneroInvoice(t, handler, identity.Token, []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`))
@@ -392,14 +392,14 @@ func TestPermanentMoneroAddressPurchaseAndGift(t *testing.T) {
 		t.Fatal(err)
 	}
 	wallet := newFakeMoneroWalletRPC(t)
-	server.cfg.WaoziIssuerPrivateKey = privateKey
-	server.cfg.TokenDirectPurchasesEnabled = true
-	server.cfg.MoneroWalletRPCURL = wallet.URL
-	server.cfg.MoneroNetwork = "stagenet"
-	server.cfg.MoneroRateAtomicAmount = 1000000000000
-	server.cfg.MoneroRateTokenUnits = 5000000
-	server.cfg.MoneroMinimumAtomicAmount = 1000
-	server.cfg.MoneroConfirmationsRequired = 10
+	server.Cfg.WaoziIssuerPrivateKey = privateKey
+	server.Cfg.TokenDirectPurchasesEnabled = true
+	server.Cfg.MoneroWalletRPCURL = wallet.URL
+	server.Cfg.MoneroNetwork = "stagenet"
+	server.Cfg.MoneroRateAtomicAmount = 1000000000000
+	server.Cfg.MoneroRateTokenUnits = 5000000
+	server.Cfg.MoneroMinimumAtomicAmount = 1000
+	server.Cfg.MoneroConfirmationsRequired = 10
 	handler := server.Routes()
 	recipient := newTestIdentity(t, handler, 0x75)
 	_ = newTestIdentity(t, handler, 0x76)
@@ -466,12 +466,12 @@ func TestPermanentMoneroDepositWaitsUntilSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	wallet := newFakeMoneroWalletRPC(t)
-	server.cfg.WaoziIssuerPrivateKey = privateKey
-	server.cfg.TokenDirectPurchasesEnabled = true
-	server.cfg.MoneroWalletRPCURL = wallet.URL
-	server.cfg.MoneroRateAtomicAmount = 1000000000000
-	server.cfg.MoneroRateTokenUnits = 5000000
-	server.cfg.MoneroConfirmationsRequired = 10
+	server.Cfg.WaoziIssuerPrivateKey = privateKey
+	server.Cfg.TokenDirectPurchasesEnabled = true
+	server.Cfg.MoneroWalletRPCURL = wallet.URL
+	server.Cfg.MoneroRateAtomicAmount = 1000000000000
+	server.Cfg.MoneroRateTokenUnits = 5000000
+	server.Cfg.MoneroConfirmationsRequired = 10
 	handler := server.Routes()
 	recipient := newTestIdentity(t, handler, 0x77)
 	address := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/address", recipient.Token, nil)
@@ -669,7 +669,7 @@ func TestPostAccountDeleteRouteMatchesKryonClient(t *testing.T) {
 
 func TestDaochiHeaderAliases(t *testing.T) {
 	server, _, verifier := testServer(t)
-	server.cfg.AdminToken = "admin-test-token"
+	server.Cfg.AdminToken = "admin-test-token"
 	handler := server.Routes()
 	publicKey := bytes.Repeat([]byte{0x72}, mlDSA44PublicKeySize)
 	userHash := sha256.Sum256(publicKey)
@@ -1045,7 +1045,7 @@ func TestSignedAppRegistrationAndProtocolV6Sync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.cfg.NodeRegistryPublicKey = nodePublic
+	server.Cfg.NodeRegistryPublicKey = nodePublic
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x50)
 	appPublic, appPrivate, err := ed25519.GenerateKey(nil)
@@ -1382,7 +1382,7 @@ func TestProtocolV5AppIDCompatibilityAndProtocolV6StrictRegistry(t *testing.T) {
 
 func TestAppGrantsGateCrossAppEncryptedRecords(t *testing.T) {
 	server, store, _ := testServer(t)
-	server.cfg.AdminToken = "admin-test-token"
+	server.Cfg.AdminToken = "admin-test-token"
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x5b)
 	_, appPrivate, err := ed25519.GenerateKey(nil)
@@ -1539,7 +1539,7 @@ func TestHashMismatchRequiresFullSnapshotAfterApplyingUpload(t *testing.T) {
 
 func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 	server, _, _ := testServer(t)
-	server.cfg.KnownNodes = []NodePeer{
+	server.Cfg.KnownNodes = []NodePeer{
 		{Name: "Mirror node", URL: "https://mirror.example"},
 	}
 	handler := server.Routes()
@@ -1676,7 +1676,7 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 
 func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	source, _, _ := testServer(t)
-	source.cfg.NodeSyncToken = "mesh-secret"
+	source.Cfg.NodeSyncToken = "mesh-secret"
 	sourceHandler := source.Routes()
 	identity := newTestIdentity(t, sourceHandler, 0x6b)
 
@@ -1750,8 +1750,8 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	defer peerHTTP.Close()
 
 	target, _, _ := testServer(t)
-	target.cfg.NodeSyncToken = "mesh-secret"
-	target.cfg.NodeSyncBatchLimit = 1
+	target.Cfg.NodeSyncToken = "mesh-secret"
+	target.Cfg.NodeSyncBatchLimit = 1
 	err = Mesh_PullPeer(target.mesh(), context.Background(), NodePeer{
 		Name: "source",
 		URL:  peerHTTP.URL,
@@ -1765,7 +1765,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull node peer: %v", err)
 	}
-	exportedRecords := MeshStore_ExportEncryptedRecords(target.store.Database, context.Background(), NodeSyncPolicy{
+	exportedRecords := MeshStore_ExportEncryptedRecords(target.Store.Database, context.Background(), NodeSyncPolicy{
 		Apps:        []string{"inbe"},
 		Collections: []string{"inbe.*"},
 		Data:        []string{"encrypted_records"},
@@ -1796,7 +1796,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	if len(exportCursors) != afterFirstPull+1 || exportCursors[len(exportCursors)-1] == "" {
 		t.Fatalf("mesh pull did not resume from persisted cursor: %#v", exportCursors)
 	}
-	reimported := MeshStore_ImportEncryptedRecords(target.store.Database, context.Background(), NodeSyncPolicy{
+	reimported := MeshStore_ImportEncryptedRecords(target.Store.Database, context.Background(), NodeSyncPolicy{
 		Apps:        []string{"inbe"},
 		Collections: []string{"inbe.*"},
 		Data:        []string{"encrypted_records"},
@@ -1943,7 +1943,7 @@ func TestEncryptedSyncEnvelopeRequiresMatchingBearerUser(t *testing.T) {
 
 func TestEncryptedSyncEnvelopePaginationAndQuota(t *testing.T) {
 	server, store, _ := testServer(t)
-	server.cfg.EncryptedPayloadMaxReturn = 1
+	server.Cfg.EncryptedPayloadMaxReturn = 1
 	handler := server.Routes()
 	identity := newTestIdentity(t, handler, 0x65)
 
@@ -1962,7 +1962,7 @@ func TestEncryptedSyncEnvelopePaginationAndQuota(t *testing.T) {
 	assertCount(t, store, "server_encrypted_payloads", 2)
 
 	limited, limitedStore, _ := testServer(t)
-	limited.cfg.EncryptedPayloadMaxAccountBytes = 16
+	limited.Cfg.EncryptedPayloadMaxAccountBytes = 16
 	limitedHandler := limited.Routes()
 	limitedIdentity := newTestIdentity(t, limitedHandler, 0x66)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", strings.NewReader(`{"v":1,"nonce":"too-large","ciphertext":"too-large"}`))
@@ -3060,7 +3060,7 @@ func TestAliasRejectsCrossAccountAndMissingAccount(t *testing.T) {
 	}
 
 	missingUser := strings.Repeat("a", 64)
-	missingTokenResult := Token_IssueAuthToken(server.cfg.TokenSecret, missingUser, time.Now().Add(server.cfg.TokenTTL).Unix())
+	missingTokenResult := Token_IssueAuthToken(server.Cfg.TokenSecret, missingUser, time.Now().Add(server.Cfg.TokenTTL).Unix())
 	if missingTokenResult.Error != "" {
 		t.Fatal(missingTokenResult.Error)
 	}
@@ -3250,7 +3250,7 @@ func TestBearerSyncCanRegisterUserWithPublicKey(t *testing.T) {
 	publicKey := bytes.Repeat([]byte{0x48}, mlDSA44PublicKeySize)
 	userHash := sha256.Sum256(publicKey)
 	userID := hex.EncodeToString(userHash[:])
-	tokenResult := Token_IssueAuthToken(server.cfg.TokenSecret, userID, time.Now().Add(server.cfg.TokenTTL).Unix())
+	tokenResult := Token_IssueAuthToken(server.Cfg.TokenSecret, userID, time.Now().Add(server.Cfg.TokenTTL).Unix())
 	if tokenResult.Error != "" {
 		t.Fatal(tokenResult.Error)
 	}
@@ -3268,7 +3268,7 @@ func TestBearerSyncCanRegisterUserWithPublicKey(t *testing.T) {
 	if payload.Applied.Habits != 1 || len(payload.Changes.Habits) != 1 {
 		t.Fatalf("registered sync response = %#v", payload)
 	}
-	if account := AccountKeys_PublicKey(server.store.Database, t.Context(), userID); account.Error != nil || !account.Found {
+	if account := AccountKeys_PublicKey(server.Store.Database, t.Context(), userID); account.Error != nil || !account.Found {
 		t.Fatalf("registered public key found=%v err=%v", account.Found, account.Error)
 	}
 }
@@ -3319,16 +3319,16 @@ func TestSyncWebSocketIsScopedToTokenUser(t *testing.T) {
 	if ready.Type != "sync_ready" || ready.UserIDHash != alice.UserID {
 		t.Fatalf("ready event = %#v", ready)
 	}
-	aliceSubs := SyncHub_Count(server.syncHub, alice.UserID)
-	bobSubs := SyncHub_Count(server.syncHub, bob.UserID)
+	aliceSubs := SyncHub_Count(server.SyncHub, alice.UserID)
+	bobSubs := SyncHub_Count(server.SyncHub, bob.UserID)
 	if aliceSubs != 1 || bobSubs != 0 {
 		t.Fatalf("unexpected websocket subscriptions alice=%d bob=%d", aliceSubs, bobSubs)
 	}
 
 	bobBody := []byte(`{"user_id_hash":"` + bob.UserID + `","client_id":"bob-client","habits":[{"id":"bob-habit","name":"Bob habit","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
 	syncWithBody(t, ts.Client(), ts.URL, bob.UserID, bob.Token, bobBody)
-	aliceSubs = SyncHub_Count(server.syncHub, alice.UserID)
-	bobSubs = SyncHub_Count(server.syncHub, bob.UserID)
+	aliceSubs = SyncHub_Count(server.SyncHub, alice.UserID)
+	bobSubs = SyncHub_Count(server.SyncHub, bob.UserID)
 	if aliceSubs != 1 || bobSubs != 0 {
 		t.Fatalf("bob sync changed websocket subscriptions alice=%d bob=%d", aliceSubs, bobSubs)
 	}

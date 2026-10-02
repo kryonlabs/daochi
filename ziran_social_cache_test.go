@@ -31,7 +31,7 @@ func TestZiranSocialCacheWritesAgainstBaseline(t *testing.T) {
 				cancel()
 			}
 			if query != "" {
-				for _, store := range []*Store{actual.store, expected.store} {
+				for _, store := range []*Store{actual.Store, expected.Store} {
 					if _, err := store.Database.Exec(query); err != nil {
 						t.Fatal(err)
 					}
@@ -40,8 +40,8 @@ func TestZiranSocialCacheWritesAgainstBaseline(t *testing.T) {
 			for _, kind := range []string{"friends.list", " \u2003friends.requests ", "", strings.Repeat("a", 96), strings.Repeat("a", 97), "\xff"} {
 				for _, payload := range []json.RawMessage{nil, {}, json.RawMessage("{}"), json.RawMessage("null"), json.RawMessage("[1,2]"), json.RawMessage(`{"text":"日本語"}`), json.RawMessage("{invalid"), {0xff}} {
 					for attempt := 0; attempt < 2; attempt++ {
-						got := SocialCache_Set(actual.store.Database, ctx, user, kind, payload)
-						applied, err := expected.store.baselineSnapshotSet(ctx, user, kind, payload)
+						got := SocialCache_Set(actual.Store.Database, ctx, user, kind, payload)
+						applied, err := expected.Store.baselineSnapshotSet(ctx, user, kind, payload)
 						if got.Applied != applied || !sameIdentityError(got.Error, err) {
 							t.Fatalf("snapshot write differs for %q, %q: %#v, %d, %v", kind, payload, got, applied, err)
 						}
@@ -52,13 +52,13 @@ func TestZiranSocialCacheWritesAgainstBaseline(t *testing.T) {
 				}
 			}
 			for _, existing := range users {
-				got := AccountExport_Export(actual.store.Database, context.Background(), existing)
-				want := AccountExport_Export(expected.store.Database, context.Background(), existing)
+				got := AccountExport_Export(actual.Store.Database, context.Background(), existing)
+				want := AccountExport_Export(expected.Store.Database, context.Background(), existing)
 				if !reflect.DeepEqual(got.Value, want.Value) || !sameIdentityError(got.Error, want.Error) {
 					t.Fatal("snapshot writes or rollback changed account state")
 				}
 			}
-			if err := actual.store.Database.Ping(); err != nil {
+			if err := actual.Store.Database.Ping(); err != nil {
 				t.Fatal("failed snapshot write retained a transaction", err)
 			}
 		})
@@ -73,7 +73,7 @@ func TestZiranSocialCacheConcurrentIdempotence(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			results <- SocialCache_Set(server.store.Database, context.Background(), users[0], "friends.list", []byte("{}"))
+			results <- SocialCache_Set(server.Store.Database, context.Background(), users[0], "friends.list", []byte("{}"))
 		}()
 	}
 	workers.Wait()
@@ -86,7 +86,7 @@ func TestZiranSocialCacheConcurrentIdempotence(t *testing.T) {
 		applied += result.Applied
 	}
 	var version int64
-	if err := server.store.Database.QueryRow("SELECT server_version FROM server_sync_state WHERE user_id_hash=?", users[0]).Scan(&version); err != nil {
+	if err := server.Store.Database.QueryRow("SELECT server_version FROM server_sync_state WHERE user_id_hash=?", users[0]).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
 	if applied != 1 || version != 8 {

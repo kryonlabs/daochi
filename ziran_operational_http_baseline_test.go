@@ -46,31 +46,31 @@ func (s *Server) baselineOpsHandleReady(w http.ResponseWriter, r *http.Request) 
 		"database":     "ok",
 		"token_secret": "ok",
 		"verifier":     "ok",
-		"token_issuer": TokenPolicy_IssuerStatus(s.cfg),
+		"token_issuer": TokenPolicy_IssuerStatus(s.Cfg),
 	}
 	status := http.StatusOK
-	if s.cfg.TokenSecretEphemeral || len(s.cfg.TokenSecret) < 32 {
+	if s.Cfg.TokenSecretEphemeral || len(s.Cfg.TokenSecret) < 32 {
 		checks["token_secret"] = "ephemeral"
 		status = http.StatusServiceUnavailable
 	}
-	if s.verifier == nil {
+	if s.Verifier == nil {
 		checks["verifier"] = "missing"
 		status = http.StatusServiceUnavailable
 	}
-	if s.cfg.TokenDirectPurchasesEnabled {
+	if s.Cfg.TokenDirectPurchasesEnabled {
 		checks["token_direct_purchases"] = "ok"
-		if TokenPolicy_IssuerStatus(s.cfg) != "ok" {
+		if TokenPolicy_IssuerStatus(s.Cfg) != "ok" {
 			checks["token_direct_purchases"] = "issuer_private_key_missing"
 			status = http.StatusServiceUnavailable
-		} else if !TokenPolicy_HasMoneroProduct(s.cfg.TokenProducts) && !MoneroWallet_ValidRate(s.cfg) {
+		} else if !TokenPolicy_HasMoneroProduct(s.Cfg.TokenProducts) && !MoneroWallet_ValidRate(s.Cfg) {
 			checks["token_direct_purchases"] = "monero_rate_or_product_missing"
 			status = http.StatusServiceUnavailable
-		} else if strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
+		} else if strings.TrimSpace(s.Cfg.MoneroWalletRPCURL) == "" {
 			checks["token_direct_purchases"] = "monero_wallet_rpc_missing"
 			status = http.StatusServiceUnavailable
 		}
 	}
-	if err := s.store.Health(r.Context()); err != nil {
+	if err := s.Store.Health(r.Context()); err != nil {
 		checks["database"] = err.Error()
 		status = http.StatusServiceUnavailable
 	}
@@ -81,7 +81,7 @@ func (s *Server) baselineOpsHandleReady(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) baselineOpsHandleNodeInfo(w http.ResponseWriter, r *http.Request) {
-	knownNodes := s.cfg.KnownNodes
+	knownNodes := s.Cfg.KnownNodes
 	if knownNodes == nil {
 		knownNodes = []NodePeer{}
 	}
@@ -91,7 +91,7 @@ func (s *Server) baselineOpsHandleNodeInfo(w http.ResponseWriter, r *http.Reques
 		Response_Error(w, http.StatusInternalServerError, "node usage failed")
 		return
 	}
-	storage, err := s.store.NodeStorageUsage(r.Context())
+	storage, err := s.Store.NodeStorageUsage(r.Context())
 	if err != nil {
 		slog.Error("load node storage usage", "error", err)
 		Response_Error(w, http.StatusInternalServerError, "node storage usage failed")
@@ -99,10 +99,10 @@ func (s *Server) baselineOpsHandleNodeInfo(w http.ResponseWriter, r *http.Reques
 	}
 	Response_JSON(w, http.StatusOK, map[string]any{
 		"status":          "ok",
-		"node_id":         s.node.ID,
-		"node_public_key": hex.EncodeToString(s.node.PublicKey),
-		"node_name":       s.cfg.NodeDisplayName,
-		"base_url":        strings.TrimSpace(s.cfg.BaseURL),
+		"node_id":         s.Node.ID,
+		"node_public_key": hex.EncodeToString(s.Node.PublicKey),
+		"node_name":       s.Cfg.NodeDisplayName,
+		"base_url":        strings.TrimSpace(s.Cfg.BaseURL),
 		"capabilities":    baselineOpsCapabilities,
 		"known_nodes":     knownNodes,
 		"usage":           usage,
@@ -118,31 +118,31 @@ func (s *Server) baselineOpsHandleMetrics(w http.ResponseWriter, r *http.Request
 	// Metrics expose user counts, traffic, and topology; when an admin
 	// token is configured, require it. Deployments without one keep the
 	// historical public endpoint (health checks use /healthz and /readyz).
-	if s.cfg.AdminToken != "" && !HttpAuth_RequireAdmin(w, r, s.cfg.AdminToken) {
+	if s.Cfg.AdminToken != "" && !HttpAuth_RequireAdmin(w, r, s.Cfg.AdminToken) {
 		return
 	}
 	usage, err := s.baselineOpsNodeUsage(r.Context())
 	if err != nil {
 		slog.Error("load metrics usage", "error", err)
 		usage = NodeUsage{RecentActivityWindowDays: baselineOpsRecentWindowDays}
-		stats := SyncHub_Stats(s.syncHub)
+		stats := SyncHub_Stats(s.SyncHub)
 		usage.ConnectedUsers = stats.Users
 		usage.ConnectedWebSocketClients = stats.Connections
 		usage.WebSocketConnectionLimitPerUser = baselineOpsConnectionLimitPerUser
 	}
-	storage, err := s.store.NodeStorageUsage(r.Context())
+	storage, err := s.Store.NodeStorageUsage(r.Context())
 	if err != nil {
 		slog.Error("load metrics storage usage", "error", err)
 	}
-	Metrics_Prometheus(s.metrics, w, usage, storage, BuildVersion)
+	Metrics_Prometheus(s.Metrics, w, usage, storage, BuildVersion)
 }
 
 func (s *Server) baselineOpsNodeUsage(ctx context.Context) (NodeUsage, error) {
-	usage, err := s.store.NodeUsage(ctx, time.Now())
+	usage, err := s.Store.NodeUsage(ctx, time.Now())
 	if err != nil {
 		return NodeUsage{}, err
 	}
-	stats := SyncHub_Stats(s.syncHub)
+	stats := SyncHub_Stats(s.SyncHub)
 	usage.ConnectedUsers = stats.Users
 	usage.ConnectedWebSocketClients = stats.Connections
 	usage.RecentActivityWindowDays = baselineOpsRecentWindowDays
@@ -155,7 +155,7 @@ func (s *Server) baselineOpsHandleSyncDiagnostics(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	report, err := s.store.SyncDiagnosticReport(r.Context(), userID)
+	report, err := s.Store.SyncDiagnosticReport(r.Context(), userID)
 	if err != nil {
 		slog.Error("sync diagnostics", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "diagnostics failed")

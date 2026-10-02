@@ -313,7 +313,7 @@ func TestZiranSyncHubPreservesDeliveryAndCleanup(t *testing.T) {
 func TestZiranWebSocketAuthenticationMatchesBaseline(t *testing.T) {
 	server, store, _ := testServer(t)
 	user := strings.Repeat("b", 64)
-	issued := Token_IssueAuthToken(server.cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix())
+	issued := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix())
 	if issued.Error != "" {
 		t.Fatal(issued.Error)
 	}
@@ -347,7 +347,7 @@ func TestZiranWebSocketHandlerMatchesBaseline(t *testing.T) {
 			baseline, _, _ := testServer(t)
 			oldHub := baselineNewSyncHub()
 			user := strings.Repeat("c", 64)
-			issued := Token_IssueAuthToken(actual.cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix())
+			issued := Token_IssueAuthToken(actual.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix())
 			request := websocketHandshakeRequest()
 			request.Header.Set("Sec-WebSocket-Protocol", "daochi-sync-v1, bearer."+issued.Value)
 			if scenario == "method" {
@@ -366,7 +366,7 @@ func TestZiranWebSocketHandlerMatchesBaseline(t *testing.T) {
 			var oldSubscriptions []chan baselineSyncEvent
 			if scenario == "connection limit" {
 				for index := 0; index < 8; index++ {
-					subscriptions = append(subscriptions, SyncHub_Subscribe(actual.syncHub, user))
+					subscriptions = append(subscriptions, SyncHub_Subscribe(actual.SyncHub, user))
 					oldSubscriptions = append(oldSubscriptions, oldHub.subscribe(user))
 				}
 			}
@@ -376,8 +376,8 @@ func TestZiranWebSocketHandlerMatchesBaseline(t *testing.T) {
 					key, limit = "ws:user:"+user, 40
 				}
 				for index := 0; index < limit; index++ {
-					RateLimit_Allow(actual.limiter, key, limit, time.Minute)
-					RateLimit_Allow(baseline.limiter, key, limit, time.Minute)
+					RateLimit_Allow(actual.Limiter, key, limit, time.Minute)
+					RateLimit_Allow(baseline.Limiter, key, limit, time.Minute)
 				}
 			}
 			newWriter := &websocketHijackWriter{ResponseRecorder: httptest.NewRecorder(), connection: &websocketMemoryConnection{}}
@@ -402,11 +402,11 @@ func TestZiranWebSocketHandlerMatchesBaseline(t *testing.T) {
 			if got != want || newWriter.Code != oldWriter.Code || !reflect.DeepEqual(newWriter.Header(), oldWriter.Header()) || newWriter.Body.String() != oldWriter.Body.String() || !bytes.Equal(newWriter.connection.Bytes(), oldWriter.connection.Bytes()) || newWriter.connection.closed != oldWriter.connection.closed {
 				t.Fatalf("handler output, error or cleanup changed: panic %v/%v, closes %d/%d", got, want, newWriter.connection.closed, oldWriter.connection.closed)
 			}
-			if SyncHub_Count(actual.syncHub, user) != oldHub.count(user) || !reflect.DeepEqual(actual.metrics.WebSocketRejects, baseline.metrics.WebSocketRejects) || actual.metrics.WebSocketAccepted.Load() != baseline.metrics.WebSocketAccepted.Load() || actual.metrics.WebSocketRejected.Load() != baseline.metrics.WebSocketRejected.Load() || actual.metrics.RateLimitedRequests.Load() != baseline.metrics.RateLimitedRequests.Load() {
+			if SyncHub_Count(actual.SyncHub, user) != oldHub.count(user) || !reflect.DeepEqual(actual.Metrics.WebSocketRejects, baseline.Metrics.WebSocketRejects) || actual.Metrics.WebSocketAccepted.Load() != baseline.Metrics.WebSocketAccepted.Load() || actual.Metrics.WebSocketRejected.Load() != baseline.Metrics.WebSocketRejected.Load() || actual.Metrics.RateLimitedRequests.Load() != baseline.Metrics.RateLimitedRequests.Load() {
 				t.Fatal("handler subscription or metrics changed")
 			}
 			for index, subscription := range subscriptions {
-				SyncHub_Unsubscribe(actual.syncHub, user, subscription)
+				SyncHub_Unsubscribe(actual.SyncHub, user, subscription)
 				oldHub.unsubscribe(user, oldSubscriptions[index])
 			}
 		})

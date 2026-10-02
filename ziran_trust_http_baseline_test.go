@@ -35,10 +35,10 @@ type completePairingRequest struct {
 }
 
 func (s *Server) baselineTrustCreateInvite(w http.ResponseWriter, r *http.Request) {
-	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.Cfg.AdminToken) {
 		return
 	}
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -66,8 +66,8 @@ func (s *Server) baselineTrustCreateInvite(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	addresses := req.Addresses
-	if len(addresses) == 0 && strings.TrimSpace(s.cfg.BaseURL) != "" {
-		addresses = []string{strings.TrimRight(s.cfg.BaseURL, "/")}
+	if len(addresses) == 0 && strings.TrimSpace(s.Cfg.BaseURL) != "" {
+		addresses = []string{strings.TrimRight(s.Cfg.BaseURL, "/")}
 	}
 	if err := NodeIdentity_ValidateAddresses(addresses); err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -77,17 +77,17 @@ func (s *Server) baselineTrustCreateInvite(w http.ResponseWriter, r *http.Reques
 	invite := PairingInvite{
 		Version:     1,
 		InviteID:    NodeAuth_RandomHex(16),
-		NodeID:      s.node.ID,
-		PublicKey:   hex.EncodeToString(s.node.PublicKey),
-		DisplayName: Manifest_DefaultString(strings.TrimSpace(req.DisplayName), s.cfg.NodeDisplayName),
+		NodeID:      s.Node.ID,
+		PublicKey:   hex.EncodeToString(s.Node.PublicKey),
+		DisplayName: Manifest_DefaultString(strings.TrimSpace(req.DisplayName), s.Cfg.NodeDisplayName),
 		Addresses:   addresses,
 		SpaceID:     strings.TrimSpace(req.SpaceID),
 		ExpiresAt:   time.Now().Add(lifetime).Unix(),
 		Nonce:       NodeAuth_RandomHex(16),
 		Policy:      req.Policy,
 	}
-	NodeIdentity_SignInvite(s.node, &invite)
-	if err := TrustStore_RecordIssuedPairingInvite(s.store.Database, r.Context(), invite); err != nil {
+	NodeIdentity_SignInvite(s.Node, &invite)
+	if err := TrustStore_RecordIssuedPairingInvite(s.Store.Database, r.Context(), invite); err != nil {
 		Response_Error(w, http.StatusInternalServerError, "pairing invite creation failed")
 		return
 	}
@@ -104,10 +104,10 @@ func baselineTrustPairingPolicy(policy NodeSyncPolicy) bool {
 }
 
 func (s *Server) baselineTrustAcceptInvite(w http.ResponseWriter, r *http.Request) {
-	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.Cfg.AdminToken) {
 		return
 	}
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -123,7 +123,7 @@ func (s *Server) baselineTrustAcceptInvite(w http.ResponseWriter, r *http.Reques
 		Response_Error(w, http.StatusBadRequest, publicKey.Error.Error())
 		return
 	}
-	if invite.NodeID == s.node.ID {
+	if invite.NodeID == s.Node.ID {
 		Response_Error(w, http.StatusBadRequest, "cannot pair a node with itself")
 		return
 	}
@@ -136,7 +136,7 @@ func (s *Server) baselineTrustAcceptInvite(w http.ResponseWriter, r *http.Reques
 		Response_Error(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	if err := TrustStore_TrustPeer(s.store.Database, r.Context(), invite, publicKey.Value); err != nil {
+	if err := TrustStore_TrustPeer(s.Store.Database, r.Context(), invite, publicKey.Value); err != nil {
 		Response_Error(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -147,21 +147,21 @@ func (s *Server) baselineTrustAcceptInvite(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) baselineTrustAcceptance(invite PairingInvite) (PairingAcceptance, error) {
-	addresses := []string{strings.TrimRight(strings.TrimSpace(s.cfg.BaseURL), "/")}
+	addresses := []string{strings.TrimRight(strings.TrimSpace(s.Cfg.BaseURL), "/")}
 	if err := NodeIdentity_ValidateAddresses(addresses); err != nil {
 		return PairingAcceptance{}, errors.New("this node needs a reachable DAOCHI_BASE_URL")
 	}
 	acceptance := PairingAcceptance{
 		Version:     1,
 		InviteID:    invite.InviteID,
-		NodeID:      s.node.ID,
-		PublicKey:   hex.EncodeToString(s.node.PublicKey),
-		DisplayName: s.cfg.NodeDisplayName,
+		NodeID:      s.Node.ID,
+		PublicKey:   hex.EncodeToString(s.Node.PublicKey),
+		DisplayName: s.Cfg.NodeDisplayName,
 		Addresses:   addresses,
 		AcceptedAt:  time.Now().Unix(),
 		Nonce:       NodeAuth_RandomHex(16),
 	}
-	NodeIdentity_SignAcceptance(s.node, invite, &acceptance)
+	NodeIdentity_SignAcceptance(s.Node, invite, &acceptance)
 	return acceptance, nil
 }
 
@@ -214,7 +214,7 @@ func baselineTrustCompleteRemote(
 }
 
 func (s *Server) baselineTrustCompletePairing(w http.ResponseWriter, r *http.Request) {
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -229,7 +229,7 @@ func (s *Server) baselineTrustCompletePairing(w http.ResponseWriter, r *http.Req
 		Response_Error(w, http.StatusBadRequest, validated.Error.Error())
 		return
 	}
-	if request.Invite.NodeID != s.node.ID {
+	if request.Invite.NodeID != s.Node.ID {
 		Response_Error(w, http.StatusBadRequest, "pairing invite belongs to another node")
 		return
 	}
@@ -238,11 +238,11 @@ func (s *Server) baselineTrustCompletePairing(w http.ResponseWriter, r *http.Req
 		Response_Error(w, http.StatusBadRequest, publicKey.Error.Error())
 		return
 	}
-	if request.Acceptance.NodeID == s.node.ID {
+	if request.Acceptance.NodeID == s.Node.ID {
 		Response_Error(w, http.StatusBadRequest, "cannot pair a node with itself")
 		return
 	}
-	if err := TrustStore_CompleteIssuedPairing(s.store.Database,
+	if err := TrustStore_CompleteIssuedPairing(s.Store.Database,
 		r.Context(),
 		request.Invite,
 		request.Acceptance,
@@ -258,10 +258,10 @@ func (s *Server) baselineTrustCompletePairing(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) baselineTrustListPeers(w http.ResponseWriter, r *http.Request) {
-	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.Cfg.AdminToken) {
 		return
 	}
-	listedPeers := TrustStore_ListTrustedPeers(s.store.Database, r.Context())
+	listedPeers := TrustStore_ListTrustedPeers(s.Store.Database, r.Context())
 	peers, err := listedPeers.Value, listedPeers.Error
 	if err != nil {
 		Response_Error(w, http.StatusInternalServerError, "peer list failed")
@@ -271,10 +271,10 @@ func (s *Server) baselineTrustListPeers(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) baselineTrustCreateSpace(w http.ResponseWriter, r *http.Request) {
-	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.Cfg.AdminToken) {
 		return
 	}
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -288,7 +288,7 @@ func (s *Server) baselineTrustCreateSpace(w http.ResponseWriter, r *http.Request
 		return
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
-	createdSpace := TrustStore_CreateTrustSpace(s.store.Database, r.Context(), displayName)
+	createdSpace := TrustStore_CreateTrustSpace(s.Store.Database, r.Context(), displayName)
 	spaceID, err := createdSpace.Value, createdSpace.Error
 	if err != nil {
 		Response_Error(w, http.StatusInternalServerError, "trust space creation failed")
@@ -301,10 +301,10 @@ func (s *Server) baselineTrustCreateSpace(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) baselineTrustRegisterName(w http.ResponseWriter, r *http.Request) {
-	if !HttpAuth_RequireLocalOperator(w, r, s.cfg.AdminToken) {
+	if !HttpAuth_RequireLocalOperator(w, r, s.Cfg.AdminToken) {
 		return
 	}
-	bodyResult := HttpBody_ReadJSON(w, r, s.cfg.MaxBodyBytes)
+	bodyResult := HttpBody_ReadJSON(w, r, s.Cfg.MaxBodyBytes)
 	body, err := bodyResult.Value, bodyResult.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -335,7 +335,7 @@ func (s *Server) baselineTrustRegisterName(w http.ResponseWriter, r *http.Reques
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	signedClaim := TrustStore_SignAndStoreNameClaim(s.store.Database, r.Context(), claim)
+	signedClaim := TrustStore_SignAndStoreNameClaim(s.Store.Database, r.Context(), claim)
 	claim, err = signedClaim.Value, signedClaim.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
@@ -351,7 +351,7 @@ func (s *Server) baselineTrustResolveName(w http.ResponseWriter, r *http.Request
 		Response_Error(w, http.StatusBadRequest, "invalid space or name")
 		return
 	}
-	resolvedClaim := TrustStore_ResolveNameClaim(s.store.Database, r.Context(), spaceID, name)
+	resolvedClaim := TrustStore_ResolveNameClaim(s.Store.Database, r.Context(), spaceID, name)
 	claim, found, err := resolvedClaim.Value, resolvedClaim.Found, resolvedClaim.Error
 	if err != nil {
 		Response_Error(w, http.StatusInternalServerError, "name resolution failed")

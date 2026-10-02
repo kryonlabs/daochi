@@ -22,22 +22,22 @@ func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *h
 	if !ok {
 		return
 	}
-	decoded := PaymentRequest_ReadInvoice(w, r, s.cfg.MaxBodyBytes)
+	decoded := PaymentRequest_ReadInvoice(w, r, s.Cfg.MaxBodyBytes)
 	req, body, err := decoded.Value, decoded.Body, decoded.Error
 	if err != nil {
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !s.cfg.TokenDirectPurchasesEnabled {
+	if !s.Cfg.TokenDirectPurchasesEnabled {
 		Response_Error(w, http.StatusServiceUnavailable, "direct token purchases disabled")
 		return
 	}
-	product, ok := s.cfg.TokenProducts[req.ProductID]
+	product, ok := s.Cfg.TokenProducts[req.ProductID]
 	if !ok || product.MoneroAtomicAmount <= 0 {
 		Response_Error(w, http.StatusBadRequest, "unknown monero product_id")
 		return
 	}
-	existence := AppStore_Exists(s.store.Database, r.Context(), req.AppID)
+	existence := AppStore_Exists(s.Store.Database, r.Context(), req.AppID)
 	if exists, err := existence.Value, existence.Error; err != nil {
 		slog.Error("monero invoice app lookup", "app", LogSafety_LogText(req.AppID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "monero invoice failed")
@@ -46,11 +46,11 @@ func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *h
 		Response_Error(w, http.StatusBadRequest, "unknown app_id")
 		return
 	}
-	authorization := TokenPolicy_Authorize(s.store.Database, r.Context(), r, body, userID, req.AppID, AssetID, "purchase", s.verifier.Verify, errSignedTxReplay)
+	authorization := TokenPolicy_Authorize(s.Store.Database, r.Context(), r, body, userID, req.AppID, AssetID, "purchase", s.Verifier.Verify, errSignedTxReplay)
 	signedTx, hasSignedTx, err := authorization.Value, authorization.Signed, baselineAuthenticationError(authorization.Authentication)
 	if err != nil {
 		if hasSignedTx {
-			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
+			SignedTx_Forget(s.Store.Database, r.Context(), signedTx)
 		}
 		s.baselineWriteAuthError(w, err)
 		return
@@ -58,10 +58,10 @@ func (s *Server) baselineInvoiceHandleMoneroInvoices(w http.ResponseWriter, r *h
 	completed := false
 	defer func() {
 		if hasSignedTx && !completed {
-			SignedTx_Forget(s.store.Database, r.Context(), signedTx)
+			SignedTx_Forget(s.Store.Database, r.Context(), signedTx)
 		}
 	}()
-	invoice, err := s.store.baselineInvoiceCreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.cfg)
+	invoice, err := s.Store.baselineInvoiceCreateMoneroInvoice(r.Context(), userID, req.AppID, product, s.Cfg)
 	if err != nil {
 		slog.Error("create monero invoice", "user", LogSafety_LogText(userID), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "monero invoice failed")
@@ -81,7 +81,7 @@ func (s *Server) baselineInvoiceHandleMoneroInvoiceRoute(w http.ResponseWriter, 
 		Response_Error(w, http.StatusBadRequest, "invalid invoice id")
 		return
 	}
-	invoice, found, err := s.store.baselineInvoiceMoneroInvoice(r.Context(), userID, id)
+	invoice, found, err := s.Store.baselineInvoiceMoneroInvoice(r.Context(), userID, id)
 	if err != nil {
 		slog.Error("load monero invoice", "user", LogSafety_LogText(userID), "invoice", LogSafety_LogText(id), "error", err)
 		Response_Error(w, http.StatusInternalServerError, "monero invoice failed")
@@ -102,12 +102,12 @@ func (s *Server) baselineInvoiceHandleMoneroInvoiceRoute(w http.ResponseWriter, 
 }
 
 func (s *Server) baselineInvoiceTrySettleOrExpireMoneroInvoice(ctx context.Context, userID string, invoice MoneroInvoiceResponse) (MoneroInvoiceResponse, error) {
-	issuer := TokenPolicy_Issuer(s.cfg, errTokenIssuerReadOnly)
+	issuer := TokenPolicy_Issuer(s.Cfg, errTokenIssuerReadOnly)
 	signer, err := issuer.Value, issuer.Error
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
 	}
-	inspected := MoneroWallet_InspectInvoice(ctx, s.cfg, invoice, errPaymentUnavailable)
+	inspected := MoneroWallet_InspectInvoice(ctx, s.Cfg, invoice, errPaymentUnavailable)
 	payment, err := inspected.Value, inspected.Error
 	if err != nil {
 		return MoneroInvoiceResponse{}, err
@@ -115,7 +115,7 @@ func (s *Server) baselineInvoiceTrySettleOrExpireMoneroInvoice(ctx context.Conte
 	// A fully-covered invoice settles even after expiry: funds arriving
 	// late must never disappear into an expired row.
 	if payment.ConfirmedAtomic >= invoice.AtomicAmount {
-		paymentResult := TokenLedger_CreditPayment(s.store.Database, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
+		paymentResult := TokenLedger_CreditPayment(s.Store.Database, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
 			AccountID:   userID,
 			AppID:       invoice.AppID,
 			EventType:   "credit",
@@ -127,17 +127,17 @@ func (s *Server) baselineInvoiceTrySettleOrExpireMoneroInvoice(ctx context.Conte
 		if err != nil {
 			return MoneroInvoiceResponse{}, err
 		}
-		if err := s.store.baselineInvoiceMarkMoneroInvoicePaid(ctx, userID, invoice.ID, receipt.ReceiptID, payment.PaymentID); err != nil {
+		if err := s.Store.baselineInvoiceMarkMoneroInvoicePaid(ctx, userID, invoice.ID, receipt.ReceiptID, payment.PaymentID); err != nil {
 			return MoneroInvoiceResponse{}, err
 		}
-		updated, _, err := s.store.baselineInvoiceMoneroInvoice(ctx, userID, invoice.ID)
+		updated, _, err := s.Store.baselineInvoiceMoneroInvoice(ctx, userID, invoice.ID)
 		return updated, err
 	}
 	if baselineInvoiceMoneroInvoiceExpired(invoice) {
-		if err := s.store.baselineInvoiceMarkMoneroInvoiceExpired(ctx, userID, invoice.ID); err != nil {
+		if err := s.Store.baselineInvoiceMarkMoneroInvoiceExpired(ctx, userID, invoice.ID); err != nil {
 			return MoneroInvoiceResponse{}, err
 		}
-		updated, _, err := s.store.baselineInvoiceMoneroInvoice(ctx, userID, invoice.ID)
+		updated, _, err := s.Store.baselineInvoiceMoneroInvoice(ctx, userID, invoice.ID)
 		return updated, err
 	}
 	return MoneroInvoiceResponse{}, nil
@@ -148,30 +148,30 @@ func (s *Server) baselineInvoiceTrySettleOrExpireMoneroInvoice(ctx context.Conte
 // partial funds are reported once per invoice as stuck for manual
 // disposition (a view-only wallet cannot refund them automatically).
 func (s *Server) baselineInvoiceReconcileMoneroExpiredInvoices(ctx context.Context, limit int) error {
-	if strings.TrimSpace(s.cfg.MoneroWalletRPCURL) == "" {
+	if strings.TrimSpace(s.Cfg.MoneroWalletRPCURL) == "" {
 		return nil
 	}
-	invoices, err := s.store.baselineInvoiceExpiredMoneroInvoices(ctx, limit)
+	invoices, err := s.Store.baselineInvoiceExpiredMoneroInvoices(ctx, limit)
 	if err != nil {
 		return err
 	}
 	if len(invoices) == 0 {
 		return nil
 	}
-	issuer := TokenPolicy_Issuer(s.cfg, errTokenIssuerReadOnly)
+	issuer := TokenPolicy_Issuer(s.Cfg, errTokenIssuerReadOnly)
 	signer, err := issuer.Value, issuer.Error
 	if err != nil {
 		return err
 	}
 	for _, item := range invoices {
-		inspected := MoneroWallet_InspectInvoice(ctx, s.cfg, item.Invoice, errPaymentUnavailable)
+		inspected := MoneroWallet_InspectInvoice(ctx, s.Cfg, item.Invoice, errPaymentUnavailable)
 		payment, err := inspected.Value, inspected.Error
 		if err != nil {
 			slog.Warn("expired monero invoice sweep failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", err)
 			continue
 		}
 		if payment.ConfirmedAtomic >= item.Invoice.AtomicAmount {
-			paymentResult := TokenLedger_CreditPayment(s.store.Database, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
+			paymentResult := TokenLedger_CreditPayment(s.Store.Database, ctx, signer, "monero", payment.PaymentID, TokenEventInput{
 				AccountID:   item.AccountID,
 				AppID:       item.Invoice.AppID,
 				EventType:   "credit",
@@ -184,7 +184,7 @@ func (s *Server) baselineInvoiceReconcileMoneroExpiredInvoices(ctx context.Conte
 				slog.Warn("expired monero invoice credit failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", err)
 				continue
 			}
-			if err := s.store.baselineInvoiceSettleExpiredMoneroInvoice(ctx, item.AccountID, item.Invoice.ID, receipt.ReceiptID, payment.PaymentID); err != nil {
+			if err := s.Store.baselineInvoiceSettleExpiredMoneroInvoice(ctx, item.AccountID, item.Invoice.ID, receipt.ReceiptID, payment.PaymentID); err != nil {
 				slog.Warn("expired monero invoice settle failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", err)
 				continue
 			}
@@ -200,10 +200,10 @@ func (s *Server) baselineInvoiceReconcileMoneroExpiredInvoices(ctx context.Conte
 }
 
 func (s *Server) baselineInvoiceReportStuckMoneroInvoice(invoiceID, accountID string, payment InvoicePaymentState) {
-	if _, already := s.moneroStuckNotified.LoadOrStore(invoiceID, true); already {
+	if _, already := s.MoneroStuckNotified.LoadOrStore(invoiceID, true); already {
 		return
 	}
-	s.metrics.MoneroStuckInvoices.Add(1)
+	s.Metrics.MoneroStuckInvoices.Add(1)
 	slog.Warn("monero invoice has uncredited funds", "invoice", LogSafety_LogText(invoiceID),
 		"account", LogSafety_LogText(accountID), "seen_atomic", payment.SeenAtomic,
 		"confirmed_atomic", payment.ConfirmedAtomic)
@@ -239,7 +239,7 @@ func (s *Server) baselineInvoiceRunMoneroInvoiceReconciler(ctx context.Context, 
 }
 
 func (s *Server) baselineInvoiceReconcileMoneroInvoices(ctx context.Context, limit int) error {
-	invoices, err := s.store.baselineInvoicePendingMoneroInvoices(ctx, limit)
+	invoices, err := s.Store.baselineInvoicePendingMoneroInvoices(ctx, limit)
 	if err != nil {
 		return err
 	}

@@ -30,15 +30,15 @@ func trustHTTPFixture(t *testing.T) *Server {
 		t.Fatal(identity.Error)
 	}
 	return &Server{
-		store: trustStoreFixture(t),
-		node:  identity.Value,
-		cfg: Config{
+		Store: trustStoreFixture(t),
+		Node:  identity.Value,
+		Cfg: Config{
 			AdminToken:      "operator-secret",
 			BaseURL:         "http://local.test/",
 			NodeDisplayName: "Local <node>",
 			MaxBodyBytes:    1 << 20,
 		},
-	}
+		Signer: signAccountProof}
 }
 
 func TestZiranPairingPolicyAgainstBaseline(t *testing.T) {
@@ -176,7 +176,7 @@ func TestZiranPairingAcceptanceAgainstBaseline(t *testing.T) {
 	for _, address := range []string{"http://local.test///", "\u2003https://local.test/path/\t", "", "\u2003\t", "ftp://local.test", "http://%zz"} {
 		t.Run(address, func(t *testing.T) {
 			server := trustHTTPFixture(t)
-			server.cfg.BaseURL = address
+			server.Cfg.BaseURL = address
 			rand.Reader = identityEntropyReader{}
 			got := TrustHttp_NewAcceptance(server.trust(), invite)
 			rand.Reader = identityEntropyReader{}
@@ -204,7 +204,7 @@ func trustHTTPPayload(t *testing.T, server *Server, handler, mode string, now ti
 	t.Helper()
 	privateKey, authority, spaceID := trustKeyFixture()
 	if handler == "claim" || handler == "resolve" {
-		if _, err := server.store.Database.Exec(`INSERT INTO trust_spaces(space_id,display_name,authority_public_key,authority_private_key,created_at)
+		if _, err := server.Store.Database.Exec(`INSERT INTO trust_spaces(space_id,display_name,authority_public_key,authority_private_key,created_at)
 VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), Timestamp_CanonicalNow()); err != nil {
 			t.Fatal(err)
 		}
@@ -212,7 +212,7 @@ VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), 
 	remote := NodeIdentity_New(ed25519.NewKeyFromSeed(bytesOf(0x43, ed25519.SeedSize))).Value
 	inviter := remote
 	if handler == "complete" || mode == "self" {
-		inviter = server.node
+		inviter = server.Node
 	}
 	invite := PairingInvite{
 		Version: 1, InviteID: "http-fixture", NodeID: inviter.ID, PublicKey: hex.EncodeToString(inviter.PublicKey),
@@ -228,13 +228,13 @@ VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), 
 		Addresses: []string{"http://remote.test"}, AcceptedAt: now.Unix(), Nonce: "acceptance-nonce",
 	}
 	if mode == "self" {
-		acceptance.NodeID, acceptance.PublicKey = server.node.ID, hex.EncodeToString(server.node.PublicKey)
-		NodeIdentity_SignAcceptance(server.node, invite, &acceptance)
+		acceptance.NodeID, acceptance.PublicKey = server.Node.ID, hex.EncodeToString(server.Node.PublicKey)
+		NodeIdentity_SignAcceptance(server.Node, invite, &acceptance)
 	} else {
 		NodeIdentity_SignAcceptance(remote, invite, &acceptance)
 	}
 	if handler == "complete" && mode != "unissued" {
-		if err := TrustStore_RecordIssuedPairingInvite(server.store.Database, t.Context(), invite); err != nil {
+		if err := TrustStore_RecordIssuedPairingInvite(server.Store.Database, t.Context(), invite); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -246,7 +246,7 @@ VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), 
 		}
 	}
 	claim := NameClaim{
-		SpaceID: spaceID, Name: "\u2003HOME\t", NodeID: server.node.ID,
+		SpaceID: spaceID, Name: "\u2003HOME\t", NodeID: server.Node.ID,
 		ExpiresAt: now.Add(time.Hour).Unix(),
 		Services:  []ServiceRecord{{Service: "sync", Endpoints: []string{"http://local.test"}}},
 	}
@@ -276,23 +276,23 @@ VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), 
 	case "accept":
 		value = invite
 		if mode == "replay" {
-			if err := TrustStore_TrustPeer(server.store.Database, t.Context(), invite, inviter.PublicKey); err != nil {
+			if err := TrustStore_TrustPeer(server.Store.Database, t.Context(), invite, inviter.PublicKey); err != nil {
 				t.Fatal(err)
 			}
 		}
 	case "complete":
 		value = completePairingRequest{Invite: invite, Acceptance: acceptance}
 		if mode == "replay" {
-			if err := TrustStore_CompleteIssuedPairing(server.store.Database, t.Context(), invite, acceptance, remote.PublicKey); err != nil {
+			if err := TrustStore_CompleteIssuedPairing(server.Store.Database, t.Context(), invite, acceptance, remote.PublicKey); err != nil {
 				t.Fatal(err)
 			}
 		}
 	case "peers":
 		if mode == "populated" {
-			if err := TrustStore_TrustPeer(server.store.Database, t.Context(), invite, inviter.PublicKey); err != nil {
+			if err := TrustStore_TrustPeer(server.Store.Database, t.Context(), invite, inviter.PublicKey); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := server.store.Database.Exec("UPDATE trusted_node_peers SET trusted_at=?1", Timestamp_CanonicalTimestamp(now)); err != nil {
+			if _, err := server.Store.Database.Exec("UPDATE trusted_node_peers SET trusted_at=?1", Timestamp_CanonicalTimestamp(now)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -306,7 +306,7 @@ VALUES(?1,'Fixture',?2,?3,?4)`, spaceID, []byte(authority), []byte(privateKey), 
 	case "resolve":
 		claim.Name = "home"
 		if mode != "missing" {
-			if result := TrustStore_SignAndStoreNameClaim(server.store.Database, t.Context(), claim); result.Error != nil {
+			if result := TrustStore_SignAndStoreNameClaim(server.Store.Database, t.Context(), claim); result.Error != nil {
 				t.Fatal(result.Error)
 			}
 		}
@@ -371,7 +371,7 @@ func TestZiranTrustHTTPAgainstBaseline(t *testing.T) {
 							"complete": "trusted_node_peers", "space": "trust_spaces", "claim": "name_claims",
 						}[handler.name]
 						query := "CREATE TRIGGER reject_trust_http BEFORE INSERT ON " + table + " BEGIN SELECT RAISE(ABORT,'trust write failed'); END"
-						if _, err := server.store.Database.Exec(query); err != nil {
+						if _, err := server.Store.Database.Exec(query); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -395,13 +395,13 @@ func TestZiranTrustHTTPAgainstBaseline(t *testing.T) {
 						request.Header.Del("X-Daochi-Admin")
 					}
 					if mode == "body limit" {
-						server.cfg.MaxBodyBytes = 1
+						server.Cfg.MaxBodyBytes = 1
 					}
 					if mode == "unreachable local" {
-						server.cfg.BaseURL = ""
+						server.Cfg.BaseURL = ""
 					}
 					if mode == "closed" {
-						_ = server.store.Database.Close()
+						_ = server.Store.Database.Close()
 					}
 					if mode == "cancelled" {
 						ctx, cancel := context.WithCancel(t.Context())
@@ -459,7 +459,7 @@ func TestZiranTrustHTTPAgainstBaseline(t *testing.T) {
 						server := []*Server{actual, expected}[index]
 						var signature string
 						var expiry int64
-						if err := server.store.Database.QueryRow("SELECT signature,expires_at FROM issued_pairing_invites WHERE invite_id=?1", invites[index].InviteID).Scan(&signature, &expiry); err != nil {
+						if err := server.Store.Database.QueryRow("SELECT signature,expires_at FROM issued_pairing_invites WHERE invite_id=?1", invites[index].InviteID).Scan(&signature, &expiry); err != nil {
 							t.Fatal(err)
 						}
 						if signature != invites[index].Signature || expiry != invites[index].ExpiresAt {
@@ -499,7 +499,7 @@ func TestZiranTrustHTTPAgainstBaseline(t *testing.T) {
 					t.Fatalf("response bytes changed: %s/%s", got.Body.String(), want.Body.String())
 				}
 				if mode != "closed" {
-					actualState, expectedState := trustSnapshot(t, actual.store), trustSnapshot(t, expected.store)
+					actualState, expectedState := trustSnapshot(t, actual.Store), trustSnapshot(t, expected.Store)
 					if handler.name == "invite" {
 						for _, state := range []map[string][][]any{actualState, expectedState} {
 							for _, issued := range state["issued"] {

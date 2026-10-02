@@ -8,12 +8,12 @@ import (
 )
 
 func (s *Server) baselineRequireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if s.cfg.AdminToken == "" {
+	if s.Cfg.AdminToken == "" {
 		Response_Error(w, http.StatusForbidden, "admin disabled")
 		return false
 	}
 	provided := HttpAuth_HeaderAlias(r, []string{"X-Daochi-Admin", "X-Ksync-Admin"})
-	if subtle.ConstantTimeCompare([]byte(provided), []byte(s.cfg.AdminToken)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(s.Cfg.AdminToken)) != 1 {
 		Response_Error(w, http.StatusUnauthorized, "admin token required")
 		return false
 	}
@@ -21,7 +21,7 @@ func (s *Server) baselineRequireAdmin(w http.ResponseWriter, r *http.Request) bo
 }
 
 func (s *Server) baselineRequireLocalOperator(w http.ResponseWriter, r *http.Request) bool {
-	if s.cfg.AdminToken != "" {
+	if s.Cfg.AdminToken != "" {
 		return s.baselineRequireAdmin(w, r)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

@@ -23,7 +23,7 @@ func meshAppRegistration(t *testing.T, appID string, version int) (SignedAppRegi
 func compareMeshAppImport(t *testing.T, actual, expected *Store, ctx context.Context, key ed25519.PublicKey, policy NodeSyncPolicy, registrations []SignedAppRegistrationRequest) MeshAppsImportResult {
 	t.Helper()
 	got := MeshApps_Import(actual.Database, ctx, key, policy, registrations, AuthenticationError_Convert)
-	baseline := &Server{store: expected, cfg: Config{NodeRegistryPublicKey: key}}
+	baseline := &Server{Store: expected, Cfg: Config{NodeRegistryPublicKey: key}, Signer: signAccountProof}
 	want, err := baseline.baselineImportMeshApps(ctx, policy, registrations)
 	if got.Value != want || !sameIdentityError(got.Error, err) {
 		t.Fatalf("mesh app import = %#v, %v; baseline = %d, %v", got, got.Error, want, err)

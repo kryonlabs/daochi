@@ -88,13 +88,13 @@ func (s *Server) baselineImportMeshApps(
 			return 0, fmt.Errorf("invalid mesh app %q: %w", registration.Manifest.AppID, errors.New(problem))
 		}
 
-		verified := AppRegistration_Verify(registration, s.cfg.NodeRegistryPublicKey)
+		verified := AppRegistration_Verify(registration, s.Cfg.NodeRegistryPublicKey)
 		manifestBytes, manifestHash, err := verified.Value, verified.Hash, baselineAuthenticationError(verified.Authentication)
 		if err != nil {
 			return 0, fmt.Errorf("verify mesh app %q: %w", registration.Manifest.AppID, err)
 		}
 
-		current, found, err := s.store.baselineLoadManifestVersion(ctx, registration.Manifest.AppID)
+		current, found, err := s.Store.baselineLoadManifestVersion(ctx, registration.Manifest.AppID)
 		if err != nil {
 			return 0, err
 		}
@@ -112,7 +112,7 @@ func (s *Server) baselineImportMeshApps(
 			continue
 		}
 
-		if err := AppStore_UpsertSignedManifest(s.store.Database,
+		if err := AppStore_UpsertSignedManifest(s.Store.Database,
 			ctx,
 			registration.Manifest,
 			manifestBytes,

@@ -15,7 +15,7 @@ func (s *Server) baselineHandleDocs(w http.ResponseWriter, r *http.Request, read
 		Response_Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	stats, err := read(r.Context(), s.cfg.DBPath)
+	stats, err := read(r.Context(), s.Cfg.DBPath)
 	statusHTML := `<p class="status-error">Stats are temporarily unavailable.</p>`
 	if err != nil {
 		slog.Error("load public stats", "error", err)

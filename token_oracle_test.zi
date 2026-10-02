@@ -1,0 +1,97 @@
+#import "std/go_types"
+#import "testing_test"
+text :: #import "std/text_go";
+token :: #import "token";
+hash :: #system_library "go:hash";
+sha256 :: #system_library "go:crypto/sha256";
+hmac :: #system_library "go:crypto/hmac";
+base64 :: #system_library "go:encoding/base64";
+strings :: #system_library "go:strings";
+regexp :: #system_library "go:regexp";
+numbers :: #system_library "go:strconv";
+
+// Preserve the released Go contract using native libraries independently of
+// Daochi's Ziran HMAC, base64 codec, identifier grammar and integer parser.
+#scope_file
+TokenOracleHash :: #type #foreign hash "Hash";
+TokenOracleFactory :: #type () -> TokenOracleHash;
+TokenOracleEncoding :: #type #foreign base64 "Encoding";
+TokenOraclePattern :: #type #foreign regexp "Regexp";
+TokenOracleBytes :: struct {
+    value: []u8
+    error: Error
+}
+TokenOracleWrite :: struct {
+    count: isize
+    error: Error
+}
+TokenOracleInteger :: struct {
+    value: s64
+    error: Error
+}
+
+NewHashRaw :: () -> TokenOracleHash #foreign sha256 "New";
+NewMACRaw :: (factory: TokenOracleFactory, secret: []u8) -> TokenOracleHash #foreign hmac "New";
+WriteRaw :: (digest: TokenOracleHash, value: []u8) -> TokenOracleWrite #go_results #foreign hash "(Hash).Write";
+SumRaw :: (digest: TokenOracleHash, prefix: []u8) -> []u8 #foreign hash "(Hash).Sum";
+EqualRaw :: (left: []u8, right: []u8) -> bool #foreign hmac "Equal";
+RawURLRaw :: () -> *TokenOracleEncoding #go_field #foreign base64 "RawURLEncoding";
+EncodeRaw :: (encoding: *TokenOracleEncoding, value: []u8) -> string #foreign base64 "(*Encoding).EncodeToString";
+DecodeRaw :: (encoding: *TokenOracleEncoding, value: string) -> TokenOracleBytes #go_results #foreign base64 "(*Encoding).DecodeString";
+SplitRaw :: (value: string, separator: string) -> []string #foreign strings "Split";
+JoinRaw :: (values: []string, separator: string) -> string #foreign strings "Join";
+CompileRaw :: (pattern: string) -> *TokenOraclePattern #foreign regexp "MustCompile";
+MatchRaw :: (pattern: *TokenOraclePattern, value: string) -> bool #foreign regexp "(*Regexp).MatchString";
+ParseIntegerRaw :: (value: string, base: isize, width: isize) -> TokenOracleInteger #go_results #foreign numbers "ParseInt";
+
+NewHash :: () -> TokenOracleHash {
+    return NewHashRaw()
+}
+
+MAC :: (secret: []u8, payload: []u8) -> []u8 {
+    digest := NewMACRaw(NewHash, secret)
+    WriteRaw(digest, payload)
+    prefix: []u8
+    return SumRaw(digest, prefix)
+}
+
+#scope_export
+Issue :: (secret: []u8, payload: string) -> string {
+    bytes := text.ToBytes(payload)
+    encoding := RawURLRaw()
+    parts: [2]string = .[EncodeRaw(encoding, bytes), EncodeRaw(encoding, MAC(secret, bytes))]
+    return JoinRaw(parts[:], ".")
+}
+
+Verify :: (secret: []u8, value: string, now: s64) -> token.AuthTokenResult {
+    result: token.AuthTokenResult
+    parts := SplitRaw(value, ".")
+    if parts.count != 2 || secret.count == 0 {
+        result.error = "invalid token"
+        return result
+    }
+    encoding := RawURLRaw()
+    payload := DecodeRaw(encoding, parts[0])
+    if payload.error != null {
+        result.error = "invalid token payload"
+        return result
+    }
+    signature := DecodeRaw(encoding, parts[1])
+    if signature.error != null || !EqualRaw(signature.value, MAC(secret, payload.value)) {
+        result.error = "invalid token signature"
+        return result
+    }
+    fields := SplitRaw(text.FromBytes(payload.value), "\n")
+    if fields.count < 4 || fields[0] != "v1" ||
+        !MatchRaw(CompileRaw("^[0-9a-f]{64}$"), fields[1]) {
+        result.error = "invalid token payload"
+        return result
+    }
+    expires := ParseIntegerRaw(fields[2], cast(isize)10, cast(isize)64)
+    if expires.error != null || now > expires.value {
+        result.error = "token expired"
+        return result
+    }
+    result.value = fields[1]
+    return result
+}

@@ -1,0 +1,62 @@
+#import "std/go_types"
+#import "testing_test"
+text :: #import "std/text_go";
+codec :: #import "codec";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+base64 :: #system_library "go:encoding/base64";
+
+// Keep the native Go decoding order, Unicode trimming and non-strict trailing
+// base64 bits as an independent oracle for Daochi's canonical codec.
+#scope_file
+BinaryFieldOracleEncoding :: #type #foreign base64 "Encoding";
+BinaryFieldOracleBytes :: struct {
+    value: []u8
+    error: Error
+}
+TrimRaw :: (value: string) -> string #foreign strings "TrimSpace";
+DecodeHexRaw :: (value: string) -> BinaryFieldOracleBytes #go_results #foreign hex "DecodeString";
+StandardRaw :: () -> *BinaryFieldOracleEncoding #go_field #foreign base64 "StdEncoding";
+RawStandardRaw :: () -> *BinaryFieldOracleEncoding #go_field #foreign base64 "RawStdEncoding";
+URLRaw :: () -> *BinaryFieldOracleEncoding #go_field #foreign base64 "URLEncoding";
+DecodeRaw :: (encoding: *BinaryFieldOracleEncoding, value: string) -> BinaryFieldOracleBytes #go_results #foreign base64 "(*Encoding).DecodeString";
+EncodeRaw :: (encoding: *BinaryFieldOracleEncoding, value: []u8) -> string #foreign base64 "(*Encoding).EncodeToString";
+
+#scope_export
+EncodeStandard :: (value: []u8) -> string {
+    return EncodeRaw(StandardRaw(), value)
+}
+
+EncodeRawStandard :: (value: []u8) -> string {
+    return EncodeRaw(RawStandardRaw(), value)
+}
+
+EncodeURL :: (value: []u8) -> string {
+    return EncodeRaw(URLRaw(), value)
+}
+
+Decode :: (value: string) -> codec.BinaryField {
+    result: codec.BinaryField
+    value = TrimRaw(value)
+    if value == "" {
+        result.error = "empty binary field"
+        return result
+    }
+    if value.count % 2 == 0 {
+        decoded := DecodeHexRaw(value)
+        if decoded.error == null {
+            result.value = text.FromBytes(decoded.value)
+            return result
+        }
+    }
+    encodings: [3]*BinaryFieldOracleEncoding = .[StandardRaw(), RawStandardRaw(), URLRaw()]
+    for encoding: encodings[:] {
+        decoded := DecodeRaw(encoding, value)
+        if decoded.error == null {
+            result.value = text.FromBytes(decoded.value)
+            return result
+        }
+    }
+    result.error = "field is neither hex nor base64"
+    return result
+}

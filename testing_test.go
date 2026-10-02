@@ -19,10 +19,6 @@ func TestingTest_RenderRaw(Pattern string, Arguments []Any) string {
 	return fmt.Sprintf(Pattern, Arguments...)
 }
 
-func TestingTest_Helper(test *Test) {
-	(*testing.T).Helper(test)
-}
-
 func TestingTest_Fatal(test *Test, message string) {
 	(*testing.T).Helper(test)
 	(*testing.T).Fatal(test, message)

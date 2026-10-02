@@ -1,6 +1,7 @@
 package main
 
 import (
+	released "daochi/testdata/binary_field_oracle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -66,7 +67,7 @@ func baselineBoundarySyncRequestPublicKey(req SyncRequest) ([]byte, error) {
 	if strings.TrimSpace(req.PublicKey) == "" {
 		return nil, nil
 	}
-	publicKeyField, decodeError := referenceBinaryField(req.PublicKey)
+	publicKeyField, decodeError := released.DecodeBytes(req.PublicKey)
 	publicKey := publicKeyField
 	if decodeError != nil {
 		return nil, errors.New("invalid public_key")
@@ -265,7 +266,7 @@ func baselineBoundaryParseExportedSyncKey(text string) (ExportedAccountKey, erro
 	if publicID != "" && !Identity_ValidUserID(publicID) {
 		return ExportedAccountKey{}, errors.New("invalid public_id")
 	}
-	privateKey, decodeError := referenceBinaryField(privateKeyText)
+	privateKey, decodeError := released.DecodeBytes(privateKeyText)
 	if decodeError != nil {
 		return ExportedAccountKey{}, errors.New("invalid private_key")
 	}

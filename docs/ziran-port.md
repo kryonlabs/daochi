@@ -60,6 +60,17 @@ testing calls and typed subtest callbacks. Quoted `#program_export` names make
 the generated entry points discoverable by `go test`; the compiler emits native
 test modules as `_test.go`, keeping their helpers out of production builds.
 
+The port regression tests also have canonical `ziran_port_test.zi` and
+`token_test.zi` sources. All four original test names and both fuzz targets are
+preserved, including the 20,000 deterministic codec samples, every identifier
+boundary, arbitrary log bytes, token key sizes and signed expiry limits. Native
+Go-library oracles in `binary_field_oracle_test.zi` and `token_oracle_test.zi`
+remain independent of Daochi's codec, grammar, integer and HMAC implementations.
+Each oracle result is checked against an unchanged historical Go fixture under
+`testdata` before it is used as an expectation. Production builds exclude these
+test modules and fixtures. Native testing helper calls appear directly in
+the canonical helper procedures so Go reports failures at their callers.
+
 Additional regression cases compare binary decoding, identifier grammars,
 bearer-token bytes, HMAC results, malformed inputs, Gregorian dates,
 manifest scope/key policy, integer limits, expiry boundaries, concurrent

@@ -1,0 +1,173 @@
+#import "std/go_types"
+testing :: #import "testing_test";
+text :: #import "std/text_go";
+codec :: #import "codec";
+identity :: #import "identity";
+log :: #import "log_safety";
+oracle :: #import "binary_field_oracle_test";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+random :: #system_library "go:math/rand";
+regexp :: #system_library "go:regexp";
+released :: #system_library "go:daochi/testdata/binary_field_oracle";
+builtin :: #system_library "go:builtin";
+native_testing :: #system_library "go:testing";
+
+#scope_file
+HelperRaw :: (test: *testing.Test) #foreign native_testing "(*T).Helper";
+RegressionRandom :: #type #foreign random "Rand";
+RegressionRandomSource :: #type #foreign random "Source";
+RegressionReadResult :: struct {
+    count: isize
+    error: Error
+}
+IdentifierValidator :: #type (value: string) -> bool;
+IdentifierCase :: struct {
+    pattern: string
+    valid: IdentifierValidator
+}
+IdentifierPattern :: #type #foreign regexp "Regexp";
+
+NewSourceRaw :: (seed: s64) -> RegressionRandomSource #foreign random "NewSource";
+NewRandomRaw :: (source: RegressionRandomSource) -> *RegressionRandom #foreign random "New";
+ReadRaw :: (source: *RegressionRandom, value: []u8) -> RegressionReadResult #go_results #foreign random "(*Rand).Read";
+IntegerRaw :: (source: *RegressionRandom, maximum: isize) -> isize #foreign random "(*Rand).Intn";
+AllocateBytesRaw :: (count: isize) -> []u8 #foreign builtin "make";
+EncodeHexRaw :: (value: []u8) -> string #foreign hex "EncodeToString";
+UpperRaw :: (value: string) -> string #foreign strings "ToUpper";
+JoinRaw :: (values: []string, separator: string) -> string #foreign strings "Join";
+RepeatRaw :: (value: string, count: isize) -> string #foreign strings "Repeat";
+ReplaceRaw :: (value: string, before: string, after: string) -> string #foreign strings "ReplaceAll";
+AppendStringRaw :: (values: []string, value: string) -> []string #foreign builtin "append";
+CompileRaw :: (pattern: string) -> *IdentifierPattern #foreign regexp "MustCompile";
+MatchRaw :: (pattern: *IdentifierPattern, value: string) -> bool #foreign regexp "(*Regexp).MatchString";
+ValidateRaw :: (validator: IdentifierValidator, value: string) -> bool #foreign builtin "call";
+ReleasedDecodeRaw :: (value: string) -> codec.BinaryField #go_results #foreign released "Decode";
+
+CheckBinaryField :: (test: *testing.Test, input: string) {
+    HelperRaw(test)
+    expected := oracle.Decode(input)
+    released := ReleasedDecodeRaw(input)
+    if expected.value != released.value || expected.error != released.error {
+        arguments: [3]Any = .[input, expected, released]
+        testing.Fatalf(test, "binary oracle %q: got %#v, want %#v", arguments[:])
+    }
+    got := codec.DecodeBinaryField(input)
+    if expected.error != "" {
+        if got.error != expected.error || got.value != "" {
+            arguments: [3]Any = .[input, got, expected.error]
+            testing.Fatalf(test, "decode %q: got %#v, want error %q", arguments[:])
+        }
+        return
+    }
+    if got.error != "" || got.value != expected.value {
+        arguments: [3]Any = .[input, got, text.ToBytes(expected.value)]
+        testing.Fatalf(test, "decode %q: got %#v, want %x", arguments[:])
+    }
+}
+
+#scope_export
+#program_export "TestZiranBinaryFieldMatchesReleasedCodec"
+BinaryFieldMatchesReleasedCodec :: (test: *testing.Test) {
+    invalidUTF8: [1]u8 = .[255]
+    inputs: [29]string = .[
+        "", " \t\n", "00ff", "ABCDEF", "a", "ab", "abc", "abcd", "abcde",
+        "Zg==", "Zg", "Zm8=", "Zm8", "Zm9v", "Zh==", "Zm9=",
+        "Z\r\ng==\r\n", "Zg=", "Zg===", "Zg==Zg==", "====", "Z===",
+        "-_8=", "-_8", "+/8=", "+/8", "\u2003Zg==\u00a0", "Zm 9v", text.FromBytes(invalidUTF8[:])
+    ]
+    for input: inputs[:] {
+        CheckBinaryField(test, input)
+    }
+    source := NewRandomRaw(NewSourceRaw(20260929))
+    length: s64 = 1
+    while length <= codec.mlDSA44PrivateKeySize {
+        bytes := AllocateBytesRaw(cast(isize)length)
+        read := ReadRaw(source, bytes)
+        if read.error != null {
+            arguments: [1]Any = .[read.error]
+            testing.Fatalf(test, "%v", arguments[:])
+        }
+        encodedHex := EncodeHexRaw(bytes)
+        CheckBinaryField(test, encodedHex)
+        CheckBinaryField(test, UpperRaw(encodedHex))
+        encodings: [3]string = .[oracle.EncodeStandard(bytes), oracle.EncodeRawStandard(bytes), oracle.EncodeURL(bytes)]
+        for encoded: encodings[:] {
+            CheckBinaryField(test, encoded)
+            wrapped: [3]string = .["\u2003", encoded, "\u2003"]
+            CheckBinaryField(test, JoinRaw(wrapped[:], ""))
+            split: [3]string = .[encoded[:encoded.count / 2], "\r\n", encoded[encoded.count / 2:]]
+            CheckBinaryField(test, JoinRaw(split[:], ""))
+        }
+        length += 17
+    }
+    alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/-_=\r\n! "
+    sample: s64 = 0
+    while sample < 20000 {
+        bytes := AllocateBytesRaw(IntegerRaw(source, cast(isize)40))
+        index: s64 = 0
+        while index < bytes.count {
+            bytes[index] = alphabet[IntegerRaw(source, cast(isize)alphabet.count)]
+            index += 1
+        }
+        CheckBinaryField(test, text.FromBytes(bytes))
+        sample += 1
+    }
+}
+
+#program_export "FuzzZiranBinaryField"
+BinaryField :: (fuzzer: *testing.Fuzzer) {
+    inputs: [5]string = .["00ff", "Zg==", "-_8=", "Zg===", "\u2003Zm9v\u2003"]
+    for input: inputs[:] {
+        testing.AddString(fuzzer, input)
+    }
+    testing.FuzzString(fuzzer, CheckBinaryField)
+}
+
+#program_export "TestZiranIdentifierGrammarMatchesReleasedPatterns"
+IdentifierGrammarMatchesReleasedPatterns :: (test: *testing.Test) {
+    cases: [8]IdentifierCase = .[
+        IdentifierCase.{"^[0-9a-f]{64}$", identity.ValidUserID},
+        IdentifierCase.{"^[A-Za-z0-9._:-]{8,128}$", identity.ValidClientID},
+        IdentifierCase.{"^[A-Za-z0-9._:-]{4,128}$", identity.ValidResourceID},
+        IdentifierCase.{"^[a-z0-9_]{4,32}$", identity.ValidAccountAlias},
+        IdentifierCase.{"^[A-Za-z0-9._:-]{1,64}$", identity.ValidNamespace},
+        IdentifierCase.{"^[A-Za-z0-9_:-]{1,64}$", identity.ValidNamespaceSegment},
+        IdentifierCase.{"^v[1-9][0-9]{0,3}$", identity.ValidVersionSegment},
+        IdentifierCase.{"^[A-Za-z0-9._:-]{1,160}$", identity.ValidEncryptedRecordID}
+    ]
+    initial: [10]string = .["", "v0", "v1", "v001", "v9999", "v10000", "v123\n", "é", "a.b", "A_Z:-"]
+    inputs := initial[:]
+    sizes: [16]isize = .[1, 3, 4, 7, 8, 31, 32, 63, 64, 65, 127, 128, 129, 159, 160, 161]
+    characters: [10]string = .["a", "A", "0", "f", "_", ".", ":", "-", " ", "\n"]
+    for size: sizes[:] {
+        for character: characters[:] {
+            inputs = AppendStringRaw(inputs, RepeatRaw(character, size))
+        }
+    }
+    for value: cases[:] {
+        pattern := CompileRaw(value.pattern)
+        for input: inputs {
+            got := ValidateRaw(value.valid, input)
+            want := MatchRaw(pattern, input)
+            if got != want {
+                arguments: [4]Any = .[value.pattern, input, got, want]
+                testing.Fatalf(test, "%s input %q: got %v, want %v", arguments[:])
+            }
+        }
+    }
+}
+
+#program_export "TestZiranLogTextPreservesOtherBytes"
+LogTextPreservesOtherBytes :: (test: *testing.Test) {
+    invalidUTF8: [4]u8 = .[0, 255, 10, 9]
+    inputs: [5]string = .["", "ordinary", "\r\nentry\r\n", "日\n本\r語", text.FromBytes(invalidUTF8[:])]
+    for input: inputs[:] {
+        want := ReplaceRaw(ReplaceRaw(input, "\n", ""), "\r", "")
+        got := log.LogText(input)
+        if got != want {
+            arguments: [3]Any = .[input, got, want]
+            testing.Fatalf(test, "sanitize %q: got %q, want %q", arguments[:])
+        }
+    }
+}

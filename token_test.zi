@@ -1,0 +1,162 @@
+#import "std/go_types"
+testing :: #import "testing_test";
+text :: #import "std/text_go";
+token :: #import "token";
+oracle :: #import "token_oracle_test";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+builtin :: #system_library "go:builtin";
+released :: #system_library "go:daochi/testdata/token_oracle";
+native_testing :: #system_library "go:testing";
+
+#scope_file
+HelperRaw :: (test: *testing.Test) #foreign native_testing "(*T).Helper";
+RepeatRaw :: (value: string, count: isize) -> string #foreign strings "Repeat";
+JoinRaw :: (values: []string, separator: string) -> string #foreign strings "Join";
+FormatIntegerRaw :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
+AllocateBytesRaw :: (count: isize) -> []u8 #foreign builtin "make";
+ReleasedIssueRaw :: (secret: []u8, payload: string) -> string #foreign released "Issue";
+ReleasedVerifyRaw :: (secret: []u8, value: string, now: s64) -> token.AuthTokenResult #go_results #foreign released "Verify";
+
+Payload :: (user: string, expiry: s64) -> string {
+    fields: [4]string = .["v1", user, FormatIntegerRaw(expiry, cast(isize)10), ""]
+    return JoinRaw(fields[:], "\n")
+}
+
+PayloadText :: (user: string, expiry: string) -> string {
+    fields: [4]string = .["v1", user, expiry, ""]
+    return JoinRaw(fields[:], "\n")
+}
+
+Suffix :: (value: string, suffix: string) -> string {
+    parts: [2]string = .[value, suffix]
+    return JoinRaw(parts[:], "")
+}
+
+SameResult :: (left: token.AuthTokenResult, right: token.AuthTokenResult) -> bool {
+    return left.value == right.value && left.error == right.error
+}
+
+ExpectedIssue :: (test: *testing.Test, secret: []u8, payload: string) -> string {
+    HelperRaw(test)
+    got := oracle.Issue(secret, payload)
+    want := ReleasedIssueRaw(secret, payload)
+    if got != want {
+        arguments: [3]Any = .[payload, got, want]
+        testing.Fatalf(test, "token oracle issue %q: got %q, want %q", arguments[:])
+    }
+    return got
+}
+
+ExpectedVerify :: (test: *testing.Test, secret: []u8, value: string, now: s64) -> token.AuthTokenResult {
+    HelperRaw(test)
+    got := oracle.Verify(secret, value, now)
+    want := ReleasedVerifyRaw(secret, value, now)
+    if !SameResult(got, want) {
+        arguments: [4]Any = .[value, now, got, want]
+        testing.Fatalf(test, "token oracle verify %q at %d: got %#v, want %#v", arguments[:])
+    }
+    return got
+}
+
+CheckFuzzInput :: (test: *testing.Test, value: string) {
+    secret := text.ToBytes("test token key")
+    got := token.VerifyAuthToken(secret, value, 0)
+    want := ExpectedVerify(test, secret, value, 0)
+    if !SameResult(got, want) {
+        arguments: [3]Any = .[value, got, want]
+        testing.Fatalf(test, "verify %q: got %#v, want %#v", arguments[:])
+    }
+}
+
+#scope_export
+#program_export "TestZiranTokensPreserveWireBytesAndAuthentication"
+TokensPreserveWireBytesAndAuthentication :: (test: *testing.Test) {
+    user := RepeatRaw("a", cast(isize)64)
+    sizes: [8]isize = .[1, 16, 32, 63, 64, 65, 128, 256]
+    expiries: [6]s64 = .[-9223372036854775807 - 1, -1, 0, 1, 1790709000, 9223372036854775807]
+    for size: sizes[:] {
+        secret := AllocateBytesRaw(size)
+        index: s64 = 0
+        while index < secret.count {
+            secret[index] = cast(u8)(index * 29)
+            index += 1
+        }
+        for expiry: expiries[:] {
+            payload := Payload(user, expiry)
+            want := ExpectedIssue(test, secret, payload)
+            issued := token.IssueAuthToken(secret, user, expiry)
+            if issued.error != "" || issued.value != want {
+                arguments: [4]Any = .[size, expiry, issued, want]
+                testing.Fatalf(test, "issue key=%d expiry=%d: got %#v, want %q", arguments[:])
+            }
+            clocks: [4]s64 = .[expiry, 0, 1790709000, 9223372036854775807]
+            for now: clocks[:] {
+                gotResult := token.VerifyAuthToken(secret, issued.value, now)
+                wantResult := ExpectedVerify(test, secret, want, now)
+                if !SameResult(gotResult, wantResult) {
+                    arguments: [5]Any = .[size, expiry, now, gotResult, wantResult]
+                    testing.Fatalf(test, "verify key=%d expiry=%d now=%d: got %#v, want %#v", arguments[:])
+                }
+            }
+        }
+    }
+    secret := text.ToBytes("stable test secret")
+    payloads: [13]string = .[
+        "", "v1\n", Payload(user, 1)[:Payload(user, 1).count - 1],
+        Suffix("v2\n", Suffix(user, "\n1\n")),
+        Payload(RepeatRaw("A", cast(isize)64), 1), "v1\nshort\n1\n",
+        PayloadText(user, "+1"), PayloadText(user, "01"),
+        PayloadText(user, " 1"), PayloadText(user, "1_0"),
+        PayloadText(user, "9223372036854775808"),
+        PayloadText(user, "-9223372036854775809"),
+        Suffix(Payload(user, 1), "extra\nfields")
+    ]
+    clocks: [3]s64 = .[0, 1, 2]
+    for payload: payloads[:] {
+        value := ExpectedIssue(test, secret, payload)
+        for now: clocks[:] {
+            got := token.VerifyAuthToken(secret, value, now)
+            want := ExpectedVerify(test, secret, value, now)
+            if !SameResult(got, want) {
+                arguments: [4]Any = .[payload, now, got, want]
+                testing.Fatalf(test, "authenticated payload %q at %d: got %#v, want %#v", arguments[:])
+            }
+        }
+    }
+    valid := ExpectedIssue(test, secret, Payload(user, 1))
+    malformed: [7]string = .["", ".", "...", "!.!", Suffix(valid, "."), valid[:valid.count - 1], Suffix(valid, "=")]
+    for value: malformed[:] {
+        got := token.VerifyAuthToken(secret, value, 0)
+        want := ExpectedVerify(test, secret, value, 0)
+        if !SameResult(got, want) {
+            arguments: [3]Any = .[value, got, want]
+            testing.Fatalf(test, "malformed token %q: got %#v, want %#v", arguments[:])
+        }
+    }
+    wrongKey := token.VerifyAuthToken(text.ToBytes("wrong secret"), valid, 0)
+    if wrongKey.error != "invalid token signature" {
+        arguments: [1]Any = .[wrongKey]
+        testing.Fatalf(test, "wrong key accepted: %#v", arguments[:])
+    }
+    emptySecret: []u8
+    emptyKey := token.IssueAuthToken(emptySecret, user, 1)
+    if emptyKey.error != "invalid token input" {
+        arguments: [1]Any = .[emptyKey]
+        testing.Fatalf(test, "empty key accepted: %#v", arguments[:])
+    }
+    invalidUser := token.IssueAuthToken(secret, "invalid", 1)
+    if invalidUser.error != "invalid token input" {
+        arguments: [1]Any = .[invalidUser]
+        testing.Fatalf(test, "invalid user accepted: %#v", arguments[:])
+    }
+}
+
+#program_export "FuzzZiranTokenVerification"
+TokenVerification :: (fuzzer: *testing.Fuzzer) {
+    secret := text.ToBytes("test token key")
+    user := RepeatRaw("a", cast(isize)64)
+    testing.AddString(fuzzer, oracle.Issue(secret, Payload(user, 1)))
+    testing.AddString(fuzzer, "invalid")
+    testing.FuzzString(fuzzer, CheckFuzzInput)
+}

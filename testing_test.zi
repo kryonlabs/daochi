@@ -16,10 +16,6 @@ AddStringRaw :: (test: *Fuzzer, value: string) #foreign native "(*F).Add";
 FuzzStringRaw :: (test: *Fuzzer, callback: StringFuzzCase) #foreign native "(*F).Fuzz";
 
 #scope_export
-Helper :: (test: *Test) {
-    HelperRaw(test)
-}
-
 Fatal :: (test: *Test, message: string) {
     HelperRaw(test)
     FatalRaw(test, message)

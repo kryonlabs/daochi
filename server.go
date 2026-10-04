@@ -1462,8 +1462,8 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 	if !validUserID(userID) {
 		return nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
 	}
-	nonce, ok := s.challenges.Consume(userID)
-	if !ok {
+	nonces := s.challenges.Outstanding(userID)
+	if len(nonces) == 0 {
 		return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
 	}
 	publicKey, found, err := s.store.PublicKey(ctx, userID)
@@ -1497,11 +1497,19 @@ func (s *Server) authenticateSignature(ctx context.Context, userID, publicKeyTex
 	if len(signature) != mlDSA44SignatureSize {
 		return nil, authError{status: http.StatusBadRequest, message: "wrong signature size"}
 	}
-	message := canonicalMessageWithContext(signatureContext, nonce, method, path, signedPayload)
-	if !s.verifier.Verify(publicKey, message, signature) {
-		return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
+	// Overlapping sign-ins of one account each hold a challenge. Accept the
+	// one this signature covers and use it up, so it cannot sign in again.
+	for _, nonce := range nonces {
+		message := canonicalMessageWithContext(signatureContext, nonce, method, path, signedPayload)
+		if !s.verifier.Verify(publicKey, message, signature) {
+			continue
+		}
+		if !s.challenges.Take(userID, nonce) {
+			return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
+		}
+		return publicKey, nil
 	}
-	return publicKey, nil
+	return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
 }
 
 func (s *Server) authenticateToken(r *http.Request) (string, error) {

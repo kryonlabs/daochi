@@ -42,9 +42,17 @@ func accessIdentity() (string, []byte, string) {
 }
 
 func accessChallenge(server *Server, user string) {
-	server.Challenges.ByUser[user] = Challenge{
-		Nonce: bytes.Repeat([]byte{0x71}, 32), ExpiresAt: time.Unix(4_000_000_000, 0),
+	nonce := bytes.Repeat([]byte{0x71}, 32)
+	server.Challenges.ByUser[Challenge_Key(user, nonce)] = Challenge{
+		User: user, Nonce: nonce, ExpiresAt: time.Unix(4_000_000_000, 0),
 	}
+}
+
+// Modes in which the signature signs in. Other failures leave the account's
+// challenge for its own sign-in, unless it was missing or had expired.
+func accessSucceeds(mode string) bool {
+	return mode == "registered" || mode == "new account" || mode == "normalized user" ||
+		mode == "registered key supplied" || mode == "base64 signature" || mode == "empty stored key"
 }
 
 func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
@@ -83,13 +91,16 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 				user = "!"
 			case "missing challenge":
 				for _, server := range servers {
-					delete(server.Challenges.ByUser, user)
+					for key := range server.Challenges.ByUser {
+						delete(server.Challenges.ByUser, key)
+					}
 				}
 			case "expired challenge":
 				for _, server := range servers {
-					item := server.Challenges.ByUser[user]
-					item.ExpiresAt = time.Unix(1, 0)
-					server.Challenges.ByUser[user] = item
+					for key, item := range server.Challenges.ByUser {
+						item.ExpiresAt = time.Unix(1, 0)
+						server.Challenges.ByUser[key] = item
+					}
 				}
 			case "missing public key":
 				publicKeyText = ""
@@ -140,7 +151,7 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 				!reflect.DeepEqual(verifiers[0].calls, verifiers[1].calls) || !reflect.DeepEqual(actual.Challenges.ByUser, expected.Challenges.ByUser) {
 				t.Fatal("account signature result, callback, panic or challenge state changed", failures, panics)
 			}
-			if mode == "registered" || mode == "new account" || mode == "normalized user" || mode == "registered key supplied" || mode == "base64 signature" || mode == "empty stored key" {
+			if accessSucceeds(mode) {
 				if failures[0] != nil || len(verifiers[0].calls) != 1 {
 					t.Fatal("valid account signature was rejected", failures)
 				}
@@ -151,10 +162,14 @@ func TestZiranAccountSignatureAgainstBaseline(t *testing.T) {
 			if mode == "callback panic" && panics[0] != sentinel {
 				t.Fatal("verifier panic identity changed", panics)
 			}
-			if mode != "invalid user" && len(actual.Challenges.ByUser) != 0 {
+			used := accessSucceeds(mode) || mode == "missing challenge" || mode == "expired challenge"
+			if mode != "invalid user" && used && len(actual.Challenges.ByUser) != 0 {
 				t.Fatal("a used or expired challenge survived authentication")
 			}
-			if mode != "invalid user" {
+			if mode != "invalid user" && !used && len(actual.Challenges.ByUser) != 1 {
+				t.Fatal("a failed sign-in removed the account's challenge")
+			}
+			if used {
 				_, replay := actual.authenticateSignature(ctx, user, publicKeyText, signature, "inbe-sync-v1", "POST", "/a/b", nil)
 				if !equalAuthenticationError(replay, authError{400, "missing or expired challenge"}) {
 					t.Fatal("challenge was reusable after authentication", replay)
@@ -202,8 +217,8 @@ func TestZiranAccountSignatureNativeFailuresAgainstBaseline(t *testing.T) {
 						values[index], failures[index] = server.baselineAccessAuthenticateSignature(t.Context(), user, "", signature, "daochi-sync-v1", "POST", "/login", nil)
 					}
 				})
-				if len(server.Challenges.ByUser) != 0 || server.Store.Database.Stats().InUse != 0 {
-					t.Fatal("native failure retained a challenge or connection")
+				if len(server.Challenges.ByUser) != 1 || server.Store.Database.Stats().InUse != 0 {
+					t.Fatal("native failure lost the challenge or retained a connection")
 				}
 			}
 			if !reflect.DeepEqual(values[0], values[1]) || !equalAuthenticationError(failures[0], failures[1]) || panics[0] != panics[1] ||
@@ -359,12 +374,15 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 					}
 					accessChallenge(server, user)
 					if mode == "missing challenge" {
-						delete(server.Challenges.ByUser, user)
+						for key := range server.Challenges.ByUser {
+							delete(server.Challenges.ByUser, key)
+						}
 					}
 					if mode == "expired challenge" {
-						item := server.Challenges.ByUser[user]
-						item.ExpiresAt = time.Unix(1, 0)
-						server.Challenges.ByUser[user] = item
+						for key, item := range server.Challenges.ByUser {
+							item.ExpiresAt = time.Unix(1, 0)
+							server.Challenges.ByUser[key] = item
+						}
 					}
 					if mode == "nil limiter" {
 						server.Limiter = nil
@@ -543,8 +561,8 @@ func TestZiranAccountAccessHTTPAgainstBaseline(t *testing.T) {
 						if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 							t.Fatal(err)
 						}
-						issued := server.Challenges.ByUser[user]
-						if response.UserIDHash != user || response.Nonce != hex.EncodeToString(bytes.Repeat([]byte{0x52}, 32)) || response.Nonce != hex.EncodeToString(issued.Nonce) ||
+						issued := server.Challenges.ByUser[Challenge_Key(user, bytes.Repeat([]byte{0x52}, 32))]
+						if issued.User != user || response.UserIDHash != user || response.Nonce != hex.EncodeToString(bytes.Repeat([]byte{0x52}, 32)) || response.Nonce != hex.EncodeToString(issued.Nonce) ||
 							response.ExpiresIn != int64(server.Cfg.ChallengeTTL.Seconds()) || issued.ExpiresAt.Before(before.Add(server.Cfg.ChallengeTTL)) || issued.ExpiresAt.After(after.Add(server.Cfg.ChallengeTTL)) {
 							t.Fatal("challenge nonce, account or expiration changed", response)
 						}

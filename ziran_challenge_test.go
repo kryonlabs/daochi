@@ -9,45 +9,78 @@ import (
 	"time"
 )
 
-func TestZiranChallengeIssueReplaceAndConsume(t *testing.T) {
+func TestZiranChallengeOverlappingIssuesStayUsable(t *testing.T) {
 	store := Challenge_New(time.Minute)
 	first := Challenge_Issue(store, "alice")
 	if first.Error != nil || len(first.Nonce) != 32 {
 		t.Fatalf("issue failed: %#v", first)
 	}
+	second := Challenge_Issue(store, "alice")
+	if second.Error != nil || len(second.Nonce) != 32 {
+		t.Fatalf("second issue failed: %#v", second)
+	}
+	pending := Challenge_Outstanding(store, "alice")
+	if len(pending) != 2 || !bytes.Equal(pending[0].Nonce, second.Nonce) || !bytes.Equal(pending[1].Nonce, first.Nonce) {
+		t.Fatalf("both challenges must stay outstanding, newest first: %#v", pending)
+	}
 	preview := Challenge_PeekBase64(store, "alice")
-	if !preview.Found || preview.Nonce != base64.StdEncoding.EncodeToString(first.Nonce) {
+	if !preview.Found || preview.Nonce != base64.StdEncoding.EncodeToString(second.Nonce) {
 		t.Fatalf("preview changed nonce or encoding: %#v", preview)
 	}
-	replacement := Challenge_Issue(store, "alice")
-	if replacement.Error != nil || len(replacement.Nonce) != 32 {
-		t.Fatalf("replacement failed: %#v", replacement)
+	if !Challenge_Take(store, Challenge_Key("alice", first.Nonce)) {
+		t.Fatal("the older challenge was replaced")
 	}
-	consumed := Challenge_Consume(store, "alice")
-	if !consumed.Found || !bytes.Equal(consumed.Nonce, replacement.Nonce) {
-		t.Fatalf("consume did not use the latest challenge: %#v", consumed)
+	if Challenge_Take(store, Challenge_Key("alice", first.Nonce)) {
+		t.Fatal("a used challenge was reusable")
 	}
-	if next := Challenge_Consume(store, "alice"); next.Found || next.Nonce != nil {
-		t.Fatalf("consumed nonce was reusable: %#v", next)
+	pending = Challenge_Outstanding(store, "alice")
+	if len(pending) != 1 || !bytes.Equal(pending[0].Nonce, second.Nonce) {
+		t.Fatalf("taking one challenge removed another: %#v", pending)
+	}
+	if len(Challenge_Outstanding(store, "bob")) != 0 || Challenge_Take(store, Challenge_Key("bob", second.Nonce)) {
+		t.Fatal("another account reached alice's challenge")
 	}
 	if missing := Challenge_PeekBase64(store, "unknown"); missing.Found || missing.Nonce != "" {
 		t.Fatalf("missing challenge was exposed: %#v", missing)
 	}
 }
 
+func TestZiranChallengeBoundsEachAccount(t *testing.T) {
+	store := Challenge_New(time.Minute)
+	var issued [][]byte
+	for i := 0; i < MaxOutstanding+2; i++ {
+		result := Challenge_Issue(store, "alice")
+		if result.Error != nil {
+			t.Fatal(result.Error)
+		}
+		issued = append(issued, result.Nonce)
+		time.Sleep(time.Millisecond)
+	}
+	other := Challenge_Issue(store, "bob")
+	if other.Error != nil {
+		t.Fatal(other.Error)
+	}
+	if count := len(Challenge_Outstanding(store, "alice")); count != MaxOutstanding {
+		t.Fatalf("outstanding challenges = %d", count)
+	}
+	if Challenge_Take(store, Challenge_Key("alice", issued[0])) || Challenge_Take(store, Challenge_Key("alice", issued[1])) {
+		t.Fatal("the oldest challenges beyond the bound must be gone")
+	}
+	if !Challenge_Take(store, Challenge_Key("alice", issued[len(issued)-1])) {
+		t.Fatal("the newest challenge must be kept")
+	}
+	if len(Challenge_Outstanding(store, "bob")) != 1 {
+		t.Fatal("another account's challenges must not count")
+	}
+}
+
 func TestZiranChallengeExpiryAndPruning(t *testing.T) {
 	now := time.Now()
 	nonce := []byte{0, 1, 2, 255}
-	if equal := Challenge_Consumed(Challenge{Nonce: nonce, ExpiresAt: now}, now); !equal.Found || !bytes.Equal(equal.Nonce, nonce) {
-		t.Fatal("a nonce exactly at its expiry must remain valid")
-	}
-	if expired := Challenge_Consumed(Challenge{Nonce: nonce, ExpiresAt: now}, now.Add(time.Nanosecond)); expired.Found || expired.Nonce != nil {
-		t.Fatal("an expired nonce was accepted")
-	}
 	store := Challenge_New(time.Minute)
-	store.ByUser["expired"] = Challenge{ExpiresAt: now.Add(-time.Nanosecond)}
-	store.ByUser["equal"] = Challenge{ExpiresAt: now}
-	store.ByUser["future"] = Challenge{ExpiresAt: now.Add(time.Nanosecond)}
+	store.ByUser["expired"] = Challenge{User: "u", ExpiresAt: now.Add(-time.Nanosecond)}
+	store.ByUser["equal"] = Challenge{User: "u", ExpiresAt: now}
+	store.ByUser["future"] = Challenge{User: "u", ExpiresAt: now.Add(time.Nanosecond)}
 	Challenge_Prune(store, now)
 	if len(store.ByUser) != 2 {
 		t.Fatalf("wrong pruning boundary: %#v", store.ByUser)
@@ -55,27 +88,34 @@ func TestZiranChallengeExpiryAndPruning(t *testing.T) {
 	if _, found := store.ByUser["expired"]; found {
 		t.Fatal("pruning retained an expired challenge")
 	}
-	store.ByUser["expired"] = Challenge{Nonce: nonce, ExpiresAt: now.Add(-time.Hour)}
-	if preview := Challenge_PeekBase64(store, "expired"); preview.Found {
+	key := Challenge_Key("alice", nonce)
+	store.ByUser[key] = Challenge{User: "alice", Nonce: nonce, ExpiresAt: now.Add(-time.Hour)}
+	if preview := Challenge_PeekBase64(store, "alice"); preview.Found {
 		t.Fatal("preview exposed an expired nonce")
 	}
-	if _, found := store.ByUser["expired"]; !found {
-		t.Fatal("preview must not consume an expired challenge")
+	if len(Challenge_Outstanding(store, "alice")) != 0 {
+		t.Fatal("an expired challenge was outstanding")
 	}
-	if consumed := Challenge_Consume(store, "expired"); consumed.Found || consumed.Nonce != nil {
-		t.Fatal("consume exposed an expired nonce")
+	if _, found := store.ByUser[key]; found {
+		t.Fatal("reading challenges must remove expired ones")
 	}
-	if _, found := store.ByUser["expired"]; found {
-		t.Fatal("consume failed to delete an expired challenge")
+	store.ByUser[key] = Challenge{User: "alice", Nonce: nonce, ExpiresAt: now.Add(-time.Hour)}
+	if Challenge_Take(store, key) {
+		t.Fatal("an expired challenge was accepted")
+	}
+	if _, found := store.ByUser[key]; found {
+		t.Fatal("taking an expired challenge must delete it")
 	}
 }
 
 func TestZiranChallengeNegativeTTL(t *testing.T) {
 	store := Challenge_New(-time.Hour)
-	if issued := Challenge_Issue(store, "alice"); issued.Error != nil || len(issued.Nonce) != 32 {
+	issued := Challenge_Issue(store, "alice")
+	if issued.Error != nil || len(issued.Nonce) != 32 {
 		t.Fatalf("issue changed its negative-TTL behavior: %#v", issued)
 	}
-	if Challenge_PeekBase64(store, "alice").Found || Challenge_Consume(store, "alice").Found {
+	if Challenge_PeekBase64(store, "alice").Found || len(Challenge_Outstanding(store, "alice")) != 0 ||
+		Challenge_Take(store, Challenge_Key("alice", issued.Nonce)) {
 		t.Fatal("negative-TTL nonce remained valid")
 	}
 }
@@ -86,18 +126,15 @@ func TestZiranChallengeConcurrentSingleUse(t *testing.T) {
 	if issued.Error != nil {
 		t.Fatal(issued.Error)
 	}
+	key := Challenge_Key("alice", issued.Nonce)
 	var accepted atomic.Int64
 	var workers sync.WaitGroup
 	for i := 0; i < 64; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			result := Challenge_Consume(store, "alice")
-			if result.Found {
+			if Challenge_Take(store, key) {
 				accepted.Add(1)
-				if !bytes.Equal(result.Nonce, issued.Nonce) {
-					t.Error("accepted nonce bytes changed")
-				}
 			}
 		}()
 	}

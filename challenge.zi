@@ -7,8 +7,15 @@
 #import "codec"
 clock :: #import "std/time_go";
 builtin :: #system_library "go:builtin";
+strings :: #system_library "go:strings";
+
+// Sign-ins of one account may overlap, such as an app's sync and its live
+// updates right after the account is attached. Each keeps its own challenge,
+// up to this many per account, instead of a newer one replacing it.
+MaxOutstanding :: 8
 
 Challenge :: struct {
+    User: string
     Nonce: []u8
     ExpiresAt: clock.Time
 }
@@ -16,6 +23,7 @@ Challenge :: struct {
 ChallengeStore :: struct {
     mu: Mutex
     ttl: clock.Duration
+    // Keyed by Key(user, nonce).
     byUser: Map(string, Challenge)
 }
 
@@ -24,9 +32,9 @@ IssuedChallenge :: struct {
     Error: Error
 }
 
-ConsumedChallenge :: struct {
+Pending :: struct {
+    Key: string
     Nonce: []u8
-    Found: bool
 }
 
 ChallengePreview :: struct {
@@ -37,6 +45,8 @@ ChallengePreview :: struct {
 #scope_file
 Allocate :: () -> *ChallengeStore #foreign builtin "new";
 AllocateNonce :: (count: isize) -> []u8 #foreign builtin "make";
+AppendPending :: (values: []Pending, value: Pending) -> []Pending #foreign builtin "append";
+Join :: (parts: []string, separator: string) -> string #foreign strings;
 
 Prune :: (store: *ChallengeStore, now: clock.Time) {
     keys := MapKeys(store.byUser)
@@ -48,17 +58,38 @@ Prune :: (store: *ChallengeStore, now: clock.Time) {
     }
 }
 
-Consumed :: (item: Challenge, now: clock.Time) -> ConsumedChallenge {
-    result: ConsumedChallenge
-    if clock.After(now, item.ExpiresAt) {
-        return result
+// Removes the account's oldest challenges until another one fits.
+Bound :: (store: *ChallengeStore, userID: string) {
+    while true {
+        keys := MapKeys(store.byUser)
+        count: isize = 0
+        oldest := ""
+        oldestExpiry: clock.Time
+        for key: keys {
+            item := MapGet(store.byUser, key)
+            if item.User != userID {
+                continue
+            }
+            count += cast(isize)1
+            if oldest == "" || clock.After(oldestExpiry, item.ExpiresAt) {
+                oldest = key
+                oldestExpiry = item.ExpiresAt
+            }
+        }
+        if count < cast(isize)MaxOutstanding {
+            return
+        }
+        MapDelete(store.byUser, oldest)
     }
-    result.Nonce = item.Nonce
-    result.Found = true
-    return result
 }
 
 #scope_export
+Key :: (userID: string, nonce: []u8) -> string {
+    encoded := EncodeBase64(FromBytes(nonce), false, true)
+    parts: [3]string = .[userID, "\n", encoded.value]
+    return Join(parts[:], "")
+}
+
 New :: (ttl: clock.Duration) -> *ChallengeStore {
     store := Allocate()
     store.ttl = ttl
@@ -77,35 +108,67 @@ Issue :: (store: *ChallengeStore, userID: string) -> IssuedChallenge {
     Lock(*store.mu)
     defer Unlock(*store.mu)
     Prune(store, clock.Now())
+    Bound(store, userID)
     item: Challenge
+    item.User = userID
     item.Nonce = nonce
     item.ExpiresAt = clock.Add(clock.Now(), store.ttl)
-    MapSet(store.byUser, userID, item)
+    MapSet(store.byUser, Key(userID, nonce), item)
     result.Nonce = nonce
     return result
 }
 
-Consume :: (store: *ChallengeStore, userID: string) -> ConsumedChallenge {
+// The account's unexpired challenges, newest first. Expired ones are removed.
+Outstanding :: (store: *ChallengeStore, userID: string) -> []Pending {
     Lock(*store.mu)
     defer Unlock(*store.mu)
-    item := MapLookup(store.byUser, userID)
-    result: ConsumedChallenge
-    if !item.has_value {
-        return result
+    Prune(store, clock.Now())
+    result: []Pending
+    keys := MapKeys(store.byUser)
+    for key: keys {
+        item := MapGet(store.byUser, key)
+        if item.User != userID {
+            continue
+        }
+        pending: Pending
+        pending.Key = key
+        pending.Nonce = item.Nonce
+        result = AppendPending(result, pending)
     }
-    MapDelete(store.byUser, userID)
-    return Consumed(item.value, clock.Now())
+    // Newest first, so the latest sign-in is tried before older ones.
+    for i: 1..result.count - 1 {
+        j := i
+        while j > 0 && clock.After(MapGet(store.byUser, result[j].Key).ExpiresAt, MapGet(store.byUser, result[j - 1].Key).ExpiresAt) {
+            swap := result[j]
+            result[j] = result[j - 1]
+            result[j - 1] = swap
+            j -= 1
+        }
+    }
+    return result
 }
 
-PeekBase64 :: (store: *ChallengeStore, userID: string) -> ChallengePreview {
+// Removes one challenge and reports whether it was still valid, so each
+// challenge signs in at most once.
+Take :: (store: *ChallengeStore, key: string) -> bool {
     Lock(*store.mu)
     defer Unlock(*store.mu)
-    item := MapLookup(store.byUser, userID)
+    item := MapLookup(store.byUser, key)
+    if !item.has_value {
+        return false
+    }
+    MapDelete(store.byUser, key)
+    return !clock.After(clock.Now(), item.value.ExpiresAt)
+}
+
+// The newest unexpired challenge, without using it.
+PeekBase64 :: (store: *ChallengeStore, userID: string) -> ChallengePreview {
     result: ChallengePreview
-    if !item.has_value || clock.After(clock.Now(), item.value.ExpiresAt) {
+    pending := Outstanding(store, userID)
+    if pending.count == 0 {
         return result
     }
-    encoded := EncodeBase64(FromBytes(item.value.Nonce), false, true)
+    encoded := EncodeBase64(FromBytes(pending[0].Nonce), false, true)
     result.Nonce = encoded.value
     result.Found = true
     return result

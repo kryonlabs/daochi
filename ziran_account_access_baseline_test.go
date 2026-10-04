@@ -179,9 +179,8 @@ func (s *Server) baselineAccessAuthenticateSignature(ctx context.Context, userID
 	if !Identity_ValidUserID(userID) {
 		return nil, authError{status: http.StatusBadRequest, message: "invalid user_id_hash"}
 	}
-	consumed := Challenge_Consume(s.Challenges, userID)
-	nonce, ok := consumed.Nonce, consumed.Found
-	if !ok {
+	pending := Challenge_Outstanding(s.Challenges, userID)
+	if len(pending) == 0 {
 		return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
 	}
 	account := AccountKeys_PublicKey(s.Store.Database, ctx, userID)
@@ -219,11 +218,17 @@ func (s *Server) baselineAccessAuthenticateSignature(ctx context.Context, userID
 	if len(signature) != mlDSA44SignatureSize {
 		return nil, authError{status: http.StatusBadRequest, message: "wrong signature size"}
 	}
-	message := Signing_CanonicalMessageWithContext(signatureContext, nonce, method, path, signedPayload)
-	if !s.Verifier.Verify(publicKey, []byte(message), signature) {
-		return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
+	for _, candidate := range pending {
+		message := Signing_CanonicalMessageWithContext(signatureContext, candidate.Nonce, method, path, signedPayload)
+		if !s.Verifier.Verify(publicKey, []byte(message), signature) {
+			continue
+		}
+		if !Challenge_Take(s.Challenges, candidate.Key) {
+			return nil, authError{status: http.StatusBadRequest, message: "missing or expired challenge"}
+		}
+		return publicKey, nil
 	}
-	return publicKey, nil
+	return nil, authError{status: http.StatusUnauthorized, message: "signature rejected"}
 }
 
 func (s *Server) baselineAccessAllowRequest(r *http.Request, key string, limit int, window time.Duration) bool {

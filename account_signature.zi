@@ -36,8 +36,8 @@ Authenticate :: (database: *sql.Database, challenges: *challenge.ChallengeStore,
     if !identity.ValidUserID(userID) {
         return Failure(cast(isize)400, "invalid user_id_hash")
     }
-    consumed := challenge.Consume(challenges, userID)
-    if !consumed.Found {
+    pending := challenge.Outstanding(challenges, userID)
+    if pending.count == 0 {
         return Failure(cast(isize)400, "missing or expired challenge")
     }
     account := accounts.PublicKey(database, context, userID)
@@ -77,12 +77,20 @@ Authenticate :: (database: *sql.Database, challenges: *challenge.ChallengeStore,
     if signature.count != codec.mlDSA44SignatureSize {
         return Failure(cast(isize)400, "wrong signature size")
     }
-    message := signing.CanonicalMessageWithContext(signatureContext, consumed.Nonce,
-        method, path, signedPayload)
-    if !verify(publicKey, text.ToBytes(message), signature) {
-        return Failure(cast(isize)401, "signature rejected")
+    // Overlapping sign-ins of one account each hold a challenge. Accept the
+    // one this signature covers and use it up, so it cannot sign in again.
+    for candidate: pending {
+        message := signing.CanonicalMessageWithContext(signatureContext, candidate.Nonce,
+            method, path, signedPayload)
+        if !verify(publicKey, text.ToBytes(message), signature) {
+            continue
+        }
+        if !challenge.Take(challenges, candidate.Key) {
+            return Failure(cast(isize)400, "missing or expired challenge")
+        }
+        result: AccountSignatureResult
+        result.value = publicKey
+        return result
     }
-    result: AccountSignatureResult
-    result.value = publicKey
-    return result
+    return Failure(cast(isize)401, "signature rejected")
 }

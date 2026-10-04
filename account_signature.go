@@ -21,8 +21,8 @@ func AccountSignature_Authenticate(database *Database, challenges *ChallengeStor
 	if !value_0 {
 		return AccountSignature_Failure(int(400), "invalid user_id_hash")
 	}
-	consumed := Challenge_Consume(challenges, userID)
-	if !consumed.Found {
+	pending := Challenge_Outstanding(challenges, userID)
+	if int64(len(pending)) == 0 {
 		return AccountSignature_Failure(int(400), "missing or expired challenge")
 	}
 	account := AccountKeys_PublicKey(database, context, userID)
@@ -71,14 +71,21 @@ func AccountSignature_Authenticate(database *Database, challenges *ChallengeStor
 	if int64(len(signature)) != 2420 {
 		return AccountSignature_Failure(int(400), "wrong signature size")
 	}
-	message := Signing_CanonicalMessageWithContext(signatureContext, consumed.Nonce, method, path, signedPayload)
-	var value_4 VerifySignature = verify
-	var value_5 bool = value_4(publicKey, StdTextGo_ToBytes(message), signature)
-	if !value_5 {
-		return AccountSignature_Failure(int(401), "signature rejected")
+	for _, candidate := range pending {
+		message := Signing_CanonicalMessageWithContext(signatureContext, candidate.Nonce, method, path, signedPayload)
+		var value_4 VerifySignature = verify
+		var value_5 bool = value_4(publicKey, StdTextGo_ToBytes(message), signature)
+		if !value_5 {
+			continue
+		}
+		var value_6 bool = Challenge_Take(challenges, candidate.Key)
+		if !value_6 {
+			return AccountSignature_Failure(int(400), "missing or expired challenge")
+		}
+		var result AccountSignatureResult = AccountSignatureResult{}
+		_ = result
+		result.Value = publicKey
+		return result
 	}
-	var result AccountSignatureResult = AccountSignatureResult{}
-	_ = result
-	result.Value = publicKey
-	return result
+	return AccountSignature_Failure(int(401), "signature rejected")
 }

@@ -22,6 +22,7 @@ google :: #import "google_play_http";
 accounts :: #import "account_http";
 social :: #import "social_http";
 registry :: #import "app_http";
+bundles :: #import "bundle_http";
 devices :: #import "device_http";
 trust :: #import "trust_http";
 mesh :: #import "mesh";
@@ -343,6 +344,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/friends/requests/", server, HandleSocialHttpRequestAction)
     Route(mux, "PUT /api/v1/profile/stats", server, HandleSocialHttpPutStats)
     Route(mux, "GET /api/v1/friends/stats", server, HandleSocialHttpFriendStats)
+    Route(mux, "GET /api/v1/packages/", server, HandleBundleHttpRoute)
     return WithCommonHeaders(server, cast(middleware.Handler)mux)
 }
 
@@ -392,6 +394,10 @@ HandleMeshImport :: (server: *Server, writer: http.ResponseWriter, request: *htt
 
 HandleAppHttpList :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     registry.List(AppRegistry(server), writer, request)
+}
+
+HandleBundleHttpRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    bundles.Route(AppRegistry(server), writer, request)
 }
 
 HandleAppHttpRegisterSigned :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

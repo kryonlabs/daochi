@@ -617,6 +617,10 @@ func Server_Routes(server *Server) Handler {
 		Server_HandleSocialHttpFriendStats(value_230, value_231, value_232)
 	}
 	Server_Route(mux, "GET /api/v1/friends/stats", server, value_233)
+	var value_237 ServerHandler = func(value_234 *Server, value_235 ResponseWriter, value_236 *Request) {
+		Server_HandleBundleHttpRoute(value_234, value_235, value_236)
+	}
+	Server_Route(mux, "GET /api/v1/packages/", server, value_237)
 	return Server_WithCommonHeaders(server, Handler(mux))
 }
 
@@ -674,6 +678,10 @@ func Server_HandleMeshImport(server *Server, writer ResponseWriter, request *Req
 
 func Server_HandleAppHttpList(server *Server, writer ResponseWriter, request *Request) {
 	AppHttp_List(Server_AppRegistry(server), writer, request)
+}
+
+func Server_HandleBundleHttpRoute(server *Server, writer ResponseWriter, request *Request) {
+	BundleHttp_Route(Server_AppRegistry(server), writer, request)
 }
 
 func Server_HandleAppHttpRegisterSigned(server *Server, writer ResponseWriter, request *Request) {

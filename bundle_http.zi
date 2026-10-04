@@ -1,0 +1,125 @@
+// Signed portable app files are operator-installed, outside account data.
+// The registry remains the authority for active publisher keys.
+#import "std/go_types"
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+files :: #import "std/file_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+keys :: #import "std/ed25519_go";
+clock :: #import "std/time_go";
+store :: #import "app_store";
+identity :: #import "identity";
+signing :: #import "signing";
+response :: #import "response";
+app_registry :: #import "app_http";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+fmt :: #system_library "go:fmt";
+go_http :: #system_library "go:net/http";
+
+Release :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    Sequence: s64 #go_tag "json:\"sequence\""
+    Version: string #go_tag "json:\"version\""
+    Runtime: string #go_tag "json:\"runtime\""
+    SHA256: string #go_tag "json:\"sha256\""
+    Size: s64 #go_tag "json:\"size\""
+    KeyID: string #go_tag "json:\"key_id\""
+    Signature: string #go_tag "json:\"signature\""
+}
+Decoded :: struct { value: []u8; error: Error; }
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+Split :: (value: string, separator: string) -> []string #foreign strings;
+ContainsAny :: (value: string, characters: string) -> bool #foreign strings;
+Decode :: (value: string) -> Decoded #go_results #foreign hex "DecodeString";
+Encode :: (value: []u8) -> string #foreign hex "EncodeToString";
+Concat :: (a: string, b: string) -> string #foreign fmt "Sprint";
+Message :: (format: string, app: string, sequence: s64, version: string, runtime: string, hash: string, size: s64, key: string) -> string #foreign fmt "Sprintf";
+Write :: (writer: http.ResponseWriter, data: []u8) -> WriteResult #go_results #foreign go_http "ResponseWriter.Write";
+WriteResult :: struct { count: isize; error: Error; }
+
+SigningMessage :: (release: Release) -> string {
+    return Message("daochi-zib-release-v1\n%s\n%d\n%s\n%s\n%s\n%d\n%s\n",
+        release.AppID, release.Sequence, release.Version, release.Runtime,
+        release.SHA256, release.Size, release.KeyID)
+}
+
+Valid :: (release: Release, appID: string) -> bool {
+    hash := Decode(release.SHA256)
+    return release.AppID == appID && identity.ValidNamespace(appID) &&
+        release.Sequence > 0 && release.Size >= 8 &&
+        release.Version != "" && !ContainsAny(release.Version, "\r\n") &&
+        release.Runtime == "kryon-desktop-v1" &&
+        identity.ValidNamespace(release.KeyID) && hash.error == null &&
+        hash.value.count == 32 && Encode(hash.value) == release.SHA256 &&
+        release.SHA256.count == 64
+}
+
+Route :: (registry: app_registry.Registry, writer: http.ResponseWriter, request: *http.Request) {
+    path := TrimPrefix(url.Path(http.RequestURL(request)), "/api/v1/packages/")
+    parts := Split(path, "/")
+    if parts.count != 2 || !identity.ValidNamespace(parts[0]) {
+        response.Error(writer, 404, "package not found")
+        return
+    }
+    app := store.ByID(registry.database, http.Context(request), parts[0])
+    if app.error != null {
+        response.Error(writer, 500, "package registry unavailable")
+        return
+    }
+    if !app.found || app.value.Status != "active" ||
+        (app.value.ManifestExpiresAt > 0 && app.value.ManifestExpiresAt <= clock.Unix(clock.Now())) {
+        response.Error(writer, 404, "package not found")
+        return
+    }
+    root := Concat(Concat(registry.configuration.DBPath, ".packages/"), Concat(parts[0], "/"))
+    metadata := files.ReadFile(Concat(root, "latest.json"))
+    release: Release
+    if metadata.error != null {
+        response.Error(writer, 404, "no portable release")
+        return
+    }
+    if json.Unmarshal(metadata.value, *release) != null || !Valid(release, parts[0]) {
+        response.Error(writer, 503, "invalid portable release")
+        return
+    }
+    if parts[1] != "latest" && parts[1] != Concat(release.SHA256, ".zib") {
+        if parts[1].count != 68 || ContainsAny(parts[1], "/\\") {
+            response.Error(writer, 404, "package not found")
+            return
+        }
+        archived := files.ReadFile(Concat(root, Concat(parts[1], ".json")))
+        if archived.error != null || json.Unmarshal(archived.value, *release) != null ||
+            !Valid(release, parts[0]) || parts[1] != Concat(release.SHA256, ".zib") {
+            response.Error(writer, 404, "package not found")
+            return
+        }
+    }
+    key := store.ActiveKey(registry.database, http.Context(request), parts[0], release.KeyID)
+    public := Decode(key.value.PublicKey)
+    signature := Decode(release.Signature)
+    if key.error != null || !key.found || key.value.Algorithm != "ed25519" ||
+        (key.value.ExpiresAt > 0 && key.value.ExpiresAt <= clock.Unix(clock.Now())) ||
+        public.error != null || public.value.count != 32 ||
+        signature.error != null || signature.value.count != 64 ||
+        !keys.Verify(cast(keys.PublicKey)public.value, text.ToBytes(SigningMessage(release)), signature.value) {
+        response.Error(writer, 503, "untrusted portable release")
+        return
+    }
+    if parts[1] == "latest" {
+        http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "no-store")
+        response.JSON(writer, 200, release)
+        return
+    }
+    bundle := files.ReadFile(Concat(root, Concat(release.SHA256, ".zib")))
+    if bundle.error != null || bundle.value.count != release.Size ||
+        signing.SHA256Hex(bundle.value) != release.SHA256 {
+        response.Error(writer, 503, "portable release bytes do not match")
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Content-Type", "application/octet-stream")
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "public, max-age=31536000, immutable")
+    http.SetHeader(http.ResponseHeaders(writer), "ETag", Concat("\"", Concat(release.SHA256, "\"")))
+    unused Write(writer, bundle.value)
+}

@@ -10,6 +10,27 @@ The read-only endpoints are:
 - `GET /api/v1/packages/APP_ID/latest`: signed release metadata, without caching.
 - `GET /api/v1/packages/APP_ID/SHA256.zib`: immutable bundle bytes.
 
+Independently versioned applications use release v2:
+
+- `GET /api/v2/packages/APP_ID/latest`: signed metadata with compatibility
+  versions, delivery variants and exact dependencies; never cached.
+- `GET /api/v2/packages/APP_ID/SHA256.zib`: an immutable signed delivery variant.
+
+Release v2 uses runtime `kryon-app-v1`. It signs `host_api`, `module_api` and
+`data_schema`, an ordered list of `module` and optional `standalone` artifacts,
+and a sorted list of exact dependency IDs, numeric versions, hashes and sizes.
+Each app retains its own version and increasing sequence. Updating a child does
+not change the parent release. Signature, registry status and active publisher
+key checks apply to the latest descriptor and to archived artifacts alike.
+These APIs serve releases; they do not register publishers or grant approval.
+
+To stage this format, pass `--format-version 2`, `--host-api N` and
+`--module-api N` to `scripts/stage-zib-release.py`. Add `--standalone FILE`
+for a separate standalone artifact and `--dependency RELEASE.json` for each
+exact module dependency. The importer locks publication per app, rejects
+version/sequence rollback and publishes immutable artifacts before updating
+`latest-v2.json`. The node verifies the registered publisher when serving them.
+
 Each release has `app_id`, positive monotonically increasing `sequence`,
 `version`, `runtime`, lowercase `sha256`, `size`, `key_id` and hexadecimal
 `signature`. The signature is Ed25519 over these UTF-8 bytes, with a trailing

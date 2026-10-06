@@ -1,0 +1,118 @@
+// A verified, immutable artifact store, with one latest release per app.
+#import "std/go_types"
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+files :: #import "std/file_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+keys :: #import "std/ed25519_go";
+clock :: #import "std/time_go";
+store :: #import "app_store";
+identity :: #import "identity";
+signing :: #import "signing";
+response :: #import "response";
+registry :: #import "app_http";
+release :: #import "package_release";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+fmt :: #system_library "go:fmt";
+go_http :: #system_library "go:net/http";
+
+#scope_file
+Decoded :: struct {
+    value: []u8
+    error: Error
+}
+WriteResult :: struct {
+    count: isize
+    error: Error
+}
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+TrimSuffix :: (value: string, suffix: string) -> string #foreign strings;
+Split :: (value: string, separator: string) -> []string #foreign strings;
+Decode :: (value: string) -> Decoded #go_results #foreign hex "DecodeString";
+Join :: (a: string, b: string) -> string #foreign fmt "Sprint";
+Write :: (writer: http.ResponseWriter, bytes: []u8) -> WriteResult #go_results #foreign go_http "ResponseWriter.Write";
+
+#scope_export
+Route :: (context: registry.Registry, writer: http.ResponseWriter,
+    request: *http.Request) {
+    path := TrimPrefix(url.Path(http.RequestURL(request)), "/api/v2/packages/")
+    parts := Split(path, "/")
+    if parts.count != 2 || !identity.ValidNamespace(parts[0]) {
+        response.Error(writer, 404, "package not found")
+        return
+    }
+    appID := parts[0]
+    app := store.ByID(context.database, http.Context(request), appID)
+    if app.error != null {
+        response.Error(writer, 500, "package registry unavailable")
+        return
+    }
+    if !app.found || app.value.Status != "active" ||
+    (app.value.ManifestExpiresAt > 0 &&
+        app.value.ManifestExpiresAt <= clock.Unix(clock.Now())) {
+        response.Error(writer, 404, "package not found")
+        return
+    }
+    root := Join(Join(context.configuration.DBPath, ".packages/"), Join(appID, "/"))
+    filename := "latest-v2.json"
+    hash := ""
+    if parts[1] != "latest" {
+        hash = TrimSuffix(parts[1], ".zib")
+        if parts[1] != Join(hash, ".zib") || !release.HashValid(hash) {
+            response.Error(writer, 404, "package not found")
+            return
+        }
+        filename = Join(parts[1], ".release-v2.json")
+    }
+    metadata := files.ReadFile(Join(root, filename))
+    if metadata.error != null {
+        response.Error(writer, 404, "portable release unavailable")
+        return
+    }
+    value: release.ReleaseV2
+    if metadata.value.count > 65536 ||
+    json.Unmarshal(metadata.value, *value) != null ||
+    !release.Valid(value, appID) {
+        response.Error(writer, 503, "invalid portable release")
+        return
+    }
+    key := store.ActiveKey(context.database, http.Context(request), appID, value.KeyID)
+    public := Decode(key.value.PublicKey)
+    signature := Decode(value.Signature)
+    if key.error != null || !key.found || key.value.Algorithm != "ed25519" ||
+    (key.value.ExpiresAt > 0 && key.value.ExpiresAt <= clock.Unix(clock.Now())) ||
+    public.error != null || public.value.count != 32 ||
+    signature.error != null || signature.value.count != 64 ||
+    !keys.Verify(cast(keys.PublicKey)public.value,
+        text.ToBytes(release.SigningMessage(value)), signature.value) {
+        response.Error(writer, 503, "untrusted portable release")
+        return
+    }
+    if parts[1] == "latest" {
+        http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "no-store")
+        response.JSON(writer, 200, value)
+        return
+    }
+    expected: s64 = 0
+    for artifact: value.Artifacts {
+        if artifact.SHA256 == hash {
+            expected = artifact.Size
+        }
+    }
+    if expected == 0 {
+        response.Error(writer, 404, "package not found")
+        return
+    }
+    bundle := files.ReadFile(Join(root, parts[1]))
+    if bundle.error != null || bundle.value.count != expected ||
+    signing.SHA256Hex(bundle.value) != hash {
+        response.Error(writer, 503, "portable release bytes do not match")
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Content-Type", "application/octet-stream")
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "public, max-age=31536000, immutable")
+    http.SetHeader(http.ResponseHeaders(writer), "ETag", Join("\"", Join(hash, "\"")))
+    unused Write(writer, bundle.value)
+}

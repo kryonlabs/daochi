@@ -10,6 +10,7 @@ import tempfile
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+import app_release
 
 
 def atomic_write(path, data):
@@ -37,6 +38,12 @@ def main():
     parser.add_argument('--key', required=True, type=Path, help='private Ed25519 PEM file; never printed')
     parser.add_argument('--sequence', required=True, type=int)
     parser.add_argument('--version', required=True)
+    parser.add_argument('--format-version', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--standalone', type=Path)
+    parser.add_argument('--dependency', action='append', type=Path, default=[])
+    parser.add_argument('--host-api', type=int, default=1)
+    parser.add_argument('--module-api', type=int, default=1)
+    parser.add_argument('--data-schema', type=int, default=0)
     parser.add_argument('bundle', type=Path)
     args = parser.parse_args()
     for value in (args.app, args.key_id):
@@ -51,6 +58,15 @@ def main():
     key = serialization.load_pem_private_key(args.key.read_bytes(), password=None)
     if not isinstance(key, Ed25519PrivateKey):
         parser.error('publisher key must be Ed25519')
+    if args.format_version == 2:
+        try:
+            release = app_release.stage(args, key)
+        except (ValueError, KeyError, StopIteration, OSError) as error:
+            parser.error(str(error))
+        print(f"Staged {release['app_id']} {release['version']} (module and standalone release v2)")
+        return
+    if args.standalone or args.dependency:
+        parser.error('standalone variants and dependencies require --format-version 2')
     release = dict(app_id=args.app, sequence=args.sequence, version=args.version,
                    runtime='kryon-desktop-v1', sha256=sha256(data).hexdigest(),
                    size=len(data), key_id=args.key_id)

@@ -23,6 +23,7 @@ accounts :: #import "account_http";
 social :: #import "social_http";
 registry :: #import "app_http";
 bundles :: #import "bundle_http";
+packages :: #import "package_http";
 devices :: #import "device_http";
 trust :: #import "trust_http";
 mesh :: #import "mesh";
@@ -345,6 +346,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "PUT /api/v1/profile/stats", server, HandleSocialHttpPutStats)
     Route(mux, "GET /api/v1/friends/stats", server, HandleSocialHttpFriendStats)
     Route(mux, "GET /api/v1/packages/", server, HandleBundleHttpRoute)
+    Route(mux, "GET /api/v2/packages/", server, HandlePackageHttpRoute)
     return WithCommonHeaders(server, cast(middleware.Handler)mux)
 }
 
@@ -398,6 +400,10 @@ HandleAppHttpList :: (server: *Server, writer: http.ResponseWriter, request: *ht
 
 HandleBundleHttpRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     bundles.Route(AppRegistry(server), writer, request)
+}
+
+HandlePackageHttpRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    packages.Route(AppRegistry(server), writer, request)
 }
 
 HandleAppHttpRegisterSigned :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

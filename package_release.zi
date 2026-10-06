@@ -1,0 +1,141 @@
+// Independently versioned portable apps. Sign both delivery variants and the
+// exact dependency closure; package releases are separate from account data.
+#import "std/go_types"
+identity :: #import "identity";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+fmt :: #system_library "go:fmt";
+
+Artifact :: struct {
+    Variant: string #go_tag "json:\"variant\""
+    SHA256: string #go_tag "json:\"sha256\""
+    Size: s64 #go_tag "json:\"size\""
+}
+
+Dependency :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    Version: string #go_tag "json:\"version\""
+    SHA256: string #go_tag "json:\"sha256\""
+    Size: s64 #go_tag "json:\"size\""
+}
+
+ReleaseV2 :: struct {
+    AppID: string #go_tag "json:\"app_id\""
+    Sequence: s64 #go_tag "json:\"sequence\""
+    Version: string #go_tag "json:\"version\""
+    Runtime: string #go_tag "json:\"runtime\""
+    HostAPI: s64 #go_tag "json:\"host_api\""
+    ModuleAPI: s64 #go_tag "json:\"module_api\""
+    DataSchema: s64 #go_tag "json:\"data_schema\""
+    KeyID: string #go_tag "json:\"key_id\""
+    Artifacts: []Artifact #go_tag "json:\"artifacts\""
+    Dependencies: []Dependency #go_tag "json:\"dependencies\""
+    Signature: string #go_tag "json:\"signature\""
+}
+
+#scope_file
+Decoded :: struct {
+    value: []u8
+    error: Error
+}
+Decode :: (value: string) -> Decoded #go_results #foreign hex "DecodeString";
+Encode :: (value: []u8) -> string #foreign hex "EncodeToString";
+Split :: (value: string, separator: string) -> []string #foreign strings;
+Less :: (a: string, b: string) -> s32 #foreign strings "Compare";
+HeaderMessage :: (template: string, app: string, sequence: s64,
+    version: string, runtime: string, host: s64, module: s64, schema: s64,
+    key: string, count: s64) -> string #foreign fmt "Sprintf";
+ArtifactMessage :: (template: string, prefix: string, variant: string,
+    hash: string, size: s64) -> string #foreign fmt "Sprintf";
+CountMessage :: (template: string, prefix: string, count: s64) -> string #foreign fmt "Sprintf";
+DependencyMessage :: (template: string, prefix: string, app: string,
+    version: string, hash: string, size: s64) -> string #foreign fmt "Sprintf";
+
+#scope_export
+VersionValid :: (value: string) -> bool {
+    parts := Split(value, ".")
+    if parts.count != 3 {
+        return false
+    }
+    for part: parts {
+        if part.count == 0 || part.count > 9 ||
+        (part.count > 1 && part[0] == cast(u8)48) {
+            return false
+        }
+        for byte: part {
+            if byte < cast(u8)48 || byte > cast(u8)57 {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+HashValid :: (value: string) -> bool {
+    decoded := Decode(value)
+    return value.count == 64 && decoded.error == null &&
+    decoded.value.count == 32 && Encode(decoded.value) == value
+}
+
+Valid :: (release: ReleaseV2, appID: string) -> bool {
+    if release.AppID != appID || !identity.ValidNamespace(appID) ||
+    release.Sequence <= 0 || !VersionValid(release.Version) ||
+    release.Runtime != "kryon-app-v1" || release.HostAPI <= 0 ||
+    release.ModuleAPI <= 0 || release.DataSchema < 0 ||
+    !identity.ValidNamespace(release.KeyID) ||
+    release.Artifacts.count < 1 || release.Artifacts.count > 2 ||
+    release.Dependencies.count > 64 {
+        return false
+    }
+    index: s64 = 0
+    while index < release.Artifacts.count {
+        artifact := release.Artifacts[index]
+        expected := ifx index == 0 then "module" else "standalone"
+        if artifact.Variant != expected || artifact.Size < 8 ||
+        !HashValid(artifact.SHA256) {
+            return false
+        }
+        index += 1
+    }
+    index = 0
+    while index < release.Dependencies.count {
+        dependency := release.Dependencies[index]
+        if !identity.ValidNamespace(dependency.AppID) ||
+        dependency.AppID == appID || !VersionValid(dependency.Version) ||
+        dependency.Size < 8 || !HashValid(dependency.SHA256) {
+            return false
+        }
+        if index > 0 && Less(release.Dependencies[index - 1].AppID,
+            dependency.AppID) >= 0 {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+SigningMessage :: (release: ReleaseV2) -> string {
+    result := HeaderMessage("daochi-zib-release-v2\n%s\n%d\n%s\n%s\n%d\n%d\n%d\n%s\n%d\n",
+        release.AppID, release.Sequence, release.Version, release.Runtime,
+        release.HostAPI, release.ModuleAPI, release.DataSchema,
+        release.KeyID, release.Artifacts.count)
+    for artifact: release.Artifacts {
+        result = ArtifactMessage("%s%s\n%s\n%d\n", result, artifact.Variant,
+            artifact.SHA256, artifact.Size)
+    }
+    result = CountMessage("%s%d\n", result, release.Dependencies.count)
+    for dependency: release.Dependencies {
+        result = DependencyMessage("%s%s\n%s\n%s\n%d\n", result, dependency.AppID,
+            dependency.Version, dependency.SHA256, dependency.Size)
+    }
+    return result
+}
+
+ContainsArtifact :: (release: ReleaseV2, hash: string) -> bool {
+    for artifact: release.Artifacts {
+        if artifact.SHA256 == hash {
+            return true
+        }
+    }
+    return false
+}

@@ -621,6 +621,10 @@ func Server_Routes(server *Server) Handler {
 		Server_HandleBundleHttpRoute(value_234, value_235, value_236)
 	}
 	Server_Route(mux, "GET /api/v1/packages/", server, value_237)
+	var value_241 ServerHandler = func(value_238 *Server, value_239 ResponseWriter, value_240 *Request) {
+		Server_HandlePackageHttpRoute(value_238, value_239, value_240)
+	}
+	Server_Route(mux, "GET /api/v2/packages/", server, value_241)
 	return Server_WithCommonHeaders(server, Handler(mux))
 }
 
@@ -682,6 +686,10 @@ func Server_HandleAppHttpList(server *Server, writer ResponseWriter, request *Re
 
 func Server_HandleBundleHttpRoute(server *Server, writer ResponseWriter, request *Request) {
 	BundleHttp_Route(Server_AppRegistry(server), writer, request)
+}
+
+func Server_HandlePackageHttpRoute(server *Server, writer ResponseWriter, request *Request) {
+	PackageHttp_Route(Server_AppRegistry(server), writer, request)
 }
 
 func Server_HandleAppHttpRegisterSigned(server *Server, writer ResponseWriter, request *Request) {

@@ -148,7 +148,7 @@
   "/api/v1/admin/feedback": {
     "get": {
       "summary": "Private developer feedback inbox",
-      "description": "Requires X-Daochi-Admin when an admin token is configured; otherwise loopback-only.",
+      "description": "Requires X-Daochi-Admin with the feedback token or the existing admin token. Disabled when neither is configured.",
       "responses": {
         "200": {
           "description": "Up to 100 newest reports"
@@ -165,7 +165,7 @@
   "/api/v1/admin/feedback/reply": {
     "post": {
       "summary": "Reply to an app feedback report",
-      "description": "Uses the same private operator authorization as the feedback inbox. The reporting account can read the reply through GET /api/v1/feedback.",
+      "description": "Requires X-Daochi-Admin and the account_id returned by the private inbox. Replies target exactly one account's report. The reporting account can read replies through GET /api/v1/feedback. Use replies=1 and a numeric offset to retrieve at most two replies per page without report diagnostics.",
       "requestBody": {
         "required": true,
         "content": {
@@ -173,6 +173,7 @@
             "schema": {
               "type": "object",
               "required": [
+                "account_id",
                 "id",
                 "reply"
               ],
@@ -185,6 +186,11 @@
                 "reply": {
                   "type": "string",
                   "maxLength": 4096
+                },
+                "account_id": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
                 }
               }
             }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 )
 
@@ -160,7 +161,7 @@ func (s *Server) baselineHandleOpenAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func baselineOpenAPISpec() map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"openapi": "3.1.0",
 		"info": map[string]any{
 			"title":       "Daochi API",
@@ -1411,6 +1412,21 @@ func baselineOpenAPISpec() map[string]any {
 			},
 		},
 	}
+	paths := result["paths"].(map[string]any)
+	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json"} {
+		data, err := os.ReadFile(fixture)
+		if err != nil {
+			panic(err)
+		}
+		var additions map[string]any
+		if err := json.Unmarshal(data, &additions); err != nil {
+			panic(err)
+		}
+		for path, value := range additions {
+			paths[path] = value
+		}
+	}
+	return result
 }
 
 func baselineSignedHeaderParameters() []map[string]any {

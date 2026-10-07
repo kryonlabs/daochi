@@ -562,6 +562,23 @@ CREATE TABLE IF NOT EXISTS node_sync_cursors (
 	cursor TEXT NOT NULL,
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS server_chat_usage (
+    account_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    used INTEGER NOT NULL,
+    PRIMARY KEY(account_id,day)
+);
+CREATE TABLE IF NOT EXISTS server_app_feedback (
+    account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    context TEXT NOT NULL,
+    reply TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(account_id,id)
+);
 `)
 	if err != nil {
 		return err

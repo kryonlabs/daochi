@@ -31,6 +31,8 @@ sync_http :: #import "sync_http";
 sync_ws :: #import "sync_ws";
 middleware :: #import "middleware";
 request_rate :: #import "request_rate";
+chat :: #import "chat";
+feedback :: #import "feedback_http";
 docs :: #import "docs";
 types :: #import "types";
 http :: #import "std/http_go";
@@ -299,6 +301,11 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/node/mesh/import", server, HandleMeshImport)
     Route(mux, "GET /metrics", server, HandleMetrics)
     Route(mux, "GET /api/v1/apps", server, HandleAppHttpList)
+    Route(mux, "POST /api/v1/chat/completions", server, HandleChat)
+    Route(mux, "POST /api/v1/feedback", server, HandleFeedbackSubmit)
+    Route(mux, "GET /api/v1/feedback", server, HandleFeedbackList)
+    Route(mux, "GET /api/v1/admin/feedback", server, HandleFeedbackInbox)
+    Route(mux, "POST /api/v1/admin/feedback/reply", server, HandleFeedbackReply)
     Route(mux, "POST /api/v1/apps", server, HandleAppHttpList)
     Route(mux, "POST /api/v1/apps/register-signed", server, HandleAppHttpRegisterSigned)
     Route(mux, "GET /api/v1/apps/", server, HandleAppHttpRoute)
@@ -351,6 +358,28 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
 }
 
 #scope_file
+ChatService :: (server: *Server) -> chat.Chat {
+    result: chat.Chat
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    return result
+}
+HandleChat :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    chat.Complete(ChatService(server), writer, request)
+}
+HandleFeedbackSubmit :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    feedback.Submit(ChatService(server), writer, request)
+}
+HandleFeedbackList :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    feedback.List(ChatService(server), writer, request, false)
+}
+HandleFeedbackInbox :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    feedback.List(ChatService(server), writer, request, true)
+}
+HandleFeedbackReply :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    feedback.Reply(ChatService(server), writer, request)
+}
 HandleDocs :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     docs.Handle(writer, request, server.cfg.DBPath, BindStats(PublicStats, server))
 }

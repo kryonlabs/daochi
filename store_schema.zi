@@ -681,7 +681,27 @@ CREATE TABLE IF NOT EXISTS node_sync_cursors (
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 SQL_7;
-Tables: [7]string = .[Tables1, Tables2, Tables3, Tables4, Tables5, Tables6, Tables7];
+Tables8 :: #string SQL_8
+CREATE TABLE IF NOT EXISTS server_chat_usage (
+    account_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    used INTEGER NOT NULL,
+    PRIMARY KEY(account_id,day)
+);
+CREATE TABLE IF NOT EXISTS server_app_feedback (
+    account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    context TEXT NOT NULL,
+    reply TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(account_id,id)
+);
+SQL_8;
+
+Tables: [8]string = .[Tables1, Tables2, Tables3, Tables4, Tables5, Tables6, Tables7, Tables8];
 BackfillMesh :: "\nINSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nWHERE NOT EXISTS (\n\tSELECT 1 FROM server_mesh_changes c\n\tWHERE c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\n)";
 AliasIndex :: "\nCREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique\nON server_users(alias)\nWHERE alias IS NOT NULL AND alias<>''";
 MeditationInfo :: "PRAGMA table_info(server_meditation_logs)";

@@ -58,6 +58,12 @@ type Config struct {
 	MoneroMinimumAtomicAmount       int64
 	MoneroConfirmationsRequired     int64
 	TokenDirectPurchasesEnabled     bool
+	ChatAPIKey                      string
+	ChatAPIEndpoint                 string
+	FeedbackToken                   string
+	ChatModel                       string
+	ChatDailyLimit                  int64
+	ChatGlobalDailyLimit            int64
 }
 
 type NativeIntegerResult struct {
@@ -308,5 +314,11 @@ func Config_Load() Config {
 	result.MoneroConfirmationsRequired = Config_EnvInt64("MONERO_CONFIRMATIONS_REQUIRED", 10)
 	var value_5 string = os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED")
 	result.TokenDirectPurchasesEnabled = ConfigValues_Bool(value_5, false)
+	result.ChatAPIKey = Config_EnvStringOrFile("DAOCHI_CHAT_API_KEY", "DAOCHI_CHAT_API_KEY_FILE", "")
+	result.ChatAPIEndpoint = Config_EnvString("DAOCHI_CHAT_ENDPOINT", "")
+	result.FeedbackToken = Config_EnvStringOrFile("DAOCHI_FEEDBACK_TOKEN", "DAOCHI_FEEDBACK_TOKEN_FILE", "")
+	result.ChatModel = Config_EnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash")
+	result.ChatDailyLimit = Config_EnvInt64("DAOCHI_CHAT_DAILY_LIMIT", 20)
+	result.ChatGlobalDailyLimit = Config_EnvInt64("DAOCHI_CHAT_GLOBAL_DAILY_LIMIT", 1000)
 	return result
 }

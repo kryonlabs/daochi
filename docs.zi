@@ -8,6 +8,8 @@ ctx :: #import "std/context_go";
 json :: #import "std/json_go";
 url :: #import "std/url_go";
 response :: #import "response";
+chat_paths :: #import "chat_paths";
+package_paths :: #import "package_paths";
 go_sync :: #system_library "go:sync";
 go_format :: #system_library "go:fmt";
 go_slog :: #system_library "go:log/slog";
@@ -2087,6 +2089,14 @@ PathApiV1FriendsStats :: () -> Map(string, Any) {
 Paths :: () -> Map(string, Any) {
     result: Map(string, Any)
     MapInit(result)
+    additions := chat_paths.Paths()
+    MapSet(result, "/api/v1/chat/completions", MapGet(additions, "/api/v1/chat/completions"))
+    MapSet(result, "/api/v1/feedback", MapGet(additions, "/api/v1/feedback"))
+    MapSet(result, "/api/v1/admin/feedback", MapGet(additions, "/api/v1/admin/feedback"))
+    MapSet(result, "/api/v1/admin/feedback/reply", MapGet(additions, "/api/v1/admin/feedback/reply"))
+    packages := package_paths.Paths()
+    MapSet(result, "/api/v1/packages/{app_id}/{asset}", MapGet(packages, "/api/v1/packages/{app_id}/{asset}"))
+    MapSet(result, "/api/v2/packages/{app_id}/{asset}", MapGet(packages, "/api/v2/packages/{app_id}/{asset}"))
     MapSet(result, "/healthz", PathHealthz())
     MapSet(result, "/readyz", PathReadyz())
     MapSet(result, "/api/v1/node", PathApiV1Node())

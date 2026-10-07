@@ -54,6 +54,12 @@ Config :: struct {
     MoneroMinimumAtomicAmount: s64
     MoneroConfirmationsRequired: s64
     TokenDirectPurchasesEnabled: bool
+    ChatAPIKey: string
+    ChatAPIEndpoint: string
+    FeedbackToken: string
+    ChatModel: string
+    ChatDailyLimit: s64
+    ChatGlobalDailyLimit: s64
 }
 
 #scope_file
@@ -280,5 +286,11 @@ Load :: () -> Config {
     result.MoneroMinimumAtomicAmount = EnvInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", cast(s64)1)
     result.MoneroConfirmationsRequired = EnvInt64("MONERO_CONFIRMATIONS_REQUIRED", cast(s64)10)
     result.TokenDirectPurchasesEnabled = Bool(Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED"), false)
+    result.ChatAPIKey = EnvStringOrFile("DAOCHI_CHAT_API_KEY", "DAOCHI_CHAT_API_KEY_FILE", "")
+    result.ChatAPIEndpoint = EnvString("DAOCHI_CHAT_ENDPOINT", "")
+    result.FeedbackToken = EnvStringOrFile("DAOCHI_FEEDBACK_TOKEN", "DAOCHI_FEEDBACK_TOKEN_FILE", "")
+    result.ChatModel = EnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash")
+    result.ChatDailyLimit = EnvInt64("DAOCHI_CHAT_DAILY_LIMIT", cast(s64)20)
+    result.ChatGlobalDailyLimit = EnvInt64("DAOCHI_CHAT_GLOBAL_DAILY_LIMIT", cast(s64)1000)
     return result
 }

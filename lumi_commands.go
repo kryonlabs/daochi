@@ -16,7 +16,7 @@ type ParsedCommand struct {
 	HasArgument bool
 }
 
-const zir_d_de317ef43e67dbaf = "[\n  {\"command\":\"start\",\"description\":\"Connect your Inner Breeze account\"},\n  {\"command\":\"help\",\"description\":\"Show commands and examples\"},\n  {\"command\":\"app\",\"description\":\"Open Inner Breeze\"},\n  {\"command\":\"history\",\"description\":\"Open your full Lumi conversation in Inner Breeze\"},\n  {\"command\":\"todo\",\"description\":\"Add a task: /todo <title>\"},\n  {\"command\":\"done\",\"description\":\"Complete a task: /done <title>\"},\n  {\"command\":\"reopen\",\"description\":\"Reopen a completed task: /reopen <title>\"},\n  {\"command\":\"lists\",\"description\":\"Open your lists\"},\n  {\"command\":\"habit\",\"description\":\"Complete a habit: /habit <title>\"},\n  {\"command\":\"habits\",\"description\":\"Open your habits\"},\n  {\"command\":\"journal\",\"description\":\"Write to today's diary: /journal <text>\"},\n  {\"command\":\"diary\",\"description\":\"Open your diary\"},\n  {\"command\":\"meditate\",\"description\":\"Start meditation in Inner Breeze\"},\n  {\"command\":\"whm\",\"description\":\"Start Wim Hof breathing in Inner Breeze\"},\n  {\"command\":\"practices\",\"description\":\"Open your practices\"},\n  {\"command\":\"progress\",\"description\":\"Show a chart: /progress <sessions|meditation|retention|habits> [1–31 days]\"},\n  {\"command\":\"feedback\",\"description\":\"Draft feedback for your approval: /feedback <text>\"},\n  {\"command\":\"donate\",\"description\":\"Show official donation links\"},\n  {\"command\":\"cancel\",\"description\":\"Cancel a pending diary or habit choice\"}\n]\n"
+const zir_d_7299f23f63b6111b = "[\n  {\"command\":\"start\",\"description\":\"Connect your Inner Breeze account\"},\n  {\"command\":\"help\",\"description\":\"Show commands and examples\"},\n  {\"command\":\"app\",\"description\":\"Open Inner Breeze\"},\n  {\"command\":\"history\",\"description\":\"Open your full Lumi conversation in Inner Breeze\"},\n  {\"command\":\"todo\",\"description\":\"Add a task: /todo <title>\"},\n  {\"command\":\"done\",\"description\":\"Complete a task: /done <title>\"},\n  {\"command\":\"reopen\",\"description\":\"Reopen a completed task: /reopen <title>\"},\n  {\"command\":\"lists\",\"description\":\"Open your lists\"},\n  {\"command\":\"habit\",\"description\":\"Complete a habit: /habit <title>\"},\n  {\"command\":\"habits\",\"description\":\"Open your habits\"},\n  {\"command\":\"journal\",\"description\":\"Write to today's diary: /journal <text>\"},\n  {\"command\":\"diary\",\"description\":\"Open your diary\"},\n  {\"command\":\"meditate\",\"description\":\"Start meditation in Inner Breeze\"},\n  {\"command\":\"whm\",\"description\":\"Start Wim Hof breathing in Inner Breeze\"},\n  {\"command\":\"practices\",\"description\":\"Open your practices\"},\n  {\"command\":\"progress\",\"description\":\"Show a chart: /progress <sessions|meditation|retention|habits> [1–31 days]\"},\n  {\"command\":\"feedback\",\"description\":\"Draft feedback for your approval: /feedback <text>\"},\n  {\"command\":\"donate\",\"description\":\"Show official donation links\"},\n  {\"command\":\"cancel\",\"description\":\"Cancel a pending diary or habit choice\"}\n]\n"
 
 func LumiCommands_Parse(input string) ParsedCommand {
 	result := ParsedCommand{Message: input}
@@ -28,10 +28,28 @@ func LumiCommands_Parse(input string) ParsedCommand {
 		boundary = int(int64(len(input)))
 	}
 	command := input[1:boundary]
+	colon := strings.IndexAny(command, ":")
+	if colon >= 0 {
+		diary_command := command[:colon]
+		diary_address := strings.IndexAny(diary_command, "@")
+		if diary_address >= 0 {
+			diary_command = diary_command[:diary_address]
+		}
+		var value_0 bool = strings.EqualFold(diary_command, "journal")
+		var value_1 bool = value_0
+		if !value_1 {
+			var value_2 bool = strings.EqualFold(diary_command, "diary")
+			value_1 = value_2
+		}
+		if value_1 {
+			boundary = colon + 1
+			command = input[1:boundary]
+		}
+	}
 	address := strings.IndexAny(command, "@")
 	if address >= 0 {
-		var value_0 bool = strings.EqualFold(command[(address+1):], "inlumi_bot")
-		if !value_0 {
+		var value_3 bool = strings.EqualFold(command[(address+1):], "inlumi_bot")
+		if !value_3 {
 			result.Foreign = true
 			return result
 		}
@@ -39,11 +57,11 @@ func LumiCommands_Parse(input string) ParsedCommand {
 	}
 	result.Name = strings.ToLower(command)
 	result.HasArgument = strings.TrimSpace(input[boundary:]) != ""
-	var value_1 [3]string
-	value_1[0] = "/"
-	value_1[1] = result.Name
-	value_1[2] = input[boundary:]
-	parts := value_1
+	var value_4 [3]string
+	value_4[0] = "/"
+	value_4[1] = result.Name
+	value_4[2] = input[boundary:]
+	parts := value_4
 	_ = parts
 	result.Message = strings.Join(parts[0:3:3], "")
 	return result

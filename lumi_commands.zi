@@ -31,6 +31,18 @@ Parse :: (input: string) -> ParsedCommand {
         boundary = cast(isize)input.count
     }
     command := input[1:boundary]
+    colon := IndexAny(command, ":")
+    if colon >= 0 {
+        diary_command := command[:colon]
+        diary_address := IndexAny(diary_command, "@")
+        if diary_address >= 0 {
+            diary_command = diary_command[:diary_address]
+        }
+        if EqualFold(diary_command, "journal") || EqualFold(diary_command, "diary") {
+            boundary = colon + 1
+            command = input[1:boundary]
+        }
+    }
     address := IndexAny(command, "@")
     if address >= 0 {
         if !EqualFold(command[address + 1:], "inlumi_bot") {

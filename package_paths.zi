@@ -1,0 +1,41 @@
+#import "std/go_types"
+#import "std/map_go"
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+
+Paths :: () -> Map(string, Any) {
+    paths: Map(string, Any)
+    json.Unmarshal(text.ToBytes(Document), *paths)
+    return paths
+}
+
+Document :: #string JSON
+{
+  "/api/v1/packages/{app_id}/{asset}": {
+    "get": {
+      "summary": "Read an app's desktop portable release",
+      "parameters": [
+        {"name":"app_id","in":"path","required":true,"schema":{"type":"string"}},
+        {"name":"asset","in":"path","required":true,"description":"latest or the release SHA-256 followed by .zib","schema":{"type":"string"}}
+      ],
+      "responses": {
+        "200":{"description":"Signed release metadata or the portable bundle"},
+        "404":{"description":"App or release is unavailable"}
+      }
+    }
+  },
+  "/api/v2/packages/{app_id}/{asset}": {
+    "get": {
+      "summary": "Read an app's portable release for current hosts",
+      "parameters": [
+        {"name":"app_id","in":"path","required":true,"schema":{"type":"string"}},
+        {"name":"asset","in":"path","required":true,"description":"latest or the release SHA-256 followed by .zib","schema":{"type":"string"}}
+      ],
+      "responses": {
+        "200":{"description":"Signed release metadata or the portable bundle"},
+        "404":{"description":"App or release is unavailable"}
+      }
+    }
+  }
+}
+JSON;

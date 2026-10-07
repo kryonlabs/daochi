@@ -1,0 +1,167 @@
+// Private, account-owned app feedback with an operator inbox and replies.
+#import "std/go_types"
+chat :: #import "chat";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+http :: #import "std/http_go";
+json :: #import "std/json_go";
+sql :: #import "std/sql_go";
+url :: #import "std/url_go";
+text :: #import "std/text_go";
+strings :: #system_library "go:strings";
+native_sql :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+Feedback :: struct {
+    account_id: string #go_tag "json:\"account_id,omitempty\""
+    id: string #go_tag "json:\"id\""
+    app_id: string #go_tag "json:\"app_id\""
+    title: string #go_tag "json:\"title\""
+    message: string #go_tag "json:\"message\""
+    context: string #go_tag "json:\"context\""
+    reply: string #go_tag "json:\"reply\""
+    created_at: string #go_tag "json:\"created_at\""
+}
+FeedbackList :: struct {
+    feedback: []Feedback #go_tag "json:\"feedback\""
+}
+
+#scope_file
+TrimSpace :: (value: string) -> string #foreign strings;
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign native_sql "(*Rows).Close";
+Append :: (values: []Feedback, value: Feedback) -> []Feedback #foreign builtin "append";
+
+RequireOperator :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request) -> bool {
+    token := service.configuration.FeedbackToken
+    if token == "" {
+        token = service.configuration.AdminToken
+    }
+    return auth.RequireAdmin(writer, request, token)
+}
+
+#scope_export
+Submit :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(service.database, request, service.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, service.counters, user.authentication)
+        return
+    }
+    received := body.ReadJSON(writer, request, 8192)
+    input: Feedback
+    if received.error != null || json.Unmarshal(received.value, *input) != null ||
+    input.id.count != 64 || input.app_id != "inbe" ||
+    TrimSpace(input.title) == "" || input.title.count > 160 ||
+    TrimSpace(input.message) == "" || input.message.count > 4096 || input.context.count > 2048 {
+        response.Error(writer, cast(isize)400, "invalid feedback")
+        return
+    }
+    // Retrying an outbox item is idempotent and cannot overwrite a report.
+    arguments: [7]Any = .[user.value, input.id, input.app_id, input.title, input.message, input.context, user.value]
+    written := sql.Exec(service.database, http.Context(request),
+        "INSERT INTO server_app_feedback(account_id,id,app_id,title,message,context) SELECT ?1,?2,?3,?4,?5,?6 WHERE (SELECT COUNT(*) FROM server_app_feedback WHERE account_id=?7 AND created_at>=date('now'))<20 ON CONFLICT(account_id,id) DO NOTHING", arguments[:])
+    if written.error != null {
+        response.Error(writer, cast(isize)503, "feedback unavailable")
+        return
+    }
+    exists: s64
+    destinations: [1]Any = .[*exists]
+    row := sql.QueryRow(service.database, http.Context(request),
+        "SELECT COUNT(*) FROM server_app_feedback WHERE account_id=?1 AND id=?2", arguments[0:2])
+    if sql.ScanRow(row, destinations[:]) != null || exists != 1 {
+        response.Error(writer, cast(isize)429, "daily feedback allowance reached")
+        return
+    }
+    response.JSON(writer, cast(isize)200, input.id)
+}
+
+List :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request, admin: bool) {
+    user: string
+    if admin {
+        if !RequireOperator(service, writer, request) {
+            return
+        }
+    } else {
+        authenticated := auth.BearerUser(service.database, request, service.configuration.TokenSecret)
+        if authenticated.authentication.error != null || authenticated.authentication.status != 0 {
+            auth.Respond(writer, service.counters, authenticated.authentication)
+            return
+        }
+        user = authenticated.value
+    }
+    arguments: [1]Any = .[user]
+    query := "SELECT id,app_id,title,message,context,reply,created_at FROM server_app_feedback WHERE account_id=?1 ORDER BY created_at DESC,id DESC LIMIT 100"
+    page_arguments: [2]Any = .[user, "0"]
+    replies := !admin && url.Value(url.Query(http.RequestURL(request)), "replies") == "1"
+    if replies {
+        offset := url.Value(url.Query(http.RequestURL(request)), "offset")
+        if offset.count > 6 {
+            response.Error(writer, cast(isize)400, "invalid feedback offset")
+            return
+        }
+        for byte: offset {
+            if byte < cast(u8)48 || byte > cast(u8)57 {
+                response.Error(writer, cast(isize)400, "invalid feedback offset")
+                return
+            }
+        }
+        if offset != "" {
+            page_arguments[1] = offset
+        }
+        // Two maximum-size replies still fit the app's bounded response buffer.
+        query = "SELECT id,app_id,'','','',reply,created_at FROM server_app_feedback WHERE account_id=?1 AND reply<>'' ORDER BY created_at DESC,id DESC LIMIT 2 OFFSET ?2"
+    }
+    if admin {
+        query = "SELECT id,app_id,title,message,context,reply,created_at,account_id FROM server_app_feedback ORDER BY created_at DESC,id DESC LIMIT 100"
+    }
+    queried := sql.Query(service.database, http.Context(request), query,
+        ifx admin then arguments[0:0] else ifx replies then page_arguments[:] else arguments[:])
+    if queried.error != null {
+        response.Error(writer, cast(isize)503, "feedback unavailable")
+        return
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    value: FeedbackList
+    while sql.Next(rows) {
+        item: Feedback
+        destinations: [8]Any = .[*item.id, *item.app_id, *item.title, *item.message, *item.context, *item.reply, *item.created_at, *item.account_id]
+        if sql.ScanRows(rows, ifx admin then destinations[:] else destinations[0:7]) != null {
+            response.Error(writer, cast(isize)503, "feedback unavailable")
+            return
+        }
+        value.feedback = Append(value.feedback, item)
+    }
+    if sql.RowsError(rows) != null {
+        response.Error(writer, cast(isize)503, "feedback unavailable")
+        return
+    }
+    response.JSON(writer, cast(isize)200, value)
+}
+
+Reply :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request) {
+    if !RequireOperator(service, writer, request) {
+        return
+    }
+    received := body.ReadJSON(writer, request, 8192)
+    input: Feedback
+    if received.error != null || json.Unmarshal(received.value, *input) != null ||
+    input.id.count != 64 || input.account_id.count != 64 ||
+    TrimSpace(input.reply) == "" || input.reply.count > 4096 {
+        response.Error(writer, cast(isize)400, "invalid feedback reply")
+        return
+    }
+    arguments: [3]Any = .[input.reply, input.id, input.account_id]
+    written := sql.Exec(service.database, http.Context(request),
+        "UPDATE server_app_feedback SET reply=?1 WHERE id=?2 AND account_id=?3", arguments[:])
+    if written.error != null {
+        response.Error(writer, cast(isize)503, "feedback unavailable")
+        return
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error != null || affected.value == 0 {
+        response.Error(writer, cast(isize)404, "feedback not found")
+        return
+    }
+    response.JSON(writer, cast(isize)200, input.id)
+}

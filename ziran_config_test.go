@@ -59,6 +59,12 @@ type BaselineConfig struct {
 	MoneroMinimumAtomicAmount       int64
 	MoneroConfirmationsRequired     int64
 	TokenDirectPurchasesEnabled     bool
+	ChatAPIKey                      string
+	ChatAPIEndpoint                 string
+	FeedbackToken                   string
+	ChatModel                       string
+	ChatDailyLimit                  int64
+	ChatGlobalDailyLimit            int64
 }
 
 func baselineLoadConfig() BaselineConfig {
@@ -135,6 +141,12 @@ func baselineLoadConfig() BaselineConfig {
 		MoneroMinimumAtomicAmount:       baselineEnvInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", 1),
 		MoneroConfirmationsRequired:     baselineEnvInt64("MONERO_CONFIRMATIONS_REQUIRED", 10),
 		TokenDirectPurchasesEnabled:     ConfigValues_Bool(os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED"), false),
+		ChatAPIKey:                      baselineEnvStringOrFile("DAOCHI_CHAT_API_KEY", "DAOCHI_CHAT_API_KEY_FILE", ""),
+		ChatAPIEndpoint:                 baselineEnvString("DAOCHI_CHAT_ENDPOINT", ""),
+		FeedbackToken:                   baselineEnvStringOrFile("DAOCHI_FEEDBACK_TOKEN", "DAOCHI_FEEDBACK_TOKEN_FILE", ""),
+		ChatModel:                       baselineEnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash"),
+		ChatDailyLimit:                  baselineEnvInt64("DAOCHI_CHAT_DAILY_LIMIT", 20),
+		ChatGlobalDailyLimit:            baselineEnvInt64("DAOCHI_CHAT_GLOBAL_DAILY_LIMIT", 1000),
 	}
 }
 
@@ -246,6 +258,14 @@ var configEnvironmentKeys = []string{
 	"DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET",
 	"DAOCHI_BASE_URL",
 	"DAOCHI_CHALLENGE_TTL_SECONDS",
+	"DAOCHI_CHAT_API_KEY",
+	"DAOCHI_CHAT_API_KEY_FILE",
+	"DAOCHI_CHAT_ENDPOINT",
+	"DAOCHI_CHAT_MODEL",
+	"DAOCHI_CHAT_DAILY_LIMIT",
+	"DAOCHI_CHAT_GLOBAL_DAILY_LIMIT",
+	"DAOCHI_FEEDBACK_TOKEN",
+	"DAOCHI_FEEDBACK_TOKEN_FILE",
 	"DAOCHI_DB",
 	"DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES",
 	"DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN",

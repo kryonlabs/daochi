@@ -1,0 +1,210 @@
+{
+  "/api/v1/chat/completions": {
+    "post": {
+      "summary": "Account-limited online app conversation",
+      "description": "Requires a Daochi bearer token and X-Daochi-User. The node keeps the provider key private, bounds context and output, and enforces persistent daily account and node limits. Each model request, including tool continuations and failed provider attempts, uses one allowance unit. Tools execute only in the client harness. A disabled or unavailable provider returns 503; exhausted allowances return 429.",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "messages"
+              ],
+              "properties": {
+                "messages": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 20,
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "context": {
+                  "type": "object"
+                },
+                "tools": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Assistant message or tool calls, and remaining allowance"
+        },
+        "400": {
+          "description": "Malformed or oversized context"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "429": {
+          "description": "Daily allowance exhausted"
+        },
+        "503": {
+          "description": "Online chat unavailable"
+        }
+      }
+    }
+  },
+  "/api/v1/feedback": {
+    "post": {
+      "summary": "Deliver an account's app feedback",
+      "description": "Idempotent by account and 64-character report ID. Up to 20 reports per account per UTC day. Feedback contains only the authored report and bounded app diagnostics, and is private to its account and node operator.",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "id",
+                "app_id",
+                "title",
+                "message"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
+                },
+                "app_id": {
+                  "const": "inbe"
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 160
+                },
+                "message": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "context": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Saved report ID"
+        },
+        "400": {
+          "description": "Invalid feedback"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "429": {
+          "description": "Daily report allowance exhausted"
+        },
+        "503": {
+          "description": "Feedback service unavailable"
+        }
+      }
+    },
+    "get": {
+      "summary": "Read the account's reports and developer replies",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Up to 100 reports with replies"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "503": {
+          "description": "Feedback service unavailable"
+        }
+      }
+    }
+  },
+  "/api/v1/admin/feedback": {
+    "get": {
+      "summary": "Private developer feedback inbox",
+      "description": "Requires X-Daochi-Admin when an admin token is configured; otherwise loopback-only.",
+      "responses": {
+        "200": {
+          "description": "Up to 100 newest reports"
+        },
+        "401": {
+          "description": "Operator authentication required"
+        },
+        "403": {
+          "description": "Remote operator access disabled"
+        }
+      }
+    }
+  },
+  "/api/v1/admin/feedback/reply": {
+    "post": {
+      "summary": "Reply to an app feedback report",
+      "description": "Uses the same private operator authorization as the feedback inbox. The reporting account can read the reply through GET /api/v1/feedback.",
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "id",
+                "reply"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
+                },
+                "reply": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Report replied to"
+        },
+        "400": {
+          "description": "Invalid reply"
+        },
+        "401": {
+          "description": "Operator authentication required"
+        },
+        "404": {
+          "description": "Report not found"
+        }
+      }
+    }
+  }
+}

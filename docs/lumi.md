@@ -46,3 +46,20 @@ read reports without receiving the node's admin credential. To send an authored
 reply, use `reply --account-id ACCOUNT --report-id REPORT --reply-file FILE`.
 The remote helper reads the node's private credential and uses loopback HTTP;
 reply text travels as JSON over SSH, without being interpolated into commands.
+
+The dedicated Telegram bot is `@inlumi_bot`. Users link their private chat from
+Lumi in Inner Breeze using a one-use link. Account signing keys stay in the app.
+`/help` lists the same catalogue used for Telegram's command menu, with examples
+for tasks, habits, diary entries, progress and feedback. `/app` and `/history`
+open Inner Breeze. App actions require the linked app to remain open and the
+corresponding sub-app to be installed. Feedback still asks for approval.
+Commands addressed to another bot are ignored; addressed Lumi commands preserve
+their argument text. Empty required arguments receive usage instructions.
+
+Check the menu and profile with `python3 scripts/configure-lumi-bot.py --host
+USER@NODE`; add `--apply` to update and verify them. The helper reads the node's
+existing `/etc/daochi/daochi.env` or a supplied `--env-file`, including
+`DAOCHI_LUMI_BOT_TOKEN_FILE`. A local `--token-file` is also supported. It verifies
+the bot's identity before making changes and never prints the credential.
+Configure `DAOCHI_LUMI_WEBHOOK_SECRET_FILE` and register the authenticated
+`/api/v1/lumi/telegram/webhook` endpoint separately after deploying the server.

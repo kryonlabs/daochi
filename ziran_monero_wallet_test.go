@@ -17,10 +17,10 @@ import (
 func TestZiranMoneroWalletPolicyAgainstBaseline(t *testing.T) {
 	for _, value := range []int64{math.MinInt64, -1, 0, 1, 10, math.MaxInt64} {
 		configuration := Config{
-			MoneroRateAtomicAmount:       value,
-			MoneroRateTokenUnits:         value,
-			MoneroConfirmationsRequired:  value,
-			MoneroMinimumAtomicAmount:    value,
+			MoneroRateAtomicAmount:      value,
+			MoneroRateTokenUnits:        value,
+			MoneroConfirmationsRequired: value,
+			MoneroMinimumAtomicAmount:   value,
 		}
 		if MoneroWallet_ValidRate(configuration) != baselineValidMoneroRate(configuration) ||
 			MoneroWallet_ConfirmationsRequired(configuration) != baselineMoneroConfirmationsRequired(configuration) ||

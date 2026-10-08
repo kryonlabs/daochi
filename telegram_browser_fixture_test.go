@@ -133,7 +133,10 @@ func TestTelegramBrowserFixture(t *testing.T) {
 		"url": server.URL, "control_key": control, "audience": fixture.owner.server.Cfg.BaseURL,
 		"synthetic": true, "bot_id": int64(123456), "node_id": fixture.owner.server.Node.ID,
 	})
-	if err != nil || os.WriteFile(reportPath, metadata, 0600) != nil {
+	if err != nil {
+		t.Fatal("private browser fixture report unavailable")
+	}
+	if err := writeTelegramBrowserFixtureReport(reportPath, metadata); err != nil {
 		t.Fatal("private browser fixture report unavailable")
 	}
 	t.Log("synthetic browser fixture ready; metadata saved privately")
@@ -147,5 +150,43 @@ func TestTelegramBrowserFixture(t *testing.T) {
 	defer cancel()
 	if err := server.Config.Shutdown(ctx); err != nil {
 		t.Error("synthetic browser fixture shutdown failed")
+	}
+}
+
+func writeTelegramBrowserFixtureReport(path string, metadata []byte) error {
+	report, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	_, writeError := report.Write(metadata)
+	closeError := report.Close()
+	if writeError != nil {
+		return writeError
+	}
+	return closeError
+}
+
+func TestTelegramBrowserFixtureReportRequiresNewPrivateFile(t *testing.T) {
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+	if err := writeTelegramBrowserFixtureReport(reportPath, []byte("synthetic-private-metadata")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(reportPath)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("fixture report permissions are not private")
+	}
+	if err := writeTelegramBrowserFixtureReport(reportPath, []byte("replacement")); err == nil {
+		t.Fatal("existing fixture report was overwritten")
+	}
+	symlinkPath := filepath.Join(t.TempDir(), "linked-report.json")
+	if err := os.Symlink(reportPath, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTelegramBrowserFixtureReport(symlinkPath, []byte("replacement")); err == nil {
+		t.Fatal("fixture report followed a symlink")
+	}
+	data, err := os.ReadFile(reportPath)
+	if err != nil || string(data) != "synthetic-private-metadata" {
+		t.Fatal("rejected fixture report changed prior data")
 	}
 }

@@ -24,7 +24,7 @@ func authorizationRecord(t *testing.T, fixture *authorizationFixture, id, key st
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer transaction.Rollback()
+	defer func() { _ = transaction.Rollback() }()
 	result := SyncWrites_UpsertRecord(transaction, t.Context(), fixture.owner.UserID, EncryptedRecord{
 		Collection: "private.inbe.v2.lumi", ID: id, KeyID: key, Nonce: "fixture-nonce",
 		Ciphertext: "opaque-fixture", UpdatedAt: "2026-10-08T00:00:00Z",
@@ -258,7 +258,7 @@ func TestAuthorizationRestartAndIssuingNodePartition(t *testing.T) {
 	}
 	// Even with the database copied locally, a different node or audience must
 	// reject the credential. It cannot renew through another partition.
-	other := *fixture.server
+	other := NewServer(fixture.server.Cfg, fixture.store, Verifier_New(MlDsa44_Verify))
 	other.Node = fixture.server.Node
 	other.Node.ID = strings.Repeat("f", 64)
 	otherHandler := other.Routes()
@@ -353,7 +353,7 @@ func TestAuthorizationWebSocketRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	proof := RequestProof{Version: 1, GrantID: fixture.grant.GrantID, SessionID: fixture.credential.SessionID,
 		AccountID: fixture.owner.UserID, AppID: "inbe", ClientID: fixture.grant.ClientID,
 		NodeID: fixture.grant.NodeID, Audience: fixture.grant.Audience, Challenge: fixture.credential.Challenge,
@@ -371,7 +371,9 @@ func TestAuthorizationWebSocketRevocation(t *testing.T) {
 	if err != nil || response.StatusCode != 101 {
 		t.Fatalf("delegate handshake: %v %v", response, err)
 	}
-	connection.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	frame := Websocket_ReadFrame(reader)
 	var event CollectionEvent
 	if frame.Error != nil || json.Unmarshal(frame.Payload, &event) != nil || event.Collection != "private.inbe.v2.lumi" {

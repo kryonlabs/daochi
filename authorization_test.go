@@ -275,7 +275,9 @@ func TestAuthorizationGrantSignatureAndRequestTampering(t *testing.T) {
 		t.Run("request-"+field, func(t *testing.T) {
 			request := fixture.delegateRequest(t, fixture.syncInput())
 			var proof map[string]any
-			json.Unmarshal([]byte(request.Header.Get("X-Daochi-Delegate")), &proof)
+			if err := json.Unmarshal([]byte(request.Header.Get("X-Daochi-Delegate")), &proof); err != nil {
+				t.Fatal(err)
+			}
 			if field == "expires_at" {
 				proof[field] = time.Now().Unix() - 1
 			} else {

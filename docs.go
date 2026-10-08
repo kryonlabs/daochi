@@ -17,19 +17,19 @@ type ReadPublicStats func(Context, string) PublicStatsResult
 
 type CachedBytes func() []uint8
 
-type zir_984da11a0fa1ec24_WriteResult struct {
+type zir_d6432f2c25808066_WriteResult struct {
 	Count int
 	Error Error
 }
 
-func Docs_Write(Writer Writer, Value []uint8) zir_984da11a0fa1ec24_WriteResult {
-	var result zir_984da11a0fa1ec24_WriteResult
+func Docs_Write(Writer Writer, Value []uint8) zir_d6432f2c25808066_WriteResult {
+	var result zir_d6432f2c25808066_WriteResult
 	result.Count, result.Error = (io.Writer).Write(Writer, Value)
 	return result
 }
 
-func Docs_WritePage(Writer Writer, Format string, Status string) zir_984da11a0fa1ec24_WriteResult {
-	var result zir_984da11a0fa1ec24_WriteResult
+func Docs_WritePage(Writer Writer, Format string, Status string) zir_d6432f2c25808066_WriteResult {
+	var result zir_d6432f2c25808066_WriteResult
 	result.Count, result.Error = fmt.Fprintf(Writer, Format, Status)
 	return result
 }
@@ -7763,459 +7763,504 @@ func Docs_Paths() __type_7d6cc8a85f09fc88 {
 		(*value_19) = make(__type_7d6cc8a85f09fc88)
 	}
 	(*value_19)[value_20] = value_21
+	telegram := TelegramPaths_Paths()
+	var value_25 [5]string
+	value_25[0] = "/api/v1/lumi/telegram/link"
+	value_25[1] = "/api/v1/lumi/telegram/updates"
+	value_25[2] = "/api/v1/lumi/telegram/ack"
+	value_25[3] = "/api/v1/lumi/telegram/messages"
+	value_25[4] = "/api/v1/lumi/telegram/webhook"
+	telegramNames := value_25
+	for _, name := range telegramNames {
+		var value_26 *__type_7d6cc8a85f09fc88 = &(result)
+		var value_27 string = name
+		var value_29 __type_7d6cc8a85f09fc88 = telegram
+		var value_30 string = name
+		var value_31 Any = value_29[value_30]
+		var value_28 Any = value_31
+		if (*value_26) == nil {
+			(*value_26) = make(__type_7d6cc8a85f09fc88)
+		}
+		(*value_26)[value_27] = value_28
+	}
+	authorization := AuthorizationPaths_Paths()
+	var value_32 [10]string
+	value_32[0] = "/api/v1/authorization/requests"
+	value_32[1] = "/api/v1/authorization/rendezvous"
+	value_32[2] = "/api/v1/authorization/cancel"
+	value_32[3] = "/api/v1/authorization/claim"
+	value_32[4] = "/api/v1/authorization/approve"
+	value_32[5] = "/api/v1/authorization/revoke"
+	value_32[6] = "/api/v1/authorization/challenge"
+	value_32[7] = "/api/v1/authorization/session"
+	value_32[8] = "/api/v1/delegated/sync"
+	value_32[9] = "/api/v1/delegated/ws"
+	authorizationNames := value_32
+	for _, name := range authorizationNames {
+		var value_33 *__type_7d6cc8a85f09fc88 = &(result)
+		var value_34 string = name
+		var value_36 __type_7d6cc8a85f09fc88 = authorization
+		var value_37 string = name
+		var value_38 Any = value_36[value_37]
+		var value_35 Any = value_38
+		if (*value_33) == nil {
+			(*value_33) = make(__type_7d6cc8a85f09fc88)
+		}
+		(*value_33)[value_34] = value_35
+	}
 	packages := PackagePaths_Paths()
-	var value_25 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_26 string = "/api/v1/packages/{app_id}/{asset}"
-	var value_28 __type_7d6cc8a85f09fc88 = packages
-	var value_29 string = "/api/v1/packages/{app_id}/{asset}"
-	var value_30 Any = value_28[value_29]
-	var value_27 Any = value_30
-	if (*value_25) == nil {
-		(*value_25) = make(__type_7d6cc8a85f09fc88)
+	var value_39 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_40 string = "/api/v1/packages/{app_id}/{asset}"
+	var value_42 __type_7d6cc8a85f09fc88 = packages
+	var value_43 string = "/api/v1/packages/{app_id}/{asset}"
+	var value_44 Any = value_42[value_43]
+	var value_41 Any = value_44
+	if (*value_39) == nil {
+		(*value_39) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_25)[value_26] = value_27
-	var value_31 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_32 string = "/api/v2/packages/{app_id}/{asset}"
-	var value_34 __type_7d6cc8a85f09fc88 = packages
-	var value_35 string = "/api/v2/packages/{app_id}/{asset}"
-	var value_36 Any = value_34[value_35]
-	var value_33 Any = value_36
-	if (*value_31) == nil {
-		(*value_31) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_31)[value_32] = value_33
-	var value_37 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_38 string = "/healthz"
-	var value_40 __type_7d6cc8a85f09fc88 = Docs_PathHealthz()
-	var value_39 Any = value_40
-	if (*value_37) == nil {
-		(*value_37) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_37)[value_38] = value_39
-	var value_41 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_42 string = "/readyz"
-	var value_44 __type_7d6cc8a85f09fc88 = Docs_PathReadyz()
-	var value_43 Any = value_44
-	if (*value_41) == nil {
-		(*value_41) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_41)[value_42] = value_43
+	(*value_39)[value_40] = value_41
 	var value_45 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_46 string = "/api/v1/node"
-	var value_48 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Node()
-	var value_47 Any = value_48
+	var value_46 string = "/api/v2/packages/{app_id}/{asset}"
+	var value_48 __type_7d6cc8a85f09fc88 = packages
+	var value_49 string = "/api/v2/packages/{app_id}/{asset}"
+	var value_50 Any = value_48[value_49]
+	var value_47 Any = value_50
 	if (*value_45) == nil {
 		(*value_45) = make(__type_7d6cc8a85f09fc88)
 	}
 	(*value_45)[value_46] = value_47
-	var value_49 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_50 string = "/api/v1/node/pairing/invites"
-	var value_52 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodePairingInvites()
-	var value_51 Any = value_52
-	if (*value_49) == nil {
-		(*value_49) = make(__type_7d6cc8a85f09fc88)
+	var value_51 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_52 string = "/healthz"
+	var value_54 __type_7d6cc8a85f09fc88 = Docs_PathHealthz()
+	var value_53 Any = value_54
+	if (*value_51) == nil {
+		(*value_51) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_49)[value_50] = value_51
-	var value_53 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_54 string = "/api/v1/node/pairing/accept"
-	var value_56 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodePairingAccept()
-	var value_55 Any = value_56
-	if (*value_53) == nil {
-		(*value_53) = make(__type_7d6cc8a85f09fc88)
+	(*value_51)[value_52] = value_53
+	var value_55 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_56 string = "/readyz"
+	var value_58 __type_7d6cc8a85f09fc88 = Docs_PathReadyz()
+	var value_57 Any = value_58
+	if (*value_55) == nil {
+		(*value_55) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_53)[value_54] = value_55
-	var value_57 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_58 string = "/api/v1/node/pairing/complete"
-	var value_60 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodePairingComplete()
-	var value_59 Any = value_60
-	if (*value_57) == nil {
-		(*value_57) = make(__type_7d6cc8a85f09fc88)
+	(*value_55)[value_56] = value_57
+	var value_59 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_60 string = "/api/v1/node"
+	var value_62 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Node()
+	var value_61 Any = value_62
+	if (*value_59) == nil {
+		(*value_59) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_57)[value_58] = value_59
-	var value_61 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_62 string = "/api/v1/node/peers"
-	var value_64 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodePeers()
-	var value_63 Any = value_64
-	if (*value_61) == nil {
-		(*value_61) = make(__type_7d6cc8a85f09fc88)
+	(*value_59)[value_60] = value_61
+	var value_63 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_64 string = "/api/v1/node/pairing/invites"
+	var value_66 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodePairingInvites()
+	var value_65 Any = value_66
+	if (*value_63) == nil {
+		(*value_63) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_61)[value_62] = value_63
-	var value_65 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_66 string = "/api/v1/namespaces"
-	var value_68 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Namespaces()
-	var value_67 Any = value_68
-	if (*value_65) == nil {
-		(*value_65) = make(__type_7d6cc8a85f09fc88)
+	(*value_63)[value_64] = value_65
+	var value_67 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_68 string = "/api/v1/node/pairing/accept"
+	var value_70 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodePairingAccept()
+	var value_69 Any = value_70
+	if (*value_67) == nil {
+		(*value_67) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_65)[value_66] = value_67
-	var value_69 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_70 string = "/api/v1/namespaces/claims"
-	var value_72 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NamespacesClaims()
-	var value_71 Any = value_72
-	if (*value_69) == nil {
-		(*value_69) = make(__type_7d6cc8a85f09fc88)
+	(*value_67)[value_68] = value_69
+	var value_71 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_72 string = "/api/v1/node/pairing/complete"
+	var value_74 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodePairingComplete()
+	var value_73 Any = value_74
+	if (*value_71) == nil {
+		(*value_71) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_69)[value_70] = value_71
-	var value_73 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_74 string = "/api/v1/namespaces/resolve"
-	var value_76 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NamespacesResolve()
-	var value_75 Any = value_76
-	if (*value_73) == nil {
-		(*value_73) = make(__type_7d6cc8a85f09fc88)
+	(*value_71)[value_72] = value_73
+	var value_75 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_76 string = "/api/v1/node/peers"
+	var value_78 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodePeers()
+	var value_77 Any = value_78
+	if (*value_75) == nil {
+		(*value_75) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_73)[value_74] = value_75
-	var value_77 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_78 string = "/api/v1/node/mesh/export"
-	var value_80 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodeMeshExport()
-	var value_79 Any = value_80
-	if (*value_77) == nil {
-		(*value_77) = make(__type_7d6cc8a85f09fc88)
+	(*value_75)[value_76] = value_77
+	var value_79 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_80 string = "/api/v1/namespaces"
+	var value_82 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Namespaces()
+	var value_81 Any = value_82
+	if (*value_79) == nil {
+		(*value_79) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_77)[value_78] = value_79
-	var value_81 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_82 string = "/api/v1/node/mesh/import"
-	var value_84 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodeMeshImport()
-	var value_83 Any = value_84
-	if (*value_81) == nil {
-		(*value_81) = make(__type_7d6cc8a85f09fc88)
+	(*value_79)[value_80] = value_81
+	var value_83 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_84 string = "/api/v1/namespaces/claims"
+	var value_86 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NamespacesClaims()
+	var value_85 Any = value_86
+	if (*value_83) == nil {
+		(*value_83) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_81)[value_82] = value_83
-	var value_85 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_86 string = "/metrics"
-	var value_88 __type_7d6cc8a85f09fc88 = Docs_PathMetrics()
-	var value_87 Any = value_88
-	if (*value_85) == nil {
-		(*value_85) = make(__type_7d6cc8a85f09fc88)
+	(*value_83)[value_84] = value_85
+	var value_87 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_88 string = "/api/v1/namespaces/resolve"
+	var value_90 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NamespacesResolve()
+	var value_89 Any = value_90
+	if (*value_87) == nil {
+		(*value_87) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_85)[value_86] = value_87
-	var value_89 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_90 string = "/api/v1/tokens/assets"
-	var value_92 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensAssets()
-	var value_91 Any = value_92
-	if (*value_89) == nil {
-		(*value_89) = make(__type_7d6cc8a85f09fc88)
+	(*value_87)[value_88] = value_89
+	var value_91 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_92 string = "/api/v1/node/mesh/export"
+	var value_94 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodeMeshExport()
+	var value_93 Any = value_94
+	if (*value_91) == nil {
+		(*value_91) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_89)[value_90] = value_91
-	var value_93 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_94 string = "/api/v1/tokens/issuer"
-	var value_96 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensIssuer()
-	var value_95 Any = value_96
-	if (*value_93) == nil {
-		(*value_93) = make(__type_7d6cc8a85f09fc88)
+	(*value_91)[value_92] = value_93
+	var value_95 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_96 string = "/api/v1/node/mesh/import"
+	var value_98 __type_7d6cc8a85f09fc88 = Docs_PathApiV1NodeMeshImport()
+	var value_97 Any = value_98
+	if (*value_95) == nil {
+		(*value_95) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_93)[value_94] = value_95
-	var value_97 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_98 string = "/api/v1/tokens/products"
-	var value_100 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensProducts()
-	var value_99 Any = value_100
-	if (*value_97) == nil {
-		(*value_97) = make(__type_7d6cc8a85f09fc88)
+	(*value_95)[value_96] = value_97
+	var value_99 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_100 string = "/metrics"
+	var value_102 __type_7d6cc8a85f09fc88 = Docs_PathMetrics()
+	var value_101 Any = value_102
+	if (*value_99) == nil {
+		(*value_99) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_97)[value_98] = value_99
-	var value_101 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_102 string = "/api/v1/tokens/balance"
-	var value_104 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensBalance()
-	var value_103 Any = value_104
-	if (*value_101) == nil {
-		(*value_101) = make(__type_7d6cc8a85f09fc88)
+	(*value_99)[value_100] = value_101
+	var value_103 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_104 string = "/api/v1/tokens/assets"
+	var value_106 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensAssets()
+	var value_105 Any = value_106
+	if (*value_103) == nil {
+		(*value_103) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_101)[value_102] = value_103
-	var value_105 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_106 string = "/api/v1/tokens/ledger"
-	var value_108 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensLedger()
-	var value_107 Any = value_108
-	if (*value_105) == nil {
-		(*value_105) = make(__type_7d6cc8a85f09fc88)
+	(*value_103)[value_104] = value_105
+	var value_107 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_108 string = "/api/v1/tokens/issuer"
+	var value_110 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensIssuer()
+	var value_109 Any = value_110
+	if (*value_107) == nil {
+		(*value_107) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_105)[value_106] = value_107
-	var value_109 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_110 string = "/api/v1/tokens/spend"
-	var value_112 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensSpend()
-	var value_111 Any = value_112
-	if (*value_109) == nil {
-		(*value_109) = make(__type_7d6cc8a85f09fc88)
+	(*value_107)[value_108] = value_109
+	var value_111 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_112 string = "/api/v1/tokens/products"
+	var value_114 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensProducts()
+	var value_113 Any = value_114
+	if (*value_111) == nil {
+		(*value_111) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_109)[value_110] = value_111
-	var value_113 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_114 string = "/api/v1/tokens/purchases/google/verify"
-	var value_116 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesGoogleVerify()
-	var value_115 Any = value_116
-	if (*value_113) == nil {
-		(*value_113) = make(__type_7d6cc8a85f09fc88)
+	(*value_111)[value_112] = value_113
+	var value_115 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_116 string = "/api/v1/tokens/balance"
+	var value_118 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensBalance()
+	var value_117 Any = value_118
+	if (*value_115) == nil {
+		(*value_115) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_113)[value_114] = value_115
-	var value_117 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_118 string = "/api/v1/tokens/purchases/monero/invoices"
-	var value_120 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroInvoices()
-	var value_119 Any = value_120
-	if (*value_117) == nil {
-		(*value_117) = make(__type_7d6cc8a85f09fc88)
+	(*value_115)[value_116] = value_117
+	var value_119 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_120 string = "/api/v1/tokens/ledger"
+	var value_122 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensLedger()
+	var value_121 Any = value_122
+	if (*value_119) == nil {
+		(*value_119) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_117)[value_118] = value_119
-	var value_121 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_122 string = "/api/v1/tokens/purchases/monero/invoices/{id}"
-	var value_124 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroInvoicesId()
-	var value_123 Any = value_124
-	if (*value_121) == nil {
-		(*value_121) = make(__type_7d6cc8a85f09fc88)
+	(*value_119)[value_120] = value_121
+	var value_123 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_124 string = "/api/v1/tokens/spend"
+	var value_126 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensSpend()
+	var value_125 Any = value_126
+	if (*value_123) == nil {
+		(*value_123) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_121)[value_122] = value_123
-	var value_125 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_126 string = "/api/v1/tokens/purchases/monero/address"
-	var value_128 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroAddress()
-	var value_127 Any = value_128
-	if (*value_125) == nil {
-		(*value_125) = make(__type_7d6cc8a85f09fc88)
+	(*value_123)[value_124] = value_125
+	var value_127 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_128 string = "/api/v1/tokens/purchases/google/verify"
+	var value_130 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesGoogleVerify()
+	var value_129 Any = value_130
+	if (*value_127) == nil {
+		(*value_127) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_125)[value_126] = value_127
-	var value_129 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_130 string = "/api/v1/tokens/purchases/monero/address/{recipient}"
-	var value_132 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroAddressRecipient()
-	var value_131 Any = value_132
-	if (*value_129) == nil {
-		(*value_129) = make(__type_7d6cc8a85f09fc88)
+	(*value_127)[value_128] = value_129
+	var value_131 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_132 string = "/api/v1/tokens/purchases/monero/invoices"
+	var value_134 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroInvoices()
+	var value_133 Any = value_134
+	if (*value_131) == nil {
+		(*value_131) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_129)[value_130] = value_131
-	var value_133 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_134 string = "/api/v1/tokens/purchases/monero/deposits"
-	var value_136 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroDeposits()
-	var value_135 Any = value_136
-	if (*value_133) == nil {
-		(*value_133) = make(__type_7d6cc8a85f09fc88)
+	(*value_131)[value_132] = value_133
+	var value_135 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_136 string = "/api/v1/tokens/purchases/monero/invoices/{id}"
+	var value_138 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroInvoicesId()
+	var value_137 Any = value_138
+	if (*value_135) == nil {
+		(*value_135) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_133)[value_134] = value_135
-	var value_137 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_138 string = "/api/v1/tokens/checkpoints/latest"
-	var value_140 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensCheckpointsLatest()
-	var value_139 Any = value_140
-	if (*value_137) == nil {
-		(*value_137) = make(__type_7d6cc8a85f09fc88)
+	(*value_135)[value_136] = value_137
+	var value_139 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_140 string = "/api/v1/tokens/purchases/monero/address"
+	var value_142 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroAddress()
+	var value_141 Any = value_142
+	if (*value_139) == nil {
+		(*value_139) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_137)[value_138] = value_139
-	var value_141 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_142 string = "/api/v1/tokens/receipts/{receipt_id}"
-	var value_144 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensReceiptsReceiptId()
-	var value_143 Any = value_144
-	if (*value_141) == nil {
-		(*value_141) = make(__type_7d6cc8a85f09fc88)
+	(*value_139)[value_140] = value_141
+	var value_143 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_144 string = "/api/v1/tokens/purchases/monero/address/{recipient}"
+	var value_146 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroAddressRecipient()
+	var value_145 Any = value_146
+	if (*value_143) == nil {
+		(*value_143) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_141)[value_142] = value_143
-	var value_145 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_146 string = "/api/v1/admin/tokens/manual-credit"
-	var value_148 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AdminTokensManualCredit()
-	var value_147 Any = value_148
-	if (*value_145) == nil {
-		(*value_145) = make(__type_7d6cc8a85f09fc88)
+	(*value_143)[value_144] = value_145
+	var value_147 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_148 string = "/api/v1/tokens/purchases/monero/deposits"
+	var value_150 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensPurchasesMoneroDeposits()
+	var value_149 Any = value_150
+	if (*value_147) == nil {
+		(*value_147) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_145)[value_146] = value_147
-	var value_149 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_150 string = "/api/v1/admin/tokens/checkpoint"
-	var value_152 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AdminTokensCheckpoint()
-	var value_151 Any = value_152
-	if (*value_149) == nil {
-		(*value_149) = make(__type_7d6cc8a85f09fc88)
+	(*value_147)[value_148] = value_149
+	var value_151 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_152 string = "/api/v1/tokens/checkpoints/latest"
+	var value_154 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensCheckpointsLatest()
+	var value_153 Any = value_154
+	if (*value_151) == nil {
+		(*value_151) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_149)[value_150] = value_151
-	var value_153 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_154 string = "/api/v1/apps"
-	var value_156 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Apps()
-	var value_155 Any = value_156
-	if (*value_153) == nil {
-		(*value_153) = make(__type_7d6cc8a85f09fc88)
+	(*value_151)[value_152] = value_153
+	var value_155 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_156 string = "/api/v1/tokens/receipts/{receipt_id}"
+	var value_158 __type_7d6cc8a85f09fc88 = Docs_PathApiV1TokensReceiptsReceiptId()
+	var value_157 Any = value_158
+	if (*value_155) == nil {
+		(*value_155) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_153)[value_154] = value_155
-	var value_157 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_158 string = "/api/v1/apps/register-signed"
-	var value_160 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AppsRegisterSigned()
-	var value_159 Any = value_160
-	if (*value_157) == nil {
-		(*value_157) = make(__type_7d6cc8a85f09fc88)
+	(*value_155)[value_156] = value_157
+	var value_159 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_160 string = "/api/v1/admin/tokens/manual-credit"
+	var value_162 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AdminTokensManualCredit()
+	var value_161 Any = value_162
+	if (*value_159) == nil {
+		(*value_159) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_157)[value_158] = value_159
-	var value_161 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_162 string = "/api/v1/apps/{app_id}"
-	var value_164 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AppsAppId()
-	var value_163 Any = value_164
-	if (*value_161) == nil {
-		(*value_161) = make(__type_7d6cc8a85f09fc88)
+	(*value_159)[value_160] = value_161
+	var value_163 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_164 string = "/api/v1/admin/tokens/checkpoint"
+	var value_166 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AdminTokensCheckpoint()
+	var value_165 Any = value_166
+	if (*value_163) == nil {
+		(*value_163) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_161)[value_162] = value_163
-	var value_165 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_166 string = "/api/v1/apps/{app_id}/collections"
-	var value_168 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AppsAppIdCollections()
-	var value_167 Any = value_168
-	if (*value_165) == nil {
-		(*value_165) = make(__type_7d6cc8a85f09fc88)
+	(*value_163)[value_164] = value_165
+	var value_167 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_168 string = "/api/v1/apps"
+	var value_170 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Apps()
+	var value_169 Any = value_170
+	if (*value_167) == nil {
+		(*value_167) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_165)[value_166] = value_167
-	var value_169 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_170 string = "/api/v1/account/app-grants"
-	var value_172 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountAppGrants()
-	var value_171 Any = value_172
-	if (*value_169) == nil {
-		(*value_169) = make(__type_7d6cc8a85f09fc88)
+	(*value_167)[value_168] = value_169
+	var value_171 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_172 string = "/api/v1/apps/register-signed"
+	var value_174 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AppsRegisterSigned()
+	var value_173 Any = value_174
+	if (*value_171) == nil {
+		(*value_171) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_169)[value_170] = value_171
-	var value_173 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_174 string = "/api/v1/account/app-grants/signed"
-	var value_176 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountAppGrantsSigned()
-	var value_175 Any = value_176
-	if (*value_173) == nil {
-		(*value_173) = make(__type_7d6cc8a85f09fc88)
+	(*value_171)[value_172] = value_173
+	var value_175 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_176 string = "/api/v1/apps/{app_id}"
+	var value_178 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AppsAppId()
+	var value_177 Any = value_178
+	if (*value_175) == nil {
+		(*value_175) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_173)[value_174] = value_175
-	var value_177 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_178 string = "/api/v1/account/app-records"
-	var value_180 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountAppRecords()
-	var value_179 Any = value_180
-	if (*value_177) == nil {
-		(*value_177) = make(__type_7d6cc8a85f09fc88)
+	(*value_175)[value_176] = value_177
+	var value_179 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_180 string = "/api/v1/apps/{app_id}/collections"
+	var value_182 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AppsAppIdCollections()
+	var value_181 Any = value_182
+	if (*value_179) == nil {
+		(*value_179) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_177)[value_178] = value_179
-	var value_181 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_182 string = "/api/v1/sync/diagnostics"
-	var value_184 __type_7d6cc8a85f09fc88 = Docs_PathApiV1SyncDiagnostics()
-	var value_183 Any = value_184
-	if (*value_181) == nil {
-		(*value_181) = make(__type_7d6cc8a85f09fc88)
+	(*value_179)[value_180] = value_181
+	var value_183 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_184 string = "/api/v1/account/app-grants"
+	var value_186 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountAppGrants()
+	var value_185 Any = value_186
+	if (*value_183) == nil {
+		(*value_183) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_181)[value_182] = value_183
-	var value_185 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_186 string = "/api/v1/sync/challenge"
-	var value_188 __type_7d6cc8a85f09fc88 = Docs_PathApiV1SyncChallenge()
-	var value_187 Any = value_188
-	if (*value_185) == nil {
-		(*value_185) = make(__type_7d6cc8a85f09fc88)
+	(*value_183)[value_184] = value_185
+	var value_187 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_188 string = "/api/v1/account/app-grants/signed"
+	var value_190 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountAppGrantsSigned()
+	var value_189 Any = value_190
+	if (*value_187) == nil {
+		(*value_187) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_185)[value_186] = value_187
-	var value_189 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_190 string = "/api/v1/sync/login"
-	var value_192 __type_7d6cc8a85f09fc88 = Docs_PathApiV1SyncLogin()
-	var value_191 Any = value_192
-	if (*value_189) == nil {
-		(*value_189) = make(__type_7d6cc8a85f09fc88)
+	(*value_187)[value_188] = value_189
+	var value_191 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_192 string = "/api/v1/account/app-records"
+	var value_194 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountAppRecords()
+	var value_193 Any = value_194
+	if (*value_191) == nil {
+		(*value_191) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_189)[value_190] = value_191
-	var value_193 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_194 string = "/api/v1/sync"
-	var value_196 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Sync()
-	var value_195 Any = value_196
-	if (*value_193) == nil {
-		(*value_193) = make(__type_7d6cc8a85f09fc88)
+	(*value_191)[value_192] = value_193
+	var value_195 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_196 string = "/api/v1/sync/diagnostics"
+	var value_198 __type_7d6cc8a85f09fc88 = Docs_PathApiV1SyncDiagnostics()
+	var value_197 Any = value_198
+	if (*value_195) == nil {
+		(*value_195) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_193)[value_194] = value_195
-	var value_197 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_198 string = "/api/v1/sync/ws"
-	var value_200 __type_7d6cc8a85f09fc88 = Docs_PathApiV1SyncWs()
-	var value_199 Any = value_200
-	if (*value_197) == nil {
-		(*value_197) = make(__type_7d6cc8a85f09fc88)
+	(*value_195)[value_196] = value_197
+	var value_199 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_200 string = "/api/v1/sync/challenge"
+	var value_202 __type_7d6cc8a85f09fc88 = Docs_PathApiV1SyncChallenge()
+	var value_201 Any = value_202
+	if (*value_199) == nil {
+		(*value_199) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_197)[value_198] = value_199
-	var value_201 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_202 string = "/api/v1/account"
-	var value_204 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Account()
-	var value_203 Any = value_204
-	if (*value_201) == nil {
-		(*value_201) = make(__type_7d6cc8a85f09fc88)
+	(*value_199)[value_200] = value_201
+	var value_203 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_204 string = "/api/v1/sync/login"
+	var value_206 __type_7d6cc8a85f09fc88 = Docs_PathApiV1SyncLogin()
+	var value_205 Any = value_206
+	if (*value_203) == nil {
+		(*value_203) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_201)[value_202] = value_203
-	var value_205 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_206 string = "/api/v1/account/delete"
-	var value_208 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountDelete()
-	var value_207 Any = value_208
-	if (*value_205) == nil {
-		(*value_205) = make(__type_7d6cc8a85f09fc88)
+	(*value_203)[value_204] = value_205
+	var value_207 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_208 string = "/api/v1/sync"
+	var value_210 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Sync()
+	var value_209 Any = value_210
+	if (*value_207) == nil {
+		(*value_207) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_205)[value_206] = value_207
-	var value_209 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_210 string = "/api/v1/account/export"
-	var value_212 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountExport()
-	var value_211 Any = value_212
-	if (*value_209) == nil {
-		(*value_209) = make(__type_7d6cc8a85f09fc88)
+	(*value_207)[value_208] = value_209
+	var value_211 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_212 string = "/api/v1/sync/ws"
+	var value_214 __type_7d6cc8a85f09fc88 = Docs_PathApiV1SyncWs()
+	var value_213 Any = value_214
+	if (*value_211) == nil {
+		(*value_211) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_209)[value_210] = value_211
-	var value_213 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_214 string = "/api/v1/account/devices"
-	var value_216 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountDevices()
-	var value_215 Any = value_216
-	if (*value_213) == nil {
-		(*value_213) = make(__type_7d6cc8a85f09fc88)
+	(*value_211)[value_212] = value_213
+	var value_215 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_216 string = "/api/v1/account"
+	var value_218 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Account()
+	var value_217 Any = value_218
+	if (*value_215) == nil {
+		(*value_215) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_213)[value_214] = value_215
-	var value_217 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_218 string = "/api/v1/account/delete-with-key"
-	var value_220 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountDeleteWithKey()
-	var value_219 Any = value_220
-	if (*value_217) == nil {
-		(*value_217) = make(__type_7d6cc8a85f09fc88)
+	(*value_215)[value_216] = value_217
+	var value_219 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_220 string = "/api/v1/account/delete"
+	var value_222 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountDelete()
+	var value_221 Any = value_222
+	if (*value_219) == nil {
+		(*value_219) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_217)[value_218] = value_219
-	var value_221 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_222 string = "/api/v1/account/alias"
-	var value_224 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountAlias()
-	var value_223 Any = value_224
-	if (*value_221) == nil {
-		(*value_221) = make(__type_7d6cc8a85f09fc88)
+	(*value_219)[value_220] = value_221
+	var value_223 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_224 string = "/api/v1/account/export"
+	var value_226 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountExport()
+	var value_225 Any = value_226
+	if (*value_223) == nil {
+		(*value_223) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_221)[value_222] = value_223
-	var value_225 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_226 string = "/api/v1/account/profile-icon"
-	var value_228 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountProfileIcon()
-	var value_227 Any = value_228
-	if (*value_225) == nil {
-		(*value_225) = make(__type_7d6cc8a85f09fc88)
+	(*value_223)[value_224] = value_225
+	var value_227 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_228 string = "/api/v1/account/devices"
+	var value_230 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountDevices()
+	var value_229 Any = value_230
+	if (*value_227) == nil {
+		(*value_227) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_225)[value_226] = value_227
-	var value_229 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_230 string = "/api/v1/friends"
-	var value_232 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Friends()
-	var value_231 Any = value_232
-	if (*value_229) == nil {
-		(*value_229) = make(__type_7d6cc8a85f09fc88)
+	(*value_227)[value_228] = value_229
+	var value_231 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_232 string = "/api/v1/account/delete-with-key"
+	var value_234 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountDeleteWithKey()
+	var value_233 Any = value_234
+	if (*value_231) == nil {
+		(*value_231) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_229)[value_230] = value_231
-	var value_233 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_234 string = "/api/v1/friends/requests"
-	var value_236 __type_7d6cc8a85f09fc88 = Docs_PathApiV1FriendsRequests()
-	var value_235 Any = value_236
-	if (*value_233) == nil {
-		(*value_233) = make(__type_7d6cc8a85f09fc88)
+	(*value_231)[value_232] = value_233
+	var value_235 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_236 string = "/api/v1/account/alias"
+	var value_238 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountAlias()
+	var value_237 Any = value_238
+	if (*value_235) == nil {
+		(*value_235) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_233)[value_234] = value_235
-	var value_237 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_238 string = "/api/v1/friends/requests/{request_id}/accept"
-	var value_240 __type_7d6cc8a85f09fc88 = Docs_PathApiV1FriendsRequestsRequestIdAccept()
-	var value_239 Any = value_240
-	if (*value_237) == nil {
-		(*value_237) = make(__type_7d6cc8a85f09fc88)
+	(*value_235)[value_236] = value_237
+	var value_239 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_240 string = "/api/v1/account/profile-icon"
+	var value_242 __type_7d6cc8a85f09fc88 = Docs_PathApiV1AccountProfileIcon()
+	var value_241 Any = value_242
+	if (*value_239) == nil {
+		(*value_239) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_237)[value_238] = value_239
-	var value_241 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_242 string = "/api/v1/friends/requests/{request_id}/decline"
-	var value_244 __type_7d6cc8a85f09fc88 = Docs_PathApiV1FriendsRequestsRequestIdDecline()
-	var value_243 Any = value_244
-	if (*value_241) == nil {
-		(*value_241) = make(__type_7d6cc8a85f09fc88)
+	(*value_239)[value_240] = value_241
+	var value_243 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_244 string = "/api/v1/friends"
+	var value_246 __type_7d6cc8a85f09fc88 = Docs_PathApiV1Friends()
+	var value_245 Any = value_246
+	if (*value_243) == nil {
+		(*value_243) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_241)[value_242] = value_243
-	var value_245 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_246 string = "/api/v1/profile/stats"
-	var value_248 __type_7d6cc8a85f09fc88 = Docs_PathApiV1ProfileStats()
-	var value_247 Any = value_248
-	if (*value_245) == nil {
-		(*value_245) = make(__type_7d6cc8a85f09fc88)
+	(*value_243)[value_244] = value_245
+	var value_247 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_248 string = "/api/v1/friends/requests"
+	var value_250 __type_7d6cc8a85f09fc88 = Docs_PathApiV1FriendsRequests()
+	var value_249 Any = value_250
+	if (*value_247) == nil {
+		(*value_247) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_245)[value_246] = value_247
-	var value_249 *__type_7d6cc8a85f09fc88 = &(result)
-	var value_250 string = "/api/v1/friends/stats"
-	var value_252 __type_7d6cc8a85f09fc88 = Docs_PathApiV1FriendsStats()
-	var value_251 Any = value_252
-	if (*value_249) == nil {
-		(*value_249) = make(__type_7d6cc8a85f09fc88)
+	(*value_247)[value_248] = value_249
+	var value_251 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_252 string = "/api/v1/friends/requests/{request_id}/accept"
+	var value_254 __type_7d6cc8a85f09fc88 = Docs_PathApiV1FriendsRequestsRequestIdAccept()
+	var value_253 Any = value_254
+	if (*value_251) == nil {
+		(*value_251) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_249)[value_250] = value_251
+	(*value_251)[value_252] = value_253
+	var value_255 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_256 string = "/api/v1/friends/requests/{request_id}/decline"
+	var value_258 __type_7d6cc8a85f09fc88 = Docs_PathApiV1FriendsRequestsRequestIdDecline()
+	var value_257 Any = value_258
+	if (*value_255) == nil {
+		(*value_255) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_255)[value_256] = value_257
+	var value_259 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_260 string = "/api/v1/profile/stats"
+	var value_262 __type_7d6cc8a85f09fc88 = Docs_PathApiV1ProfileStats()
+	var value_261 Any = value_262
+	if (*value_259) == nil {
+		(*value_259) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_259)[value_260] = value_261
+	var value_263 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_264 string = "/api/v1/friends/stats"
+	var value_266 __type_7d6cc8a85f09fc88 = Docs_PathApiV1FriendsStats()
+	var value_265 Any = value_266
+	if (*value_263) == nil {
+		(*value_263) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_263)[value_264] = value_265
 	return result
 }
 

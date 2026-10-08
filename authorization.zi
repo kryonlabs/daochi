@@ -1,0 +1,214 @@
+// Owner authorization is separate from public app sharing and account bearers.
+#import "std/go_types"
+auth :: #import "authentication";
+accounts :: #import "account_keys";
+apps :: #import "app_store";
+identity :: #import "identity";
+codec :: #import "codec";
+signing :: #import "signing";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+
+GrantScope :: struct {
+    collection: string #go_tag "json:\"collection\""
+    visibility: string #go_tag "json:\"visibility\""
+    read: bool #go_tag "json:\"read\""
+    write: bool #go_tag "json:\"write\""
+    keyID: string #go_tag "json:\"key_id\""
+    keyEnvelope: string #go_tag "json:\"key_envelope\""
+}
+
+Grant :: struct {
+    version: isize #go_tag "json:\"version\""
+    accountID: string #go_tag "json:\"account_id\""
+    grantID: string #go_tag "json:\"grant_id\""
+    requestID: string #go_tag "json:\"request_id\""
+    appID: string #go_tag "json:\"app_id\""
+    clientID: string #go_tag "json:\"client_id\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
+    signingKey: string #go_tag "json:\"signing_key\""
+    encryptionKey: string #go_tag "json:\"encryption_key\""
+    issuedAt: s64 #go_tag "json:\"issued_at\""
+    notBefore: s64 #go_tag "json:\"not_before\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+    nonce: string #go_tag "json:\"nonce\""
+    botID: s64 #go_tag "json:\"bot_id\""
+    telegramID: s64 #go_tag "json:\"telegram_id\""
+    scopes: []GrantScope #go_tag "json:\"scopes\""
+    signature: string #go_tag "json:\"signature\""
+}
+
+AuthorizedGrantResult :: struct {
+    value: Grant
+    authentication: auth.AuthenticationResult
+}
+
+#scope_file
+Join :: (values: []string, separator: string) -> string #foreign strings;
+FormatInteger :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
+Compare :: (left: string, right: string) -> isize #foreign strings;
+HasPrefix :: (value: string, prefix: string) -> bool #foreign strings;
+
+#scope_export
+HexID :: (value: string, length: s64) -> bool {
+    if value.count != length {
+        return false
+    }
+    for byte: value {
+        if !(byte >= cast(u8)48 && byte <= cast(u8)57) &&
+            !(byte >= cast(u8)97 && byte <= cast(u8)102) {
+            return false
+        }
+    }
+    return true
+}
+
+SafeCollection :: (appID: string, collection: string) -> bool {
+    // Released Inbe private v1 collections share one global content key.
+    // Giving out any of those keys exceeds an exact collection grant. Lumi
+    // v2 has an independently derived key and is the initial private scope.
+    return !(appID == "inbe" && HasPrefix(collection, "private.inbe.v1."))
+}
+
+GrantMessage :: (grant: Grant) -> string {
+    fields: [19]string = .["daochi-authorization-v1", "1", grant.accountID,
+        grant.grantID, grant.requestID, grant.appID, grant.clientID, grant.nodeID,
+        grant.audience, grant.signingKey, grant.encryptionKey,
+        FormatInteger(grant.issuedAt, 10), FormatInteger(grant.notBefore, 10),
+        FormatInteger(grant.expiresAt, 10), grant.nonce,
+        FormatInteger(grant.botID, 10), FormatInteger(grant.telegramID, 10),
+        FormatInteger(grant.scopes.count, 10), ""]
+    message := Join(fields[:], "\n")
+    for scope: grant.scopes {
+        fields: [7]string = .[scope.collection, scope.visibility, ifx scope.read then "read" else "",
+            ifx scope.write then "write" else "", scope.keyID,
+            signing.SHA256Hex(text.ToBytes(scope.keyEnvelope)), ""]
+        parts: [2]string = .[message, Join(fields[:], "\n")]
+        message = Join(parts[:], "")
+    }
+    return message
+}
+
+ValidGrant :: (grant: Grant, nodeID: string, audience: string, now: s64) -> bool {
+    if grant.version != 1 || !identity.ValidUserID(grant.accountID) ||
+        !HexID(grant.grantID, 32) || !HexID(grant.requestID, 32) ||
+        !identity.ValidNamespace(grant.appID) || !HexID(grant.clientID, 64) ||
+        !HexID(grant.nodeID, 64) || grant.nodeID != nodeID ||
+        grant.audience != audience || audience.count == 0 ||
+        !HexID(grant.signingKey, 64) || !HexID(grant.encryptionKey, 2368) ||
+        grant.signingKey == grant.encryptionKey || !HexID(grant.nonce, 32) ||
+        grant.issuedAt < now - 300 || grant.issuedAt > now ||
+        grant.notBefore < grant.issuedAt || grant.notBefore > now ||
+        grant.expiresAt <= now || grant.expiresAt - grant.issuedAt > 2592000 ||
+        grant.scopes.count < 1 || grant.scopes.count > 16 ||
+        grant.botID < 0 || grant.telegramID < 0 ||
+        ((grant.botID == 0) != (grant.telegramID == 0)) {
+        return false
+    }
+    previous := ""
+    for scope: grant.scopes {
+        // Account metadata and the old combined private key cannot be delegated.
+        // Exact collections only; no wildcard, grant chaining or extra operations.
+        if !identity.ValidEncryptedHierarchyCollection(scope.collection) ||
+            scope.collection.count > 64 || HasPrefix(scope.collection, "account.") ||
+            !SafeCollection(grant.appID, scope.collection) ||
+            Compare(scope.collection, previous) <= 0 || (!scope.read && !scope.write) ||
+            (scope.visibility != "private" && scope.visibility != "shared" &&
+                scope.visibility != "friends" && scope.visibility != "public") ||
+            !identity.ValidClientID(scope.keyID) || scope.keyEnvelope.count < 1 ||
+            scope.keyEnvelope.count > 16384 {
+            return false
+        }
+        previous = scope.collection
+    }
+    return true
+}
+
+Allowed :: (grant: Grant, collection: string, write: bool) -> bool {
+    for scope: grant.scopes {
+        if scope.collection == collection {
+            return ifx write then scope.write else scope.read
+        }
+    }
+    return false
+}
+
+VerifyGrant :: (database: *sql.Database, context: ctx.Context, grant: Grant,
+    accountID: string, nodeID: string, audience: string,
+    verify: auth.VerifySignature) -> auth.AuthenticationResult {
+    if accountID != grant.accountID ||
+        !ValidGrant(grant, nodeID, audience, clock.Unix(clock.Now())) {
+        return auth.Failure(400, "invalid authorization grant")
+    }
+    owner := accounts.PublicKey(database, context, accountID)
+    if owner.error != null {
+        return auth.NativeFailure(owner.error)
+    }
+    signature := codec.DecodeBinaryField(grant.signature)
+    if !owner.found || !HexID(grant.signature, 4840) || signature.error != "" ||
+        signature.value.count != codec.mlDSA44SignatureSize ||
+        !verify(owner.value, text.ToBytes(GrantMessage(grant)), text.ToBytes(signature.value)) {
+        return auth.Failure(401, "owner authorization rejected")
+    }
+    // Reuse registration validation. ActiveGrant checks current ownership and
+    // visibility inside the same transaction that performs delegated access.
+    for scope: grant.scopes {
+        owned := apps.OwnsCollection(database, context, grant.appID, scope.collection)
+        if owned.error != null {
+            return auth.NativeFailure(owned.error)
+        }
+        if !owned.value {
+            return auth.Failure(403, "collection is not registered for app")
+        }
+    }
+    return auth.NativeFailure(null)
+}
+
+// This check runs inside every locked request transaction, including sessions.
+// App status, expiry, collection ownership and visibility remain authoritative.
+ActiveGrant :: (transaction: *sql.Transaction, context: ctx.Context,
+    grantID: string, nodeID: string, audience: string, now: s64) -> AuthorizedGrantResult {
+    result: AuthorizedGrantResult
+    raw: string
+    destinations: [1]Any = .[*raw]
+    arguments: [4]Any = .[grantID, nodeID, audience, now]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT g.grant_json FROM server_authorization_grants g JOIN server_apps a ON a.app_id=g.app_id WHERE g.grant_id=?1 AND g.node_id=?2 AND g.audience=?3 AND g.revoked_at=0 AND g.not_before<=?4 AND g.expires_at>?4 AND a.status='active' AND NOT EXISTS(SELECT 1 FROM server_app_manifests m WHERE m.app_id=a.app_id AND (m.status<>'active' OR (m.expires_at>0 AND m.expires_at<?4)))", arguments[:])
+    if sql.ScanRow(row, destinations[:]) != null ||
+        json.Unmarshal(text.ToBytes(raw), *result.value) != null {
+        result.authentication = auth.Failure(401, "authorization inactive on this node")
+        return result
+    }
+    for scope: result.value.scopes {
+        arguments: [1]Any = .[scope.collection]
+        app: string
+        visibility: string
+        owners: s64
+        destinations: [3]Any = .[*app, *visibility, *owners]
+        row = sql.QueryRowTx(transaction, context,
+            "WITH matches AS (SELECT app_id,visibility,length(rtrim(collection_prefix,'*')) AS specificity FROM server_app_collections WHERE collection_prefix=?1 OR (substr(collection_prefix,-1)='*' AND substr(?1,1,length(collection_prefix)-1)=substr(collection_prefix,1,length(collection_prefix)-1))), best AS (SELECT * FROM matches WHERE specificity=(SELECT MAX(specificity) FROM matches)) SELECT app_id,visibility,(SELECT COUNT(*) FROM best) FROM best LIMIT 1", arguments[:])
+        if sql.ScanRow(row, destinations[:]) != null || app != result.value.appID ||
+            owners != 1 || visibility != scope.visibility {
+            result.authentication = auth.Failure(403, "app collection visibility changed")
+            return result
+        }
+    }
+    if result.value.telegramID > 0 {
+        arguments: [2]Any = .[result.value.accountID, result.value.telegramID]
+        found: s64
+        destinations: [1]Any = .[*found]
+        row = sql.QueryRowTx(transaction, context,
+            "SELECT COUNT(*) FROM server_lumi_telegram WHERE account_id=?1 AND telegram_id=?2", arguments[:])
+        if sql.ScanRow(row, destinations[:]) != null || found != 1 {
+            result.authentication = auth.Failure(401, "Telegram authorization disconnected")
+            return result
+        }
+    }
+    return result
+}

@@ -701,7 +701,62 @@ CREATE TABLE IF NOT EXISTS server_app_feedback (
 );
 SQL_8;
 
-Tables: [8]string = .[Tables1, Tables2, Tables3, Tables4, Tables5, Tables6, Tables7, Tables8];
+Tables9 :: #string SQL_9
+CREATE TABLE IF NOT EXISTS server_authorization_requests (
+    request_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+    app_id TEXT NOT NULL REFERENCES server_apps(app_id),
+    node_id TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    bot_id INTEGER NOT NULL DEFAULT 0,
+    telegram_id INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT NOT NULL DEFAULT '',
+    signing_key TEXT NOT NULL DEFAULT '',
+    encryption_key TEXT NOT NULL DEFAULT '',
+    scopes_json TEXT NOT NULL,
+    claim_nonce TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+);
+CREATE TABLE IF NOT EXISTS server_authorization_grants (
+    grant_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+    request_id TEXT NOT NULL UNIQUE REFERENCES server_authorization_requests(request_id),
+    app_id TEXT NOT NULL REFERENCES server_apps(app_id),
+    node_id TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    not_before INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    nonce TEXT NOT NULL,
+    revoked_at INTEGER NOT NULL DEFAULT 0,
+    grant_json TEXT NOT NULL,
+    UNIQUE(account_id,nonce)
+);
+CREATE TABLE IF NOT EXISTS server_authorization_challenges (
+    challenge TEXT PRIMARY KEY,
+    grant_id TEXT NOT NULL REFERENCES server_authorization_grants(grant_id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    consumed_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS server_authorization_sessions (
+    session_id TEXT PRIMARY KEY,
+    grant_id TEXT NOT NULL REFERENCES server_authorization_grants(grant_id) ON DELETE CASCADE,
+    challenge TEXT NOT NULL UNIQUE,
+    expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS server_authorization_nonces (
+    grant_id TEXT NOT NULL REFERENCES server_authorization_grants(grant_id) ON DELETE CASCADE,
+    nonce TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY(grant_id,nonce)
+);
+CREATE TABLE IF NOT EXISTS server_telegram_init_claims (
+    digest TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL REFERENCES server_authorization_requests(request_id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+);
+SQL_9;
+Tables: [9]string = .[Tables1, Tables2, Tables3, Tables4, Tables5, Tables6, Tables7, Tables8, Tables9];
 BackfillMesh :: "\nINSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nWHERE NOT EXISTS (\n\tSELECT 1 FROM server_mesh_changes c\n\tWHERE c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\n)";
 AliasIndex :: "\nCREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique\nON server_users(alias)\nWHERE alias IS NOT NULL AND alias<>''";
 MeditationInfo :: "PRAGMA table_info(server_meditation_logs)";

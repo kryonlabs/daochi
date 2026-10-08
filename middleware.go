@@ -149,7 +149,7 @@ func Middleware_ServeHTTP(middleware *Middleware, output ResponseWriter, request
 		StdHttpGo_SetHeader(Middleware_Header(writer), "Vary", "Origin")
 	}
 	StdHttpGo_SetHeader(Middleware_Header(writer), "Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-	var value_5 string = "Authorization, Content-Type, X-Daochi-User, X-Daochi-Signature, X-Daochi-Client, X-Daochi-Since-Version, X-Daochi-Limit, X-Daochi-Admin, X-Ksync-User, X-Ksync-Signature, X-Ksync-Client, X-Ksync-Since-Version, X-Ksync-Limit, X-Ksync-Admin, X-Inbe-User, X-Inbe-Signature"
+	var value_5 string = "Authorization, Content-Type, X-Daochi-User, X-Daochi-Signature, X-Daochi-Tx, X-Daochi-Delegate, X-Daochi-Client, X-Daochi-Since-Version, X-Daochi-Limit, X-Daochi-Admin, X-Ksync-User, X-Ksync-Signature, X-Ksync-Client, X-Ksync-Since-Version, X-Ksync-Limit, X-Ksync-Admin, X-Inbe-User, X-Inbe-Signature"
 	StdHttpGo_SetHeader(Middleware_Header(writer), "Access-Control-Allow-Headers", value_5)
 	if StdHttpGo_Method(request) == "OPTIONS" {
 		Middleware_WriteHeader(writer, int(204))

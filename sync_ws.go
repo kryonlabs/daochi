@@ -30,7 +30,7 @@ type EventResult struct {
 	Present bool
 }
 
-type ReaderWorker func(Connection, *BufferedReader, CancelFunc)
+type zir_9967e96ab11c08f3_ReaderWorker func(Connection, *BufferedReader, CancelFunc)
 
 type zir_9de58f4e2bed614c_CancelCallback func(CancelFunc)
 
@@ -44,7 +44,7 @@ func SyncWs_UnsubscribeAtReturn(Callback UnsubscribeCallback, Hub *SyncHub, User
 	Callback(Hub, UserID, Subscription)
 }
 
-func SyncWs_SpawnReader(Callback ReaderWorker, Connection Connection, Reader *BufferedReader, Cancel CancelFunc) {
+func SyncWs_SpawnReader(Callback zir_9967e96ab11c08f3_ReaderWorker, Connection Connection, Reader *BufferedReader, Cancel CancelFunc) {
 	go Callback(Connection, Reader, Cancel)
 }
 
@@ -173,10 +173,10 @@ func SyncWs_Handle(value SyncSocket, writer ResponseWriter, request *Request) {
 	child := StdContextGo_WithCancel(StdHttpGo_Context(request))
 	var value_12 zir_9de58f4e2bed614c_CancelCallback = func(value_11 CancelFunc) { StdContextGo_Cancel(value_11) }
 	defer SyncWs_CancelAtReturn(value_12, child.Cancel)
-	var value_16 ReaderWorker = func(value_13 Connection, value_14 *BufferedReader, value_15 CancelFunc) {
+	var value_16 zir_9967e96ab11c08f3_ReaderWorker = func(value_13 Connection, value_14 *BufferedReader, value_15 CancelFunc) {
 		SyncWs_ReadLoop(value_13, value_14, value_15)
 	}
-	var value_17 ReaderWorker = value_16
+	var value_17 zir_9967e96ab11c08f3_ReaderWorker = value_16
 	var value_18 Connection = accepted.Connection
 	var value_19 *BufferedReader = SyncWs_Reader(accepted.Buffer)
 	SyncWs_SpawnReader(value_17, value_18, value_19, child.Cancel)

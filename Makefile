@@ -48,7 +48,7 @@ build: $(LIBOQS_A)
 	$(CGO_ENV) $(GO) build -ldflags "-X main.BuildVersion=$(VERSION)" -o daochi .
 
 test: $(LIBOQS_A)
-	$(CGO_ENV) GOCACHE=/tmp/daochi-gocache $(GO) test ./...
+	$(CGO_ENV) GO="$(GO)" GOCACHE=/tmp/daochi-gocache python3 scripts/test_go.py
 
 run: $(LIBOQS_A)
 	$(CGO_ENV) $(GO) run .

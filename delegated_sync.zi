@@ -1,0 +1,168 @@
+// A scoped principal can sync exactly one approved collection per request.
+// Owner v6, full snapshots, account metadata, broad reads and deletes remain
+// on their existing owner-only routes.
+#import "std/go_types"
+#import "protocol"
+types :: #import "sync_types";
+authorization :: #import "authorization";
+service :: #import "authorization_http";
+session :: #import "session";
+validation :: #import "sync_validation";
+writes :: #import "sync_writes";
+views :: #import "sync_views";
+body :: #import "http_body";
+strict :: #import "strict_json";
+response :: #import "response";
+http_auth :: #import "http_auth";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+native :: #system_library "go:database/sql";
+
+DelegatedSyncRequest :: struct {
+    sync: types.SyncRequest #go_tag "json:\"sync\""
+    collection: string #go_tag "json:\"collection\""
+    read: bool #go_tag "json:\"read\""
+    sinceVersion: s64 #go_tag "json:\"since_version\""
+    limit: isize #go_tag "json:\"limit\""
+}
+DelegatedSyncResponse :: struct {
+    collection: string #go_tag "json:\"collection\""
+    records: []EncryptedRecord #go_tag "json:\"records\""
+    nextVersion: s64 #go_tag "json:\"next_version\""
+    truncated: bool #go_tag "json:\"truncated\""
+    applied: isize #go_tag "json:\"applied\""
+}
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+
+#scope_export
+Handle :: (authorizations: service.Authorizations, writer: http.ResponseWriter, request: *http.Request) {
+    if !service.Guard(authorizations, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, authorizations.configuration.MaxBodyBytes)
+    input: DelegatedSyncRequest
+    if raw.error != null || strict.Decode(raw.value, *input) != null ||
+        input.limit < 1 || input.limit > 512 || input.sinceVersion < 0 {
+        response.Error(writer, 400, "invalid delegated sync request")
+        return
+    }
+    sync := input.sync
+    if sync.ProtocolVersion != 6 || sync.FullSyncRequested || sync.Bootstrap || sync.IncludeLegacyData ||
+        sync.PublicKey != "" || sync.Habits.count != 0 || sync.HabitDays.count != 0 ||
+        sync.Sessions.count != 0 || sync.MeditationLogs.count != 0 || sync.SocialCache.count != 0 ||
+        sync.Ops.count != 0 || sync.ClientStateHash != "" || sync.LastServerStateHash != "" ||
+        sync.SinceServerVersion != 0 || sync.ClientClock != 0 || sync.ClientCapabilities.count != 0 {
+        response.Error(writer, 403, "delegation permits only scoped encrypted records")
+        return
+    }
+    context := http.Context(request)
+    // Share owner sync's encrypted-record grammar and app registration checks.
+    if validation.Validate(authorizations.database, context, sync) != null {
+        response.Error(writer, 400, "invalid delegated sync records or app")
+        return
+    }
+    opened := sql.Begin(authorizations.database, context, null)
+    if opened.error != null {
+        response.Error(writer, 503, "delegated sync unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    principal := session.AuthenticateTx(transaction, context, request, raw.value,
+        authorizations.nodeID, authorizations.configuration.BaseURL)
+    if principal.authentication.error != null || principal.authentication.status != 0 {
+        http_auth.Respond(writer, authorizations.counters, principal.authentication)
+        return
+    }
+    grant := principal.grant
+    if sync.UserIDHash != grant.accountID || sync.AppID != grant.appID || sync.ClientID != grant.clientID ||
+        (input.read && !authorization.Allowed(grant, input.collection, false)) ||
+        (sync.EncryptedRecords.count > 0 && !authorization.Allowed(grant, input.collection, true)) ||
+        (!input.read && sync.EncryptedRecords.count == 0) {
+        response.Error(writer, 403, "delegate scope mismatch")
+        return
+    }
+    keyID := ""
+    for scope: grant.scopes {
+        if scope.collection == input.collection {
+            keyID = scope.keyID
+        }
+    }
+    result := DelegatedSyncResponse.{collection = input.collection, nextVersion = input.sinceVersion}
+    for record: sync.EncryptedRecords {
+        if record.Collection != input.collection || record.KeyID != keyID || record.DeletedAt != 0 {
+            response.Error(writer, 403, "delegate collection, key or operation mismatch")
+            return
+        }
+        // A delegate cannot overwrite a record rotated by the owner to a key
+        // generation outside this grant, even when it knows the record ID.
+        identifiers: [4]Any = .[grant.accountID, input.collection, record.ID, keyID]
+        conflicting: s64
+        destinations: [1]Any = .[*conflicting]
+        existing := sql.QueryRowTx(transaction, context,
+            "SELECT COUNT(*) FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND key_id<>?4", identifiers[:])
+        if sql.ScanRow(existing, destinations[:]) != null {
+            response.Error(writer, 503, "delegated sync unavailable")
+            return
+        }
+        if conflicting != 0 {
+            response.Error(writer, 403, "record key generation is outside grant")
+            return
+        }
+        written := writes.UpsertRecord(transaction, context, grant.accountID, record)
+        if written.error != null {
+            response.Error(writer, 503, "delegated sync unavailable")
+            return
+        }
+        result.applied += written.applied
+    }
+    if input.read {
+        arguments: [5]Any = .[grant.accountID, input.collection, keyID, input.sinceVersion, input.limit]
+        queried := sql.QueryTx(transaction, context,
+            "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND key_id=?3 AND server_version>?4 ORDER BY server_version,id LIMIT ?5", arguments[:])
+        if queried.error != null {
+            response.Error(writer, 503, "delegated read unavailable")
+            return
+        }
+        rows := queried.value
+        CloseRowsAtReturn(rows)
+        loaded := views.ReadRecords(rows)
+        sql.CloseRows(rows)
+        if loaded.error != null {
+            response.Error(writer, 503, "delegated read unavailable")
+            return
+        }
+        result.records = loaded.value
+        // Each response has one collection, so another scope's version cannot
+        // skip this collection's truncated records.
+        if result.records.count > 0 {
+            last := result.records[result.records.count - 1]
+            cursor: [3]Any = .[grant.accountID, input.collection, last.ID]
+            destinations: [1]Any = .[*result.nextVersion]
+            row := sql.QueryRowTx(transaction, context,
+                "SELECT server_version FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND id=?3", cursor[:])
+            if sql.ScanRow(row, destinations[:]) != null {
+                response.Error(writer, 503, "delegated cursor unavailable")
+                return
+            }
+        }
+        arguments[3] = result.nextVersion
+        remaining: s64
+        destinations: [1]Any = .[*remaining]
+        row := sql.QueryRowTx(transaction, context,
+            "SELECT COUNT(*) FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND key_id=?3 AND server_version>?4", arguments[0:4])
+        if sql.ScanRow(row, destinations[:]) != null {
+            response.Error(writer, 503, "delegated cursor unavailable")
+            return
+        }
+        result.truncated = remaining > 0
+    }
+    if sql.Commit(transaction) != null {
+        response.Error(writer, 503, "delegated sync unavailable")
+        return
+    }
+    response.JSON(writer, 200, result)
+}

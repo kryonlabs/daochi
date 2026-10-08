@@ -399,7 +399,7 @@ func TokenHttp_ZiSpec4f8701667b2973d4(values []TokenProduct) {
 	start := count / 2
 	for start > 0 {
 		start--
-		TokenHttp_ZiSpec7c1f1fb297fed2b1(values, start, count)
+		TokenHttp_ZiSpec4d6f79df546a1bd5(values, start, count)
 	}
 	end := count
 	for end > 1 {
@@ -407,11 +407,11 @@ func TokenHttp_ZiSpec4f8701667b2973d4(values []TokenProduct) {
 		saved := values[0]
 		values[0] = values[end]
 		values[end] = saved
-		TokenHttp_ZiSpec7c1f1fb297fed2b1(values, 0, end)
+		TokenHttp_ZiSpec4d6f79df546a1bd5(values, 0, end)
 	}
 }
 
-func TokenHttp_ZiSpec7c1f1fb297fed2b1(values []TokenProduct, root int64, end int64) {
+func TokenHttp_ZiSpec4d6f79df546a1bd5(values []TokenProduct, root int64, end int64) {
 	parent := root
 	for (parent*2)+1 < end {
 		child := (parent * 2) + 1

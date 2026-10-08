@@ -65,7 +65,7 @@ type RSAPrivateKey = rsa.PrivateKey
 
 type CryptoHash = crypto.Hash
 
-type StringReader = strings.Reader
+type zir_39698f6a3b56cd03_StringReader = strings.Reader
 
 type PEMResult struct {
 	Value *PEMBlock
@@ -170,7 +170,7 @@ func GooglePlay_FormSet(form __type_f70dc01c9cc634ef, name string, value string)
 func GooglePlay_RequestToken(context Context, target string, form __type_f70dc01c9cc634ef, failure string) AccessTokenResult {
 	var result AccessTokenResult = AccessTokenResult{}
 	body := (url.Values).Encode(url.Values(form))
-	var value_0 *StringReader = strings.NewReader(body)
+	var value_0 *zir_39698f6a3b56cd03_StringReader = strings.NewReader(body)
 	request := StdHttpGo_NewRequest(context, "POST", target, Reader(value_0))
 	result.Error = request.Error
 	if result.Error != nil {

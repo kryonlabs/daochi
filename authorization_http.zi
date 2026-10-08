@@ -1,0 +1,649 @@
+#import "std/go_types"
+authorization :: #import "authorization";
+session :: #import "session";
+telegram :: #import "telegram_init";
+strict :: #import "strict_json";
+auth :: #import "authentication";
+http_auth :: #import "http_auth";
+signed :: #import "signed_tx";
+body :: #import "http_body";
+response :: #import "response";
+random :: #import "telegram_transport";
+config :: #import "config";
+metrics :: #import "metrics";
+validation :: #import "sync_validation";
+types :: #import "sync_types";
+identity :: #import "identity";
+signing :: #import "signing";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+text :: #import "std/text_go";
+json :: #import "std/json_go";
+clock :: #import "std/time_go";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+hex :: #system_library "go:encoding/hex";
+rate :: #import "request_rate";
+limiters :: #import "rate_limit";
+address :: #import "client_address";
+
+Authorizations :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    verify: auth.VerifySignature
+    replay: Error
+    nodeID: string
+    limiter: *limiters.RateLimiter
+}
+RequestedScope :: struct {
+    collection: string #go_tag "json:\"collection\""
+    read: bool #go_tag "json:\"read\""
+    write: bool #go_tag "json:\"write\""
+}
+AuthorizationRequest :: struct {
+    appID: string #go_tag "json:\"app_id\""
+    telegram: bool #go_tag "json:\"telegram\""
+    scopes: []RequestedScope #go_tag "json:\"scopes\""
+}
+Rendezvous :: struct {
+    requestID: string #go_tag "json:\"request_id\""
+    grantID: string #go_tag "json:\"grant_id\""
+    accountID: string #go_tag "json:\"account_id\""
+    appID: string #go_tag "json:\"app_id\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+    botID: s64 #go_tag "json:\"bot_id\""
+    telegramID: s64 #go_tag "json:\"telegram_id\""
+    clientID: string #go_tag "json:\"client_id\""
+    signingKey: string #go_tag "json:\"signing_key\""
+    encryptionKey: string #go_tag "json:\"encryption_key\""
+    challenge: string #go_tag "json:\"challenge\""
+    status: string #go_tag "json:\"status\""
+    scopes: []RequestedScope #go_tag "json:\"scopes\""
+}
+RendezvousChallenge :: struct {
+    requestID: string #go_tag "json:\"request_id\""
+    grantID: string #go_tag "json:\"grant_id\""
+    appID: string #go_tag "json:\"app_id\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+    challenge: string #go_tag "json:\"challenge\""
+    status: string #go_tag "json:\"status\""
+}
+RendezvousID :: struct {
+    requestID: string #go_tag "json:\"request_id\""
+    appID: string #go_tag "json:\"app_id\""
+}
+RendezvousClaim :: struct {
+    requestID: string #go_tag "json:\"request_id\""
+    clientID: string #go_tag "json:\"client_id\""
+    signingKey: string #go_tag "json:\"signing_key\""
+    encryptionKey: string #go_tag "json:\"encryption_key\""
+    initData: string #go_tag "json:\"init_data\""
+    proof: string #go_tag "json:\"proof\""
+}
+GrantIDRequest :: struct {
+    grantID: string #go_tag "json:\"grant_id\""
+    appID: string #go_tag "json:\"app_id\""
+}
+SessionAnswer :: struct {
+    credential: session.SessionCredential #go_tag "json:\"credential\""
+    grant: authorization.Grant #go_tag "json:\"grant\""
+    ownerPublicKey: string #go_tag "json:\"owner_public_key\""
+}
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+Compare :: (left: string, right: string) -> isize #foreign strings;
+HasPrefix :: (value: string, prefix: string) -> bool #foreign strings;
+FormatInteger :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
+EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
+
+Failure :: (service: Authorizations, writer: http.ResponseWriter, status: isize, message: string) {
+    response.Error(writer, status, message)
+}
+
+#scope_export
+Guard :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request) -> bool {
+    fields: [2]string = .["authorization:", address.FromRequest(request)]
+    if !rate.Allow(service.limiter, service.counters, Join(fields[:], ""), 120,
+        cast(clock.Duration)60000000000) {
+        response.Error(writer, 429, "authorization rate limit exceeded")
+        return false
+    }
+    return true
+}
+
+#scope_file
+
+Owner :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request,
+    raw: []u8, appID: string) -> string {
+    account := http_auth.BearerUser(service.database, request, service.configuration.TokenSecret)
+    if account.authentication.error != null || account.authentication.status != 0 {
+        http_auth.Respond(writer, service.counters, account.authentication)
+        return ""
+    }
+    header := signed.ReadHeader(request)
+    if header.authentication.error != null || header.authentication.status != 0 {
+        http_auth.Respond(writer, service.counters, header.authentication)
+        return ""
+    }
+    verified := signed.Verify(service.database, http.Context(request), request, raw,
+        header.value, account.value, appID, service.verify, service.replay)
+    if verified.error != null || verified.status != 0 {
+        http_auth.Respond(writer, service.counters, verified)
+        return ""
+    }
+    return account.value
+}
+
+ReadRendezvous :: (transaction: *sql.Transaction, context: ctx.Context, requestID: string) -> Rendezvous {
+    result: Rendezvous
+    scopes: string
+    arguments: [1]Any = .[requestID]
+    destinations: [14]Any = .[*result.requestID, *result.accountID, *result.appID,
+        *result.nodeID, *result.audience, *result.expiresAt, *result.botID, *result.telegramID,
+        *result.clientID, *result.signingKey, *result.encryptionKey, *result.challenge,
+        *result.status, *scopes]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT request_id,account_id,app_id,node_id,audience,expires_at,bot_id,telegram_id,client_id,signing_key,encryption_key,claim_nonce,status,scopes_json FROM server_authorization_requests WHERE request_id=?1", arguments[:])
+    if sql.ScanRow(row, destinations[:]) != null || json.Unmarshal(text.ToBytes(scopes), *result.scopes) != null {
+        result.status = "unavailable"
+    }
+    if result.status == "approved" {
+        destinations: [1]Any = .[*result.grantID]
+        row = sql.QueryRowTx(transaction, context,
+            "SELECT grant_id FROM server_authorization_grants WHERE request_id=?1", arguments[:])
+        if sql.ScanRow(row, destinations[:]) != null {
+            result.status = "unavailable"
+        }
+    }
+    return result
+}
+
+#scope_export
+ClaimMessage :: (pending: Rendezvous, claim: RendezvousClaim, initDigest: string) -> string {
+    // The unguessable request and fresh challenge bind the owner-created
+    // pending row without disclosing its account or numeric Telegram user.
+    fields: [12]string = .["daochi-rendezvous-claim-v1", pending.requestID,
+        pending.appID, pending.nodeID, pending.audience,
+        pending.challenge, FormatInteger(pending.expiresAt, 10),
+        claim.clientID, claim.signingKey, claim.encryptionKey, initDigest, ""]
+    return Join(fields[:], "\n")
+}
+
+CreateRequest :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 8192)
+    input: AuthorizationRequest
+    if raw.error != null || strict.Decode(raw.value, *input) != null ||
+        !identity.ValidNamespace(input.appID) || input.scopes.count < 1 || input.scopes.count > 16 {
+        Failure(service, writer, 400, "invalid authorization request")
+        return
+    }
+    account := Owner(service, writer, request, raw.value, input.appID)
+    if account == "" {
+        return
+    }
+    check: types.SyncRequest
+    check.AppID = input.appID
+    check.ProtocolVersion = 6
+    if validation.Validate(service.database, http.Context(request), check) != null {
+        Failure(service, writer, 403, "app unavailable")
+        return
+    }
+    previous := ""
+    for scope: input.scopes {
+        if !identity.ValidEncryptedHierarchyCollection(scope.collection) ||
+            scope.collection.count > 64 || HasPrefix(scope.collection, "account.") ||
+            !authorization.SafeCollection(input.appID, scope.collection) || Compare(scope.collection, previous) <= 0 ||
+            (!scope.read && !scope.write) {
+            Failure(service, writer, 400, "invalid authorization scopes")
+            return
+        }
+        previous = scope.collection
+    }
+    result := Rendezvous.{requestID = random.Nonce(), accountID = account,
+        appID = input.appID, nodeID = service.nodeID, audience = service.configuration.BaseURL,
+        expiresAt = clock.Unix(clock.Now()) + 600, challenge = random.Nonce(),
+        status = "pending", scopes = input.scopes}
+    if result.requestID.count != 32 || result.challenge.count != 32 || service.nodeID.count != 64 {
+        Failure(service, writer, 503, "authorization unavailable")
+        return
+    }
+    if input.telegram {
+        result.botID = telegram.BotID(service.configuration.LumiBotToken)
+        arguments: [1]Any = .[account]
+        destinations: [1]Any = .[*result.telegramID]
+        row := sql.QueryRow(service.database, http.Context(request),
+            "SELECT telegram_id FROM server_lumi_telegram WHERE account_id=?1", arguments[:])
+        if result.botID == 0 || sql.ScanRow(row, destinations[:]) != null || result.telegramID <= 0 {
+            Failure(service, writer, 409, "connect this Telegram chat before requesting Mini App access")
+            return
+        }
+    }
+    encoded := json.Marshal(input.scopes)
+    if encoded.error != null {
+        Failure(service, writer, 503, "authorization unavailable")
+        return
+    }
+    arguments: [10]Any = .[result.requestID, account, input.appID, service.nodeID,
+        result.audience, result.expiresAt, result.botID, result.telegramID,
+        result.challenge, text.FromBytes(encoded.value)]
+    written := sql.Exec(service.database, http.Context(request),
+        "INSERT INTO server_authorization_requests(request_id,account_id,app_id,node_id,audience,expires_at,bot_id,telegram_id,claim_nonce,scopes_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", arguments[:])
+    if written.error != null {
+        Failure(service, writer, 503, "authorization unavailable")
+        return
+    }
+    response.JSON(writer, 200, result)
+}
+
+RendezvousStatus :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request, cancel: bool) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 1024)
+    input: RendezvousID
+    if raw.error != null || strict.Decode(raw.value, *input) != null || !authorization.HexID(input.requestID, 32) {
+        Failure(service, writer, 400, "invalid rendezvous")
+        return
+    }
+    account := ""
+    if cancel {
+        account = Owner(service, writer, request, raw.value, input.appID)
+        if account == "" {
+            return
+        }
+    } else if http.HeaderValue(http.Headers(request), "Authorization") != "" {
+        owner := http_auth.BearerUser(service.database, request, service.configuration.TokenSecret)
+        if owner.authentication.error != null || owner.authentication.status != 0 {
+            http_auth.Respond(writer, service.counters, owner.authentication)
+            return
+        }
+        account = owner.value
+    }
+    opened := sql.Begin(service.database, http.Context(request), null)
+    if opened.error != null {
+        Failure(service, writer, 503, "rendezvous unavailable")
+        return
+    }
+    RollbackAtReturn(opened.value)
+    if cancel {
+        arguments: [3]Any = .[input.requestID, account, input.appID]
+        written := sql.ExecTx(opened.value, http.Context(request),
+            "UPDATE server_authorization_requests SET status='cancelled' WHERE request_id=?1 AND account_id=?2 AND app_id=?3 AND status IN ('pending','claimed')", arguments[:])
+        if written.error != null {
+            Failure(service, writer, 503, "rendezvous unavailable")
+            return
+        }
+        changed := sql.RowsAffected(written.value)
+        if changed.error != null || changed.value != 1 {
+            Failure(service, writer, 409, "rendezvous cannot be cancelled")
+            return
+        }
+    }
+    result := ReadRendezvous(opened.value, http.Context(request), input.requestID)
+    if result.nodeID != service.nodeID || result.audience != service.configuration.BaseURL ||
+        result.status == "unavailable" || (!cancel && result.expiresAt <= clock.Unix(clock.Now())) {
+        Failure(service, writer, 410, "rendezvous unavailable or expired")
+        return
+    }
+    if account != "" && account != result.accountID {
+        Failure(service, writer, 404, "owned rendezvous not found")
+        return
+    }
+    if sql.Commit(opened.value) != null {
+        Failure(service, writer, 503, "rendezvous unavailable")
+        return
+    }
+    if account != "" {
+        response.JSON(writer, 200, result)
+    } else {
+        public := RendezvousChallenge.{requestID = result.requestID, grantID = result.grantID,
+            appID = result.appID, nodeID = result.nodeID, audience = result.audience,
+            expiresAt = result.expiresAt, challenge = result.challenge, status = result.status}
+        response.JSON(writer, 200, public)
+    }
+}
+
+Claim :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 24576)
+    input: RendezvousClaim
+    if raw.error != null || strict.Decode(raw.value, *input) != null ||
+        !authorization.HexID(input.requestID, 32) || !authorization.HexID(input.clientID, 64) ||
+        !authorization.HexID(input.signingKey, 64) || !authorization.HexID(input.encryptionKey, 2368) ||
+        input.signingKey == input.encryptionKey {
+        Failure(service, writer, 400, "invalid delegate claim")
+        return
+    }
+    context := http.Context(request)
+    now := clock.Unix(clock.Now())
+    opened := sql.Begin(service.database, context, null)
+    if opened.error != null {
+        Failure(service, writer, 503, "rendezvous unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    arguments: [5]Any = .[input.requestID, input.clientID, input.signingKey, input.encryptionKey, now]
+    locked := sql.ExecTx(transaction, context,
+        "UPDATE server_authorization_requests SET request_id=request_id WHERE request_id=?1", arguments[0:1])
+    if locked.error != null {
+        Failure(service, writer, 503, "rendezvous unavailable")
+        return
+    }
+    pending := ReadRendezvous(transaction, context, input.requestID)
+    if pending.status != "pending" || pending.expiresAt <= now ||
+        pending.nodeID != service.nodeID || pending.audience != service.configuration.BaseURL {
+        Failure(service, writer, 409, "rendezvous expired, cancelled or already claimed")
+        return
+    }
+    digest := ""
+    if pending.botID > 0 {
+        verified := telegram.Validate(input.initData, service.configuration.LumiBotToken, now)
+        if !verified.valid || verified.botID != pending.botID || verified.userID != pending.telegramID {
+            Failure(service, writer, 401, "verified Telegram sender required")
+            return
+        }
+        digest = verified.digest
+        // The chat binding is checked again under the claim lock.
+        matches: s64
+        destinations: [1]Any = .[*matches]
+        binding: [2]Any = .[pending.accountID, pending.telegramID]
+        row := sql.QueryRowTx(transaction, context,
+            "SELECT COUNT(*) FROM server_lumi_telegram WHERE account_id=?1 AND telegram_id=?2", binding[:])
+        if sql.ScanRow(row, destinations[:]) != null || matches != 1 {
+            Failure(service, writer, 409, "Telegram connection changed")
+            return
+        }
+    } else if input.initData != "" {
+        Failure(service, writer, 400, "unexpected Telegram claim")
+        return
+    }
+    if !session.VerifyKeyProof(input.signingKey, ClaimMessage(pending, input, digest), input.proof) {
+        Failure(service, writer, 401, "delegate claim proof rejected")
+        return
+    }
+    if digest != "" {
+        cutoff: [1]Any = .[now]
+        pruned := sql.ExecTx(transaction, context,
+            "DELETE FROM server_telegram_init_claims WHERE expires_at<?1", cutoff[:])
+        if pruned.error != null {
+            Failure(service, writer, 503, "claim unavailable")
+            return
+        }
+        replay: [3]Any = .[digest, input.requestID, now + 300]
+        claimed := sql.ExecTx(transaction, context,
+            "INSERT INTO server_telegram_init_claims(digest,request_id,expires_at) VALUES(?1,?2,?3) ON CONFLICT(digest) DO NOTHING", replay[:])
+        if claimed.error != null {
+            Failure(service, writer, 503, "claim unavailable")
+            return
+        }
+        changed := sql.RowsAffected(claimed.value)
+        if changed.error != null || changed.value != 1 {
+            Failure(service, writer, 409, "Telegram initData already claimed")
+            return
+        }
+    }
+    written := sql.ExecTx(transaction, context,
+        "UPDATE server_authorization_requests SET status='claimed',client_id=?2,signing_key=?3,encryption_key=?4 WHERE request_id=?1 AND status='pending' AND expires_at>?5", arguments[:])
+    if written.error != null {
+        Failure(service, writer, 503, "claim unavailable")
+        return
+    }
+    changed := sql.RowsAffected(written.value)
+    if changed.error != null || changed.value != 1 || sql.Commit(transaction) != null {
+        Failure(service, writer, 409, "claim unavailable")
+        return
+    }
+    response.JSON(writer, 200, true)
+}
+
+Approve :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 262144)
+    grant: authorization.Grant
+    if raw.error != null || strict.Decode(raw.value, *grant) != null {
+        Failure(service, writer, 400, "invalid authorization grant")
+        return
+    }
+    owner := http_auth.BearerUser(service.database, request, service.configuration.TokenSecret)
+    if owner.authentication.error != null || owner.authentication.status != 0 {
+        http_auth.Respond(writer, service.counters, owner.authentication)
+        return
+    }
+    verified := authorization.VerifyGrant(service.database, http.Context(request), grant,
+        owner.value, service.nodeID, service.configuration.BaseURL, service.verify)
+    if verified.error != null || verified.status != 0 {
+        http_auth.Respond(writer, service.counters, verified)
+        return
+    }
+    opened := sql.Begin(service.database, http.Context(request), null)
+    if opened.error != null {
+        Failure(service, writer, 503, "approval unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    arguments: [10]Any = .[grant.grantID, grant.accountID, grant.requestID, grant.appID,
+        grant.nodeID, grant.audience, grant.notBefore, grant.expiresAt, grant.nonce, text.FromBytes(raw.value)]
+    claim: [2]Any = .[grant.requestID, clock.Unix(clock.Now())]
+    written := sql.ExecTx(transaction, http.Context(request),
+        "UPDATE server_authorization_requests SET status='approved' WHERE request_id=?1 AND status='claimed' AND expires_at>?2", claim[:])
+    if written.error != null {
+        Failure(service, writer, 503, "approval unavailable")
+        return
+    }
+    changed := sql.RowsAffected(written.value)
+    pending := ReadRendezvous(transaction, http.Context(request), grant.requestID)
+    if changed.error != null || changed.value != 1 || pending.accountID != grant.accountID ||
+        pending.appID != grant.appID || pending.nodeID != grant.nodeID || pending.audience != grant.audience ||
+        pending.clientID != grant.clientID || pending.signingKey != grant.signingKey ||
+        pending.encryptionKey != grant.encryptionKey || pending.botID != grant.botID ||
+        pending.telegramID != grant.telegramID || pending.scopes.count != grant.scopes.count {
+        Failure(service, writer, 409, "approval does not match verified delegate request")
+        return
+    }
+    for index: cast(s64)0..grant.scopes.count - 1 {
+        expected := pending.scopes[index]
+        approved := grant.scopes[index]
+        if expected.collection != approved.collection || expected.read != approved.read || expected.write != approved.write {
+            Failure(service, writer, 403, "approval scope mismatch")
+            return
+        }
+    }
+    written = sql.ExecTx(transaction, http.Context(request),
+        "INSERT INTO server_authorization_grants(grant_id,account_id,request_id,app_id,node_id,audience,not_before,expires_at,nonce,grant_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", arguments[:])
+    if written.error != null {
+        Failure(service, writer, 409, "authorization grant already issued")
+        return
+    }
+    active := authorization.ActiveGrant(transaction, http.Context(request), grant.grantID,
+        service.nodeID, service.configuration.BaseURL, clock.Unix(clock.Now()))
+    if active.authentication.error != null || active.authentication.status != 0 {
+        http_auth.Respond(writer, service.counters, active.authentication)
+        return
+    }
+    if sql.Commit(transaction) != null {
+        Failure(service, writer, 503, "approval unavailable")
+        return
+    }
+    response.JSON(writer, 200, true)
+}
+
+Revoke :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 1024)
+    input: GrantIDRequest
+    if raw.error != null || strict.Decode(raw.value, *input) != null || !authorization.HexID(input.grantID, 32) {
+        Failure(service, writer, 400, "invalid grant revocation")
+        return
+    }
+    owner := Owner(service, writer, request, raw.value, input.appID)
+    if owner == "" {
+        return
+    }
+    arguments: [4]Any = .[input.grantID, owner, input.appID, clock.Unix(clock.Now())]
+    written := sql.Exec(service.database, http.Context(request),
+        "UPDATE server_authorization_grants SET revoked_at=CASE WHEN revoked_at=0 THEN ?4 ELSE revoked_at END WHERE grant_id=?1 AND account_id=?2 AND app_id=?3", arguments[:])
+    if written.error != null {
+        Failure(service, writer, 503, "revocation unavailable")
+        return
+    }
+    changed := sql.RowsAffected(written.value)
+    if changed.error != null || changed.value != 1 {
+        Failure(service, writer, 404, "authorization grant not found")
+        return
+    }
+    response.JSON(writer, 200, true)
+}
+
+Challenge :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 1024)
+    input: GrantIDRequest
+    if raw.error != null || strict.Decode(raw.value, *input) != null || !authorization.HexID(input.grantID, 32) {
+        Failure(service, writer, 400, "invalid session challenge request")
+        return
+    }
+    now := clock.Unix(clock.Now())
+    opened := sql.Begin(service.database, http.Context(request), null)
+    if opened.error != null {
+        Failure(service, writer, 503, "session challenge unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    lock: [1]Any = .[input.grantID]
+    locked := sql.ExecTx(transaction, http.Context(request),
+        "UPDATE server_authorization_grants SET grant_id=grant_id WHERE grant_id=?1", lock[:])
+    if locked.error != null {
+        Failure(service, writer, 503, "session challenge unavailable")
+        return
+    }
+    grant := authorization.ActiveGrant(transaction, http.Context(request), input.grantID,
+        service.nodeID, service.configuration.BaseURL, now)
+    if grant.authentication.error != null || grant.authentication.status != 0 {
+        http_auth.Respond(writer, service.counters, grant.authentication)
+        return
+    }
+    result := session.SessionChallenge.{grantID = input.grantID, challenge = random.Nonce(),
+        nodeID = service.nodeID, audience = service.configuration.BaseURL, expiresAt = now + 90}
+    if result.challenge.count != 32 {
+        Failure(service, writer, 503, "session challenge unavailable")
+        return
+    }
+    arguments: [3]Any = .[result.challenge, result.grantID, result.expiresAt]
+    cutoff: [1]Any = .[now]
+    pruned := sql.ExecTx(transaction, http.Context(request),
+        "DELETE FROM server_authorization_challenges WHERE expires_at<?1", cutoff[:])
+    if pruned.error != null {
+        Failure(service, writer, 503, "session challenge unavailable")
+        return
+    }
+    written := sql.ExecTx(transaction, http.Context(request),
+        "INSERT INTO server_authorization_challenges(challenge,grant_id,expires_at) VALUES(?1,?2,?3)", arguments[:])
+    if written.error != null || sql.Commit(transaction) != null {
+        Failure(service, writer, 503, "session challenge unavailable")
+        return
+    }
+    response.JSON(writer, 200, result)
+}
+
+IssueSession :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 2048)
+    input: session.SessionRequest
+    if raw.error != null || strict.Decode(raw.value, *input) != null ||
+        !authorization.HexID(input.grantID, 32) || !authorization.HexID(input.challenge, 32) {
+        Failure(service, writer, 400, "invalid session request")
+        return
+    }
+    now := clock.Unix(clock.Now())
+    context := http.Context(request)
+    opened := sql.Begin(service.database, context, null)
+    if opened.error != null {
+        Failure(service, writer, 503, "session unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    arguments: [3]Any = .[input.challenge, input.grantID, now]
+    claimed := sql.ExecTx(transaction, context,
+        "UPDATE server_authorization_challenges SET consumed_at=?3 WHERE challenge=?1 AND grant_id=?2 AND consumed_at=0 AND expires_at>?3", arguments[:])
+    if claimed.error != null {
+        Failure(service, writer, 503, "session unavailable")
+        return
+    }
+    changed := sql.RowsAffected(claimed.value)
+    if changed.error != null || changed.value != 1 {
+        Failure(service, writer, 409, "session challenge expired or reused")
+        return
+    }
+    grant := authorization.ActiveGrant(transaction, context, input.grantID,
+        service.nodeID, service.configuration.BaseURL, now)
+    if grant.authentication.error != null || grant.authentication.status != 0 {
+        http_auth.Respond(writer, service.counters, grant.authentication)
+        return
+    }
+    challenge := session.SessionChallenge.{grantID = input.grantID, challenge = input.challenge,
+        nodeID = service.nodeID, audience = service.configuration.BaseURL}
+    destinations: [1]Any = .[*challenge.expiresAt]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT expires_at FROM server_authorization_challenges WHERE challenge=?1 AND grant_id=?2", arguments[0:2])
+    if sql.ScanRow(row, destinations[:]) != null ||
+        !session.VerifyKeyProof(grant.value.signingKey, session.ChallengeMessage(challenge), input.signature) {
+        Failure(service, writer, 401, "session key proof rejected")
+        return
+    }
+    result: SessionAnswer
+    result.grant = grant.value
+    ownerKey: []u8
+    ownerArguments: [1]Any = .[grant.value.accountID]
+    ownerDestinations: [1]Any = .[*ownerKey]
+    row = sql.QueryRowTx(transaction, context,
+        "SELECT public_key FROM server_users WHERE user_id_hash=?1", ownerArguments[:])
+    if sql.ScanRow(row, ownerDestinations[:]) != null {
+        Failure(service, writer, 503, "session unavailable")
+        return
+    }
+    result.ownerPublicKey = EncodeHex(ownerKey)
+    result.credential = session.SessionCredential.{sessionID = random.Nonce(), grantID = input.grantID,
+        challenge = random.Nonce(), expiresAt = now + 300}
+    if result.credential.expiresAt > grant.value.expiresAt {
+        result.credential.expiresAt = grant.value.expiresAt
+    }
+    if result.credential.sessionID.count != 32 || result.credential.challenge.count != 32 {
+        Failure(service, writer, 503, "session unavailable")
+        return
+    }
+    values: [4]Any = .[result.credential.sessionID, input.grantID,
+        result.credential.challenge, result.credential.expiresAt]
+    written := sql.ExecTx(transaction, context,
+        "INSERT INTO server_authorization_sessions(session_id,grant_id,challenge,expires_at) VALUES(?1,?2,?3,?4)", values[:])
+    if written.error != null || sql.Commit(transaction) != null {
+        Failure(service, writer, 503, "session unavailable")
+        return
+    }
+    response.JSON(writer, 200, result)
+}

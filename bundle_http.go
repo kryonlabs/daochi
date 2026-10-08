@@ -20,7 +20,7 @@ type Release struct {
 	Signature string "json:\"signature\""
 }
 
-type Decoded struct {
+type zir_10ec5c4f6be0ae99_Decoded struct {
 	Value []uint8
 	Error Error
 }
@@ -30,8 +30,8 @@ type zir_99d25837ba5a518f_WriteResult struct {
 	Error Error
 }
 
-func BundleHttp_Decode(Value string) Decoded {
-	var result Decoded
+func BundleHttp_Decode(Value string) zir_10ec5c4f6be0ae99_Decoded {
+	var result zir_10ec5c4f6be0ae99_Decoded
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }

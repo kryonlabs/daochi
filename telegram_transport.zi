@@ -1,0 +1,113 @@
+// Telegram transport contains no account credentials or application actions.
+#import "std/go_types"
+random :: #import "std/random_go";
+constant :: #import "std/constant_time";
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+context :: #import "std/context_go";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+native_io :: #system_library "go:io";
+native_json :: #system_library "go:encoding/json";
+
+StringReader :: #type #foreign strings "Reader";
+Reader :: (value: string) -> *StringReader #foreign strings "NewReader";
+EncodeHex :: (bytes: []u8) -> string #foreign hex "EncodeToString";
+Join :: (parts: []string, separator: string) -> string #foreign strings;
+CloseAtReturn :: (stream: io.ReadCloser) #go_defer #foreign native_io "ReadCloser.Close";
+
+TelegramAPIBase: string = "https://api.telegram.org";
+TelegramHTTPClient: *http.Client = http.NewClient(cast(clock.Duration)10000000000);
+
+TelegramAnswer :: struct {
+    ok: bool #go_tag "json:\"ok\""
+}
+WebApp :: struct {
+    url: string #go_tag "json:\"url\""
+}
+TelegramButton :: struct {
+    text: string #go_tag "json:\"text\""
+    callback_data: string #go_tag "json:\"callback_data,omitempty\""
+    web_app: *WebApp #go_tag "json:\"web_app,omitempty\""
+}
+KeyboardJSON :: #type #foreign native_json "RawMessage";
+TelegramSend :: struct {
+    chat_id: s64 #go_tag "json:\"chat_id\""
+    text: string #go_tag "json:\"text\""
+    reply_markup: KeyboardJSON #go_tag "json:\"reply_markup,omitempty\""
+}
+TelegramCallbackAnswer :: struct {
+    callback_query_id: string #go_tag "json:\"callback_query_id\""
+}
+
+Nonce :: () -> string {
+    bytes: [16]u8
+    if random.Fill(bytes[:]).error != null {
+        return ""
+    }
+    return EncodeHex(bytes[:])
+}
+
+WebhookTrusted :: (request: *http.Request, secret: string) -> bool {
+    supplied := http.HeaderValue(http.Headers(request), "X-Telegram-Bot-Api-Secret-Token")
+    return secret != "" && constant.ConstantTimeTextEqual(supplied, secret)
+}
+
+Call :: (token: string, method: string, value: Any) -> bool {
+    encoded := json.Marshal(value)
+    if encoded.error != null {
+        return false
+    }
+    parts: [5]string = .[TelegramAPIBase, "/bot", token, "/", method]
+    request := http.NewRequest(context.Background(), "POST", Join(parts[:], ""),
+        cast(io.Reader)Reader(text.FromBytes(encoded.value)))
+    if request.error != null {
+        return false
+    }
+    http.SetHeader(http.Headers(request.value), "Content-Type", "application/json")
+    received := http.Do(TelegramHTTPClient, request.value)
+    if received.error != null {
+        // HTTP errors can contain the credential-bearing URL. Never log them.
+        return false
+    }
+    stream := http.ResponseBody(received.value)
+    CloseAtReturn(stream)
+    bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 65537))
+    answer: TelegramAnswer
+    return http.StatusCode(received.value) == 200 && bytes.error == null &&
+        bytes.value.count <= 65536 && json.Unmarshal(bytes.value, *answer) == null && answer.ok
+}
+
+Deliver :: (token: string, destination: s64, content: string, draft: string, canvas: string) -> bool {
+    message := TelegramSend.{chat_id = destination, text = content}
+    buttons: [2]TelegramButton
+    web: WebApp
+    count: s32
+    if draft != "" {
+        yes: [2]string = .["Y", draft]
+        no: [2]string = .["N", draft]
+        buttons[0] = TelegramButton.{text = "Yes", callback_data = Join(yes[:], "")}
+        buttons[1] = TelegramButton.{text = "No", callback_data = Join(no[:], "")}
+        count = 2
+    } else if canvas != "" {
+        web.url = canvas
+        buttons[0] = TelegramButton.{text = "Open Inner Breeze", web_app = *web}
+        count = 1
+    }
+    if count > 0 {
+        encoded := json.Marshal(buttons[:count])
+        if encoded.error != null {
+            return false
+        }
+        markup: [3]string = .["{\"inline_keyboard\":[", text.FromBytes(encoded.value), "]}"]
+        message.reply_markup = cast(KeyboardJSON)text.ToBytes(Join(markup[:], ""))
+    }
+    return Call(token, "sendMessage", message)
+}
+
+AnswerCallback :: (token: string, id: string) -> bool {
+    return Call(token, "answerCallbackQuery", TelegramCallbackAnswer.{callback_query_id = id})
+}

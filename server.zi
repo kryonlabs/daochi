@@ -32,6 +32,10 @@ sync_ws :: #import "sync_ws";
 middleware :: #import "middleware";
 request_rate :: #import "request_rate";
 chat :: #import "chat";
+lumi_telegram :: #import "lumi_telegram";
+authorization_http :: #import "authorization_http";
+delegated_sync :: #import "delegated_sync";
+delegated_ws :: #import "delegated_ws";
 feedback :: #import "feedback_http";
 docs :: #import "docs";
 types :: #import "types";
@@ -302,6 +306,22 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "GET /metrics", server, HandleMetrics)
     Route(mux, "GET /api/v1/apps", server, HandleAppHttpList)
     Route(mux, "POST /api/v1/chat/completions", server, HandleChat)
+    Route(mux, "POST /api/v1/lumi/telegram/link", server, HandleLumiLink)
+    Route(mux, "DELETE /api/v1/lumi/telegram/link", server, HandleLumiUnlink)
+    Route(mux, "GET /api/v1/lumi/telegram/updates", server, HandleLumiPoll)
+    Route(mux, "POST /api/v1/lumi/telegram/ack", server, HandleLumiAck)
+    Route(mux, "POST /api/v1/lumi/telegram/messages", server, HandleLumiPublish)
+    Route(mux, "POST /api/v1/lumi/telegram/webhook", server, HandleLumiWebhook)
+    Route(mux, "POST /api/v1/authorization/requests", server, HandleAuthorizationRequest)
+    Route(mux, "POST /api/v1/authorization/rendezvous", server, HandleAuthorizationStatus)
+    Route(mux, "POST /api/v1/authorization/cancel", server, HandleAuthorizationCancel)
+    Route(mux, "POST /api/v1/authorization/claim", server, HandleAuthorizationClaim)
+    Route(mux, "POST /api/v1/authorization/approve", server, HandleAuthorizationApprove)
+    Route(mux, "POST /api/v1/authorization/revoke", server, HandleAuthorizationRevoke)
+    Route(mux, "POST /api/v1/authorization/challenge", server, HandleAuthorizationChallenge)
+    Route(mux, "POST /api/v1/authorization/session", server, HandleAuthorizationSession)
+    Route(mux, "POST /api/v1/delegated/sync", server, HandleDelegatedSync)
+    Route(mux, "GET /api/v1/delegated/ws", server, HandleDelegatedSocket)
     Route(mux, "POST /api/v1/feedback", server, HandleFeedbackSubmit)
     Route(mux, "GET /api/v1/feedback", server, HandleFeedbackList)
     Route(mux, "GET /api/v1/admin/feedback", server, HandleFeedbackInbox)
@@ -607,4 +627,71 @@ HandleDeleteAccountWithKey :: (server: *Server, writer: http.ResponseWriter, req
 
 HandleSyncWebSocket :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleSyncWebSocket" {
     sync_ws.Handle(SyncSocket(server), writer, request)
+}
+
+HandleLumiLink :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    lumi_telegram.Account(ChatService(server), writer, request, "link")
+}
+
+HandleLumiUnlink :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    lumi_telegram.Account(ChatService(server), writer, request, "unlink")
+}
+
+HandleLumiPoll :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    lumi_telegram.Account(ChatService(server), writer, request, "poll")
+}
+
+HandleLumiAck :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    lumi_telegram.Account(ChatService(server), writer, request, "ack")
+}
+
+HandleLumiPublish :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    lumi_telegram.Account(ChatService(server), writer, request, "publish")
+}
+
+HandleLumiWebhook :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    lumi_telegram.Webhook(ChatService(server), writer, request)
+}
+
+Authorizations :: (server: *Server) -> authorization_http.Authorizations {
+    result: authorization_http.Authorizations
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.verify = BindVerifier(Verify, server)
+    result.replay = errSignedTxReplay
+    result.nodeID = RetainPath(server.node.ID)
+    result.limiter = server.limiter
+    return result
+}
+
+HandleAuthorizationRequest :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    authorization_http.CreateRequest(Authorizations(server), writer, request)
+}
+HandleAuthorizationStatus :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    authorization_http.RendezvousStatus(Authorizations(server), writer, request, false)
+}
+HandleAuthorizationCancel :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    authorization_http.RendezvousStatus(Authorizations(server), writer, request, true)
+}
+HandleAuthorizationClaim :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    authorization_http.Claim(Authorizations(server), writer, request)
+}
+HandleAuthorizationApprove :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    authorization_http.Approve(Authorizations(server), writer, request)
+}
+HandleAuthorizationRevoke :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    authorization_http.Revoke(Authorizations(server), writer, request)
+}
+HandleAuthorizationChallenge :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    authorization_http.Challenge(Authorizations(server), writer, request)
+}
+HandleAuthorizationSession :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    authorization_http.IssueSession(Authorizations(server), writer, request)
+}
+HandleDelegatedSync :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    delegated_sync.Handle(Authorizations(server), writer, request)
+}
+HandleDelegatedSocket :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    delegated_ws.Handle(Authorizations(server), writer, request)
 }

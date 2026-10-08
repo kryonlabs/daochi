@@ -40,7 +40,18 @@ func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 	if result.Error != nil {
 		t.Fatal(result.Error)
 	}
-	return result.Value
+	// These tables extend the schema; existing-table equivalence remains
+	// checked against the released migration below. Their constraints and
+	// transactional behavior are exercised by the authorization tests.
+	legacy := result.Value[:0]
+	for _, entry := range result.Value {
+		name := entry["tbl_name"].(string)
+		if strings.HasPrefix(name, "server_authorization_") || name == "server_telegram_init_claims" {
+			continue
+		}
+		legacy = append(legacy, entry)
+	}
+	return legacy
 }
 
 func schemaData(t *testing.T, store *Store) map[string]any {
@@ -307,7 +318,7 @@ func TestZiranStoreSchemaNativeTraceAndFailures(t *testing.T) {
 					})
 					viewsConnectionReleased(t, store)
 				}
-				if failures[0] != failures[1] || panics[0] != panics[1] || !reflect.DeepEqual(plans[0].trace, plans[1].trace) || plans[0].closed != plans[1].closed {
+				if failures[0] != failures[1] || panics[0] != panics[1] || !reflect.DeepEqual(schemaLegacyTrace(plans[0].trace), schemaLegacyTrace(plans[1].trace)) || plans[0].closed != plans[1].closed {
 					t.Fatalf("composite %t/%s/step %d changed SQL, failure or cursor cleanup:\n%v/%v versus %v/%v\n%#v\n%#v", composite, mode, step, failures[0], panics[0], failures[1], panics[1], plans[0].trace, plans[1].trace)
 				}
 			}
@@ -324,4 +335,17 @@ func TestZiranStoreSchemaClosesMeditationRowsOnPanic(t *testing.T) {
 		t.Fatal("schema row panic changed identity or retained its cursor", got, plan)
 	}
 	viewsConnectionReleased(t, store)
+}
+
+// Ignore only the appended authorization DDL when comparing released SQL
+// behavior. Keep every original statement, ordering, binding and failure.
+func schemaLegacyTrace(trace []lifecycleTrace) []lifecycleTrace {
+	result := append([]lifecycleTrace(nil), trace...)
+	for index := range result {
+		if result[index].Operation == "exec" {
+			before, _, _ := strings.Cut(result[index].Query, "CREATE TABLE IF NOT EXISTS server_authorization_requests")
+			result[index].Query = strings.TrimSpace(before)
+		}
+	}
+	return result
 }

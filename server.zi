@@ -318,6 +318,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/telegram/entry", server, HandleTelegramEntry)
     Route(mux, "POST /api/v1/telegram/entry/verify", server, HandleTelegramEntryVerify)
     Route(mux, "POST /api/v1/telegram/entry/status", server, HandleTelegramEntryStatus)
+    Route(mux, "POST /api/v1/telegram/entry/rendezvous", server, HandleTelegramEntryRendezvous)
     Route(mux, "POST /api/v1/telegram/entry/cancel", server, HandleTelegramEntryCancel)
     Route(mux, "POST /api/v1/telegram/account/bind", server, HandleTelegramAccountBind)
     Route(mux, "POST /api/v1/authorization/requests", server, HandleAuthorizationRequest)
@@ -694,6 +695,11 @@ HandleTelegramEntryVerify :: (server: *Server, writer: http.ResponseWriter, requ
 HandleTelegramEntryStatus :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     if TelegramBindingSchema(server, writer, request) {
         telegram_entries.Status(TelegramEntries(server), writer, request)
+    }
+}
+HandleTelegramEntryRendezvous :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    if TelegramBindingSchema(server, writer, request) {
+        telegram_entries.Rendezvous(TelegramEntries(server), writer, request)
     }
 }
 HandleTelegramEntryCancel :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

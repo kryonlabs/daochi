@@ -9,7 +9,6 @@ service :: #import "authorization_http";
 session :: #import "session";
 validation :: #import "sync_validation";
 writes :: #import "sync_writes";
-views :: #import "sync_views";
 body :: #import "http_body";
 strict :: #import "strict_json";
 json :: #import "std/json_go";
@@ -18,6 +17,7 @@ http_auth :: #import "http_auth";
 http :: #import "std/http_go";
 sql :: #import "std/sql_go";
 native :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
 
 DelegatedSyncRequest :: struct {
     sync: types.SyncRequest #go_tag "json:\"sync\""
@@ -32,6 +32,47 @@ DelegatedSyncResponse :: struct {
     nextVersion: s64 #go_tag "json:\"next_version\""
     truncated: bool #go_tag "json:\"truncated\""
     applied: isize #go_tag "json:\"applied\""
+}
+
+// At most the serialized page and one candidate record are retained. SQL
+// rows beyond the byte budget remain unread and are reached by a fresh proof.
+BoundedRecordsResult :: struct {
+    value: []EncryptedRecord
+    error: Error
+    tooLarge: bool
+}
+
+#scope_file
+AllocateRecords :: (count: isize) -> []EncryptedRecord #foreign builtin "make";
+AppendRecord :: (records: []EncryptedRecord, record: EncryptedRecord) -> []EncryptedRecord #foreign builtin "append";
+
+ReadRecordsWithinBudget :: (rows: *sql.Rows) -> BoundedRecordsResult {
+    result: BoundedRecordsResult
+    result.value = AllocateRecords(cast(isize)0)
+    responseBytes: s64 = 256
+    while sql.Next(rows) {
+        record: EncryptedRecord
+        destinations: [10]Any = .[*record.Collection, *record.ID, *record.KeyID,
+            *record.Nonce, *record.Ciphertext, *record.UpdatedAt, *record.DeletedAt,
+            *record.ContentHash, *record.SchemaVersion, *record.ParentID]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        encoded := json.Marshal(record)
+        result.error = encoded.error
+        if result.error != null {
+            return result
+        }
+        if responseBytes + encoded.value.count + 1 > 1000000 {
+            result.tooLarge = result.value.count == 0
+            return result
+        }
+        responseBytes += encoded.value.count + 1
+        result.value = AppendRecord(result.value, record)
+    }
+    result.error = sql.RowsError(rows)
+    return result
 }
 
 #scope_file
@@ -130,34 +171,17 @@ Handle :: (authorizations: service.Authorizations, writer: http.ResponseWriter, 
         }
         rows := queried.value
         CloseRowsAtReturn(rows)
-        loaded := views.ReadRecords(rows)
+        loaded := ReadRecordsWithinBudget(rows)
         sql.CloseRows(rows)
         if loaded.error != null {
             response.Error(writer, 503, "delegated read unavailable")
             return
         }
-        // The client parses at most one MiB. Stop before that bound and set
-        // the cursor only from records actually delivered; large photo history
-        // must paginate rather than silently skip or fail every retry.
-        returned: s64
-        responseBytes: s64 = 256
-        for record: loaded.value {
-            encoded := json.Marshal(record)
-            if encoded.error != null {
-                response.Error(writer, 503, "delegated record encoding unavailable")
-                return
-            }
-            if responseBytes + encoded.value.count + 1 > 1000000 {
-                if returned == 0 {
-                    response.Error(writer, 413, "record exceeds delegated response bound")
-                    return
-                }
-                break
-            }
-            responseBytes += encoded.value.count + 1
-            returned += 1
+        if loaded.tooLarge {
+            response.Error(writer, 413, "record exceeds delegated response bound")
+            return
         }
-        result.records = loaded.value[0:returned]
+        result.records = loaded.value
         // Each response has one collection, so another scope's version cannot
         // skip this collection's truncated records.
         if result.records.count > 0 {

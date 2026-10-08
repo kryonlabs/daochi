@@ -229,6 +229,37 @@ Document3 :: #string JSON_3
       }
     }
   },
+JSON_3;
+Document4 :: #string JSON_4
+  "/api/v1/telegram/entry/rendezvous": {
+    "post": {
+      "summary": "Discover an owner authorization request using a fresh verified delegate proof",
+      "description": "Issuing-node only. Requires the same verified numeric Telegram sender and delegate signing/encryption keys as the expiring bot entry. Each proof is bound to the entry, action, node, audience, expiry and one-use nonce. URL possession alone cannot poll. The response contains only expiring authorization rendezvous metadata; account identity, numeric sender, private keys and recovery data are never returned. This discovery does not approve a grant.",
+      "responses": {
+        "200": {
+          "description": "Minimal matching owner authorization rendezvous"
+        },
+        "202": {
+          "description": "Verified entry is waiting for an owner authorization request"
+        },
+        "400": {
+          "description": "Malformed entry action"
+        },
+        "401": {
+          "description": "Verified delegate proof rejected or expired"
+        },
+        "404": {
+          "description": "Entry unavailable"
+        },
+        "409": {
+          "description": "Proof replayed or current account binding conflicts"
+        },
+        "503": {
+          "description": "Entry or owner request unavailable"
+        }
+      }
+    }
+  },
   "/api/v1/telegram/entry/cancel": {
     "post": {
       "summary": "Cancel a verified entry with a fresh delegate proof",
@@ -252,8 +283,8 @@ Document3 :: #string JSON_3
   "/api/v1/telegram/account/bind": {
     "post": {
       "summary": "Bind a locally created or restored owner account to the verified Telegram entry",
-JSON_3;
-Document4 :: #string JSON_4
+JSON_4;
+Document5 :: #string JSON_5
       "description": "Issuing-node only. Entries expire after ten minutes. Telegram identity is verified server-side; no owner private key or recovery passphrase is accepted. Status, cancel and bind require fresh one-use key proofs. Bind additionally requires an existing owner bearer and unchanged v6 owner/device transaction signatures.",
       "responses": {
         "200": {
@@ -277,5 +308,5 @@ Document4 :: #string JSON_4
     }
   }
 }
-JSON_4;
-Documents: [4]string = .[Document1, Document2, Document3, Document4];
+JSON_5;
+Documents: [5]string = .[Document1, Document2, Document3, Document4, Document5];

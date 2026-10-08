@@ -2097,10 +2097,10 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/admin/feedback", MapGet(additions, "/api/v1/admin/feedback"))
     MapSet(result, "/api/v1/admin/feedback/reply", MapGet(additions, "/api/v1/admin/feedback/reply"))
     telegram := telegram_paths.Paths()
-    telegramNames: [11]string = .["/api/v1/lumi/telegram/link", "/api/v1/lumi/telegram/updates",
+    telegramNames: [12]string = .["/api/v1/lumi/telegram/link", "/api/v1/lumi/telegram/updates",
         "/api/v1/lumi/telegram/ack", "/api/v1/lumi/telegram/messages", "/api/v1/lumi/telegram/webhook",
         "/api/v1/telegram/environment", "/api/v1/telegram/entry", "/api/v1/telegram/entry/verify",
-        "/api/v1/telegram/entry/status", "/api/v1/telegram/entry/cancel", "/api/v1/telegram/account/bind"]
+        "/api/v1/telegram/entry/status", "/api/v1/telegram/entry/rendezvous", "/api/v1/telegram/entry/cancel", "/api/v1/telegram/account/bind"]
     for name: telegramNames {
         MapSet(result, name, MapGet(telegram, name))
     }

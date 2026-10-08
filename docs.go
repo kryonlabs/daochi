@@ -7764,7 +7764,7 @@ func Docs_Paths() __type_7d6cc8a85f09fc88 {
 	}
 	(*value_19)[value_20] = value_21
 	telegram := TelegramPaths_Paths()
-	var value_25 [11]string
+	var value_25 [12]string
 	value_25[0] = "/api/v1/lumi/telegram/link"
 	value_25[1] = "/api/v1/lumi/telegram/updates"
 	value_25[2] = "/api/v1/lumi/telegram/ack"
@@ -7774,8 +7774,9 @@ func Docs_Paths() __type_7d6cc8a85f09fc88 {
 	value_25[6] = "/api/v1/telegram/entry"
 	value_25[7] = "/api/v1/telegram/entry/verify"
 	value_25[8] = "/api/v1/telegram/entry/status"
-	value_25[9] = "/api/v1/telegram/entry/cancel"
-	value_25[10] = "/api/v1/telegram/account/bind"
+	value_25[9] = "/api/v1/telegram/entry/rendezvous"
+	value_25[10] = "/api/v1/telegram/entry/cancel"
+	value_25[11] = "/api/v1/telegram/account/bind"
 	telegramNames := value_25
 	for _, name := range telegramNames {
 		var value_26 *__type_7d6cc8a85f09fc88 = &(result)

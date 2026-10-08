@@ -475,259 +475,263 @@ func Server_Routes(server *Server) Handler {
 	}
 	Server_Route(mux, "POST /api/v1/telegram/entry/status", server, value_90)
 	var value_94 ServerHandler = func(value_91 *Server, value_92 ResponseWriter, value_93 *Request) {
-		Server_HandleTelegramEntryCancel(value_91, value_92, value_93)
+		Server_HandleTelegramEntryRendezvous(value_91, value_92, value_93)
 	}
-	Server_Route(mux, "POST /api/v1/telegram/entry/cancel", server, value_94)
+	Server_Route(mux, "POST /api/v1/telegram/entry/rendezvous", server, value_94)
 	var value_98 ServerHandler = func(value_95 *Server, value_96 ResponseWriter, value_97 *Request) {
-		Server_HandleTelegramAccountBind(value_95, value_96, value_97)
+		Server_HandleTelegramEntryCancel(value_95, value_96, value_97)
 	}
-	Server_Route(mux, "POST /api/v1/telegram/account/bind", server, value_98)
+	Server_Route(mux, "POST /api/v1/telegram/entry/cancel", server, value_98)
 	var value_102 ServerHandler = func(value_99 *Server, value_100 ResponseWriter, value_101 *Request) {
-		Server_HandleAuthorizationRequest(value_99, value_100, value_101)
+		Server_HandleTelegramAccountBind(value_99, value_100, value_101)
 	}
-	Server_Route(mux, "POST /api/v1/authorization/requests", server, value_102)
+	Server_Route(mux, "POST /api/v1/telegram/account/bind", server, value_102)
 	var value_106 ServerHandler = func(value_103 *Server, value_104 ResponseWriter, value_105 *Request) {
-		Server_HandleAuthorizationStatus(value_103, value_104, value_105)
+		Server_HandleAuthorizationRequest(value_103, value_104, value_105)
 	}
-	Server_Route(mux, "POST /api/v1/authorization/rendezvous", server, value_106)
+	Server_Route(mux, "POST /api/v1/authorization/requests", server, value_106)
 	var value_110 ServerHandler = func(value_107 *Server, value_108 ResponseWriter, value_109 *Request) {
-		Server_HandleAuthorizationCancel(value_107, value_108, value_109)
+		Server_HandleAuthorizationStatus(value_107, value_108, value_109)
 	}
-	Server_Route(mux, "POST /api/v1/authorization/cancel", server, value_110)
+	Server_Route(mux, "POST /api/v1/authorization/rendezvous", server, value_110)
 	var value_114 ServerHandler = func(value_111 *Server, value_112 ResponseWriter, value_113 *Request) {
-		Server_HandleAuthorizationClaim(value_111, value_112, value_113)
+		Server_HandleAuthorizationCancel(value_111, value_112, value_113)
 	}
-	Server_Route(mux, "POST /api/v1/authorization/claim", server, value_114)
+	Server_Route(mux, "POST /api/v1/authorization/cancel", server, value_114)
 	var value_118 ServerHandler = func(value_115 *Server, value_116 ResponseWriter, value_117 *Request) {
-		Server_HandleAuthorizationApprove(value_115, value_116, value_117)
+		Server_HandleAuthorizationClaim(value_115, value_116, value_117)
 	}
-	Server_Route(mux, "POST /api/v1/authorization/approve", server, value_118)
+	Server_Route(mux, "POST /api/v1/authorization/claim", server, value_118)
 	var value_122 ServerHandler = func(value_119 *Server, value_120 ResponseWriter, value_121 *Request) {
-		Server_HandleAuthorizationRevoke(value_119, value_120, value_121)
+		Server_HandleAuthorizationApprove(value_119, value_120, value_121)
 	}
-	Server_Route(mux, "POST /api/v1/authorization/revoke", server, value_122)
+	Server_Route(mux, "POST /api/v1/authorization/approve", server, value_122)
 	var value_126 ServerHandler = func(value_123 *Server, value_124 ResponseWriter, value_125 *Request) {
-		Server_HandleAuthorizationChallenge(value_123, value_124, value_125)
+		Server_HandleAuthorizationRevoke(value_123, value_124, value_125)
 	}
-	Server_Route(mux, "POST /api/v1/authorization/challenge", server, value_126)
+	Server_Route(mux, "POST /api/v1/authorization/revoke", server, value_126)
 	var value_130 ServerHandler = func(value_127 *Server, value_128 ResponseWriter, value_129 *Request) {
-		Server_HandleAuthorizationSession(value_127, value_128, value_129)
+		Server_HandleAuthorizationChallenge(value_127, value_128, value_129)
 	}
-	Server_Route(mux, "POST /api/v1/authorization/session", server, value_130)
+	Server_Route(mux, "POST /api/v1/authorization/challenge", server, value_130)
 	var value_134 ServerHandler = func(value_131 *Server, value_132 ResponseWriter, value_133 *Request) {
-		Server_HandleDelegatedSync(value_131, value_132, value_133)
+		Server_HandleAuthorizationSession(value_131, value_132, value_133)
 	}
-	Server_Route(mux, "POST /api/v1/delegated/sync", server, value_134)
+	Server_Route(mux, "POST /api/v1/authorization/session", server, value_134)
 	var value_138 ServerHandler = func(value_135 *Server, value_136 ResponseWriter, value_137 *Request) {
-		Server_HandleDelegatedSocket(value_135, value_136, value_137)
+		Server_HandleDelegatedSync(value_135, value_136, value_137)
 	}
-	Server_Route(mux, "GET /api/v1/delegated/ws", server, value_138)
+	Server_Route(mux, "POST /api/v1/delegated/sync", server, value_138)
 	var value_142 ServerHandler = func(value_139 *Server, value_140 ResponseWriter, value_141 *Request) {
-		Server_HandleFeedbackSubmit(value_139, value_140, value_141)
+		Server_HandleDelegatedSocket(value_139, value_140, value_141)
 	}
-	Server_Route(mux, "POST /api/v1/feedback", server, value_142)
+	Server_Route(mux, "GET /api/v1/delegated/ws", server, value_142)
 	var value_146 ServerHandler = func(value_143 *Server, value_144 ResponseWriter, value_145 *Request) {
-		Server_HandleFeedbackList(value_143, value_144, value_145)
+		Server_HandleFeedbackSubmit(value_143, value_144, value_145)
 	}
-	Server_Route(mux, "GET /api/v1/feedback", server, value_146)
+	Server_Route(mux, "POST /api/v1/feedback", server, value_146)
 	var value_150 ServerHandler = func(value_147 *Server, value_148 ResponseWriter, value_149 *Request) {
-		Server_HandleFeedbackInbox(value_147, value_148, value_149)
+		Server_HandleFeedbackList(value_147, value_148, value_149)
 	}
-	Server_Route(mux, "GET /api/v1/admin/feedback", server, value_150)
+	Server_Route(mux, "GET /api/v1/feedback", server, value_150)
 	var value_154 ServerHandler = func(value_151 *Server, value_152 ResponseWriter, value_153 *Request) {
-		Server_HandleFeedbackReply(value_151, value_152, value_153)
+		Server_HandleFeedbackInbox(value_151, value_152, value_153)
 	}
-	Server_Route(mux, "POST /api/v1/admin/feedback/reply", server, value_154)
+	Server_Route(mux, "GET /api/v1/admin/feedback", server, value_154)
 	var value_158 ServerHandler = func(value_155 *Server, value_156 ResponseWriter, value_157 *Request) {
-		Server_HandleAppHttpList(value_155, value_156, value_157)
+		Server_HandleFeedbackReply(value_155, value_156, value_157)
 	}
-	Server_Route(mux, "POST /api/v1/apps", server, value_158)
+	Server_Route(mux, "POST /api/v1/admin/feedback/reply", server, value_158)
 	var value_162 ServerHandler = func(value_159 *Server, value_160 ResponseWriter, value_161 *Request) {
-		Server_HandleAppHttpRegisterSigned(value_159, value_160, value_161)
+		Server_HandleAppHttpList(value_159, value_160, value_161)
 	}
-	Server_Route(mux, "POST /api/v1/apps/register-signed", server, value_162)
+	Server_Route(mux, "POST /api/v1/apps", server, value_162)
 	var value_166 ServerHandler = func(value_163 *Server, value_164 ResponseWriter, value_165 *Request) {
-		Server_HandleAppHttpRoute(value_163, value_164, value_165)
+		Server_HandleAppHttpRegisterSigned(value_163, value_164, value_165)
 	}
-	Server_Route(mux, "GET /api/v1/apps/", server, value_166)
+	Server_Route(mux, "POST /api/v1/apps/register-signed", server, value_166)
 	var value_170 ServerHandler = func(value_167 *Server, value_168 ResponseWriter, value_169 *Request) {
 		Server_HandleAppHttpRoute(value_167, value_168, value_169)
 	}
-	Server_Route(mux, "PUT /api/v1/apps/", server, value_170)
+	Server_Route(mux, "GET /api/v1/apps/", server, value_170)
 	var value_174 ServerHandler = func(value_171 *Server, value_172 ResponseWriter, value_173 *Request) {
-		Server_HandleTokenHttpAssets(value_171, value_172, value_173)
+		Server_HandleAppHttpRoute(value_171, value_172, value_173)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/assets", server, value_174)
+	Server_Route(mux, "PUT /api/v1/apps/", server, value_174)
 	var value_178 ServerHandler = func(value_175 *Server, value_176 ResponseWriter, value_177 *Request) {
-		Server_HandleTokenHttpProducts(value_175, value_176, value_177)
+		Server_HandleTokenHttpAssets(value_175, value_176, value_177)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/products", server, value_178)
+	Server_Route(mux, "GET /api/v1/tokens/assets", server, value_178)
 	var value_182 ServerHandler = func(value_179 *Server, value_180 ResponseWriter, value_181 *Request) {
-		Server_HandleTokenHttpIssuer(value_179, value_180, value_181)
+		Server_HandleTokenHttpProducts(value_179, value_180, value_181)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/issuer", server, value_182)
+	Server_Route(mux, "GET /api/v1/tokens/products", server, value_182)
 	var value_186 ServerHandler = func(value_183 *Server, value_184 ResponseWriter, value_185 *Request) {
-		Server_HandleTokenHttpBalance(value_183, value_184, value_185)
+		Server_HandleTokenHttpIssuer(value_183, value_184, value_185)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/balance", server, value_186)
+	Server_Route(mux, "GET /api/v1/tokens/issuer", server, value_186)
 	var value_190 ServerHandler = func(value_187 *Server, value_188 ResponseWriter, value_189 *Request) {
-		Server_HandleTokenHttpLedger(value_187, value_188, value_189)
+		Server_HandleTokenHttpBalance(value_187, value_188, value_189)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/ledger", server, value_190)
+	Server_Route(mux, "GET /api/v1/tokens/balance", server, value_190)
 	var value_194 ServerHandler = func(value_191 *Server, value_192 ResponseWriter, value_193 *Request) {
-		Server_HandleTokenHttpSpend(value_191, value_192, value_193)
+		Server_HandleTokenHttpLedger(value_191, value_192, value_193)
 	}
-	Server_Route(mux, "POST /api/v1/tokens/spend", server, value_194)
+	Server_Route(mux, "GET /api/v1/tokens/ledger", server, value_194)
 	var value_198 ServerHandler = func(value_195 *Server, value_196 ResponseWriter, value_197 *Request) {
-		Server_HandleGooglePlayHttpVerify(value_195, value_196, value_197)
+		Server_HandleTokenHttpSpend(value_195, value_196, value_197)
 	}
-	Server_Route(mux, "POST /api/v1/tokens/purchases/google/verify", server, value_198)
+	Server_Route(mux, "POST /api/v1/tokens/spend", server, value_198)
 	var value_202 ServerHandler = func(value_199 *Server, value_200 ResponseWriter, value_201 *Request) {
-		Server_HandleMoneroInvoicesCreate(value_199, value_200, value_201)
+		Server_HandleGooglePlayHttpVerify(value_199, value_200, value_201)
 	}
-	Server_Route(mux, "POST /api/v1/tokens/purchases/monero/invoices", server, value_202)
+	Server_Route(mux, "POST /api/v1/tokens/purchases/google/verify", server, value_202)
 	var value_206 ServerHandler = func(value_203 *Server, value_204 ResponseWriter, value_205 *Request) {
-		Server_HandleMoneroInvoicesRead(value_203, value_204, value_205)
+		Server_HandleMoneroInvoicesCreate(value_203, value_204, value_205)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/purchases/monero/invoices/", server, value_206)
+	Server_Route(mux, "POST /api/v1/tokens/purchases/monero/invoices", server, value_206)
 	var value_210 ServerHandler = func(value_207 *Server, value_208 ResponseWriter, value_209 *Request) {
-		Server_HandleMoneroDepositsAddress(value_207, value_208, value_209)
+		Server_HandleMoneroInvoicesRead(value_207, value_208, value_209)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/purchases/monero/address", server, value_210)
+	Server_Route(mux, "GET /api/v1/tokens/purchases/monero/invoices/", server, value_210)
 	var value_214 ServerHandler = func(value_211 *Server, value_212 ResponseWriter, value_213 *Request) {
 		Server_HandleMoneroDepositsAddress(value_211, value_212, value_213)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/purchases/monero/address/", server, value_214)
+	Server_Route(mux, "GET /api/v1/tokens/purchases/monero/address", server, value_214)
 	var value_218 ServerHandler = func(value_215 *Server, value_216 ResponseWriter, value_217 *Request) {
-		Server_HandleMoneroDepositsDeposits(value_215, value_216, value_217)
+		Server_HandleMoneroDepositsAddress(value_215, value_216, value_217)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/purchases/monero/deposits", server, value_218)
+	Server_Route(mux, "GET /api/v1/tokens/purchases/monero/address/", server, value_218)
 	var value_222 ServerHandler = func(value_219 *Server, value_220 ResponseWriter, value_221 *Request) {
-		Server_HandleTokenHttpLatestCheckpoint(value_219, value_220, value_221)
+		Server_HandleMoneroDepositsDeposits(value_219, value_220, value_221)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/checkpoints/latest", server, value_222)
+	Server_Route(mux, "GET /api/v1/tokens/purchases/monero/deposits", server, value_222)
 	var value_226 ServerHandler = func(value_223 *Server, value_224 ResponseWriter, value_225 *Request) {
-		Server_HandleTokenHttpReceipt(value_223, value_224, value_225)
+		Server_HandleTokenHttpLatestCheckpoint(value_223, value_224, value_225)
 	}
-	Server_Route(mux, "GET /api/v1/tokens/receipts/", server, value_226)
+	Server_Route(mux, "GET /api/v1/tokens/checkpoints/latest", server, value_226)
 	var value_230 ServerHandler = func(value_227 *Server, value_228 ResponseWriter, value_229 *Request) {
-		Server_HandleTokenHttpManualCredit(value_227, value_228, value_229)
+		Server_HandleTokenHttpReceipt(value_227, value_228, value_229)
 	}
-	Server_Route(mux, "POST /api/v1/admin/tokens/manual-credit", server, value_230)
+	Server_Route(mux, "GET /api/v1/tokens/receipts/", server, value_230)
 	var value_234 ServerHandler = func(value_231 *Server, value_232 ResponseWriter, value_233 *Request) {
-		Server_HandleTokenHttpCreateCheckpoint(value_231, value_232, value_233)
+		Server_HandleTokenHttpManualCredit(value_231, value_232, value_233)
 	}
-	Server_Route(mux, "POST /api/v1/admin/tokens/checkpoint", server, value_234)
+	Server_Route(mux, "POST /api/v1/admin/tokens/manual-credit", server, value_234)
 	var value_238 ServerHandler = func(value_235 *Server, value_236 ResponseWriter, value_237 *Request) {
-		Server_HandleSyncDiagnostics(value_235, value_236, value_237)
+		Server_HandleTokenHttpCreateCheckpoint(value_235, value_236, value_237)
 	}
-	Server_Route(mux, "GET /api/v1/sync/diagnostics", server, value_238)
+	Server_Route(mux, "POST /api/v1/admin/tokens/checkpoint", server, value_238)
 	var value_242 ServerHandler = func(value_239 *Server, value_240 ResponseWriter, value_241 *Request) {
-		Server_HandleChallenge(value_239, value_240, value_241)
+		Server_HandleSyncDiagnostics(value_239, value_240, value_241)
 	}
-	Server_Route(mux, "GET /api/v1/sync/challenge", server, value_242)
+	Server_Route(mux, "GET /api/v1/sync/diagnostics", server, value_242)
 	var value_246 ServerHandler = func(value_243 *Server, value_244 ResponseWriter, value_245 *Request) {
-		Server_HandleSyncWebSocket(value_243, value_244, value_245)
+		Server_HandleChallenge(value_243, value_244, value_245)
 	}
-	Server_Route(mux, "GET /api/v1/sync/ws", server, value_246)
-	Server_Route(mux, "POST /api/v1/sync/login", server, func(value_247 *Server, value_248 ResponseWriter, value_249 *Request) {
-		Server_HandleLogin(value_247, value_248, value_249)
-	})
-	Server_Route(mux, "POST /api/v1/sync", server, func(value_250 *Server, value_251 ResponseWriter, value_252 *Request) {
-		Server_HandleSync(value_250, value_251, value_252)
-	})
-	var value_256 ServerHandler = func(value_253 *Server, value_254 ResponseWriter, value_255 *Request) {
-		Server_HandleAccountHttpAlias(value_253, value_254, value_255)
+	Server_Route(mux, "GET /api/v1/sync/challenge", server, value_246)
+	var value_250 ServerHandler = func(value_247 *Server, value_248 ResponseWriter, value_249 *Request) {
+		Server_HandleSyncWebSocket(value_247, value_248, value_249)
 	}
-	Server_Route(mux, "POST /api/v1/account/alias", server, value_256)
+	Server_Route(mux, "GET /api/v1/sync/ws", server, value_250)
+	Server_Route(mux, "POST /api/v1/sync/login", server, func(value_251 *Server, value_252 ResponseWriter, value_253 *Request) {
+		Server_HandleLogin(value_251, value_252, value_253)
+	})
+	Server_Route(mux, "POST /api/v1/sync", server, func(value_254 *Server, value_255 ResponseWriter, value_256 *Request) {
+		Server_HandleSync(value_254, value_255, value_256)
+	})
 	var value_260 ServerHandler = func(value_257 *Server, value_258 ResponseWriter, value_259 *Request) {
-		Server_HandleAccountHttpProfileIcon(value_257, value_258, value_259)
+		Server_HandleAccountHttpAlias(value_257, value_258, value_259)
 	}
-	Server_Route(mux, "POST /api/v1/account/profile-icon", server, value_260)
+	Server_Route(mux, "POST /api/v1/account/alias", server, value_260)
 	var value_264 ServerHandler = func(value_261 *Server, value_262 ResponseWriter, value_263 *Request) {
-		Server_HandleAccountHttpExport(value_261, value_262, value_263)
+		Server_HandleAccountHttpProfileIcon(value_261, value_262, value_263)
 	}
-	Server_Route(mux, "GET /api/v1/account/export", server, value_264)
+	Server_Route(mux, "POST /api/v1/account/profile-icon", server, value_264)
 	var value_268 ServerHandler = func(value_265 *Server, value_266 ResponseWriter, value_267 *Request) {
-		Server_HandleDeviceHttpRoute(value_265, value_266, value_267)
+		Server_HandleAccountHttpExport(value_265, value_266, value_267)
 	}
-	Server_Route(mux, "GET /api/v1/account/devices", server, value_268)
+	Server_Route(mux, "GET /api/v1/account/export", server, value_268)
 	var value_272 ServerHandler = func(value_269 *Server, value_270 ResponseWriter, value_271 *Request) {
 		Server_HandleDeviceHttpRoute(value_269, value_270, value_271)
 	}
-	Server_Route(mux, "POST /api/v1/account/devices", server, value_272)
+	Server_Route(mux, "GET /api/v1/account/devices", server, value_272)
 	var value_276 ServerHandler = func(value_273 *Server, value_274 ResponseWriter, value_275 *Request) {
 		Server_HandleDeviceHttpRoute(value_273, value_274, value_275)
 	}
-	Server_Route(mux, "DELETE /api/v1/account/devices", server, value_276)
+	Server_Route(mux, "POST /api/v1/account/devices", server, value_276)
 	var value_280 ServerHandler = func(value_277 *Server, value_278 ResponseWriter, value_279 *Request) {
-		Server_HandleAppHttpGrants(value_277, value_278, value_279)
+		Server_HandleDeviceHttpRoute(value_277, value_278, value_279)
 	}
-	Server_Route(mux, "GET /api/v1/account/app-grants", server, value_280)
+	Server_Route(mux, "DELETE /api/v1/account/devices", server, value_280)
 	var value_284 ServerHandler = func(value_281 *Server, value_282 ResponseWriter, value_283 *Request) {
 		Server_HandleAppHttpGrants(value_281, value_282, value_283)
 	}
-	Server_Route(mux, "POST /api/v1/account/app-grants", server, value_284)
+	Server_Route(mux, "GET /api/v1/account/app-grants", server, value_284)
 	var value_288 ServerHandler = func(value_285 *Server, value_286 ResponseWriter, value_287 *Request) {
-		Server_HandleAppHttpGrantSigned(value_285, value_286, value_287)
+		Server_HandleAppHttpGrants(value_285, value_286, value_287)
 	}
-	Server_Route(mux, "POST /api/v1/account/app-grants/signed", server, value_288)
+	Server_Route(mux, "POST /api/v1/account/app-grants", server, value_288)
 	var value_292 ServerHandler = func(value_289 *Server, value_290 ResponseWriter, value_291 *Request) {
-		Server_HandleAppHttpGrantRoute(value_289, value_290, value_291)
+		Server_HandleAppHttpGrantSigned(value_289, value_290, value_291)
 	}
-	Server_Route(mux, "DELETE /api/v1/account/app-grants/", server, value_292)
+	Server_Route(mux, "POST /api/v1/account/app-grants/signed", server, value_292)
 	var value_296 ServerHandler = func(value_293 *Server, value_294 ResponseWriter, value_295 *Request) {
-		Server_HandleAppHttpRecords(value_293, value_294, value_295)
+		Server_HandleAppHttpGrantRoute(value_293, value_294, value_295)
 	}
-	Server_Route(mux, "GET /api/v1/account/app-records", server, value_296)
+	Server_Route(mux, "DELETE /api/v1/account/app-grants/", server, value_296)
 	var value_300 ServerHandler = func(value_297 *Server, value_298 ResponseWriter, value_299 *Request) {
-		Server_HandleDeleteAccount(value_297, value_298, value_299)
+		Server_HandleAppHttpRecords(value_297, value_298, value_299)
 	}
-	Server_Route(mux, "DELETE /api/v1/account", server, value_300)
+	Server_Route(mux, "GET /api/v1/account/app-records", server, value_300)
 	var value_304 ServerHandler = func(value_301 *Server, value_302 ResponseWriter, value_303 *Request) {
 		Server_HandleDeleteAccount(value_301, value_302, value_303)
 	}
-	Server_Route(mux, "POST /api/v1/account/delete", server, value_304)
+	Server_Route(mux, "DELETE /api/v1/account", server, value_304)
 	var value_308 ServerHandler = func(value_305 *Server, value_306 ResponseWriter, value_307 *Request) {
-		Server_HandleDeleteAccountWithKey(value_305, value_306, value_307)
+		Server_HandleDeleteAccount(value_305, value_306, value_307)
 	}
-	Server_Route(mux, "POST /api/v1/account/delete-with-key", server, value_308)
+	Server_Route(mux, "POST /api/v1/account/delete", server, value_308)
 	var value_312 ServerHandler = func(value_309 *Server, value_310 ResponseWriter, value_311 *Request) {
-		Server_HandleSocialHttpFriends(value_309, value_310, value_311)
+		Server_HandleDeleteAccountWithKey(value_309, value_310, value_311)
 	}
-	Server_Route(mux, "GET /api/v1/friends", server, value_312)
+	Server_Route(mux, "POST /api/v1/account/delete-with-key", server, value_312)
 	var value_316 ServerHandler = func(value_313 *Server, value_314 ResponseWriter, value_315 *Request) {
-		Server_HandleSocialHttpRemoveFriend(value_313, value_314, value_315)
+		Server_HandleSocialHttpFriends(value_313, value_314, value_315)
 	}
-	Server_Route(mux, "DELETE /api/v1/friends/", server, value_316)
+	Server_Route(mux, "GET /api/v1/friends", server, value_316)
 	var value_320 ServerHandler = func(value_317 *Server, value_318 ResponseWriter, value_319 *Request) {
-		Server_HandleSocialHttpRequests(value_317, value_318, value_319)
+		Server_HandleSocialHttpRemoveFriend(value_317, value_318, value_319)
 	}
-	Server_Route(mux, "GET /api/v1/friends/requests", server, value_320)
+	Server_Route(mux, "DELETE /api/v1/friends/", server, value_320)
 	var value_324 ServerHandler = func(value_321 *Server, value_322 ResponseWriter, value_323 *Request) {
-		Server_HandleSocialHttpCreateRequest(value_321, value_322, value_323)
+		Server_HandleSocialHttpRequests(value_321, value_322, value_323)
 	}
-	Server_Route(mux, "POST /api/v1/friends/requests", server, value_324)
+	Server_Route(mux, "GET /api/v1/friends/requests", server, value_324)
 	var value_328 ServerHandler = func(value_325 *Server, value_326 ResponseWriter, value_327 *Request) {
-		Server_HandleSocialHttpRequestAction(value_325, value_326, value_327)
+		Server_HandleSocialHttpCreateRequest(value_325, value_326, value_327)
 	}
-	Server_Route(mux, "POST /api/v1/friends/requests/", server, value_328)
+	Server_Route(mux, "POST /api/v1/friends/requests", server, value_328)
 	var value_332 ServerHandler = func(value_329 *Server, value_330 ResponseWriter, value_331 *Request) {
-		Server_HandleSocialHttpPutStats(value_329, value_330, value_331)
+		Server_HandleSocialHttpRequestAction(value_329, value_330, value_331)
 	}
-	Server_Route(mux, "PUT /api/v1/profile/stats", server, value_332)
+	Server_Route(mux, "POST /api/v1/friends/requests/", server, value_332)
 	var value_336 ServerHandler = func(value_333 *Server, value_334 ResponseWriter, value_335 *Request) {
-		Server_HandleSocialHttpFriendStats(value_333, value_334, value_335)
+		Server_HandleSocialHttpPutStats(value_333, value_334, value_335)
 	}
-	Server_Route(mux, "GET /api/v1/friends/stats", server, value_336)
+	Server_Route(mux, "PUT /api/v1/profile/stats", server, value_336)
 	var value_340 ServerHandler = func(value_337 *Server, value_338 ResponseWriter, value_339 *Request) {
-		Server_HandleBundleHttpRoute(value_337, value_338, value_339)
+		Server_HandleSocialHttpFriendStats(value_337, value_338, value_339)
 	}
-	Server_Route(mux, "GET /api/v1/packages/", server, value_340)
+	Server_Route(mux, "GET /api/v1/friends/stats", server, value_340)
 	var value_344 ServerHandler = func(value_341 *Server, value_342 ResponseWriter, value_343 *Request) {
-		Server_HandlePackageHttpRoute(value_341, value_342, value_343)
+		Server_HandleBundleHttpRoute(value_341, value_342, value_343)
 	}
-	Server_Route(mux, "GET /api/v2/packages/", server, value_344)
+	Server_Route(mux, "GET /api/v1/packages/", server, value_344)
+	var value_348 ServerHandler = func(value_345 *Server, value_346 ResponseWriter, value_347 *Request) {
+		Server_HandlePackageHttpRoute(value_345, value_346, value_347)
+	}
+	Server_Route(mux, "GET /api/v2/packages/", server, value_348)
 	return Server_WithCommonHeaders(server, Handler(mux))
 }
 
@@ -1108,6 +1112,12 @@ func Server_HandleTelegramEntryVerify(server *Server, writer ResponseWriter, req
 func Server_HandleTelegramEntryStatus(server *Server, writer ResponseWriter, request *Request) {
 	if Server_TelegramBindingSchema(server, writer, request) {
 		TelegramAccountEntry_Status(Server_TelegramEntries(server), writer, request)
+	}
+}
+
+func Server_HandleTelegramEntryRendezvous(server *Server, writer ResponseWriter, request *Request) {
+	if Server_TelegramBindingSchema(server, writer, request) {
+		TelegramAccountEntry_Rendezvous(Server_TelegramEntries(server), writer, request)
 	}
 }
 

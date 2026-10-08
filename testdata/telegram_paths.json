@@ -211,6 +211,35 @@
       }
     }
   },
+  "/api/v1/telegram/entry/rendezvous": {
+    "post": {
+      "summary": "Discover an owner authorization request using a fresh verified delegate proof",
+      "description": "Issuing-node only. Requires the same verified numeric Telegram sender and delegate signing/encryption keys as the expiring bot entry. Each proof is bound to the entry, action, node, audience, expiry and one-use nonce. URL possession alone cannot poll. The response contains only expiring authorization rendezvous metadata; account identity, numeric sender, private keys and recovery data are never returned. This discovery does not approve a grant.",
+      "responses": {
+        "200": {
+          "description": "Minimal matching owner authorization rendezvous"
+        },
+        "202": {
+          "description": "Verified entry is waiting for an owner authorization request"
+        },
+        "400": {
+          "description": "Malformed entry action"
+        },
+        "401": {
+          "description": "Verified delegate proof rejected or expired"
+        },
+        "404": {
+          "description": "Entry unavailable"
+        },
+        "409": {
+          "description": "Proof replayed or current account binding conflicts"
+        },
+        "503": {
+          "description": "Entry or owner request unavailable"
+        }
+      }
+    }
+  },
   "/api/v1/telegram/entry/cancel": {
     "post": {
       "summary": "Cancel a verified entry with a fresh delegate proof",

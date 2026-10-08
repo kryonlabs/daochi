@@ -46,6 +46,11 @@ func TestTelegramBrowserFixture(t *testing.T) {
 		t.Fatal("synthetic fixture control key unavailable")
 	}
 	control := hex.EncodeToString(controlBytes[:])
+	// This one-run synthetic secret lets the browser fixture deliver a captured
+	// owner link through the production webhook. It never signs or approves a
+	// grant and is written only to the private opt-in fixture report.
+	fixture.owner.server.Cfg.LumiWebhookSecret = control
+	fixture.owner.handler = fixture.owner.server.Routes()
 	var mutex sync.Mutex
 	sequence := 0
 	stopped := make(chan struct{})
@@ -132,6 +137,7 @@ func TestTelegramBrowserFixture(t *testing.T) {
 	metadata, err := json.Marshal(map[string]any{
 		"url": server.URL, "control_key": control, "audience": fixture.owner.server.Cfg.BaseURL,
 		"synthetic": true, "bot_id": int64(123456), "node_id": fixture.owner.server.Node.ID,
+		"webhook_secret": control,
 	})
 	if err != nil {
 		t.Fatal("private browser fixture report unavailable")

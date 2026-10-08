@@ -1,5 +1,7 @@
 // Security messages reject duplicate (including escaped) object keys and
 // unknown protocol fields rather than relying on last-field-wins decoding.
+// Protocol field names are canonical lowercase ASCII. Go's JSON decoder
+// otherwise accepts case-folded aliases even with DisallowUnknownFields.
 #import "std/go_types"
 #import "std/map_go"
 scan :: #import "std/json_scan";
@@ -17,6 +19,19 @@ NewReader :: (value: string) -> *TextReader #foreign strings;
 NewDecoder :: (reader: io.Reader) -> *StrictDecoder #foreign native;
 DisallowUnknownFields :: (decoder: *StrictDecoder) #foreign native "(*Decoder).DisallowUnknownFields";
 DecodeValue :: (decoder: *StrictDecoder, target: Any) -> Error #foreign native "(*Decoder).Decode";
+
+CanonicalField :: (key: string) -> bool {
+    if key.count == 0 {
+        return false
+    }
+    for byte: key {
+        if (byte < cast(u8)97 || byte > cast(u8)122) &&
+            (byte < cast(u8)48 || byte > cast(u8)57) && byte != cast(u8)95 {
+            return false
+        }
+    }
+    return true
+}
 
 UniqueValueEnd :: (document: string, at: s32, depth: s32) -> s32 {
     at = scan.Space(document, at)
@@ -40,7 +55,7 @@ UniqueValueEnd :: (document: string, at: s32, depth: s32) -> s32 {
                 return -1
             }
             key := text.FromBytes(keyBytes[0:count])
-            if MapGet(keys, key) {
+            if !CanonicalField(key) || MapGet(keys, key) {
                 return -1
             }
             MapSet(keys, key, true)

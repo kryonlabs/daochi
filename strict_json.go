@@ -12,6 +12,19 @@ type StrictDecoder = json.Decoder
 
 type TextReader = strings.Reader
 
+func StrictJson_CanonicalField(key string) bool {
+	if int64(len(key)) == 0 {
+		return false
+	}
+	for it_index := int64(0); it_index < int64(len(key)); it_index++ {
+		byte := key[it_index]
+		if (byte < 97 || byte > 122) && (byte < 48 || byte > 57) && byte != 95 {
+			return false
+		}
+	}
+	return true
+}
+
 func StrictJson_UniqueValueEnd(document string, at int32, depth int32) int32 {
 	at = StdJsonScan_Space(document, at)
 	if depth > 32 || at < 0 || int64(at) >= int64(len(document)) {
@@ -41,19 +54,24 @@ func StrictJson_UniqueValueEnd(document string, at int32, depth int32) int32 {
 				return -1
 			}
 			key := StdTextGo_FromBytes(keyBytes[0:count:count])
-			var value_1 __type_c922d3f56b74fd5a = keys
-			var value_2 string = key
-			var value_3 bool = value_1[value_2]
-			if value_3 {
+			var value_1 bool = StrictJson_CanonicalField(key)
+			var value_2 bool = !value_1
+			if !value_2 {
+				var value_3 __type_c922d3f56b74fd5a = keys
+				var value_4 string = key
+				var value_5 bool = value_3[value_4]
+				value_2 = value_5
+			}
+			if value_2 {
 				return -1
 			}
-			var value_4 *__type_c922d3f56b74fd5a = &(keys)
-			var value_5 string = key
-			var value_6 bool = true
-			if (*value_4) == nil {
-				(*value_4) = make(__type_c922d3f56b74fd5a)
+			var value_6 *__type_c922d3f56b74fd5a = &(keys)
+			var value_7 string = key
+			var value_8 bool = true
+			if (*value_6) == nil {
+				(*value_6) = make(__type_c922d3f56b74fd5a)
 			}
-			(*value_4)[value_5] = value_6
+			(*value_6)[value_7] = value_8
 			cursor = StdJsonScan_Space(document, span.After)
 			if int64(cursor) >= int64(len(document)) || document[cursor] != 58 {
 				return -1

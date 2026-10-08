@@ -335,18 +335,36 @@ func TestTelegramInitDataValidationAndStrictJSON(t *testing.T) {
 			t.Fatal("duplicate, malformed or tampered initData accepted")
 		}
 	}
-	for _, user := range []string{`{"id":1234,"id":4321}`, `{"id":1234,"\u0069d":4321}`, `{"id":"1234"}`, `{"first_name":"1234"}`, `{"id":1.2}`, `{"id":1234,"is_bot":true}`} {
+	for _, user := range []string{`{"id":1234,"id":4321}`, `{"id":1234,"\u0069d":4321}`, `{"id":1234,"ID":4321}`, `{"ID":1234}`, `{"\u0049d":1234}`, `{"id":"1234"}`, `{"first_name":"1234"}`, `{"id":1.2}`, `{"id":1234,"is_bot":true}`} {
 		fields.Set("user", user)
 		if TelegramInit_Validate(telegramInitFixture(token, fields), token, now).Valid {
 			t.Fatal("malformed numeric identity accepted")
 		}
 	}
-	for _, document := range []string{`{"a":1,"a":2}`, `{"a":[{"b":1,"b":2}]}`, `{"id":1,"\u0069d":2}`} {
+	for _, document := range []string{`{"a":1,"a":2}`, `{"a":[{"b":1,"b":2}]}`, `{"id":1,"\u0069d":2}`, `{"grant_id":"a","GRANT_ID":"b"}`, `{"GRANT_ID":"a"}`, `{"grant_id":"a","\u0047rant_id":"b"}`} {
 		if StrictJson_Valid(document) {
 			t.Fatal("duplicate JSON accepted")
 		}
 	}
 	if !StrictJson_Valid(`{"a":[{},null,1,"x"],"b":true}`) {
 		t.Fatal("valid JSON rejected")
+	}
+}
+
+func TestAuthorizationRejectsCaseFoldedProtocolFields(t *testing.T) {
+	fixture := authorizationSetup(t)
+	fixture.connect(t)
+	request := fixture.delegateRequest(t, fixture.syncInput())
+	proof := request.Header.Get("X-Daochi-Delegate")
+	for _, malformed := range []string{
+		strings.Replace(proof, `"grant_id":`, `"GRANT_ID":`, 1),
+		strings.Replace(proof, `"grant_id":`, `"GRANT_ID":"ignored","grant_id":`, 1),
+		strings.Replace(proof, `"grant_id":`, `"\u0047rant_id":`, 1),
+	} {
+		clone := fixture.delegateRequest(t, fixture.syncInput())
+		clone.Header.Set("X-Daochi-Delegate", malformed)
+		if result := authorizationServe(fixture, clone); result.Code != 401 {
+			t.Fatalf("case-folded request field accepted: %d", result.Code)
+		}
 	}
 }

@@ -459,7 +459,7 @@ func StoreStats_ZiSpecF9abe995f77bd153(values []CollectionStorageUsage) {
 	start := count / 2
 	for start > 0 {
 		start--
-		StoreStats_ZiSpec635ee775ab0eaac0(values, start, count)
+		StoreStats_ZiSpecB49d0e36649f1f94(values, start, count)
 	}
 	end := count
 	for end > 1 {
@@ -467,7 +467,7 @@ func StoreStats_ZiSpecF9abe995f77bd153(values []CollectionStorageUsage) {
 		saved := values[0]
 		values[0] = values[end]
 		values[end] = saved
-		StoreStats_ZiSpec635ee775ab0eaac0(values, 0, end)
+		StoreStats_ZiSpecB49d0e36649f1f94(values, 0, end)
 	}
 }
 
@@ -476,7 +476,7 @@ func StoreStats_ZiSpecCfc5bfd0280631aa(values []AppStorageUsage) {
 	start := count / 2
 	for start > 0 {
 		start--
-		StoreStats_ZiSpec21adfedb07c26ad7(values, start, count)
+		StoreStats_ZiSpec9ee707141ae0acf3(values, start, count)
 	}
 	end := count
 	for end > 1 {
@@ -484,11 +484,11 @@ func StoreStats_ZiSpecCfc5bfd0280631aa(values []AppStorageUsage) {
 		saved := values[0]
 		values[0] = values[end]
 		values[end] = saved
-		StoreStats_ZiSpec21adfedb07c26ad7(values, 0, end)
+		StoreStats_ZiSpec9ee707141ae0acf3(values, 0, end)
 	}
 }
 
-func StoreStats_ZiSpec635ee775ab0eaac0(values []CollectionStorageUsage, root int64, end int64) {
+func StoreStats_ZiSpecB49d0e36649f1f94(values []CollectionStorageUsage, root int64, end int64) {
 	parent := root
 	for (parent*2)+1 < end {
 		child := (parent * 2) + 1
@@ -511,7 +511,7 @@ func StoreStats_ZiSpec635ee775ab0eaac0(values []CollectionStorageUsage, root int
 	}
 }
 
-func StoreStats_ZiSpec21adfedb07c26ad7(values []AppStorageUsage, root int64, end int64) {
+func StoreStats_ZiSpec9ee707141ae0acf3(values []AppStorageUsage, root int64, end int64) {
 	parent := root
 	for (parent*2)+1 < end {
 		child := (parent * 2) + 1

@@ -1,0 +1,437 @@
+// A Telegram conversation is an authorized transport for the same app chat.
+// It queues app-owned actions; it never receives an account signing key.
+#import "std/go_types"
+chat :: #import "chat";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+json :: #import "std/json_go";
+clock :: #import "std/time_go";
+url :: #import "std/url_go";
+transport :: #import "telegram_transport";
+schema :: #import "store_schema";
+ctx :: #import "std/context_go";
+commands :: #import "lumi_commands";
+strings :: #system_library "go:strings";
+native_sql :: #system_library "go:database/sql";
+Join :: (parts: []string, separator: string) -> string #foreign strings;
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native_sql "(*Tx).Rollback";
+
+LinkResponse :: struct {
+    url: string #go_tag "json:\"url\""
+}
+LinkResult :: struct {
+    status: string #go_tag "json:\"link_status\""
+    error: Error #go_tag "json:\"-\""
+}
+TelegramUser :: struct {
+    id: s64 #go_tag "json:\"id\""
+    is_bot: bool #go_tag "json:\"is_bot\""
+}
+TelegramChat :: struct {
+    id: s64 #go_tag "json:\"id\""
+    type: string #go_tag "json:\"type\""
+}
+TelegramMessage :: struct {
+    message_id: s64 #go_tag "json:\"message_id\""
+    from: TelegramUser #go_tag "json:\"from\""
+    chat: TelegramChat #go_tag "json:\"chat\""
+    text: string #go_tag "json:\"text\""
+}
+TelegramCallback :: struct {
+    id: string #go_tag "json:\"id\""
+    from: TelegramUser #go_tag "json:\"from\""
+    message: TelegramMessage #go_tag "json:\"message\""
+    data: string #go_tag "json:\"data\""
+}
+TelegramUpdate :: struct {
+    update_id: s64 #go_tag "json:\"update_id\""
+    message: TelegramMessage #go_tag "json:\"message\""
+    callback_query: TelegramCallback #go_tag "json:\"callback_query\""
+}
+LumiUpdate :: struct {
+    id: s64 #go_tag "json:\"id\""
+    kind: string #go_tag "json:\"kind\""
+    text: string #go_tag "json:\"text\""
+    choice: isize #go_tag "json:\"choice\""
+}
+LumiPoll :: struct {
+    linked: bool #go_tag "json:\"linked\""
+    linked_at: s64 #go_tag "json:\"linked_at\""
+    update: LumiUpdate #go_tag "json:\"update\""
+}
+LumiReceipt :: struct {
+    id: s64 #go_tag "json:\"id\""
+    client: string #go_tag "json:\"client\""
+}
+LumiMessage :: struct {
+    id: string #go_tag "json:\"id\""
+    text: string #go_tag "json:\"text\""
+    draft: string #go_tag "json:\"draft\""
+    time: s64 #go_tag "json:\"time\""
+}
+
+Schema :: (service: chat.Chat, request: *http.Request) -> bool {
+    arguments: [0]Any
+    result := sql.Exec(service.database, http.Context(request),
+        "CREATE TABLE IF NOT EXISTS server_lumi_link_codes(code TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS server_lumi_telegram(account_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,telegram_id INTEGER NOT NULL UNIQUE,linked_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS server_lumi_updates(id INTEGER PRIMARY KEY,account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,kind TEXT NOT NULL,text TEXT NOT NULL,choice INTEGER NOT NULL DEFAULT 0,done INTEGER NOT NULL DEFAULT 0,executor TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS server_lumi_deliveries(account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,id TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(account_id,id));", arguments[:])
+    if result.error != null {
+        return false
+    }
+    if schema.AddColumn(service.database, http.Context(request), "server_lumi_link_codes", "consumed_at",
+        "ALTER TABLE server_lumi_link_codes ADD COLUMN consumed_at INTEGER NOT NULL DEFAULT 0") != null {
+        return false
+    }
+    return schema.AddColumn(service.database, http.Context(request), "server_lumi_link_codes", "telegram_id",
+        "ALTER TABLE server_lumi_link_codes ADD COLUMN telegram_id INTEGER NOT NULL DEFAULT 0") == null
+}
+
+// The claim takes SQLite's write lock before inspecting the binding. Binding
+// and consumption commit together; a rejected claim leaves the code usable by
+// its intended sender. Retained claims distinguish reuse across restarts.
+ConsumeLink :: (database: *sql.Database, requestContext: ctx.Context, code: string,
+    sender: s64, now: s64) -> LinkResult {
+    result := LinkResult.{status = "invalid"}
+    if code.count != 32 || sender <= 0 || now <= 0 {
+        return result
+    }
+    opened := sql.Begin(database, requestContext, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    arguments: [5]Any = .[code, sender, now, "", ""]
+    claimed := sql.ExecTx(transaction, requestContext,
+        "UPDATE server_lumi_link_codes SET consumed_at=?3,telegram_id=?2 WHERE code=?1 AND expires>?3 AND consumed_at=0", arguments[0:3])
+    result.error = claimed.error
+    if result.error != null {
+        return result
+    }
+    changed := sql.RowsAffected(claimed.value)
+    result.error = changed.error
+    if result.error != null {
+        return result
+    }
+    account: string
+    expiry: s64
+    consumed: s64
+    destinations: [3]Any = .[*account, *expiry, *consumed]
+    row := sql.QueryRowTx(transaction, requestContext,
+        "SELECT account_id,expires,consumed_at FROM server_lumi_link_codes WHERE code=?1", arguments[0:1])
+    scanned := sql.ScanRow(row, destinations[:])
+    if scanned != null {
+        if scanned != sql.NoRows() {
+            result.error = scanned
+        }
+        return result
+    }
+    if changed.value != 1 {
+        if consumed > 0 {
+            result.status = "reused"
+        } else if expiry <= now {
+            result.status = "expired"
+        }
+        return result
+    }
+    arguments[3] = account
+    conflicts: s64
+    conflictDestination: [1]Any = .[*conflicts]
+    row = sql.QueryRowTx(transaction, requestContext,
+        "SELECT COUNT(*) FROM server_lumi_telegram WHERE (account_id=?4 AND telegram_id<>?2) OR (telegram_id=?2 AND account_id<>?4)", arguments[0:4])
+    result.error = sql.ScanRow(row, conflictDestination[:])
+    if result.error != null {
+        return result
+    }
+    if conflicts != 0 {
+        result.status = "conflicting_account"
+        return result
+    }
+    bound := sql.ExecTx(transaction, requestContext,
+        "INSERT INTO server_lumi_telegram(account_id,telegram_id,linked_at) VALUES(?4,?2,?3) ON CONFLICT(account_id) DO UPDATE SET telegram_id=excluded.telegram_id WHERE server_lumi_telegram.telegram_id=excluded.telegram_id", arguments[0:4])
+    result.error = bound.error
+    if result.error != null {
+        return result
+    }
+    changed = sql.RowsAffected(bound.value)
+    result.error = changed.error
+    if result.error != null || changed.value != 1 {
+        result.status = "conflicting_account"
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    if result.error == null {
+        result.status = "connected"
+    }
+    return result
+}
+
+Account :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request, action: string) {
+    user := auth.BearerUser(service.database, request, service.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, service.counters, user.authentication)
+        return
+    }
+    if service.configuration.LumiBotToken == "" || !Schema(service, request) {
+        response.Error(writer, cast(isize)503, "Lumi Telegram unavailable")
+        return
+    }
+    context := http.Context(request)
+    now := clock.Unix(clock.Now())
+    arguments: [4]Any = .[user.value, "", now, ""]
+    if action == "link" {
+        code := transport.Nonce()
+        if code.count != 32 {
+            response.Error(writer, cast(isize)503, "link unavailable")
+            return
+        }
+        arguments[1] = code
+        arguments[2] = now + 600
+        written := sql.Exec(service.database, context,
+            "INSERT INTO server_lumi_link_codes(code,account_id,expires) VALUES(?2,?1,?3)", arguments[0:3])
+        if written.error != null {
+            response.Error(writer, cast(isize)503, "link unavailable")
+            return
+        }
+        parts: [2]string = .["https://t.me/inlumi_bot?start=", code]
+        result := LinkResponse.{url = Join(parts[:], "")}
+        response.JSON(writer, cast(isize)200, result)
+        return
+    }
+    if action == "unlink" {
+        opened := sql.Begin(service.database, context, null)
+        if opened.error != null {
+            response.Error(writer, 503, "unlink unavailable")
+            return
+        }
+        transaction := opened.value
+        RollbackAtReturn(transaction)
+        written := sql.ExecTx(transaction, context,
+            "DELETE FROM server_lumi_telegram WHERE account_id=?1", arguments[0:1])
+        if written.error != null {
+            response.Error(writer, 503, "unlink unavailable")
+            return
+        }
+        values: [2]Any = .[user.value, now]
+        queries: [3]string = .[
+            "UPDATE server_authorization_grants SET revoked_at=?2 WHERE account_id=?1 AND revoked_at=0 AND request_id IN (SELECT request_id FROM server_authorization_requests WHERE bot_id>0)",
+            "UPDATE server_authorization_requests SET status='cancelled' WHERE account_id=?1 AND bot_id>0 AND status IN ('pending','claimed')",
+            "UPDATE server_lumi_link_codes SET expires=?2 WHERE account_id=?1 AND consumed_at=0 AND expires>?2",
+        ]
+        for query: queries {
+            written = sql.ExecTx(transaction, context, query, values[:])
+            if written.error != null {
+                response.Error(writer, 503, "unlink unavailable")
+                return
+            }
+        }
+        if sql.Commit(transaction) != null {
+            response.Error(writer, 503, "unlink unavailable")
+            return
+        }
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    if action == "ack" {
+        received := body.ReadJSON(writer, request, 256)
+        input: LumiReceipt
+        if received.error != null || json.Unmarshal(received.value, *input) != null || input.id == 0 || input.client.count != 64 {
+            response.Error(writer, cast(isize)400, "invalid receipt")
+            return
+        }
+        arguments[1] = input.id
+        arguments[2] = input.client
+        written := sql.Exec(service.database, context, "UPDATE server_lumi_updates SET done=1 WHERE account_id=?1 AND id=?2 AND executor=?3", arguments[0:3])
+        if written.error != null { response.Error(writer, cast(isize)503, "receipt unavailable"); return }
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    destination: s64
+    linkedAt: s64
+    destinations: [2]Any = .[*destination, *linkedAt]
+    row := sql.QueryRow(service.database, context, "SELECT telegram_id,linked_at FROM server_lumi_telegram WHERE account_id=?1", arguments[0:1])
+    linked := sql.ScanRow(row, destinations[:]) == null
+    if action == "poll" {
+        client := url.Value(url.Query(http.RequestURL(request)), "client")
+        if client.count != 64 {
+            response.Error(writer, cast(isize)400, "app client required")
+            return
+        }
+        // Feedback is delivered only to the configured immutable owner ID.
+        // A display name or user-chosen @alias cannot acquire this privilege.
+        if service.configuration.LumiOwnerID.count == 64 && user.value == service.configuration.LumiOwnerID {
+            written := sql.Exec(service.database, context,
+                "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text) SELECT -rowid,?1,'feedback',json_object('title',title,'message',message,'account_id',account_id,'report_id',id) FROM server_app_feedback WHERE app_id='inbe'", arguments[0:1])
+            if written.error != null { response.Error(writer, cast(isize)503, "feedback unavailable"); return }
+        }
+        result: LumiPoll
+        result.linked = linked
+        result.linked_at = linkedAt
+        updateDestinations: [4]Any = .[*result.update.id, *result.update.kind, *result.update.text, *result.update.choice]
+        // Only the claiming app executes this update. Another signed-in device
+        // gets its resulting conversation through encrypted sync.
+        arguments[1] = client
+        row = sql.QueryRow(service.database, context, "UPDATE server_lumi_updates SET executor=?2 WHERE account_id=?1 AND done=0 AND id=(SELECT id FROM server_lumi_updates WHERE account_id=?1 AND done=0 ORDER BY id LIMIT 1) AND (executor='' OR executor=?2) RETURNING id,kind,text,choice", arguments[0:2])
+        unused sql.ScanRow(row, updateDestinations[:])
+        response.JSON(writer, cast(isize)200, result)
+        return
+    }
+    if action != "publish" || !linked {
+        response.Error(writer, cast(isize)409, "Telegram is not linked")
+        return
+    }
+    received := body.ReadJSON(writer, request, 16384)
+    input: LumiMessage
+    if received.error != null || json.Unmarshal(received.value, *input) != null ||
+    input.id.count < 1 || input.id.count > 180 || input.text.count < 1 || input.text.count > 4096 ||
+    (input.draft != "" && input.draft.count != 32) {
+        response.Error(writer, cast(isize)400, "invalid message")
+        return
+    }
+    // Linking does not replay old messages unsolicited; /history opens them.
+    if input.time < linkedAt * 1000000 {
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    arguments[1] = input.id
+    claimed := sql.Exec(service.database, context, "INSERT OR IGNORE INTO server_lumi_deliveries(account_id,id,state) VALUES(?1,?2,'sending')", arguments[0:2])
+    if claimed.error != null { response.Error(writer, cast(isize)503, "delivery unavailable"); return }
+    changed := sql.RowsAffected(claimed.value)
+    if changed.error != null { response.Error(writer, cast(isize)503, "delivery unavailable"); return }
+    if changed.value == 0 {
+        state: string
+        stateDestination: [1]Any = .[*state]
+        row = sql.QueryRow(service.database, context, "SELECT state FROM server_lumi_deliveries WHERE account_id=?1 AND id=?2", arguments[0:2])
+        if sql.ScanRow(row, stateDestination[:]) != null || state != "sent" {
+            response.Error(writer, cast(isize)409, "delivery outcome requires inspection")
+            return
+        }
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    if !transport.Deliver(service.configuration.LumiBotToken, destination, input.text, input.draft, "") {
+        response.Error(writer, cast(isize)502, "delivery outcome requires inspection")
+        return
+    }
+    unused sql.Exec(service.database, context, "UPDATE server_lumi_deliveries SET state='sent' WHERE account_id=?1 AND id=?2", arguments[0:2])
+    response.JSON(writer, cast(isize)200, true)
+}
+
+Webhook :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request) {
+    if service.configuration.LumiBotToken == "" || service.configuration.LumiWebhookSecret == "" ||
+    !transport.WebhookTrusted(request, service.configuration.LumiWebhookSecret) {
+        response.Error(writer, cast(isize)401, "Telegram authentication required")
+        return
+    }
+    received := body.ReadJSON(writer, request, 32768)
+    update: TelegramUpdate
+    if received.error != null || json.Unmarshal(received.value, *update) != null || update.update_id <= 0 || !Schema(service, request) {
+        response.Error(writer, cast(isize)400, "invalid update")
+        return
+    }
+    message := update.message
+    sender := message.from
+    callback := update.callback_query
+    if callback.id != "" {
+        message = callback.message
+        sender = callback.from
+    }
+    if message.chat.type != "private" || sender.id <= 0 || sender.is_bot || message.chat.id != sender.id {
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    context := http.Context(request)
+    arguments: [5]Any = .[sender.id, "", clock.Unix(clock.Now()), "", ""]
+    parsed := commands.Parse(message.text)
+    if callback.id == "" && parsed.foreign {
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    text := parsed.message
+    if callback.id == "" && text.count == 39 && text[:7] == "/start " {
+        code := text[7:]
+        linked := ConsumeLink(service.database, context, code, sender.id, clock.Unix(clock.Now()))
+        if linked.error != null {
+            response.Error(writer, cast(isize)503, "link temporarily unavailable")
+            return
+        }
+        notice := "This connection code is invalid. Request a new code in Inner Breeze."
+        if linked.status == "connected" {
+            notice = "Telegram chat connected. Mini App access requires a separate approval in Inner Breeze."
+        } else if linked.status == "expired" {
+            notice = "This connection code expired. Request a new code in Inner Breeze."
+        } else if linked.status == "reused" {
+            notice = "This connection code was already used. Mini App access requires a separate approval in Inner Breeze."
+        } else if linked.status == "conflicting_account" {
+            notice = "This Telegram chat or account is already connected to a different account or chat. Disconnect it from the existing account first."
+        }
+        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", service.configuration.LumiCanvasURL)
+        response.JSON(writer, cast(isize)200, linked)
+        return
+    }
+    account: string
+    destination: [1]Any = .[*account]
+    row := sql.QueryRow(service.database, context, "SELECT account_id FROM server_lumi_telegram WHERE telegram_id=?1", arguments[0:1])
+    linked := sql.ScanRow(row, destination[:]) == null
+    if callback.id == "" && parsed.name == "help" {
+        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, commands.Help(linked), "", service.configuration.LumiCanvasURL)
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    if callback.id == "" && (parsed.name == "start" || parsed.name == "app" || parsed.name == "history") {
+        notice := ifx linked then "Open Inner Breeze for your full Lumi history and app controls. Messages here use the same account chat." else "Open Inner Breeze, sign in to your account, then choose Chat on Telegram in Lumi to link this private chat. Keep your private key inside the app."
+        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", service.configuration.LumiCanvasURL)
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    if !linked {
+        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, "Link your account from Lumi in Inner Breeze first.", "", service.configuration.LumiCanvasURL)
+        response.JSON(writer, cast(isize)200, true)
+        return
+    }
+    if callback.id == "" && text.count > 0 && text[0] == cast(u8)47 {
+        notice: string
+        if !commands.Known(parsed.name) {
+            notice = "Unknown command. Use /help to see Lumi's commands, or send a normal chat message."
+        } else {
+            usage := commands.Usage(parsed.name)
+            if usage != "" && !parsed.has_argument {
+                parts: [2]string = .["Use ", usage]
+                notice = Join(parts[:], "")
+            }
+        }
+        if notice != "" {
+            unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", "")
+            response.JSON(writer, cast(isize)200, true)
+            return
+        }
+    }
+    kind := "message"
+    choice: isize
+    if callback.id != "" {
+        if callback.data.count != 33 || (callback.data[0] != cast(u8)89 && callback.data[0] != cast(u8)78) {
+            response.JSON(writer, cast(isize)200, true)
+            return
+        }
+        kind = "confirmation"
+        text = callback.data[1:]
+        choice = ifx callback.data[0] == cast(u8)89 then 1 else 2
+        unused transport.AnswerCallback(service.configuration.LumiBotToken, callback.id)
+    }
+    if text.count == 0 || text.count >= 1024 {
+        response.Error(writer, cast(isize)400, "message too long")
+        return
+    }
+    arguments[0] = update.update_id
+    arguments[1] = account
+    arguments[2] = kind
+    arguments[3] = text
+    arguments[4] = choice
+    written := sql.Exec(service.database, context,
+        "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text,choice) VALUES(?1,?2,?3,?4,?5)", arguments[:])
+    if written.error != null { response.Error(writer, cast(isize)503, "app queue unavailable"); return }
+    response.JSON(writer, cast(isize)200, true)
+}

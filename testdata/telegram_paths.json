@@ -1,0 +1,134 @@
+{
+  "/api/v1/lumi/telegram/link": {
+    "post": {
+      "summary": "Create a one-use Lumi Telegram account link",
+      "description": "Authenticated account only. The link expires after ten minutes. Account signing keys stay in the app.",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Bot deep link"
+        },
+        "401": {
+          "description": "Sign in required"
+        },
+        "503": {
+          "description": "Bot unavailable"
+        }
+      }
+    },
+    "delete": {
+      "summary": "Disconnect the account's Telegram chat",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Disconnected"
+        },
+        "401": {
+          "description": "Sign in required"
+        }
+      }
+    }
+  },
+  "/api/v1/lumi/telegram/updates": {
+    "get": {
+      "summary": "Claim the next app action or owner feedback message",
+      "description": "Requires a stable 64-character app client identifier. Each update belongs to one executor. Owner feedback is restricted to the configured immutable account ID.",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "client",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Link status and next claimed update"
+        },
+        "400": {
+          "description": "Invalid client"
+        },
+        "401": {
+          "description": "Sign in required"
+        }
+      }
+    }
+  },
+  "/api/v1/lumi/telegram/ack": {
+    "post": {
+      "summary": "Acknowledge an action claimed by this app client",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Acknowledged"
+        },
+        "400": {
+          "description": "Invalid receipt"
+        },
+        "401": {
+          "description": "Sign in required"
+        }
+      }
+    }
+  },
+  "/api/v1/lumi/telegram/messages": {
+    "post": {
+      "summary": "Mirror a new Lumi conversation message to the linked Telegram chat",
+      "description": "Idempotent per account and message ID. Pending feedback carries Yes/No buttons. Messages from before linking are not replayed unsolicited. An uncertain external send is kept for inspection instead of automatically duplicated.",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Delivered or previously delivered"
+        },
+        "409": {
+          "description": "Unlinked or delivery needs inspection"
+        },
+        "502": {
+          "description": "Telegram delivery needs inspection"
+        }
+      }
+    }
+  },
+  "/api/v1/lumi/telegram/webhook": {
+    "post": {
+      "summary": "Accept private-chat updates from the dedicated Lumi bot",
+      "description": "Requires X-Telegram-Bot-Api-Secret-Token. Only numeric sender identities in their own private chats are accepted. Duplicate update IDs cannot execute a second action.",
+      "responses": {
+        "200": {
+          "description": "Accepted or ignored"
+        },
+        "400": {
+          "description": "Invalid update"
+        },
+        "401": {
+          "description": "Webhook authentication required"
+        }
+      }
+    }
+  }
+}

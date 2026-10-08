@@ -9,6 +9,8 @@ json :: #import "std/json_go";
 url :: #import "std/url_go";
 response :: #import "response";
 chat_paths :: #import "chat_paths";
+telegram_paths :: #import "telegram_paths";
+authorization_paths :: #import "authorization_paths";
 package_paths :: #import "package_paths";
 go_sync :: #system_library "go:sync";
 go_format :: #system_library "go:fmt";
@@ -2094,6 +2096,20 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/feedback", MapGet(additions, "/api/v1/feedback"))
     MapSet(result, "/api/v1/admin/feedback", MapGet(additions, "/api/v1/admin/feedback"))
     MapSet(result, "/api/v1/admin/feedback/reply", MapGet(additions, "/api/v1/admin/feedback/reply"))
+    telegram := telegram_paths.Paths()
+    telegramNames: [5]string = .["/api/v1/lumi/telegram/link", "/api/v1/lumi/telegram/updates",
+        "/api/v1/lumi/telegram/ack", "/api/v1/lumi/telegram/messages", "/api/v1/lumi/telegram/webhook"]
+    for name: telegramNames {
+        MapSet(result, name, MapGet(telegram, name))
+    }
+    authorization := authorization_paths.Paths()
+    authorizationNames: [10]string = .["/api/v1/authorization/requests", "/api/v1/authorization/rendezvous",
+        "/api/v1/authorization/cancel", "/api/v1/authorization/claim", "/api/v1/authorization/approve",
+        "/api/v1/authorization/revoke", "/api/v1/authorization/challenge", "/api/v1/authorization/session",
+        "/api/v1/delegated/sync", "/api/v1/delegated/ws"]
+    for name: authorizationNames {
+        MapSet(result, name, MapGet(authorization, name))
+    }
     packages := package_paths.Paths()
     MapSet(result, "/api/v1/packages/{app_id}/{asset}", MapGet(packages, "/api/v1/packages/{app_id}/{asset}"))
     MapSet(result, "/api/v2/packages/{app_id}/{asset}", MapGet(packages, "/api/v2/packages/{app_id}/{asset}"))

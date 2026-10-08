@@ -1,0 +1,57 @@
+{
+  "/api/v1/authorization/requests": {"post": {
+    "summary": "Owner initiates a ten-minute delegate rendezvous",
+    "description": "Requires the owner bearer and unchanged protocol-v6 ML-DSA/device transaction signature. Exact registered collection read/write scopes only. Telegram requests bind the existing numeric chat connection. URLs may carry the expiring rendezvous ID only.",
+    "security": [{"bearerAuth": []}],
+    "responses": {"200": {"description": "Pending rendezvous and proof challenge"}, "401": {"description": "Owner signatures required"}, "409": {"description": "Telegram chat must be linked"}}
+  }},
+  "/api/v1/authorization/rendezvous": {"post": {
+    "summary": "Read an expiring rendezvous by ID",
+    "description": "Unauthenticated holders receive only request/grant IDs, app, node/audience, expiry, fresh challenge and status. Full account, numeric Telegram identity, scopes and claimed keys require the matching owner bearer. Never returns a session credential or private key. Issuing-node-only.",
+    "responses": {"200": {"description": "Pairing status"}, "410": {"description": "Wrong node, missing or expired rendezvous"}}
+  }},
+  "/api/v1/authorization/cancel": {"post": {
+    "summary": "Owner cancels a pending or claimed rendezvous",
+    "security": [{"bearerAuth": []}],
+    "description": "Requires an owner protocol-v6 signed request. A cancelled rendezvous cannot be claimed or approved.",
+    "responses": {"200": {"description": "Cancelled"}, "401": {"description": "Owner signatures required"}, "409": {"description": "Already completed or unavailable"}}
+  }},
+  "/api/v1/authorization/claim": {"post": {
+    "summary": "Delegate proves its separate signing and encryption public keys",
+    "description": "Ed25519 proof binds the full rendezvous and both public keys. Telegram claims require raw server-validated production initData for the bound bot and numeric sender; initData is one-use, five-minute maximum age and never accepted from the future. Chat linking alone does not authorize this session.",
+    "responses": {"200": {"description": "Delegate claimed; owner approval still required"}, "401": {"description": "Key or Telegram proof rejected"}, "409": {"description": "Expired, cancelled, conflicting or replayed claim"}}
+  }},
+  "/api/v1/authorization/approve": {"post": {
+    "summary": "Owner signs one finite delegate grant",
+    "description": "Owner ML-DSA signature binds account, grant, claimed delegate Ed25519 and ML-KEM-768 keys, registered app/client, node/audience, exact collection, approved visibility, read/write operations, key generation, opaque encrypted collection-key envelope, timestamps, nonce and optional verified Telegram identity. Maximum lifetime is thirty days. Known Inbe private v1 collections sharing the global key are refused. No chaining, broad bearer, account export/delete, payment or unlisted operations.",
+    "security": [{"bearerAuth": []}],
+    "responses": {"200": {"description": "Signed grant accepted"}, "401": {"description": "Owner grant signature rejected"}, "403": {"description": "Scope or current app policy mismatch"}, "409": {"description": "Does not match claimed request or already issued"}}
+  }},
+  "/api/v1/authorization/revoke": {"post": {
+    "summary": "Owner revokes future delegate access and renewal",
+    "description": "Requires an owner protocol-v6 signed request. Revocation is checked on every request and socket notification. Previously received plaintext cannot be erased. Telegram disconnect also revokes its grants.",
+    "security": [{"bearerAuth": []}],
+    "responses": {"200": {"description": "Revoked"}, "401": {"description": "Owner signatures required"}, "404": {"description": "Owned grant not found"}}
+  }},
+  "/api/v1/authorization/challenge": {"post": {
+    "summary": "Request a fresh ninety-second session challenge",
+    "description": "Grant ID is public metadata. Active grant, current app policy and issuing node are rechecked. A challenge alone grants no access.",
+    "responses": {"200": {"description": "Fresh key-proof challenge"}, "401": {"description": "Expired, revoked or unavailable on this node"}}
+  }},
+  "/api/v1/authorization/session": {"post": {
+    "summary": "Exchange a one-use delegate-key proof for a five-minute session",
+    "description": "Ed25519 proof consumes the fresh challenge atomically. Returns the signed grant, public owner key, opaque approved collection-key envelopes and a key-bound credential; the credential is never accepted by broad BearerUser. Renewal requires another fresh challenge and proof.",
+    "responses": {"200": {"description": "Key-bound short session"}, "401": {"description": "Wrong key or inactive grant"}, "409": {"description": "Expired or reused challenge"}}
+  }},
+  "/api/v1/delegated/sync": {"post": {
+    "summary": "Read or write one exact approved encrypted collection/key generation",
+    "description": "Authorization: Delegate ds1.<session-id> plus X-Daochi-Delegate Ed25519 proof. Proof binds grant/session/account/app/client/node/audience/challenge, method, normalized path/query, body SHA-256, expiry and unique nonce. Replay claim and mutations commit together. Scoped validation reuses sync v6. Reads, cursors and truncation filter key_id; delegates cannot overwrite records rotated to another key. No full snapshots, plaintext data, deletion or extra routes. This custom proof protocol is not OAuth DPoP. Other nodes and partitions fail closed.",
+    "responses": {"200": {"description": "Scoped records and cursor"}, "401": {"description": "Invalid proof or inactive session/grant"}, "403": {"description": "Operation, collection, app policy or key generation outside scope"}, "409": {"description": "Request replayed"}}
+  }},
+  "/api/v1/delegated/ws": {"get": {
+    "summary": "Observe one approved collection/key generation",
+    "description": "Fresh signed GET proof with normalized collection query is consumed atomically. Browser credentials are supplied in daochi.delegate.<base64url-proof> and daochi.session.<session-id> subprotocols, never URLs. Events expose only the approved collection generation's version; grants, app policy, node and session expiry are checked before notifications. Revocation closes the socket.",
+    "parameters": [{"name": "collection", "in": "query", "required": true, "schema": {"type": "string"}}],
+    "responses": {"101": {"description": "Scoped socket"}, "401": {"description": "Key proof or active session required"}, "403": {"description": "Collection outside grant"}, "409": {"description": "Handshake proof replayed"}}
+  }}
+}

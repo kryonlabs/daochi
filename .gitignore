@@ -1,4 +1,5 @@
 build/
+backup/
 __pycache__/
 ziran.local.toml
 lyra

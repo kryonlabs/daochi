@@ -1,0 +1,152 @@
+// Validate raw Telegram initData on the bot's backend. Neither display names
+// nor initDataUnsafe can identify an account. Production signatures are pinned.
+#import "std/go_types"
+#import "std/map_go"
+authorization :: #import "authorization";
+strict :: #import "strict_json";
+codec :: #import "codec";
+signing :: #import "signing";
+hmac :: #import "std/hmac_sha256_go";
+constant :: #import "std/constant_time";
+text :: #import "std/text_go";
+json :: #import "std/json_go";
+keys :: #import "std/ed25519_go";
+native_url :: #system_library "go:net/url";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+sort :: #system_library "go:sort";
+builtin :: #system_library "go:builtin";
+
+TelegramInitIdentity :: struct {
+    botID: s64
+    userID: s64
+    authDate: s64
+    digest: string
+    valid: bool
+}
+
+#scope_file
+Unescaped :: struct {
+    value: string
+    error: Error
+}
+Integer :: struct {
+    value: s64
+    error: Error
+}
+InitUser :: struct {
+    id: s64 #go_tag "json:\"id\""
+    isBot: bool #go_tag "json:\"is_bot\""
+}
+Split :: (value: string, separator: string) -> []string #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+ContainsAny :: (value: string, characters: string) -> bool #foreign strings;
+Unescape :: (value: string) -> Unescaped #go_results #foreign native_url "QueryUnescape";
+ParseInteger :: (value: string, base: isize, bits: isize) -> Integer #go_results #foreign numbers "ParseInt";
+FormatInteger :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
+Sort :: (values: []string) #foreign sort "Strings";
+Append :: (values: []string, value: string) -> []string #foreign builtin "append";
+
+#scope_export
+BotID :: (token: string) -> s64 {
+    parts := Split(token, ":")
+    if parts.count != 2 || parts[1].count < 1 {
+        return 0
+    }
+    parsed := ParseInteger(parts[0], 10, 64)
+    if parsed.error != null || parsed.value <= 0 || FormatInteger(parsed.value, 10) != parts[0] {
+        return 0
+    }
+    return parsed.value
+}
+
+// The verification key parameter is used only by synthetic tests; production
+// callers use Validate, which selects the fixed Telegram production key.
+ValidateWithKey :: (raw: string, token: string, now: s64,
+    productionKey: string) -> TelegramInitIdentity {
+    result: TelegramInitIdentity
+    result.botID = BotID(token)
+    if raw.count < 1 || raw.count > 16384 || result.botID == 0 {
+        return result
+    }
+    fields: Map(string, string)
+    seen: Map(string, bool)
+    names: []string
+    for pair: Split(raw, "&") {
+        parts := Split(pair, "=")
+        if parts.count != 2 {
+            return result
+        }
+        name := Unescape(parts[0])
+        value := Unescape(parts[1])
+        if name.error != null || value.error != null || name.value.count == 0 ||
+            ContainsAny(name.value, "\n\r\x00=") || ContainsAny(value.value, "\n\r\x00") ||
+            MapGet(seen, name.value) {
+            return result
+        }
+        MapSet(seen, name.value, true)
+        MapSet(fields, name.value, value.value)
+        names = Append(names, name.value)
+    }
+    if !authorization.HexID(MapGet(fields, "hash"), 64) || MapGet(fields, "auth_date") == "" || MapGet(fields, "user") == "" {
+        return result
+    }
+    Sort(names)
+    hmacFields: []string
+    signatureFields: []string
+    for name: names {
+        if name != "hash" {
+            parts: [3]string = .[name, "=", MapGet(fields, name)]
+            line := Join(parts[:], "")
+            hmacFields = Append(hmacFields, line)
+            if name != "signature" {
+                signatureFields = Append(signatureFields, line)
+            }
+        }
+    }
+    secret := hmac.HMACSHA256(text.ToBytes("WebAppData"), token)
+    digest := hmac.HMACSHA256(text.ToBytes(secret.value), Join(hmacFields, "\n"))
+    received := codec.DecodeBinaryField(MapGet(fields, "hash"))
+    if secret.error != "" || digest.error != "" || received.error != "" ||
+        !constant.ConstantTimeTextEqual(digest.value, received.value) {
+        return result
+    }
+    if MapGet(seen, "signature") {
+        key := codec.DecodeBinaryField(productionKey)
+        signature := codec.DecodeBase64(MapGet(fields, "signature"), true, false)
+        if signature.error != "" {
+            signature = codec.DecodeBase64(MapGet(fields, "signature"), true, true)
+        }
+        parts: [4]string = .[FormatInteger(result.botID, 10), ":WebAppData\n",
+            Join(signatureFields, "\n"), ""]
+        if key.error != "" || key.value.count != 32 || signature.error != "" ||
+            signature.value.count != 64 ||
+            !keys.Verify(cast(keys.PublicKey)text.ToBytes(key.value), text.ToBytes(Join(parts[:], "")),
+                text.ToBytes(signature.value)) {
+            return result
+        }
+    }
+    parsed := ParseInteger(MapGet(fields, "auth_date"), 10, 64)
+    if parsed.error != null || FormatInteger(parsed.value, 10) != MapGet(fields, "auth_date") ||
+        parsed.value <= now - 300 || parsed.value > now ||
+        !strict.Valid(MapGet(fields, "user")) {
+        return result
+    }
+    user: InitUser
+    if json.Unmarshal(text.ToBytes(MapGet(fields, "user")), *user) != null ||
+        user.id <= 0 || user.id > 4503599627370495 || user.isBot {
+        return result
+    }
+    result.authDate = parsed.value
+    result.userID = user.id
+    // Hash the signed content, not the raw URL encoding, for replay detection.
+    replay: [3]string = .[FormatInteger(result.botID, 10), "\n", Join(hmacFields, "\n")]
+    result.digest = signing.SHA256Hex(text.ToBytes(Join(replay[:], "")))
+    result.valid = true
+    return result
+}
+
+Validate :: (raw: string, token: string, now: s64) -> TelegramInitIdentity {
+    return ValidateWithKey(raw, token, now,
+        "e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d")
+}

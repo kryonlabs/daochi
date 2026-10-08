@@ -1,0 +1,87 @@
+// Security messages reject duplicate (including escaped) object keys and
+// unknown protocol fields rather than relying on last-field-wins decoding.
+#import "std/go_types"
+#import "std/map_go"
+scan :: #import "std/json_scan";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+io :: #import "std/io_go";
+native :: #system_library "go:encoding/json";
+strings :: #system_library "go:strings";
+
+#scope_file
+StrictDecoder :: #type #foreign native "Decoder";
+TextReader :: #type #foreign strings "Reader";
+NewReader :: (value: string) -> *TextReader #foreign strings;
+NewDecoder :: (reader: io.Reader) -> *StrictDecoder #foreign native;
+DisallowUnknownFields :: (decoder: *StrictDecoder) #foreign native "(*Decoder).DisallowUnknownFields";
+DecodeValue :: (decoder: *StrictDecoder, target: Any) -> Error #foreign native "(*Decoder).Decode";
+
+UniqueValueEnd :: (document: string, at: s32, depth: s32) -> s32 {
+    at = scan.Space(document, at)
+    if depth > 32 || at < 0 || at >= document.count {
+        return -1
+    }
+    byte := document[at]
+    if byte != cast(u8)123 && byte != cast(u8)91 {
+        return scan.ValueEnd(document, at, depth)
+    }
+    object := byte == cast(u8)123
+    ending := ifx object then cast(u8)125 else cast(u8)93
+    cursor := scan.Space(document, at + 1)
+    keys: Map(string, bool)
+    while cursor < document.count && document[cursor] != ending {
+        if object {
+            span := scan.ReadString(document, cursor)
+            keyBytes: [128]u8
+            count := scan.ReadStringText(document, cursor, keyBytes[:])
+            if !span.valid || count < 0 {
+                return -1
+            }
+            key := text.FromBytes(keyBytes[0:count])
+            if MapGet(keys, key) {
+                return -1
+            }
+            MapSet(keys, key, true)
+            cursor = scan.Space(document, span.after)
+            if cursor >= document.count || document[cursor] != cast(u8)58 {
+                return -1
+            }
+            cursor = scan.Space(document, cursor + 1)
+        }
+        cursor = UniqueValueEnd(document, cursor, depth + 1)
+        if cursor < 0 {
+            return -1
+        }
+        cursor = scan.Space(document, cursor)
+        if cursor < document.count && document[cursor] == cast(u8)44 {
+            cursor = scan.Space(document, cursor + 1)
+        } else {
+            break
+        }
+    }
+    if cursor >= document.count || document[cursor] != ending {
+        return -1
+    }
+    return cursor + 1
+}
+
+#scope_export
+Valid :: (document: string) -> bool {
+    if document.count == 0 || document.count > 1048576 || !json.Valid(text.ToBytes(document)) {
+        return false
+    }
+    end := UniqueValueEnd(document, 0, 0)
+    return end >= 0 && scan.Space(document, end) == document.count
+}
+
+Decode :: (raw: []u8, target: Any) -> Error {
+    document := text.FromBytes(raw)
+    if !Valid(document) {
+        return errors.New("invalid or duplicate JSON fields")
+    }
+    decoder := NewDecoder(cast(io.Reader)NewReader(document))
+    DisallowUnknownFields(decoder)
+    return DecodeValue(decoder, target)
+}

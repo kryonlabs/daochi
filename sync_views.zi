@@ -219,6 +219,7 @@ ReadSocial :: (rows: *sql.Rows) -> SocialSnapshotsResult {
     return result
 }
 
+#scope_export
 ReadRecords :: (rows: *sql.Rows) -> RecordsResult {
     result: RecordsResult
     values := AllocateRecords(cast(isize)0)
@@ -236,6 +237,7 @@ ReadRecords :: (rows: *sql.Rows) -> RecordsResult {
     return result
 }
 
+#scope_file
 ReadOperations :: (rows: *sql.Rows) -> OperationsResult {
     result: OperationsResult
     values := AllocateOperations(cast(isize)0)

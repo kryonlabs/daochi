@@ -60,6 +60,10 @@ type Config struct {
 	TokenDirectPurchasesEnabled     bool
 	ChatAPIKey                      string
 	ChatAPIEndpoint                 string
+	LumiBotToken                    string
+	LumiWebhookSecret               string
+	LumiOwnerID                     string
+	LumiCanvasURL                   string
 	FeedbackToken                   string
 	ChatModel                       string
 	ChatDailyLimit                  int64
@@ -317,6 +321,10 @@ func Config_Load() Config {
 	result.ChatAPIKey = Config_EnvStringOrFile("DAOCHI_CHAT_API_KEY", "DAOCHI_CHAT_API_KEY_FILE", "")
 	result.ChatAPIEndpoint = Config_EnvString("DAOCHI_CHAT_ENDPOINT", "")
 	result.FeedbackToken = Config_EnvStringOrFile("DAOCHI_FEEDBACK_TOKEN", "DAOCHI_FEEDBACK_TOKEN_FILE", "")
+	result.LumiBotToken = Config_EnvStringOrFile("DAOCHI_LUMI_BOT_TOKEN", "DAOCHI_LUMI_BOT_TOKEN_FILE", "")
+	result.LumiWebhookSecret = Config_EnvStringOrFile("DAOCHI_LUMI_WEBHOOK_SECRET", "DAOCHI_LUMI_WEBHOOK_SECRET_FILE", "")
+	result.LumiOwnerID = Config_EnvString("DAOCHI_LUMI_OWNER_ID", "")
+	result.LumiCanvasURL = Config_EnvString("DAOCHI_LUMI_CANVAS_URL", "https://inbe.waozi.xyz/build/telegram/index.html")
 	result.ChatModel = Config_EnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash")
 	result.ChatDailyLimit = Config_EnvInt64("DAOCHI_CHAT_DAILY_LIMIT", 20)
 	result.ChatGlobalDailyLimit = Config_EnvInt64("DAOCHI_CHAT_GLOBAL_DAILY_LIMIT", 1000)

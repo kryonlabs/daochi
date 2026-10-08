@@ -1,0 +1,233 @@
+// Five-minute issuing-node-only sessions require an Ed25519 request proof.
+// This custom protocol uses sender-constrained proof/replay principles; it is
+// not an implementation of OAuth DPoP and is never accepted by BearerUser.
+#import "std/go_types"
+authorization :: #import "authorization";
+auth :: #import "authentication";
+codec :: #import "codec";
+signing :: #import "signing";
+keys :: #import "std/ed25519_go";
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+json :: #import "std/json_go";
+strict :: #import "strict_json";
+text :: #import "std/text_go";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+clock :: #import "std/time_go";
+identity :: #import "identity";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+native_url :: #system_library "go:net/url";
+
+SessionChallenge :: struct {
+    grantID: string #go_tag "json:\"grant_id\""
+    challenge: string #go_tag "json:\"challenge\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+}
+SessionRequest :: struct {
+    grantID: string #go_tag "json:\"grant_id\""
+    challenge: string #go_tag "json:\"challenge\""
+    signature: string #go_tag "json:\"signature\""
+}
+SessionCredential :: struct {
+    sessionID: string #go_tag "json:\"session_id\""
+    grantID: string #go_tag "json:\"grant_id\""
+    challenge: string #go_tag "json:\"challenge\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+}
+RequestProof :: struct {
+    version: isize #go_tag "json:\"version\""
+    grantID: string #go_tag "json:\"grant_id\""
+    sessionID: string #go_tag "json:\"session_id\""
+    accountID: string #go_tag "json:\"account_id\""
+    appID: string #go_tag "json:\"app_id\""
+    clientID: string #go_tag "json:\"client_id\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
+    challenge: string #go_tag "json:\"challenge\""
+    method: string #go_tag "json:\"method\""
+    path: string #go_tag "json:\"path\""
+    query: string #go_tag "json:\"query\""
+    bodySHA256: string #go_tag "json:\"body_sha256\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+    nonce: string #go_tag "json:\"nonce\""
+    signature: string #go_tag "json:\"signature\""
+}
+ScopedPrincipal :: struct {
+    grant: authorization.Grant
+    expiresAt: s64
+    authentication: auth.AuthenticationResult
+}
+
+#scope_file
+Join :: (values: []string, separator: string) -> string #foreign strings;
+FormatInteger :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
+RawQuery :: (value: *url.URL) -> string #go_field #foreign native_url "(*URL).RawQuery";
+Split :: (value: string, separator: string) -> []string #foreign strings;
+TrimSpace :: (value: string) -> string #foreign strings;
+
+#scope_export
+ChallengeMessage :: (value: SessionChallenge) -> string {
+    fields: [7]string = .["daochi-session-v1", value.grantID, value.challenge,
+        value.nodeID, value.audience, FormatInteger(value.expiresAt, 10), ""]
+    return Join(fields[:], "\n")
+}
+
+ProofMessage :: (proof: RequestProof) -> string {
+    fields: [18]string = .["daochi-delegate-request-v1", "1", proof.grantID,
+        proof.sessionID, proof.accountID, proof.appID, proof.clientID,
+        proof.nodeID, proof.audience, proof.challenge, proof.method, proof.path,
+        proof.query, proof.bodySHA256, FormatInteger(proof.expiresAt, 10),
+        proof.nonce, "", ""]
+    // A single trailing newline is part of the protocol fixture.
+    return Join(fields[0:17], "\n")
+}
+
+VerifyKeyProof :: (publicKey: string, message: string, signatureText: string) -> bool {
+    if !authorization.HexID(publicKey, 64) || !authorization.HexID(signatureText, 128) {
+        return false
+    }
+    key := codec.DecodeBinaryField(publicKey)
+    signature := codec.DecodeBinaryField(signatureText)
+    return key.error == "" && signature.error == "" &&
+        keys.Verify(cast(keys.PublicKey)text.ToBytes(key.value), text.ToBytes(message),
+            text.ToBytes(signature.value))
+}
+
+ValidQuery :: (request: *http.Request, query: string) -> bool {
+    if query != RawQuery(http.RequestURL(request)) {
+        return false
+    }
+    if url.Path(http.RequestURL(request)) != "/api/v1/delegated/ws" {
+        return query == ""
+    }
+    // The only admitted query has an ASCII collection value, so its unique
+    // encoding is also its normalized form. Escapes and duplicate keys fail.
+    collection := url.Value(url.Query(http.RequestURL(request)), "collection")
+    fields: [2]string = .["collection=", collection]
+    return identity.ValidEncryptedHierarchyCollection(collection) &&
+        query == Join(fields[:], "")
+}
+
+SocketHeaders :: (request: *http.Request) -> bool {
+    headers := http.Headers(request)
+    proof := http.HeaderValue(headers, "X-Daochi-Delegate")
+    credential := http.HeaderValue(headers, "Authorization")
+    for protocol: Split(http.HeaderValue(headers, "Sec-WebSocket-Protocol"), ",") {
+        fields := Split(TrimSpace(protocol), ".")
+        if fields.count == 3 && fields[0] == "daochi" && fields[1] == "delegate" {
+            decoded := codec.DecodeBase64(fields[2], true, false)
+            if decoded.error != "" || proof != "" || decoded.value.count > 4096 {
+                return false
+            }
+            proof = decoded.value
+        } else if fields.count == 3 && fields[0] == "daochi" && fields[1] == "session" {
+            if !authorization.HexID(fields[2], 32) || credential != "" {
+                return false
+            }
+            parts: [2]string = .["Delegate ds1.", fields[2]]
+            credential = Join(parts[:], "")
+        }
+    }
+    http.SetHeader(headers, "X-Daochi-Delegate", proof)
+    http.SetHeader(headers, "Authorization", credential)
+    return proof != "" && credential != ""
+}
+
+// Callers commit the replay claim with their mutation or scoped read. Rollback
+// leaves neither a partial write nor a permanently burned request nonce.
+AuthenticateTx :: (transaction: *sql.Transaction, context: ctx.Context,
+    request: *http.Request, body: []u8, nodeID: string, audience: string) -> ScopedPrincipal {
+    result: ScopedPrincipal
+    headers := http.Headers(request)
+    header := http.HeaderValue(headers, "X-Daochi-Delegate")
+    proof: RequestProof
+    now := clock.Unix(clock.Now())
+    if header.count == 0 || header.count > 4096 ||
+        strict.Decode(text.ToBytes(header), *proof) != null || proof.version != 1 ||
+        !authorization.HexID(proof.sessionID, 32) ||
+        !authorization.HexID(proof.grantID, 32) ||
+        !authorization.HexID(proof.nonce, 32) ||
+        proof.nodeID != nodeID || proof.audience != audience ||
+        proof.expiresAt <= now || proof.expiresAt > now + 60 ||
+        proof.method != http.Method(request) || proof.path != url.Path(http.RequestURL(request)) ||
+        url.EscapedPath(http.RequestURL(request)) != proof.path ||
+        !ValidQuery(request, proof.query) ||
+        proof.bodySHA256 != signing.SHA256Hex(body) {
+        result.authentication = auth.Failure(401, "invalid delegate request proof")
+        return result
+    }
+    credential: [2]string = .["Delegate ds1.", proof.sessionID]
+    if http.HeaderValue(headers, "Authorization") != Join(credential[:], "") {
+        result.authentication = auth.Failure(401, "delegate session required")
+        return result
+    }
+    arguments: [3]Any = .[proof.sessionID, proof.grantID, now]
+    locked := sql.ExecTx(transaction, context,
+        "UPDATE server_authorization_sessions SET expires_at=expires_at WHERE session_id=?1 AND grant_id=?2 AND expires_at>?3", arguments[:])
+    if locked.error != null {
+        result.authentication = auth.NativeFailure(locked.error)
+        return result
+    }
+    changed := sql.RowsAffected(locked.value)
+    if changed.error != null || changed.value != 1 {
+        result.authentication = auth.Failure(401, "delegate session expired")
+        return result
+    }
+    challenge: string
+    destinations: [2]Any = .[*challenge, *result.expiresAt]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT challenge,expires_at FROM server_authorization_sessions WHERE session_id=?1 AND grant_id=?2", arguments[0:2])
+    if sql.ScanRow(row, destinations[:]) != null || proof.challenge != challenge ||
+        proof.expiresAt > result.expiresAt {
+        result.authentication = auth.Failure(401, "delegate session mismatch")
+        return result
+    }
+    active := authorization.ActiveGrant(transaction, context, proof.grantID, nodeID, audience, now)
+    result.authentication = active.authentication
+    if result.authentication.error != null || result.authentication.status != 0 {
+        return result
+    }
+    grant := active.value
+    if proof.accountID != grant.accountID || proof.appID != grant.appID ||
+        proof.clientID != grant.clientID ||
+        !VerifyKeyProof(grant.signingKey, ProofMessage(proof), proof.signature) {
+        result.authentication = auth.Failure(401, "delegate signature rejected")
+        return result
+    }
+    userHeader := http.HeaderValue(headers, "X-Daochi-User")
+    if userHeader != "" && userHeader != grant.accountID {
+        result.authentication = auth.Failure(401, "delegate account mismatch")
+        return result
+    }
+    arguments[0] = grant.grantID
+    arguments[1] = proof.nonce
+    arguments[2] = proof.expiresAt
+    cutoff: [1]Any = .[now]
+    pruned := sql.ExecTx(transaction, context,
+        "DELETE FROM server_authorization_nonces WHERE expires_at<?1", cutoff[:])
+    if pruned.error != null {
+        result.authentication = auth.NativeFailure(pruned.error)
+        return result
+    }
+    claimed := sql.ExecTx(transaction, context,
+        "INSERT INTO server_authorization_nonces(grant_id,nonce,expires_at) VALUES(?1,?2,?3) ON CONFLICT(grant_id,nonce) DO NOTHING", arguments[:])
+    if claimed.error != null {
+        result.authentication = auth.NativeFailure(claimed.error)
+        return result
+    }
+    changed = sql.RowsAffected(claimed.value)
+    if changed.error != null {
+        result.authentication = auth.NativeFailure(changed.error)
+        return result
+    }
+    if changed.value != 1 {
+        result.authentication = auth.Failure(409, "delegate request replayed")
+        return result
+    }
+    result.grant = grant
+    return result
+}

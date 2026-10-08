@@ -61,6 +61,10 @@ type BaselineConfig struct {
 	TokenDirectPurchasesEnabled     bool
 	ChatAPIKey                      string
 	ChatAPIEndpoint                 string
+	LumiBotToken                    string
+	LumiWebhookSecret               string
+	LumiOwnerID                     string
+	LumiCanvasURL                   string
 	FeedbackToken                   string
 	ChatModel                       string
 	ChatDailyLimit                  int64
@@ -144,6 +148,10 @@ func baselineLoadConfig() BaselineConfig {
 		ChatAPIKey:                      baselineEnvStringOrFile("DAOCHI_CHAT_API_KEY", "DAOCHI_CHAT_API_KEY_FILE", ""),
 		ChatAPIEndpoint:                 baselineEnvString("DAOCHI_CHAT_ENDPOINT", ""),
 		FeedbackToken:                   baselineEnvStringOrFile("DAOCHI_FEEDBACK_TOKEN", "DAOCHI_FEEDBACK_TOKEN_FILE", ""),
+		LumiBotToken:                    baselineEnvStringOrFile("DAOCHI_LUMI_BOT_TOKEN", "DAOCHI_LUMI_BOT_TOKEN_FILE", ""),
+		LumiWebhookSecret:               baselineEnvStringOrFile("DAOCHI_LUMI_WEBHOOK_SECRET", "DAOCHI_LUMI_WEBHOOK_SECRET_FILE", ""),
+		LumiOwnerID:                     baselineEnvString("DAOCHI_LUMI_OWNER_ID", ""),
+		LumiCanvasURL:                   baselineEnvString("DAOCHI_LUMI_CANVAS_URL", "https://inbe.waozi.xyz/build/telegram/index.html"),
 		ChatModel:                       baselineEnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash"),
 		ChatDailyLimit:                  baselineEnvInt64("DAOCHI_CHAT_DAILY_LIMIT", 20),
 		ChatGlobalDailyLimit:            baselineEnvInt64("DAOCHI_CHAT_GLOBAL_DAILY_LIMIT", 1000),
@@ -253,6 +261,12 @@ func baselineEnvBytesHexOrFile(key, fileKey string, fallback []byte) []byte {
 }
 
 var configEnvironmentKeys = []string{
+	"DAOCHI_LUMI_BOT_TOKEN",
+	"DAOCHI_LUMI_BOT_TOKEN_FILE",
+	"DAOCHI_LUMI_WEBHOOK_SECRET",
+	"DAOCHI_LUMI_WEBHOOK_SECRET_FILE",
+	"DAOCHI_LUMI_OWNER_ID",
+	"DAOCHI_LUMI_CANVAS_URL",
 	"DAOCHI_ADDR",
 	"DAOCHI_ADMIN_TOKEN",
 	"DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET",

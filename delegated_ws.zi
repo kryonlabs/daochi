@@ -1,0 +1,177 @@
+// Delegated sockets report changes in one approved collection only. They do
+// not subscribe to the account-wide hub or disclose unrelated state versions.
+#import "std/go_types"
+service :: #import "authorization_http";
+authorization :: #import "authorization";
+session :: #import "session";
+socket :: #import "websocket";
+http_auth :: #import "http_auth";
+response :: #import "response";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+selection :: #import "std/select_go";
+strict :: #import "strict_json";
+text :: #import "std/text_go";
+native_sql :: #system_library "go:database/sql";
+native_net :: #system_library "go:net";
+native_time :: #system_library "go:time";
+native_bufio :: #system_library "go:bufio";
+builtin :: #system_library "go:builtin";
+
+CollectionEvent :: struct {
+    type: string #go_tag "json:\"type\""
+    collection: string #go_tag "json:\"collection\""
+    version: s64 #go_tag "json:\"version\""
+}
+CollectionVersion :: struct {
+    value: s64
+    active: bool
+}
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native_sql "(*Tx).Rollback";
+CloseAtReturn :: (connection: socket.Connection) #go_defer #foreign native_net "Conn.Close";
+StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign native_time "(*Ticker).Stop";
+SetWriteDeadline :: (connection: socket.Connection, value: clock.Time) -> Error #foreign native_net "Conn.SetWriteDeadline";
+SetReadDeadline :: (connection: socket.Connection, value: clock.Time) -> Error #foreign native_net "Conn.SetReadDeadline";
+BufferedReaderFor :: (buffer: *socket.BufferedConnection) -> *socket.BufferedReader #go_field #foreign native_bufio "(*ReadWriter).Reader";
+ReaderWorker :: #type (connection: socket.Connection, reader: *socket.BufferedReader, cancel: ctx.CancelFunc) -> void;
+SpawnReader :: (callback: ReaderWorker, connection: socket.Connection, reader: *socket.BufferedReader, cancel: ctx.CancelFunc) #foreign builtin "spawn";
+CancelCallback :: #type (cancel: ctx.CancelFunc) -> void;
+CancelAtReturn :: (callback: CancelCallback, cancel: ctx.CancelFunc) #go_defer #foreign builtin "call";
+
+ReadLoop :: (connection: socket.Connection, reader: *socket.BufferedReader, cancel: ctx.CancelFunc) {
+    while true {
+        SetReadDeadline(connection, clock.Add(clock.Now(), cast(clock.Duration)90000000000))
+        if socket.ReadClientFrame(reader).error != null {
+            ctx.Cancel(cancel)
+            return
+        }
+    }
+}
+
+#scope_export
+Current :: (value: service.Authorizations, context: ctx.Context, sessionID: string,
+    grantID: string, collection: string) -> CollectionVersion {
+    result: CollectionVersion
+    opened := sql.Begin(value.database, context, null)
+    if opened.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    now := clock.Unix(clock.Now())
+    arguments: [3]Any = .[sessionID, grantID, now]
+    locked := sql.ExecTx(transaction, context,
+        "UPDATE server_authorization_sessions SET session_id=session_id WHERE session_id=?1 AND grant_id=?2 AND expires_at>?3", arguments[:])
+    if locked.error != null {
+        return result
+    }
+    changed := sql.RowsAffected(locked.value)
+    if changed.error != null || changed.value != 1 {
+        return result
+    }
+    active := authorization.ActiveGrant(transaction, context, grantID, value.nodeID,
+        value.configuration.BaseURL, now)
+    if active.authentication.error != null || active.authentication.status != 0 ||
+        !authorization.Allowed(active.value, collection, false) {
+        return result
+    }
+    arguments[0] = active.value.accountID
+    arguments[1] = collection
+    for scope: active.value.scopes {
+        if scope.collection == collection {
+            arguments[2] = scope.keyID
+        }
+    }
+    destinations: [1]Any = .[*result.value]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT COALESCE(MAX(server_version),0) FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND key_id=?3", arguments[:])
+    if sql.ScanRow(row, destinations[:]) != null || sql.Commit(transaction) != null {
+        return result
+    }
+    result.active = true
+    return result
+}
+
+Handle :: (value: service.Authorizations, writer: http.ResponseWriter, request: *http.Request) {
+    if !service.Guard(value, writer, request) {
+        return
+    }
+    if !session.SocketHeaders(request) {
+        response.Error(writer, 401, "delegate socket proof required")
+        return
+    }
+    context := http.Context(request)
+    opened := sql.Begin(value.database, context, null)
+    if opened.error != null {
+        response.Error(writer, 503, "delegate socket unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    empty: [0]u8
+    principal := session.AuthenticateTx(transaction, context, request, empty[:],
+        value.nodeID, value.configuration.BaseURL)
+    if principal.authentication.error != null || principal.authentication.status != 0 {
+        http_auth.Respond(writer, value.counters, principal.authentication)
+        return
+    }
+    collection := url.Value(url.Query(http.RequestURL(request)), "collection")
+    if !authorization.Allowed(principal.grant, collection, false) {
+        response.Error(writer, 403, "delegate socket scope mismatch")
+        return
+    }
+    proof: session.RequestProof
+    // AuthenticateTx has already strictly decoded and verified this proof.
+    decoded := ReadProof(request, *proof)
+    if !decoded || sql.Commit(transaction) != null {
+        response.Error(writer, 503, "delegate socket unavailable")
+        return
+    }
+    accepted := socket.Accept(writer, request)
+    if accepted.error != null {
+        return
+    }
+    CloseAtReturn(accepted.connection)
+    child := ctx.WithCancel(context)
+    CancelAtReturn(ctx.Cancel, child.cancel)
+    SpawnReader(ReadLoop, accepted.connection, BufferedReaderFor(accepted.buffer), child.cancel)
+    ticker := clock.NewTicker(cast(clock.Duration)500000000)
+    StopAtReturn(ticker)
+    version: s64 = -1
+    ticks: s64
+    while true {
+        current := Current(value, child.value, proof.sessionID, principal.grant.grantID, collection)
+        if !current.active {
+            return
+        }
+        SetWriteDeadline(accepted.connection, clock.Add(clock.Now(), cast(clock.Duration)10000000000))
+        if current.value != version {
+            event := CollectionEvent.{type = "collection_changed", collection = collection, version = current.value}
+            if socket.WriteJSON(accepted.connection, event) != null {
+                return
+            }
+            version = current.value
+        } else if ticks % 60 == 0 {
+            if socket.WriteFrame(accepted.connection, cast(u8)9, empty[:]) != null {
+                return
+            }
+        }
+        cases: [2]selection.Case
+        cases[0] = selection.Receive(ctx.Done(child.value))
+        cases[1] = selection.Receive(clock.TickerChannel(ticker))
+        if selection.Select(cases[:]).chosen == 0 {
+            return
+        }
+        ticks += 1
+    }
+}
+
+#scope_file
+ReadProof :: (request: *http.Request, proof: *session.RequestProof) -> bool {
+    return strict.Decode(text.ToBytes(http.HeaderValue(http.Headers(request), "X-Daochi-Delegate")), proof) == null
+}

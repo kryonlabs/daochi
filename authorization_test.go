@@ -43,8 +43,9 @@ func authorizationSetup(t *testing.T) *authorizationFixture {
 	if _, err := store.Database.Exec("INSERT INTO server_users(user_id_hash,public_key) VALUES(?,?)", id, owner.PublicKey); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Database.Exec("INSERT INTO server_app_collections(app_id,collection_prefix,visibility,schema_version) VALUES('inbe','private.inbe.v2.lumi','private',2)"); err != nil {
-		t.Fatal(err)
+	registered := AppStore_OwnsCollection(store.Database, t.Context(), "inbe", "private.inbe.v2.lumi")
+	if registered.Error != nil || !registered.Value {
+		t.Fatal("built-in Inbe registration does not declare isolated Lumi history")
 	}
 	// An approved app manifest preserves its declared collections when the
 	// node restarts, instead of restoring the legacy unsigned seed inventory.

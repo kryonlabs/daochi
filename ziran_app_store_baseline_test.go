@@ -299,10 +299,11 @@ func (s *Store) baselineSeedBuiltinApps(ctx context.Context) error {
 			{CollectionPrefix: "shared.inbe.v1.*", Visibility: "shared", SchemaVersion: 1, Description: "User-grantable Inbe records."},
 			{CollectionPrefix: "friends.inbe.v1.*", Visibility: "friends", SchemaVersion: 1, Description: "Friend-visible Inbe records."},
 			{CollectionPrefix: "public.inbe.v1.*", Visibility: "public", SchemaVersion: 1, Description: "Public Inbe records."},
+			{CollectionPrefix: "private.inbe.v2.lumi", Visibility: "private", SchemaVersion: 2, Description: "Isolated encrypted Lumi history."},
 		},
 		Capabilities: []string{"sync", "encrypted-records", "profile-stats", "leaderboard"},
 		Features: []AppFeature{
-			{ID: "sync.private_records", Collections: []string{"private.inbe.v1.*", "inbe.habits", "inbe.habit_days", "inbe.sessions"}, RequiresSignedTx: true},
+			{ID: "sync.private_records", Collections: []string{"private.inbe.v1.*", "inbe.habits", "inbe.habit_days", "inbe.sessions", "private.inbe.v2.lumi"}, RequiresSignedTx: true},
 			{ID: "sync.elist", Collections: []string{"private.inbe.v1.elist-lists", "private.inbe.v1.elist-items"}, RequiresSignedTx: true},
 			{ID: "sync.shared_records", Collections: []string{"shared.inbe.v1.*"}, RequiresSignedTx: true},
 			{ID: "profile.stats", RequiresSignedTx: false},

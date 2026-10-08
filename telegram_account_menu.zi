@@ -1,0 +1,158 @@
+// Account entry links contain only a short-lived rendezvous identifier.
+// The caller issues and expires that identifier; this menu never handles keys.
+#import "std/go_types"
+transport :: #import "telegram_transport";
+url :: #import "std/url_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+net :: #import "std/net_go";
+native_url :: #system_library "go:net/url";
+strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+#scope_file
+UserInfo :: #type #foreign native_url "Userinfo";
+User :: (value: *url.URL) -> *UserInfo #go_field #foreign native_url "(*URL).User";
+RawQuery :: (value: *url.URL) -> string #go_field #foreign native_url "(*URL).RawQuery";
+Fragment :: (value: *url.URL) -> string #go_field #foreign native_url "(*URL).Fragment";
+Opaque :: (value: *url.URL) -> string #go_field #foreign native_url "(*URL).Opaque";
+Hostname :: (value: *url.URL) -> string #foreign native_url "(*URL).Hostname";
+Port :: (value: *url.URL) -> string #foreign native_url "(*URL).Port";
+ContainsAny :: (value: string, characters: string) -> bool #foreign strings;
+HasPrefix :: (value: string, prefix: string) -> bool #foreign strings;
+Join :: (parts: []string, separator: string) -> string #foreign strings;
+KeyboardLength :: (value: transport.KeyboardJSON) -> isize #foreign builtin "len";
+
+Keyboard :: struct {
+    inline_keyboard: [3][1]transport.TelegramButton #go_tag "json:\"inline_keyboard\""
+}
+
+EntryHostValid :: (target: *url.URL) -> bool {
+    authority := url.Host(target)
+    hostname := Hostname(target)
+    if authority.count == 0 || hostname.count == 0 ||
+    authority[authority.count - 1] == cast(u8)58 {
+        return false
+    }
+    port := Port(target)
+    if port.count > 0 {
+        if port.count > 5 {
+            return false
+        }
+        number: s32
+        for byte: port {
+            if byte < cast(u8)48 || byte > cast(u8)57 {
+                return false
+            }
+            number = number * 10 + cast(s32)(byte - cast(u8)48)
+        }
+        if number < 1 || number > 65535 {
+            return false
+        }
+    }
+    if authority[0] == cast(u8)91 {
+        return ContainsAny(hostname, ":") && net.ValidIP(net.ParseIP(hostname))
+    }
+    if hostname.count > 253 {
+        return false
+    }
+    labelLength: s32
+    previous: u8
+    for byte: hostname {
+        if byte == cast(u8)46 {
+            if labelLength == 0 || previous == cast(u8)45 {
+                return false
+            }
+            labelLength = 0
+        } else {
+            if !((byte >= cast(u8)48 && byte <= cast(u8)57) ||
+                (byte >= cast(u8)65 && byte <= cast(u8)90) ||
+                (byte >= cast(u8)97 && byte <= cast(u8)122) || byte == cast(u8)45) {
+                return false
+            }
+            if (labelLength == 0 && byte == cast(u8)45) || labelLength >= 63 {
+                return false
+            }
+            labelLength += 1
+        }
+        previous = byte
+    }
+    return previous != cast(u8)45
+}
+
+EntryURLValid :: (value: string) -> bool {
+    if value.count < 1 || value.count > 2048 || !HasPrefix(value, "https://") ||
+    ContainsAny(value, "%\\# \t\r\n") {
+        return false
+    }
+    for byte: value {
+        if byte < cast(u8)33 || byte > cast(u8)126 {
+            return false
+        }
+    }
+    parsed := url.Parse(value)
+    if parsed.error != null || parsed.value == null {
+        return false
+    }
+    target := parsed.value
+    if url.Scheme(target) != "https" || !EntryHostValid(target) ||
+    User(target) != null || Fragment(target) != "" || Opaque(target) != "" {
+        return false
+    }
+    query := RawQuery(target)
+    if query.count != 34 || !HasPrefix(query, "r=") {
+        return false
+    }
+    for index: 2..33 {
+        byte := query[index]
+        if !(byte >= cast(u8)48 && byte <= cast(u8)57) &&
+        !(byte >= cast(u8)97 && byte <= cast(u8)102) {
+            return false
+        }
+    }
+    return true
+}
+
+#scope_export
+Build :: (createURL: string, restoreURL: string,
+    connectURL: string) -> transport.KeyboardJSON {
+    if !EntryURLValid(createURL) || !EntryURLValid(restoreURL) ||
+    !EntryURLValid(connectURL) {
+        return cast(transport.KeyboardJSON)text.ToBytes("")
+    }
+    urls: [3]string = .[createURL, restoreURL, connectURL]
+    labels: [3]string = .["Create account", "Restore account", "Connect existing account"]
+    web: [3]transport.WebApp
+    keyboard: Keyboard
+    for index: 0..2 {
+        web[index].url = urls[index]
+        keyboard.inline_keyboard[index][0] = transport.TelegramButton.{
+            text = labels[index], web_app = *web[index]}
+    }
+    encoded := json.Marshal(keyboard)
+    if encoded.error != null {
+        return cast(transport.KeyboardJSON)text.ToBytes("")
+    }
+    return cast(transport.KeyboardJSON)encoded.value
+}
+
+Send :: (token: string, sender: s64, createURL: string,
+    restoreURL: string, connectURL: string) -> bool {
+    if token == "" || sender <= 0 {
+        return false
+    }
+    keyboard := Build(createURL, restoreURL, connectURL)
+    if KeyboardLength(keyboard) == 0 {
+        return false
+    }
+    explanation: [4]string = .[
+    "Create or restore your account on your device. Your private owner key stays there. ",
+    "Connect an existing account by approving access in Inbe. ",
+    "Never send private keys or recovery passphrases in this chat. ",
+    "App actions need an active Inbe session and are handled by Inbe."]
+    message := transport.TelegramSend.{
+        chat_id = sender,
+        text = Join(explanation[:], ""),
+        reply_markup = keyboard}
+    return transport.Call(token, "sendMessage", message)
+}

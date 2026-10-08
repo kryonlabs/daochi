@@ -91,6 +91,16 @@ EntryEnvironment :: struct {
     botID: s64 #go_tag "json:\"bot_id\""
     environment: string #go_tag "json:\"environment\""
 }
+EntryRendezvous :: struct {
+    requestID: string #go_tag "json:\"request_id\""
+    grantID: string #go_tag "json:\"grant_id\""
+    appID: string #go_tag "json:\"app_id\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+    challenge: string #go_tag "json:\"challenge\""
+    status: string #go_tag "json:\"status\""
+}
 
 #scope_export
 // The global digest table is shared with authorization rendezvous claims.
@@ -696,4 +706,94 @@ ClaimTx :: (transaction: *sql.Transaction, context: ctx.Context, entryID: string
     }
     changed := sql.RowsAffected(written.value)
     return changed.error == null && changed.value == 1
+}
+
+// A bot-created Connect entry may wait for approval initiated on an existing
+// owner device. The fresh entry proof discovers only that owner's pending
+// rendezvous; the ordinary claim still consumes this entry atomically.
+Rendezvous :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    read := ReadAction(writer, request)
+    if !read.valid {
+        return
+    }
+    input := read.input
+    context := http.Context(request)
+    opened := sql.Begin(service.database, context, null)
+    if opened.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    if !LockEntry(transaction, context, input.entryID) {
+        response.Error(writer, 404, "Telegram entry unavailable")
+        return
+    }
+    entry := ReadEntry(transaction, context, input.entryID)
+    now := clock.Unix(clock.Now())
+    if !Current(service, entry, now) || !Matches(entry, input) || !FreshAction(entry, input, now) ||
+        (entry.status != "verified" && entry.status != "bound") ||
+        !session.VerifyKeyProof(entry.signingKey, ActionMessage(entry.info, input, "request"), input.proof) {
+        response.Error(writer, 401, "verified delegate proof required")
+        return
+    }
+    if !ClaimAction(transaction, context, input, now) {
+        response.Error(writer, 409, "Telegram entry proof already used")
+        return
+    }
+    account: string
+    sender: [1]Any = .[entry.telegramID]
+    destination: [1]Any = .[*account]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT account_id FROM server_lumi_telegram WHERE telegram_id=?1", sender[:])
+    scanned := sql.ScanRow(row, destination[:])
+    if scanned != null && scanned != sql.NoRows() {
+        response.Error(writer, 503, "Telegram binding unavailable")
+        return
+    }
+    if entry.accountID != "" && entry.accountID != account {
+        response.Error(writer, 409, "Telegram account changed")
+        return
+    }
+    if account != "" && entry.accountID == "" {
+        binding: [2]Any = .[entry.info.entryID, account]
+        updated := sql.ExecTx(transaction, context,
+            "UPDATE server_telegram_account_entries SET account_id=?2 WHERE entry_id=?1 AND account_id='' AND status='verified'", binding[:])
+        if updated.error != null {
+            response.Error(writer, 503, "Telegram binding unavailable")
+            return
+        }
+        changed := sql.RowsAffected(updated.value)
+        if changed.error != null || changed.value != 1 {
+            response.Error(writer, 409, "Telegram account changed")
+            return
+        }
+    }
+    result: EntryRendezvous
+    arguments: [5]Any = .[account, entry.info.botID, entry.telegramID, service.nodeID, now]
+    destinations: [7]Any = .[*result.requestID, *result.appID, *result.nodeID,
+        *result.audience, *result.expiresAt, *result.challenge, *result.status]
+    row = sql.QueryRowTx(transaction, context,
+        "SELECT request_id,app_id,node_id,audience,expires_at,claim_nonce,status FROM server_authorization_requests WHERE account_id=?1 AND bot_id=?2 AND telegram_id=?3 AND node_id=?4 AND app_id='inbe' AND status='pending' AND expires_at>?5 ORDER BY expires_at DESC,request_id LIMIT 1", arguments[:])
+    scanned = sql.ScanRow(row, destinations[:])
+    if scanned != null && scanned != sql.NoRows() {
+        response.Error(writer, 503, "Owner request unavailable")
+        return
+    }
+    if scanned == null && result.audience != service.configuration.BaseURL {
+        response.Error(writer, 409, "Owner request belongs to another node")
+        return
+    }
+    if sql.Commit(transaction) != null {
+        response.Error(writer, 503, "Owner request unavailable")
+        return
+    }
+    if scanned == sql.NoRows() {
+        response.JSON(writer, 202, true)
+        return
+    }
+    response.JSON(writer, 200, result)
 }

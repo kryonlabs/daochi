@@ -83,13 +83,24 @@ type EntryEnvironment struct {
 	Environment string "json:\"environment\""
 }
 
+type EntryRendezvous struct {
+	RequestID string "json:\"request_id\""
+	GrantID   string "json:\"grant_id\""
+	AppID     string "json:\"app_id\""
+	NodeID    string "json:\"node_id\""
+	Audience  string "json:\"audience\""
+	ExpiresAt int64  "json:\"expires_at\""
+	Challenge string "json:\"challenge\""
+	Status    string "json:\"status\""
+}
+
 type ActionRead struct {
 	Raw   []uint8
 	Input EntryAction
 	Valid bool
 }
 
-const zir_d_50da4dab6c59b56e = "CREATE TABLE IF NOT EXISTS server_telegram_account_entries (\n    entry_id TEXT PRIMARY KEY,\n    mode TEXT NOT NULL,\n    app_id TEXT NOT NULL,\n    node_id TEXT NOT NULL,\n    audience TEXT NOT NULL,\n    bot_id INTEGER NOT NULL,\n    telegram_id INTEGER NOT NULL,\n    challenge TEXT NOT NULL,\n    expires_at INTEGER NOT NULL,\n    status TEXT NOT NULL DEFAULT 'pending',\n    account_id TEXT NOT NULL DEFAULT '',\n    client_id TEXT NOT NULL DEFAULT '',\n    signing_key TEXT NOT NULL DEFAULT '',\n    encryption_key TEXT NOT NULL DEFAULT '',\n    init_digest TEXT NOT NULL DEFAULT '',\n    verified_at INTEGER NOT NULL DEFAULT 0,\n    bound_at INTEGER NOT NULL DEFAULT 0,\n    consumed_at INTEGER NOT NULL DEFAULT 0\n);\nCREATE INDEX IF NOT EXISTS server_telegram_account_entries_expiry\nON server_telegram_account_entries(expires_at);\nCREATE TABLE IF NOT EXISTS server_telegram_init_replays (\n    digest TEXT PRIMARY KEY,\n    expires_at INTEGER NOT NULL\n);\nCREATE TABLE IF NOT EXISTS server_telegram_entry_nonces (\n    entry_id TEXT NOT NULL REFERENCES server_telegram_account_entries(entry_id) ON DELETE CASCADE,\n    nonce TEXT NOT NULL,\n    expires_at INTEGER NOT NULL,\n    PRIMARY KEY(entry_id,nonce)\n);\n"
+const zir_d_1b0e8750ff00d024 = "CREATE TABLE IF NOT EXISTS server_telegram_account_entries (\n    entry_id TEXT PRIMARY KEY,\n    mode TEXT NOT NULL,\n    app_id TEXT NOT NULL,\n    node_id TEXT NOT NULL,\n    audience TEXT NOT NULL,\n    bot_id INTEGER NOT NULL,\n    telegram_id INTEGER NOT NULL,\n    challenge TEXT NOT NULL,\n    expires_at INTEGER NOT NULL,\n    status TEXT NOT NULL DEFAULT 'pending',\n    account_id TEXT NOT NULL DEFAULT '',\n    client_id TEXT NOT NULL DEFAULT '',\n    signing_key TEXT NOT NULL DEFAULT '',\n    encryption_key TEXT NOT NULL DEFAULT '',\n    init_digest TEXT NOT NULL DEFAULT '',\n    verified_at INTEGER NOT NULL DEFAULT 0,\n    bound_at INTEGER NOT NULL DEFAULT 0,\n    consumed_at INTEGER NOT NULL DEFAULT 0\n);\nCREATE INDEX IF NOT EXISTS server_telegram_account_entries_expiry\nON server_telegram_account_entries(expires_at);\nCREATE TABLE IF NOT EXISTS server_telegram_init_replays (\n    digest TEXT PRIMARY KEY,\n    expires_at INTEGER NOT NULL\n);\nCREATE TABLE IF NOT EXISTS server_telegram_entry_nonces (\n    entry_id TEXT NOT NULL REFERENCES server_telegram_account_entries(entry_id) ON DELETE CASCADE,\n    nonce TEXT NOT NULL,\n    expires_at INTEGER NOT NULL,\n    PRIMARY KEY(entry_id,nonce)\n);\n"
 
 func TelegramAccountEntry_ValidKeys(clientID string, signingKey string, encryptionKey string) bool {
 	var value_0 bool = Authorization_HexID(clientID, 64)
@@ -945,6 +956,147 @@ func TelegramAccountEntry_ClaimTx(transaction *Transaction, context Context, ent
 	}
 	changed := StdSqlGo_RowsAffected(written.Value)
 	return changed.Error == nil && changed.Value == 1
+}
+
+func TelegramAccountEntry_Rendezvous(service AccountEntries, writer ResponseWriter, request *Request) {
+	var value_0 bool = TelegramAccountEntry_Guard(service, writer, request)
+	if !value_0 {
+		return
+	}
+	read := TelegramAccountEntry_ReadAction(writer, request)
+	if !read.Valid {
+		return
+	}
+	input := read.Input
+	context := StdHttpGo_Context(request)
+	opened := StdSqlGo_Begin(service.Database, context, nil)
+	if opened.Error != nil {
+		Response_Error(writer, 503, "Telegram entry unavailable")
+		return
+	}
+	transaction := opened.Value
+	defer (*sql.Tx).Rollback(transaction)
+	var value_1 bool = TelegramAccountEntry_LockEntry(transaction, context, input.EntryID)
+	if !value_1 {
+		Response_Error(writer, 404, "Telegram entry unavailable")
+		return
+	}
+	entry := TelegramAccountEntry_ReadEntry(transaction, context, input.EntryID)
+	now := StdTimeGo_Unix(StdTimeGo_Now())
+	var value_2 bool = TelegramAccountEntry_Current(service, entry, now)
+	var value_3 bool = !value_2
+	if !value_3 {
+		var value_4 bool = TelegramAccountEntry_Matches(entry, input)
+		value_3 = !value_4
+	}
+	var value_5 bool = value_3
+	if !value_5 {
+		var value_6 bool = TelegramAccountEntry_FreshAction(entry, input, now)
+		value_5 = !value_6
+	}
+	var value_7 bool = value_5 || (entry.Status != "verified" && entry.Status != "bound")
+	if !value_7 {
+		var value_8 bool = Session_VerifyKeyProof(entry.SigningKey, TelegramAccountEntry_ActionMessage(entry.Info, input, "request"), input.Proof)
+		value_7 = !value_8
+	}
+	if value_7 {
+		Response_Error(writer, 401, "verified delegate proof required")
+		return
+	}
+	var value_9 bool = TelegramAccountEntry_ClaimAction(transaction, context, input, now)
+	if !value_9 {
+		Response_Error(writer, 409, "Telegram entry proof already used")
+		return
+	}
+	var account string = ""
+	var value_10 [1]Any
+	value_10[0] = entry.TelegramID
+	sender := value_10
+	_ = sender
+	var value_11 [1]Any
+	value_11[0] = &(account)
+	destination := value_11
+	_ = destination
+	row := StdSqlGo_QueryRowTx(transaction, context, "SELECT account_id FROM server_lumi_telegram WHERE telegram_id=?1", sender[0:1:1])
+	scanned := StdSqlGo_ScanRow(row, destination[0:1:1])
+	var value_12 bool = scanned != nil
+	var value_13 bool = value_12
+	if value_13 {
+		var value_14 bool = scanned != StdSqlGo_NoRows()
+		value_13 = value_14
+	}
+	if value_13 {
+		Response_Error(writer, 503, "Telegram binding unavailable")
+		return
+	}
+	if entry.AccountID != "" && entry.AccountID != account {
+		Response_Error(writer, 409, "Telegram account changed")
+		return
+	}
+	if account != "" && entry.AccountID == "" {
+		var value_15 [2]Any
+		value_15[0] = entry.Info.EntryID
+		value_15[1] = account
+		binding := value_15
+		_ = binding
+		var value_16 string = "UPDATE server_telegram_account_entries SET account_id=?2 WHERE entry_id=?1 AND account_id='' AND status='verified'"
+		updated := StdSqlGo_ExecTx(transaction, context, value_16, binding[0:2:2])
+		if updated.Error != nil {
+			Response_Error(writer, 503, "Telegram binding unavailable")
+			return
+		}
+		changed := StdSqlGo_RowsAffected(updated.Value)
+		if changed.Error != nil || changed.Value != 1 {
+			Response_Error(writer, 409, "Telegram account changed")
+			return
+		}
+	}
+	var result EntryRendezvous = EntryRendezvous{}
+	var value_17 [5]Any
+	value_17[0] = account
+	value_17[1] = entry.Info.BotID
+	value_17[2] = entry.TelegramID
+	value_17[3] = service.NodeID
+	value_17[4] = now
+	arguments := value_17
+	_ = arguments
+	var value_18 [7]Any
+	value_18[0] = &(result.RequestID)
+	value_18[1] = &(result.AppID)
+	value_18[2] = &(result.NodeID)
+	value_18[3] = &(result.Audience)
+	value_18[4] = &(result.ExpiresAt)
+	value_18[5] = &(result.Challenge)
+	value_18[6] = &(result.Status)
+	destinations := value_18
+	_ = destinations
+	var value_19 string = "SELECT request_id,app_id,node_id,audience,expires_at,claim_nonce,status FROM server_authorization_requests WHERE account_id=?1 AND bot_id=?2 AND telegram_id=?3 AND node_id=?4 AND app_id='inbe' AND status='pending' AND expires_at>?5 ORDER BY expires_at DESC,request_id LIMIT 1"
+	row = StdSqlGo_QueryRowTx(transaction, context, value_19, arguments[0:5:5])
+	scanned = StdSqlGo_ScanRow(row, destinations[0:7:7])
+	var value_20 bool = scanned != nil
+	var value_21 bool = value_20
+	if value_21 {
+		var value_22 bool = scanned != StdSqlGo_NoRows()
+		value_21 = value_22
+	}
+	if value_21 {
+		Response_Error(writer, 503, "Owner request unavailable")
+		return
+	}
+	if scanned == nil && result.Audience != service.Configuration.BaseURL {
+		Response_Error(writer, 409, "Owner request belongs to another node")
+		return
+	}
+	var value_23 Error = StdSqlGo_Commit(transaction)
+	if value_23 != nil {
+		Response_Error(writer, 503, "Owner request unavailable")
+		return
+	}
+	if scanned == StdSqlGo_NoRows() {
+		Response_JSON(writer, 202, true)
+		return
+	}
+	Response_JSON(writer, 200, result)
 }
 
 var TelegramAccountEntry_ziranInitState uint8

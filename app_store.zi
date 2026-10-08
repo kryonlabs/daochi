@@ -579,7 +579,7 @@ SeedBuiltin :: (database: *sql.Database, context: ctx.Context) -> Error {
     app.MinClientVersion = "0.0.0"
     app.CurrentVersion = "next"
     app.CompatibilityUntil = "2027-09-01"
-    app.Collections = AllocateCollections(9)
+    app.Collections = AllocateCollections(10)
     app.Collections[0] = AppCollection.{CollectionPrefix = "inbe.habits", Visibility = "private", SchemaVersion = 4, Description = "Released v4 encrypted habit records."}
     app.Collections[1] = AppCollection.{CollectionPrefix = "inbe.habit_days", Visibility = "private", SchemaVersion = 4, Description = "Released v4 encrypted habit-day records."}
     app.Collections[2] = AppCollection.{CollectionPrefix = "inbe.sessions", Visibility = "private", SchemaVersion = 4, Description = "Released v4 encrypted session records."}
@@ -589,6 +589,7 @@ SeedBuiltin :: (database: *sql.Database, context: ctx.Context) -> Error {
     app.Collections[6] = AppCollection.{CollectionPrefix = "shared.inbe.v1.*", Visibility = "shared", SchemaVersion = 1, Description = "User-grantable Inbe records."}
     app.Collections[7] = AppCollection.{CollectionPrefix = "friends.inbe.v1.*", Visibility = "friends", SchemaVersion = 1, Description = "Friend-visible Inbe records."}
     app.Collections[8] = AppCollection.{CollectionPrefix = "public.inbe.v1.*", Visibility = "public", SchemaVersion = 1, Description = "Public Inbe records."}
+    app.Collections[9] = AppCollection.{CollectionPrefix = "private.inbe.v2.lumi", Visibility = "private", SchemaVersion = 2, Description = "Isolated encrypted Lumi history."}
     app.Capabilities = AllocateStrings(4)
     app.Capabilities[0] = "sync"
     app.Capabilities[1] = "encrypted-records"
@@ -597,11 +598,12 @@ SeedBuiltin :: (database: *sql.Database, context: ctx.Context) -> Error {
     app.Features = AllocateFeatures(4)
     app.Features[0].ID = "sync.private_records"
     app.Features[0].RequiresSignedTx = true
-    app.Features[0].Collections = AllocateStrings(4)
+    app.Features[0].Collections = AllocateStrings(5)
     app.Features[0].Collections[0] = "private.inbe.v1.*"
     app.Features[0].Collections[1] = "inbe.habits"
     app.Features[0].Collections[2] = "inbe.habit_days"
     app.Features[0].Collections[3] = "inbe.sessions"
+    app.Features[0].Collections[4] = "private.inbe.v2.lumi"
     app.Features[1].ID = "sync.elist"
     app.Features[1].RequiresSignedTx = true
     app.Features[1].Collections = AllocateStrings(2)

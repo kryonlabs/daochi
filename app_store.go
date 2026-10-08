@@ -138,7 +138,7 @@ func AppStore_QueryAll(Database *Database, Context Context, Query string) zir_ad
 }
 
 const RegistryListSQL = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps ORDER BY app_id\n"
-const zir_d_a0318049dc4463de = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps WHERE app_id=?1\n"
+const zir_d_6f5c18a9652f6c10 = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps WHERE app_id=?1\n"
 const CollectionsSQL = "\nSELECT app_id,collection_prefix,visibility,schema_version,description,created_at\nFROM server_app_collections WHERE app_id=?1 ORDER BY collection_prefix\n"
 const CapabilitiesSQL = "SELECT capability FROM server_app_capabilities WHERE app_id=?1 ORDER BY capability"
 const AppInsertSQL = "\nINSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status,app_schema_version,min_supported_client_version,current_client_version,compatibility_until,features_json,legacy_protocols_json)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(app_id) DO UPDATE SET\n display_name=excluded.display_name,\n description=excluded.description,\n homepage_url=excluded.homepage_url,\n source_url=excluded.source_url,\n public_key=excluded.public_key,\n status=excluded.status,\n app_schema_version=excluded.app_schema_version,\n min_supported_client_version=excluded.min_supported_client_version,\n current_client_version=excluded.current_client_version,\n compatibility_until=excluded.compatibility_until,\n features_json=excluded.features_json,\n legacy_protocols_json=excluded.legacy_protocols_json,\n updated_at=CURRENT_TIMESTAMP\n"
@@ -713,7 +713,7 @@ func AppStore_SeedBuiltin(database *Database, context Context) Error {
 	app.MinClientVersion = "0.0.0"
 	app.CurrentVersion = "next"
 	app.CompatibilityUntil = "2027-09-01"
-	app.Collections = make([]AppCollection, int(9))
+	app.Collections = make([]AppCollection, int(10))
 	var value_0 AppCollection = AppCollection{CollectionPrefix: "inbe.habits", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit records."}
 	app.Collections[0] = value_0
 	var value_1 AppCollection = AppCollection{CollectionPrefix: "inbe.habit_days", Visibility: "private", SchemaVersion: 4, Description: "Released v4 encrypted habit-day records."}
@@ -732,6 +732,8 @@ func AppStore_SeedBuiltin(database *Database, context Context) Error {
 	app.Collections[7] = value_7
 	var value_8 AppCollection = AppCollection{CollectionPrefix: "public.inbe.v1.*", Visibility: "public", SchemaVersion: 1, Description: "Public Inbe records."}
 	app.Collections[8] = value_8
+	var value_9 AppCollection = AppCollection{CollectionPrefix: "private.inbe.v2.lumi", Visibility: "private", SchemaVersion: 2, Description: "Isolated encrypted Lumi history."}
+	app.Collections[9] = value_9
 	app.Capabilities = make([]string, int(4))
 	app.Capabilities[0] = "sync"
 	app.Capabilities[1] = "encrypted-records"
@@ -740,34 +742,35 @@ func AppStore_SeedBuiltin(database *Database, context Context) Error {
 	app.Features = make([]AppFeature, int(4))
 	(app.Features[0]).ID = "sync.private_records"
 	(app.Features[0]).RequiresSignedTx = true
-	var value_9 []string = make([]string, int(4))
-	(app.Features[0]).Collections = value_9
+	var value_10 []string = make([]string, int(5))
+	(app.Features[0]).Collections = value_10
 	(app.Features[0]).Collections[0] = "private.inbe.v1.*"
 	(app.Features[0]).Collections[1] = "inbe.habits"
 	(app.Features[0]).Collections[2] = "inbe.habit_days"
 	(app.Features[0]).Collections[3] = "inbe.sessions"
+	(app.Features[0]).Collections[4] = "private.inbe.v2.lumi"
 	(app.Features[1]).ID = "sync.elist"
 	(app.Features[1]).RequiresSignedTx = true
-	var value_10 []string = make([]string, int(2))
-	(app.Features[1]).Collections = value_10
+	var value_11 []string = make([]string, int(2))
+	(app.Features[1]).Collections = value_11
 	(app.Features[1]).Collections[0] = "private.inbe.v1.elist-lists"
 	(app.Features[1]).Collections[1] = "private.inbe.v1.elist-items"
 	(app.Features[2]).ID = "sync.shared_records"
 	(app.Features[2]).RequiresSignedTx = true
-	var value_11 []string = make([]string, int(1))
-	(app.Features[2]).Collections = value_11
+	var value_12 []string = make([]string, int(1))
+	(app.Features[2]).Collections = value_12
 	(app.Features[2]).Collections[0] = "shared.inbe.v1.*"
 	(app.Features[3]).ID = "profile.stats"
 	app.LegacyProtocols = make([]LegacyProtocol, int(2))
-	var value_12 LegacyProtocol = LegacyProtocol{Name: "inbe-typed-sync", Version: 5, Status: "compatibility", ValidUntil: "2027-09-01"}
-	app.LegacyProtocols[0] = value_12
-	var value_13 LegacyProtocol = LegacyProtocol{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: "2027-09-01"}
-	app.LegacyProtocols[1] = value_13
+	var value_13 LegacyProtocol = LegacyProtocol{Name: "inbe-typed-sync", Version: 5, Status: "compatibility", ValidUntil: "2027-09-01"}
+	app.LegacyProtocols[0] = value_13
+	var value_14 LegacyProtocol = LegacyProtocol{Name: "ksync-headers", Version: 5, Status: "compatibility", ValidUntil: "2027-09-01"}
+	app.LegacyProtocols[1] = value_14
 	app.TokenPolicies = make([]TokenPolicy, int(2))
-	var value_14 TokenPolicy = TokenPolicy{AssetID: "waozi:token", Permission: "spend", Status: "active", LegacyUnsignedUntil: 1819756800}
-	app.TokenPolicies[0] = value_14
-	var value_15 TokenPolicy = TokenPolicy{AssetID: "waozi:token", Permission: "purchase", Status: "active", LegacyUnsignedUntil: 1819756800}
-	app.TokenPolicies[1] = value_15
+	var value_15 TokenPolicy = TokenPolicy{AssetID: "waozi:token", Permission: "spend", Status: "active", LegacyUnsignedUntil: 1819756800}
+	app.TokenPolicies[0] = value_15
+	var value_16 TokenPolicy = TokenPolicy{AssetID: "waozi:token", Permission: "purchase", Status: "active", LegacyUnsignedUntil: 1819756800}
+	app.TokenPolicies[1] = value_16
 	var signed int = 0
 	row := (*sql.DB).QueryRowContext(database, context, "SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status='active')")
 	error := (*sql.Row).Scan(row, &(signed))

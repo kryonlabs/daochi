@@ -34,6 +34,8 @@ request_rate :: #import "request_rate";
 chat :: #import "chat";
 lumi_telegram :: #import "lumi_telegram";
 authorization_http :: #import "authorization_http";
+telegram_entries :: #import "telegram_account_entry";
+response :: #import "response";
 delegated_sync :: #import "delegated_sync";
 delegated_ws :: #import "delegated_ws";
 feedback :: #import "feedback_http";
@@ -312,6 +314,12 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/lumi/telegram/ack", server, HandleLumiAck)
     Route(mux, "POST /api/v1/lumi/telegram/messages", server, HandleLumiPublish)
     Route(mux, "POST /api/v1/lumi/telegram/webhook", server, HandleLumiWebhook)
+    Route(mux, "GET /api/v1/telegram/environment", server, HandleTelegramEnvironment)
+    Route(mux, "POST /api/v1/telegram/entry", server, HandleTelegramEntry)
+    Route(mux, "POST /api/v1/telegram/entry/verify", server, HandleTelegramEntryVerify)
+    Route(mux, "POST /api/v1/telegram/entry/status", server, HandleTelegramEntryStatus)
+    Route(mux, "POST /api/v1/telegram/entry/cancel", server, HandleTelegramEntryCancel)
+    Route(mux, "POST /api/v1/telegram/account/bind", server, HandleTelegramAccountBind)
     Route(mux, "POST /api/v1/authorization/requests", server, HandleAuthorizationRequest)
     Route(mux, "POST /api/v1/authorization/rendezvous", server, HandleAuthorizationStatus)
     Route(mux, "POST /api/v1/authorization/cancel", server, HandleAuthorizationCancel)
@@ -650,7 +658,51 @@ HandleLumiPublish :: (server: *Server, writer: http.ResponseWriter, request: *ht
 }
 
 HandleLumiWebhook :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
-    lumi_telegram.Webhook(ChatService(server), writer, request)
+    lumi_telegram.Webhook(ChatService(server), TelegramEntries(server), writer, request)
+}
+
+TelegramEntries :: (server: *Server) -> telegram_entries.AccountEntries {
+    result: telegram_entries.AccountEntries
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.verify = BindVerifier(Verify, server)
+    result.replay = errSignedTxReplay
+    result.nodeID = RetainPath(server.node.ID)
+    result.limiter = server.limiter
+    return result
+}
+
+HandleTelegramEnvironment :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    telegram_entries.Environment(TelegramEntries(server), writer, request)
+}
+HandleTelegramEntry :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    telegram_entries.EntryInfo(TelegramEntries(server), writer, request)
+}
+TelegramBindingSchema :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) -> bool {
+    if !lumi_telegram.Schema(ChatService(server), request) {
+        response.Error(writer, 503, "Telegram binding unavailable")
+        return false
+    }
+    return true
+}
+HandleTelegramEntryVerify :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    if TelegramBindingSchema(server, writer, request) {
+        telegram_entries.Verify(TelegramEntries(server), writer, request)
+    }
+}
+HandleTelegramEntryStatus :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    if TelegramBindingSchema(server, writer, request) {
+        telegram_entries.Status(TelegramEntries(server), writer, request)
+    }
+}
+HandleTelegramEntryCancel :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    telegram_entries.Cancel(TelegramEntries(server), writer, request)
+}
+HandleTelegramAccountBind :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    if TelegramBindingSchema(server, writer, request) {
+        telegram_entries.Bind(TelegramEntries(server), writer, request)
+    }
 }
 
 Authorizations :: (server: *Server) -> authorization_http.Authorizations {

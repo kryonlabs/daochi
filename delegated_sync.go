@@ -123,6 +123,7 @@ func DelegatedSync_Handle(authorizations Authorizations, writer ResponseWriter, 
 		for loop_cursor_43 < loop_count_43 {
 			loop_index_43 := loop_cursor_43
 			record := loop_view_43[loop_index_43]
+			_ = record
 			if record.Collection != input.Collection || record.KeyID != keyID || record.DeletedAt != 0 {
 				Response_Error(writer, 403, "delegate collection, key or operation mismatch")
 				return
@@ -181,46 +182,81 @@ func DelegatedSync_Handle(authorizations Authorizations, writer ResponseWriter, 
 			Response_Error(writer, 503, "delegated read unavailable")
 			return
 		}
-		result.Records = loaded.Value
+		var returned int64 = 0
+		var responseBytes int64 = 256
+		{
+			value_28 := loaded.Value[:]
+			if int64(0) < 0 || int64(int64(len(value_28))) < int64(0) || int64(int64(len(value_28))) > int64(len(value_28)) {
+				panic("slice range out of bounds")
+			}
+			loop_view_84 := value_28[0:int64(len(value_28)):int64(len(value_28))]
+			loop_count_84 := int64(len(loop_view_84))
+			var loop_cursor_84 int64 = 0
+			for loop_cursor_84 < loop_count_84 {
+				loop_index_84 := loop_cursor_84
+				record := loop_view_84[loop_index_84]
+				_ = record
+				encoded := StdJsonGo_Marshal(record)
+				if encoded.Error != nil {
+					Response_Error(writer, 503, "delegated record encoding unavailable")
+					return
+				}
+				if (responseBytes+int64(len(encoded.Value)))+1 > 1000000 {
+					if returned == 0 {
+						Response_Error(writer, 413, "record exceeds delegated response bound")
+						return
+					}
+					break
+				}
+				responseBytes += (int64(len(encoded.Value)) + 1)
+				returned++
+				loop_cursor_84++
+			}
+		}
+		value_29 := loaded.Value[:]
+		if int64(0) < 0 || int64(returned) < int64(0) || int64(returned) > int64(len(value_29)) {
+			panic("slice range out of bounds")
+		}
+		result.Records = value_29[0:returned:returned]
 		if int64(len(result.Records)) > 0 {
 			last := result.Records[(int64(len(result.Records)) - 1)]
-			var value_28 [3]Any
-			value_28[0] = grant.AccountID
-			value_28[1] = input.Collection
-			value_28[2] = last.ID
-			cursor := value_28
+			var value_30 [3]Any
+			value_30[0] = grant.AccountID
+			value_30[1] = input.Collection
+			value_30[2] = last.ID
+			cursor := value_30
 			_ = cursor
-			var value_29 [1]Any
-			value_29[0] = &(result.NextVersion)
-			destinations := value_29
+			var value_31 [1]Any
+			value_31[0] = &(result.NextVersion)
+			destinations := value_31
 			_ = destinations
-			var value_30 string = "SELECT server_version FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND id=?3"
-			row := StdSqlGo_QueryRowTx(transaction, context, value_30, cursor[0:3:3])
+			var value_32 string = "SELECT server_version FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND id=?3"
+			row := StdSqlGo_QueryRowTx(transaction, context, value_32, cursor[0:3:3])
 			_ = row
-			var value_31 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-			if value_31 != nil {
+			var value_33 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+			if value_33 != nil {
 				Response_Error(writer, 503, "delegated cursor unavailable")
 				return
 			}
 		}
 		arguments[3] = result.NextVersion
 		var remaining int64 = 0
-		var value_32 [1]Any
-		value_32[0] = &(remaining)
-		destinations := value_32
+		var value_34 [1]Any
+		value_34[0] = &(remaining)
+		destinations := value_34
 		_ = destinations
-		var value_33 string = "SELECT COUNT(*) FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND key_id=?3 AND server_version>?4"
-		row := StdSqlGo_QueryRowTx(transaction, context, value_33, arguments[0:4:4])
+		var value_35 string = "SELECT COUNT(*) FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND key_id=?3 AND server_version>?4"
+		row := StdSqlGo_QueryRowTx(transaction, context, value_35, arguments[0:4:4])
 		_ = row
-		var value_34 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-		if value_34 != nil {
+		var value_36 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+		if value_36 != nil {
 			Response_Error(writer, 503, "delegated cursor unavailable")
 			return
 		}
 		result.Truncated = remaining > 0
 	}
-	var value_35 Error = StdSqlGo_Commit(transaction)
-	if value_35 != nil {
+	var value_37 Error = StdSqlGo_Commit(transaction)
+	if value_37 != nil {
 		Response_Error(writer, 503, "delegated sync unavailable")
 		return
 	}

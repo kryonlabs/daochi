@@ -1,0 +1,699 @@
+// A bot menu rendezvous proves a numeric Telegram sender and possession of
+// separate delegate keys. It never creates an account, session or grant.
+#import "std/go_types"
+authorization :: #import "authorization";
+session :: #import "session";
+telegram :: #import "telegram_init";
+strict :: #import "strict_json";
+auth :: #import "authentication";
+http_auth :: #import "http_auth";
+signed :: #import "signed_tx";
+body :: #import "http_body";
+response :: #import "response";
+random :: #import "telegram_transport";
+config :: #import "config";
+metrics :: #import "metrics";
+rate :: #import "request_rate";
+limiters :: #import "rate_limit";
+address :: #import "client_address";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+
+AccountEntries :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    verify: auth.VerifySignature
+    replay: Error
+    nodeID: string
+    limiter: *limiters.RateLimiter
+}
+EntryChallenge :: struct {
+    entryID: string #go_tag "json:\"entry_id\""
+    mode: string #go_tag "json:\"mode\""
+    appID: string #go_tag "json:\"app_id\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
+    botID: s64 #go_tag "json:\"bot_id\""
+    challenge: string #go_tag "json:\"challenge\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+}
+EntryIdentity :: struct {
+    info: EntryChallenge #go_tag "json:\"info\""
+    telegramID: s64 #go_tag "json:\"telegram_id\""
+    accountID: string #go_tag "json:\"account_id\""
+    status: string #go_tag "json:\"status\""
+    clientID: string #go_tag "json:\"client_id\""
+    signingKey: string #go_tag "json:\"signing_key\""
+    encryptionKey: string #go_tag "json:\"encryption_key\""
+    initDigest: string #go_tag "json:\"init_digest\""
+}
+EntryIssue :: struct {
+    info: EntryChallenge
+    error: Error
+}
+EntryMenu :: struct {
+    create: EntryChallenge
+    restore: EntryChallenge
+    connect: EntryChallenge
+    error: Error
+}
+EntryID :: struct {
+    entryID: string #go_tag "json:\"entry_id\""
+}
+EntryVerify :: struct {
+    entryID: string #go_tag "json:\"entry_id\""
+    clientID: string #go_tag "json:\"client_id\""
+    signingKey: string #go_tag "json:\"signing_key\""
+    encryptionKey: string #go_tag "json:\"encryption_key\""
+    initData: string #go_tag "json:\"init_data\""
+    proof: string #go_tag "json:\"proof\""
+}
+EntryAction :: struct {
+    entryID: string #go_tag "json:\"entry_id\""
+    clientID: string #go_tag "json:\"client_id\""
+    signingKey: string #go_tag "json:\"signing_key\""
+    encryptionKey: string #go_tag "json:\"encryption_key\""
+    expiresAt: s64 #go_tag "json:\"expires_at\""
+    nonce: string #go_tag "json:\"nonce\""
+    proof: string #go_tag "json:\"proof\""
+}
+EntryEnvironment :: struct {
+    appID: string #go_tag "json:\"app_id\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
+    botID: s64 #go_tag "json:\"bot_id\""
+    environment: string #go_tag "json:\"environment\""
+}
+
+#scope_export
+// The global digest table is shared with authorization rendezvous claims.
+// It has no request foreign key because bot entries precede owner approval.
+Schema :: #string SQL_ENTRY
+CREATE TABLE IF NOT EXISTS server_telegram_account_entries (
+    entry_id TEXT PRIMARY KEY,
+    mode TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    bot_id INTEGER NOT NULL,
+    telegram_id INTEGER NOT NULL,
+    challenge TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    account_id TEXT NOT NULL DEFAULT '',
+    client_id TEXT NOT NULL DEFAULT '',
+    signing_key TEXT NOT NULL DEFAULT '',
+    encryption_key TEXT NOT NULL DEFAULT '',
+    init_digest TEXT NOT NULL DEFAULT '',
+    verified_at INTEGER NOT NULL DEFAULT 0,
+    bound_at INTEGER NOT NULL DEFAULT 0,
+    consumed_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS server_telegram_account_entries_expiry
+ON server_telegram_account_entries(expires_at);
+CREATE TABLE IF NOT EXISTS server_telegram_init_replays (
+    digest TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS server_telegram_entry_nonces (
+    entry_id TEXT NOT NULL REFERENCES server_telegram_account_entries(entry_id) ON DELETE CASCADE,
+    nonce TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY(entry_id,nonce)
+);
+SQL_ENTRY;
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+FormatInteger :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
+
+ValidKeys :: (clientID: string, signingKey: string, encryptionKey: string) -> bool {
+    return authorization.HexID(clientID, 64) && authorization.HexID(signingKey, 64) &&
+        authorization.HexID(encryptionKey, 2368)
+}
+
+Current :: (service: AccountEntries, entry: EntryIdentity, now: s64) -> bool {
+    return entry.info.appID == "inbe" && entry.info.nodeID == service.nodeID &&
+        entry.info.audience == service.configuration.BaseURL && entry.info.expiresAt > now &&
+        entry.info.botID > 0 && entry.info.botID == telegram.BotID(service.configuration.LumiBotToken)
+}
+
+Guard :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request) -> bool {
+    fields: [2]string = .["telegram-entry:", address.FromRequest(request)]
+    if !rate.Allow(service.limiter, service.counters, Join(fields[:], ""), 120,
+        cast(clock.Duration)60000000000) {
+        response.Error(writer, 429, "Telegram entry rate limit exceeded")
+        return false
+    }
+    return true
+}
+
+ReadEntry :: (transaction: *sql.Transaction, context: ctx.Context, entryID: string) -> EntryIdentity {
+    entry: EntryIdentity
+    arguments: [1]Any = .[entryID]
+    destinations: [15]Any = .[*entry.info.entryID, *entry.info.mode, *entry.info.appID,
+        *entry.info.nodeID, *entry.info.audience, *entry.info.botID, *entry.info.challenge,
+        *entry.info.expiresAt, *entry.telegramID, *entry.accountID, *entry.status,
+        *entry.clientID, *entry.signingKey, *entry.encryptionKey, *entry.initDigest]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT entry_id,mode,app_id,node_id,audience,bot_id,challenge,expires_at,telegram_id,account_id,status,client_id,signing_key,encryption_key,init_digest FROM server_telegram_account_entries WHERE entry_id=?1", arguments[:])
+    if sql.ScanRow(row, destinations[:]) != null {
+        entry.status = "unavailable"
+    }
+    return entry
+}
+
+LockEntry :: (transaction: *sql.Transaction, context: ctx.Context, entryID: string) -> bool {
+    arguments: [1]Any = .[entryID]
+    locked := sql.ExecTx(transaction, context,
+        "UPDATE server_telegram_account_entries SET entry_id=entry_id WHERE entry_id=?1", arguments[:])
+    if locked.error != null {
+        return false
+    }
+    changed := sql.RowsAffected(locked.value)
+    return changed.error == null && changed.value == 1
+}
+
+IssueTx :: (service: AccountEntries, transaction: *sql.Transaction, context: ctx.Context,
+    mode: string, telegramID: s64, now: s64) -> EntryIssue {
+    result: EntryIssue
+    botID := telegram.BotID(service.configuration.LumiBotToken)
+    if (mode != "create" && mode != "restore" && mode != "connect") ||
+        telegramID <= 0 || telegramID > 4503599627370495 || botID <= 0 ||
+        !authorization.HexID(service.nodeID, 64) || service.configuration.BaseURL == "" {
+        result.error = errors.New("Telegram entry unavailable")
+        return result
+    }
+    result.info = EntryChallenge.{entryID = random.Nonce(), mode = mode, appID = "inbe",
+        nodeID = service.nodeID, audience = service.configuration.BaseURL,
+        botID = botID, challenge = random.Nonce(), expiresAt = now + 600}
+    if !authorization.HexID(result.info.entryID, 32) || !authorization.HexID(result.info.challenge, 32) {
+        result.error = errors.New("Telegram entry unavailable")
+        return result
+    }
+    arguments: [9]Any = .[result.info.entryID, mode, "inbe", service.nodeID,
+        result.info.audience, botID, telegramID, result.info.challenge, result.info.expiresAt]
+    written := sql.ExecTx(transaction, context,
+        "INSERT INTO server_telegram_account_entries(entry_id,mode,app_id,node_id,audience,bot_id,telegram_id,challenge,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", arguments[:])
+    result.error = written.error
+    if result.error == null {
+        changed := sql.RowsAffected(written.value)
+        result.error = changed.error
+        if result.error == null && changed.value != 1 {
+            result.error = errors.New("Telegram entry unavailable")
+        }
+    }
+    return result
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return Schema
+}
+
+Environment :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    botID := telegram.BotID(service.configuration.LumiBotToken)
+    if !authorization.HexID(service.nodeID, 64) || service.configuration.BaseURL == "" || botID <= 0 {
+        response.Error(writer, 503, "Telegram environment unavailable")
+        return
+    }
+    result := EntryEnvironment.{appID = "inbe", nodeID = service.nodeID,
+        audience = service.configuration.BaseURL, botID = botID, environment = "production"}
+    response.JSON(writer, 200, result)
+}
+
+// Only a trusted private-chat webhook calls these issuing functions. HTTP
+// callers cannot select another sender and cannot gain authority from a mode.
+Issue :: (service: AccountEntries, context: ctx.Context, mode: string, telegramID: s64) -> EntryIssue {
+    result: EntryIssue
+    opened := sql.Begin(service.database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    RollbackAtReturn(opened.value)
+    result = IssueTx(service, opened.value, context, mode, telegramID, clock.Unix(clock.Now()))
+    if result.error == null {
+        result.error = sql.Commit(opened.value)
+    }
+    return result
+}
+
+Create :: (service: AccountEntries, context: ctx.Context, telegramID: s64) -> EntryMenu {
+    result: EntryMenu
+    opened := sql.Begin(service.database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    RollbackAtReturn(opened.value)
+    now := clock.Unix(clock.Now())
+    created := IssueTx(service, opened.value, context, "create", telegramID, now)
+    if created.error != null {
+        result.error = created.error
+        return result
+    }
+    result.create = created.info
+    restored := IssueTx(service, opened.value, context, "restore", telegramID, now)
+    if restored.error != null {
+        result.error = restored.error
+        return result
+    }
+    result.restore = restored.info
+    connected := IssueTx(service, opened.value, context, "connect", telegramID, now)
+    if connected.error != null {
+        result.error = connected.error
+        return result
+    }
+    result.connect = connected.info
+    result.error = sql.Commit(opened.value)
+    return result
+}
+
+VerifyMessage :: (info: EntryChallenge, input: EntryVerify, initDigest: string) -> string {
+    fields: [14]string = .["daochi-telegram-entry-verify-v1", info.entryID, info.mode,
+        info.appID, info.nodeID, info.audience, FormatInteger(info.botID, 10),
+        info.challenge, FormatInteger(info.expiresAt, 10), input.clientID,
+        input.signingKey, input.encryptionKey, initDigest, ""]
+    return Join(fields[:], "\n")
+}
+
+ActionMessage :: (info: EntryChallenge, input: EntryAction, action: string) -> string {
+    fields: [16]string = .["daochi-telegram-entry-action-v1", action, info.entryID,
+        info.mode, info.appID, info.nodeID, info.audience, FormatInteger(info.botID, 10),
+        info.challenge, FormatInteger(info.expiresAt, 10), input.clientID,
+        input.signingKey, input.encryptionKey, FormatInteger(input.expiresAt, 10), input.nonce, ""]
+    return Join(fields[:], "\n")
+}
+
+BindMessage :: (entry: EntryIdentity, input: EntryAction, accountID: string) -> string {
+    fields: [4]string = .[ActionMessage(entry.info, input, "bind"), accountID, entry.initDigest, ""]
+    return Join(fields[:], "\n")
+}
+
+EntryInfo :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 1024)
+    input: EntryID
+    if raw.error != null || strict.Decode(raw.value, *input) != null ||
+        !authorization.HexID(input.entryID, 32) {
+        response.Error(writer, 400, "invalid Telegram entry")
+        return
+    }
+    opened := sql.Begin(service.database, http.Context(request), null)
+    if opened.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    RollbackAtReturn(opened.value)
+    entry := ReadEntry(opened.value, http.Context(request), input.entryID)
+    if !Current(service, entry, clock.Unix(clock.Now())) ||
+        (entry.status != "pending" && entry.status != "verified" && entry.status != "bound") {
+        response.Error(writer, 404, "Telegram entry unavailable")
+        return
+    }
+    if sql.Commit(opened.value) != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    response.JSON(writer, 200, entry.info)
+}
+
+Verify :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    raw := body.ReadJSON(writer, request, 24576)
+    input: EntryVerify
+    if raw.error != null || strict.Decode(raw.value, *input) != null ||
+        !authorization.HexID(input.entryID, 32) ||
+        !ValidKeys(input.clientID, input.signingKey, input.encryptionKey) {
+        response.Error(writer, 400, "invalid Telegram entry proof")
+        return
+    }
+    context := http.Context(request)
+    now := clock.Unix(clock.Now())
+    opened := sql.Begin(service.database, context, null)
+    if opened.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    if !LockEntry(transaction, context, input.entryID) {
+        response.Error(writer, 404, "Telegram entry unavailable")
+        return
+    }
+    entry := ReadEntry(transaction, context, input.entryID)
+    if !Current(service, entry, now) || entry.status != "pending" {
+        response.Error(writer, 409, "Telegram entry expired or already verified")
+        return
+    }
+    verified := telegram.Validate(input.initData, service.configuration.LumiBotToken, now)
+    if !verified.valid || verified.botID != entry.info.botID || verified.userID != entry.telegramID ||
+        !session.VerifyKeyProof(input.signingKey, VerifyMessage(entry.info, input, verified.digest), input.proof) {
+        response.Error(writer, 401, "Telegram sender and delegate proof required")
+        return
+    }
+    // Historical owner rendezvous claims also count as global replays.
+    historical: s64
+    digest: [1]Any = .[verified.digest]
+    historicalDestination: [1]Any = .[*historical]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM server_telegram_init_claims WHERE digest=?1", digest[:])
+    if sql.ScanRow(row, historicalDestination[:]) != null {
+        response.Error(writer, 503, "Telegram proof unavailable")
+        return
+    }
+    if historical != 0 {
+        response.Error(writer, 409, "Telegram initData already claimed")
+        return
+    }
+    cutoff: [1]Any = .[now]
+    pruned := sql.ExecTx(transaction, context,
+        "DELETE FROM server_telegram_init_replays WHERE expires_at<?1", cutoff[:])
+    replay: [2]Any = .[verified.digest, verified.authDate + 300]
+    claimed := sql.ExecTx(transaction, context,
+        "INSERT INTO server_telegram_init_replays(digest,expires_at) VALUES(?1,?2) ON CONFLICT(digest) DO NOTHING", replay[:])
+    if pruned.error != null || claimed.error != null {
+        response.Error(writer, 503, "Telegram proof unavailable")
+        return
+    }
+    changed := sql.RowsAffected(claimed.value)
+    if changed.error != null || changed.value != 1 {
+        response.Error(writer, 409, "Telegram initData already claimed")
+        return
+    }
+    account: string
+    sender: [1]Any = .[verified.userID]
+    destinations: [1]Any = .[*account]
+    row = sql.QueryRowTx(transaction, context,
+        "SELECT account_id FROM server_lumi_telegram WHERE telegram_id=?1", sender[:])
+    scanned := sql.ScanRow(row, destinations[:])
+    if scanned != null && scanned != sql.NoRows() {
+        response.Error(writer, 503, "Telegram binding unavailable")
+        return
+    }
+    arguments: [8]Any = .[input.entryID, account, input.clientID, input.signingKey,
+        input.encryptionKey, verified.digest, now, entry.info.expiresAt]
+    written := sql.ExecTx(transaction, context,
+        "UPDATE server_telegram_account_entries SET status='verified',account_id=?2,client_id=?3,signing_key=?4,encryption_key=?5,init_digest=?6,verified_at=?7 WHERE entry_id=?1 AND status='pending' AND expires_at=?8 AND expires_at>?7", arguments[:])
+    if written.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    changed = sql.RowsAffected(written.value)
+    if changed.error != null || changed.value != 1 {
+        response.Error(writer, 409, "Telegram entry already verified")
+        return
+    }
+    entry = ReadEntry(transaction, context, input.entryID)
+    if entry.status != "verified" || sql.Commit(transaction) != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    response.JSON(writer, 200, entry)
+}
+
+#scope_file
+ActionRead :: struct {
+    raw: []u8
+    input: EntryAction
+    valid: bool
+}
+ReadAction :: (writer: http.ResponseWriter, request: *http.Request) -> ActionRead {
+    result: ActionRead
+    read := body.ReadJSON(writer, request, 8192)
+    if read.error != null || strict.Decode(read.value, *result.input) != null ||
+        !authorization.HexID(result.input.entryID, 32) ||
+        !ValidKeys(result.input.clientID, result.input.signingKey, result.input.encryptionKey) {
+        response.Error(writer, 400, "invalid Telegram entry action")
+        return result
+    }
+    result.raw = read.value
+    result.valid = true
+    return result
+}
+
+Matches :: (entry: EntryIdentity, input: EntryAction) -> bool {
+    return input.entryID == entry.info.entryID && input.clientID == entry.clientID &&
+        input.signingKey == entry.signingKey && input.encryptionKey == entry.encryptionKey
+}
+
+FreshAction :: (entry: EntryIdentity, input: EntryAction, now: s64) -> bool {
+    return input.expiresAt > now && input.expiresAt <= now + 60 &&
+        input.expiresAt <= entry.info.expiresAt && authorization.HexID(input.nonce, 32)
+}
+
+ClaimAction :: (transaction: *sql.Transaction, context: ctx.Context, input: EntryAction, now: s64) -> bool {
+    cutoff: [1]Any = .[now]
+    pruned := sql.ExecTx(transaction, context,
+        "DELETE FROM server_telegram_entry_nonces WHERE expires_at<?1", cutoff[:])
+    if pruned.error != null {
+        return false
+    }
+    arguments: [3]Any = .[input.entryID, input.nonce, input.expiresAt]
+    claimed := sql.ExecTx(transaction, context,
+        "INSERT INTO server_telegram_entry_nonces(entry_id,nonce,expires_at) VALUES(?1,?2,?3) ON CONFLICT(entry_id,nonce) DO NOTHING", arguments[:])
+    if claimed.error != null {
+        return false
+    }
+    changed := sql.RowsAffected(claimed.value)
+    return changed.error == null && changed.value == 1
+}
+
+Owner :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request, raw: []u8) -> string {
+    account := http_auth.BearerUser(service.database, request, service.configuration.TokenSecret)
+    if account.authentication.error != null || account.authentication.status != 0 {
+        http_auth.Respond(writer, service.counters, account.authentication)
+        return ""
+    }
+    header := signed.ReadHeader(request)
+    if header.authentication.error != null || header.authentication.status != 0 {
+        http_auth.Respond(writer, service.counters, header.authentication)
+        return ""
+    }
+    if header.value.protocolVersion != 6 {
+        response.Error(writer, 400, "owner protocol v6 required")
+        return ""
+    }
+    verified := signed.Verify(service.database, http.Context(request), request, raw,
+        header.value, account.value, "inbe", service.verify, service.replay)
+    if verified.error != null || verified.status != 0 {
+        http_auth.Respond(writer, service.counters, verified)
+        return ""
+    }
+    return account.value
+}
+
+#scope_export
+// Status is authenticated by the same delegate key; public Info stays minimal.
+Status :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    read := ReadAction(writer, request)
+    if !read.valid {
+        return
+    }
+    input := read.input
+    context := http.Context(request)
+    opened := sql.Begin(service.database, context, null)
+    if opened.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    RollbackAtReturn(opened.value)
+    if !LockEntry(opened.value, context, input.entryID) {
+        response.Error(writer, 404, "Telegram entry unavailable")
+        return
+    }
+    entry := ReadEntry(opened.value, context, input.entryID)
+    now := clock.Unix(clock.Now())
+    if !Current(service, entry, now) || !Matches(entry, input) || !FreshAction(entry, input, now) ||
+        !session.VerifyKeyProof(entry.signingKey, ActionMessage(entry.info, input, "status"), input.proof) {
+        response.Error(writer, 401, "verified delegate proof required")
+        return
+    }
+    if !ClaimAction(opened.value, context, input, now) {
+        response.Error(writer, 409, "Telegram entry proof already used")
+        return
+    }
+    if sql.Commit(opened.value) != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    response.JSON(writer, 200, entry)
+}
+
+Cancel :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    read := ReadAction(writer, request)
+    if !read.valid {
+        return
+    }
+    input := read.input
+    context := http.Context(request)
+    now := clock.Unix(clock.Now())
+    opened := sql.Begin(service.database, context, null)
+    if opened.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    if !LockEntry(transaction, context, input.entryID) {
+        response.Error(writer, 404, "Telegram entry unavailable")
+        return
+    }
+    entry := ReadEntry(transaction, context, input.entryID)
+    if !Current(service, entry, now) || !Matches(entry, input) || !FreshAction(entry, input, now) ||
+        !session.VerifyKeyProof(entry.signingKey, ActionMessage(entry.info, input, "cancel"), input.proof) {
+        response.Error(writer, 401, "verified delegate proof required")
+        return
+    }
+    if !ClaimAction(transaction, context, input, now) {
+        response.Error(writer, 409, "Telegram entry proof already used")
+        return
+    }
+    arguments: [2]Any = .[input.entryID, now]
+    written := sql.ExecTx(transaction, context,
+        "UPDATE server_telegram_account_entries SET status='cancelled' WHERE entry_id=?1 AND status IN ('verified','bound') AND expires_at>?2", arguments[:])
+    if written.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    changed := sql.RowsAffected(written.value)
+    if changed.error != null || changed.value != 1 {
+        response.Error(writer, 409, "Telegram entry already finished")
+        return
+    }
+    if sql.Commit(transaction) != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    response.JSON(writer, 200, true)
+}
+
+Bind :: (service: AccountEntries, writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(service, writer, request) {
+        return
+    }
+    read := ReadAction(writer, request)
+    if !read.valid {
+        return
+    }
+    input := read.input
+    account := Owner(service, writer, request, read.raw)
+    if account == "" {
+        return
+    }
+    context := http.Context(request)
+    now := clock.Unix(clock.Now())
+    opened := sql.Begin(service.database, context, null)
+    if opened.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    if !LockEntry(transaction, context, input.entryID) {
+        response.Error(writer, 404, "Telegram entry unavailable")
+        return
+    }
+    entry := ReadEntry(transaction, context, input.entryID)
+    if !Current(service, entry, now) || entry.status != "verified" {
+        response.Error(writer, 409, "Telegram entry expired or already bound")
+        return
+    }
+    if !Matches(entry, input) || !FreshAction(entry, input, now) ||
+        !session.VerifyKeyProof(entry.signingKey, BindMessage(entry, input, account), input.proof) {
+        response.Error(writer, 401, "verified delegate binding proof required")
+        return
+    }
+    if !ClaimAction(transaction, context, input, now) {
+        response.Error(writer, 409, "Telegram entry proof already used")
+        return
+    }
+    if entry.accountID != "" && entry.accountID != account {
+        response.Error(writer, 409, "Telegram entry belongs to another account")
+        return
+    }
+    arguments: [4]Any = .[input.entryID, account, entry.telegramID, now]
+    conflicts: s64
+    destinations: [1]Any = .[*conflicts]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM server_lumi_telegram WHERE (account_id=?2 AND telegram_id<>?3) OR (telegram_id=?3 AND account_id<>?2)", arguments[0:3])
+    if sql.ScanRow(row, destinations[:]) != null {
+        response.Error(writer, 503, "Telegram binding unavailable")
+        return
+    }
+    if conflicts != 0 {
+        response.Error(writer, 409, "conflicting Telegram account")
+        return
+    }
+    bound := sql.ExecTx(transaction, context,
+        "INSERT INTO server_lumi_telegram(account_id,telegram_id,linked_at) VALUES(?2,?3,?4) ON CONFLICT(account_id) DO UPDATE SET telegram_id=excluded.telegram_id WHERE server_lumi_telegram.telegram_id=excluded.telegram_id", arguments[:])
+    if bound.error != null {
+        response.Error(writer, 503, "Telegram binding unavailable")
+        return
+    }
+    changed := sql.RowsAffected(bound.value)
+    if changed.error != null || changed.value != 1 {
+        response.Error(writer, 409, "conflicting Telegram account")
+        return
+    }
+    written := sql.ExecTx(transaction, context,
+        "UPDATE server_telegram_account_entries SET status='bound',account_id=?2,bound_at=?4 WHERE entry_id=?1 AND status='verified' AND expires_at>?4 AND (account_id='' OR account_id=?2)", arguments[:])
+    if written.error != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    changed = sql.RowsAffected(written.value)
+    if changed.error != null || changed.value != 1 {
+        response.Error(writer, 409, "Telegram entry already bound")
+        return
+    }
+    entry = ReadEntry(transaction, context, input.entryID)
+    if entry.status != "bound" || sql.Commit(transaction) != null {
+        response.Error(writer, 503, "Telegram entry unavailable")
+        return
+    }
+    response.JSON(writer, 200, entry)
+}
+
+// Called only inside the owner rendezvous claim transaction. The entry and
+// grant request commit together, so a rejected grant claim cannot consume it.
+ClaimTx :: (transaction: *sql.Transaction, context: ctx.Context, entryID: string,
+    account: string, botID: s64, userID: s64, clientID: string, signingKey: string,
+    encryptionKey: string, nodeID: string, audience: string, now: s64) -> bool {
+    if !authorization.HexID(entryID, 32) || !authorization.HexID(account, 64) ||
+        !authorization.HexID(nodeID, 64) || audience == "" || botID <= 0 || userID <= 0 ||
+        now <= 0 || !ValidKeys(clientID, signingKey, encryptionKey) {
+        return false
+    }
+    arguments: [11]Any = .[entryID, account, botID, userID, clientID, signingKey,
+        encryptionKey, nodeID, audience, now, "inbe"]
+    written := sql.ExecTx(transaction, context,
+        "UPDATE server_telegram_account_entries SET status='consumed',consumed_at=?10 WHERE entry_id=?1 AND account_id=?2 AND bot_id=?3 AND telegram_id=?4 AND client_id=?5 AND signing_key=?6 AND encryption_key=?7 AND node_id=?8 AND audience=?9 AND expires_at>?10 AND app_id=?11 AND status IN ('verified','bound') AND init_digest<>'' AND EXISTS(SELECT 1 FROM server_lumi_telegram WHERE account_id=?2 AND telegram_id=?4)", arguments[:])
+    if written.error != null {
+        return false
+    }
+    changed := sql.RowsAffected(written.value)
+    return changed.error == null && changed.value == 1
+}

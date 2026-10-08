@@ -645,6 +645,7 @@ func Store_ziranInit() {
 		panic("cyclic module startup")
 	}
 	Store_ziranInitState = 1
+	StoreOpen_ziranInit()
 	Store_GlobalInit00()
 	Store_ziranInitState = 2
 }

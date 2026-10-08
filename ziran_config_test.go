@@ -64,6 +64,7 @@ type BaselineConfig struct {
 	LumiBotToken                    string
 	LumiWebhookSecret               string
 	LumiOwnerID                     string
+	TelegramAccountsEnabled         bool
 	LumiCanvasURL                   string
 	FeedbackToken                   string
 	ChatModel                       string
@@ -151,6 +152,7 @@ func baselineLoadConfig() BaselineConfig {
 		LumiBotToken:                    baselineEnvStringOrFile("DAOCHI_LUMI_BOT_TOKEN", "DAOCHI_LUMI_BOT_TOKEN_FILE", ""),
 		LumiWebhookSecret:               baselineEnvStringOrFile("DAOCHI_LUMI_WEBHOOK_SECRET", "DAOCHI_LUMI_WEBHOOK_SECRET_FILE", ""),
 		LumiOwnerID:                     baselineEnvString("DAOCHI_LUMI_OWNER_ID", ""),
+		TelegramAccountsEnabled:         ConfigValues_Bool(os.Getenv("DAOCHI_TELEGRAM_ACCOUNTS_ENABLED"), false),
 		LumiCanvasURL:                   baselineEnvString("DAOCHI_LUMI_CANVAS_URL", "https://inbe.waozi.xyz/build/telegram/index.html"),
 		ChatModel:                       baselineEnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash"),
 		ChatDailyLimit:                  baselineEnvInt64("DAOCHI_CHAT_DAILY_LIMIT", 20),
@@ -267,6 +269,7 @@ var configEnvironmentKeys = []string{
 	"DAOCHI_LUMI_WEBHOOK_SECRET_FILE",
 	"DAOCHI_LUMI_OWNER_ID",
 	"DAOCHI_LUMI_CANVAS_URL",
+	"DAOCHI_TELEGRAM_ACCOUNTS_ENABLED",
 	"DAOCHI_ADDR",
 	"DAOCHI_ADMIN_TOKEN",
 	"DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET",

@@ -2,6 +2,7 @@
 authorization :: #import "authorization";
 session :: #import "session";
 telegram :: #import "telegram_init";
+entries :: #import "telegram_account_entry";
 strict :: #import "strict_json";
 auth :: #import "authentication";
 http_auth :: #import "http_auth";
@@ -80,12 +81,21 @@ RendezvousID :: struct {
     appID: string #go_tag "json:\"app_id\""
 }
 RendezvousClaim :: struct {
+    entryID: string #go_tag "json:\"entry_id,omitempty\""
     requestID: string #go_tag "json:\"request_id\""
     clientID: string #go_tag "json:\"client_id\""
     signingKey: string #go_tag "json:\"signing_key\""
     encryptionKey: string #go_tag "json:\"encryption_key\""
     initData: string #go_tag "json:\"init_data\""
     proof: string #go_tag "json:\"proof\""
+}
+ClaimIdentity :: struct {
+    requestID: string #go_tag "json:\"request_id\""
+    botID: s64 #go_tag "json:\"bot_id\""
+    telegramID: s64 #go_tag "json:\"telegram_id\""
+    initDigest: string #go_tag "json:\"init_digest\""
+    nodeID: string #go_tag "json:\"node_id\""
+    audience: string #go_tag "json:\"audience\""
 }
 GrantIDRequest :: struct {
     grantID: string #go_tag "json:\"grant_id\""
@@ -324,7 +334,8 @@ Claim :: (service: Authorizations, writer: http.ResponseWriter, request: *http.R
     if raw.error != null || strict.Decode(raw.value, *input) != null ||
         !authorization.HexID(input.requestID, 32) || !authorization.HexID(input.clientID, 64) ||
         !authorization.HexID(input.signingKey, 64) || !authorization.HexID(input.encryptionKey, 2368) ||
-        input.signingKey == input.encryptionKey {
+        input.signingKey == input.encryptionKey ||
+        (input.entryID != "" && (!authorization.HexID(input.entryID, 32) || input.initData != "")) {
         Failure(service, writer, 400, "invalid delegate claim")
         return
     }
@@ -352,12 +363,27 @@ Claim :: (service: Authorizations, writer: http.ResponseWriter, request: *http.R
     }
     digest := ""
     if pending.botID > 0 {
-        verified := telegram.Validate(input.initData, service.configuration.LumiBotToken, now)
-        if !verified.valid || verified.botID != pending.botID || verified.userID != pending.telegramID {
-            Failure(service, writer, 401, "verified Telegram sender required")
-            return
+        if input.entryID != "" {
+            entryArgument: [1]Any = .[input.entryID]
+            entryDestination: [1]Any = .[*digest]
+            row := sql.QueryRowTx(transaction, context,
+                "SELECT init_digest FROM server_telegram_account_entries WHERE entry_id=?1", entryArgument[:])
+            if sql.ScanRow(row, entryDestination[:]) != null ||
+                !authorization.HexID(digest, 64) ||
+                !entries.ClaimTx(transaction, context, input.entryID, pending.accountID,
+                    pending.botID, pending.telegramID, input.clientID, input.signingKey,
+                    input.encryptionKey, pending.nodeID, pending.audience, now) {
+                Failure(service, writer, 409, "verified Telegram entry does not match this request")
+                return
+            }
+        } else {
+            verified := telegram.Validate(input.initData, service.configuration.LumiBotToken, now)
+            if !verified.valid || verified.botID != pending.botID || verified.userID != pending.telegramID {
+                Failure(service, writer, 401, "verified Telegram sender required")
+                return
+            }
+            digest = verified.digest
         }
-        digest = verified.digest
         // The chat binding is checked again under the claim lock.
         matches: s64
         destinations: [1]Any = .[*matches]
@@ -368,7 +394,7 @@ Claim :: (service: Authorizations, writer: http.ResponseWriter, request: *http.R
             Failure(service, writer, 409, "Telegram connection changed")
             return
         }
-    } else if input.initData != "" {
+    } else if input.initData != "" || input.entryID != "" {
         Failure(service, writer, 400, "unexpected Telegram claim")
         return
     }
@@ -376,12 +402,27 @@ Claim :: (service: Authorizations, writer: http.ResponseWriter, request: *http.R
         Failure(service, writer, 401, "delegate claim proof rejected")
         return
     }
-    if digest != "" {
+    if digest != "" && input.entryID == "" {
         cutoff: [1]Any = .[now]
         pruned := sql.ExecTx(transaction, context,
             "DELETE FROM server_telegram_init_claims WHERE expires_at<?1", cutoff[:])
         if pruned.error != null {
             Failure(service, writer, 503, "claim unavailable")
+            return
+        }
+        // Bot entries and older owner rendezvous share one replay domain.
+        pruned = sql.ExecTx(transaction, context,
+            "DELETE FROM server_telegram_init_replays WHERE expires_at<?1", cutoff[:])
+        globalReplay: [2]Any = .[digest, now + 300]
+        globalClaim := sql.ExecTx(transaction, context,
+            "INSERT INTO server_telegram_init_replays(digest,expires_at) VALUES(?1,?2) ON CONFLICT(digest) DO NOTHING", globalReplay[:])
+        if pruned.error != null || globalClaim.error != null {
+            Failure(service, writer, 503, "claim unavailable")
+            return
+        }
+        globalChanged := sql.RowsAffected(globalClaim.value)
+        if globalChanged.error != null || globalChanged.value != 1 {
+            Failure(service, writer, 409, "Telegram initData already claimed")
             return
         }
         replay: [3]Any = .[digest, input.requestID, now + 300]
@@ -408,7 +449,12 @@ Claim :: (service: Authorizations, writer: http.ResponseWriter, request: *http.R
         Failure(service, writer, 409, "claim unavailable")
         return
     }
-    response.JSON(writer, 200, true)
+    // Identity is disclosed only after the raw Telegram proof and exact
+    // delegate key possession succeeded. Public rendezvous polling stays redacted.
+    result := ClaimIdentity.{requestID = pending.requestID, botID = pending.botID,
+        telegramID = pending.telegramID, initDigest = digest, nodeID = pending.nodeID,
+        audience = pending.audience}
+    response.JSON(writer, 200, result)
 }
 
 Approve :: (service: Authorizations, writer: http.ResponseWriter, request: *http.Request) {
@@ -470,6 +516,16 @@ Approve :: (service: Authorizations, writer: http.ResponseWriter, request: *http
         "INSERT INTO server_authorization_grants(grant_id,account_id,request_id,app_id,node_id,audience,not_before,expires_at,nonce,grant_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", arguments[:])
     if written.error != null {
         Failure(service, writer, 409, "authorization grant already issued")
+        return
+    }
+    // Owner approval registers this exact delegate installation. The client
+    // row grants no owner bearer or device authority; ActiveGrant requires
+    // both this registration and the live, key-bound owner-signed grant.
+    registration: [2]Any = .[grant.accountID, grant.clientID]
+    written = sql.ExecTx(transaction, http.Context(request),
+        "INSERT INTO server_clients(user_id_hash,client_id,protocol_version) VALUES(?1,?2,6) ON CONFLICT(user_id_hash,client_id) DO UPDATE SET protocol_version=6", registration[:])
+    if written.error != null {
+        Failure(service, writer, 503, "delegate client registration unavailable")
         return
     }
     active := authorization.ActiveGrant(transaction, http.Context(request), grant.grantID,

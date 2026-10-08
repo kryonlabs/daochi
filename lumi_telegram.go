@@ -402,7 +402,66 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 	Response_JSON(writer, int(200), true)
 }
 
-func LumiTelegram_Webhook(service Chat, writer ResponseWriter, request *Request) {
+func LumiTelegram_SendAccountMenu(service Chat, entryService AccountEntries, request *Request, sender int64, requestID string) bool {
+	if !service.Configuration.TelegramAccountsEnabled {
+		return false
+	}
+	issued := TelegramAccountEntry_Create(entryService, StdHttpGo_Context(request), sender)
+	if issued.Error != nil {
+		return false
+	}
+	connectID := issued.Connect.EntryID
+	if requestID != "" {
+		var value_0 bool = Authorization_HexID(requestID, 32)
+		if !value_0 {
+			return false
+		}
+		var matches int64 = 0
+		var value_1 [5]Any
+		value_1[0] = requestID
+		value_1[1] = sender
+		value_1[2] = entryService.NodeID
+		value_1[3] = service.Configuration.BaseURL
+		var value_2 int64 = StdTimeGo_Unix(StdTimeGo_Now())
+		value_1[4] = value_2
+		arguments := value_1
+		_ = arguments
+		var value_3 [1]Any
+		value_3[0] = &(matches)
+		destinations := value_3
+		_ = destinations
+		var value_4 Context = StdHttpGo_Context(request)
+		var value_5 string = "SELECT COUNT(*) FROM server_authorization_requests r JOIN server_lumi_telegram t ON t.account_id=r.account_id AND t.telegram_id=r.telegram_id WHERE r.request_id=?1 AND r.telegram_id=?2 AND r.node_id=?3 AND r.audience=?4 AND r.expires_at>?5 AND r.app_id='inbe' AND r.status='pending'"
+		row := StdSqlGo_QueryRow(service.Database, value_4, value_5, arguments[0:5:5])
+		var value_6 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+		if value_6 != nil || matches != 1 {
+			return false
+		}
+		connectID = requestID
+	}
+	var value_7 [3]string
+	value_7[0] = service.Configuration.LumiCanvasURL
+	value_7[1] = "?r="
+	value_7[2] = issued.Create.EntryID
+	create := value_7
+	_ = create
+	var value_8 [3]string
+	value_8[0] = service.Configuration.LumiCanvasURL
+	value_8[1] = "?r="
+	value_8[2] = issued.Restore.EntryID
+	restore := value_8
+	_ = restore
+	var value_9 [3]string
+	value_9[0] = service.Configuration.LumiCanvasURL
+	value_9[1] = "?r="
+	value_9[2] = connectID
+	connect := value_9
+	_ = connect
+	var value_10 string = service.Configuration.LumiBotToken
+	return TelegramAccountMenu_Send(value_10, sender, strings.Join(create[0:3:3], ""), strings.Join(restore[0:3:3], ""), strings.Join(connect[0:3:3], ""))
+}
+
+func LumiTelegram_Webhook(service Chat, entryService AccountEntries, writer ResponseWriter, request *Request) {
 	var value_0 bool = service.Configuration.LumiBotToken == "" || service.Configuration.LumiWebhookSecret == ""
 	var value_1 bool = value_0
 	if !value_1 {
@@ -457,6 +516,14 @@ func LumiTelegram_Webhook(service Chat, writer ResponseWriter, request *Request)
 		return
 	}
 	text := parsed.Message
+	if callback.ID == "" && int64(len(text)) == 44 && text[:12] == "/start auth_" {
+		var value_11 bool = LumiTelegram_SendAccountMenu(service, entryService, request, sender.ID, text[12:])
+		if !value_11 {
+			TelegramTransport_Deliver(service.Configuration.LumiBotToken, sender.ID, "This Mini App request is unavailable or expired. Request access again in Inner Breeze.", "", "")
+		}
+		Response_JSON(writer, 200, true)
+		return
+	}
 	if callback.ID == "" && int64(len(text)) == 39 && text[:7] == "/start " {
 		code := text[7:]
 		linked := LumiTelegram_ConsumeLink(service.Database, context, code, sender.ID, StdTimeGo_Unix(StdTimeGo_Now()))
@@ -476,38 +543,56 @@ func LumiTelegram_Webhook(service Chat, writer ResponseWriter, request *Request)
 		} else if linked.Status == "conflicting_account" {
 			notice = "This Telegram chat or account is already connected to a different account or chat. Disconnect it from the existing account first."
 		}
-		TelegramTransport_Deliver(service.Configuration.LumiBotToken, sender.ID, notice, "", service.Configuration.LumiCanvasURL)
+		var value_12 string = ""
+		if service.Configuration.TelegramAccountsEnabled {
+			value_12 = ""
+		} else {
+			value_12 = service.Configuration.LumiCanvasURL
+		}
+		canvas := value_12
+		TelegramTransport_Deliver(service.Configuration.LumiBotToken, sender.ID, notice, "", canvas)
+		if linked.Status == "connected" && service.Configuration.TelegramAccountsEnabled {
+			LumiTelegram_SendAccountMenu(service, entryService, request, sender.ID, "")
+		}
 		Response_JSON(writer, int(200), linked)
 		return
 	}
 	var account string = ""
-	var value_11 [1]Any
-	value_11[0] = &(account)
-	destination := value_11
+	var value_13 [1]Any
+	value_13[0] = &(account)
+	destination := value_13
 	_ = destination
 	row := StdSqlGo_QueryRow(service.Database, context, "SELECT account_id FROM server_lumi_telegram WHERE telegram_id=?1", arguments[0:1:1])
-	var value_12 Error = StdSqlGo_ScanRow(row, destination[0:1:1])
-	linked := value_12 == nil
+	var value_14 Error = StdSqlGo_ScanRow(row, destination[0:1:1])
+	linked := value_14 == nil
 	_ = linked
 	if callback.ID == "" && parsed.Name == "help" {
-		var value_13 string = service.Configuration.LumiBotToken
-		var value_14 string = LumiCommands_Help(linked)
-		TelegramTransport_Deliver(value_13, sender.ID, value_14, "", service.Configuration.LumiCanvasURL)
+		var value_15 string = service.Configuration.LumiBotToken
+		var value_16 string = LumiCommands_Help(linked)
+		TelegramTransport_Deliver(value_15, sender.ID, value_16, "", service.Configuration.LumiCanvasURL)
 		Response_JSON(writer, int(200), true)
 		return
 	}
 	if callback.ID == "" && (parsed.Name == "start" || parsed.Name == "app" || parsed.Name == "history") {
-		var value_15 string = ""
-		if linked {
-			var value_16 string = "Open Inner Breeze for your full Lumi history and app controls. Messages here use the same account chat."
-			value_15 = value_16
+		if service.Configuration.TelegramAccountsEnabled {
+			var value_17 bool = LumiTelegram_SendAccountMenu(service, entryService, request, sender.ID, "")
+			if !value_17 {
+				Response_Error(writer, 503, "Telegram account entry unavailable")
+				return
+			}
 		} else {
-			var value_17 string = "Open Inner Breeze, sign in to your account, then choose Chat on Telegram in Lumi to link this private chat. Keep your private key inside the app."
-			value_15 = value_17
+			var value_18 string = ""
+			if linked {
+				var value_19 string = "Open Inner Breeze for your full Lumi history and app controls. Messages here use the same account chat."
+				value_18 = value_19
+			} else {
+				var value_20 string = "Open Inner Breeze, sign in to your account, then choose Chat on Telegram in Lumi to link this private chat. Keep your private key inside the app."
+				value_18 = value_20
+			}
+			notice := value_18
+			_ = notice
+			TelegramTransport_Deliver(service.Configuration.LumiBotToken, sender.ID, notice, "", service.Configuration.LumiCanvasURL)
 		}
-		notice := value_15
-		_ = notice
-		TelegramTransport_Deliver(service.Configuration.LumiBotToken, sender.ID, notice, "", service.Configuration.LumiCanvasURL)
 		Response_JSON(writer, int(200), true)
 		return
 	}
@@ -519,16 +604,16 @@ func LumiTelegram_Webhook(service Chat, writer ResponseWriter, request *Request)
 	if callback.ID == "" && int64(len(text)) > 0 && text[0] == 47 {
 		var notice string = ""
 		_ = notice
-		var value_18 bool = LumiCommands_Known(parsed.Name)
-		if !value_18 {
+		var value_21 bool = LumiCommands_Known(parsed.Name)
+		if !value_21 {
 			notice = "Unknown command. Use /help to see Lumi's commands, or send a normal chat message."
 		} else {
 			usage := LumiCommands_Usage(parsed.Name)
 			if usage != "" && !parsed.HasArgument {
-				var value_19 [2]string
-				value_19[0] = "Use "
-				value_19[1] = usage
-				parts := value_19
+				var value_22 [2]string
+				value_22[0] = "Use "
+				value_22[1] = usage
+				parts := value_22
 				_ = parts
 				notice = strings.Join(parts[0:2:2], "")
 			}
@@ -547,18 +632,18 @@ func LumiTelegram_Webhook(service Chat, writer ResponseWriter, request *Request)
 			return
 		}
 		kind = "confirmation"
-		value_20 := callback.Data
-		if int64(1) < 0 || int64(len(value_20)) < int64(1) || int64(len(value_20)) > int64(len(value_20)) {
+		value_23 := callback.Data
+		if int64(1) < 0 || int64(len(value_23)) < int64(1) || int64(len(value_23)) > int64(len(value_23)) {
 			panic("string range out of bounds")
 		}
-		text = value_20[1:len(value_20)]
-		var value_21 int = 0
+		text = value_23[1:len(value_23)]
+		var value_24 int = 0
 		if callback.Data[0] == 89 {
-			value_21 = 1
+			value_24 = 1
 		} else {
-			value_21 = 2
+			value_24 = 2
 		}
-		choice = value_21
+		choice = value_24
 		TelegramTransport_AnswerCallback(service.Configuration.LumiBotToken, callback.ID)
 	}
 	if int64(len(text)) == 0 || int64(len(text)) >= 1024 {
@@ -570,8 +655,8 @@ func LumiTelegram_Webhook(service Chat, writer ResponseWriter, request *Request)
 	arguments[2] = kind
 	arguments[3] = text
 	arguments[4] = choice
-	var value_22 string = "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text,choice) VALUES(?1,?2,?3,?4,?5)"
-	written := StdSqlGo_Exec(service.Database, context, value_22, arguments[0:5:5])
+	var value_25 string = "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text,choice) VALUES(?1,?2,?3,?4,?5)"
+	written := StdSqlGo_Exec(service.Database, context, value_25, arguments[0:5:5])
 	if written.Error != nil {
 		Response_Error(writer, int(503), "app queue unavailable")
 		return
@@ -590,6 +675,9 @@ func LumiTelegram_ziranInit() {
 	}
 	LumiTelegram_ziranInitState = 1
 	Chat_ziranInit()
+	TelegramAccountEntry_ziranInit()
+	TelegramAccountMenu_ziranInit()
 	TelegramTransport_ziranInit()
+	StoreSchema_ziranInit()
 	LumiTelegram_ziranInitState = 2
 }

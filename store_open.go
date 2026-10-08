@@ -68,3 +68,17 @@ func StoreOpen_Open(path string) StoreOpenResult {
 func StoreOpen_Close(database *Database) Error {
 	return (*sql.DB).Close(database)
 }
+
+var StoreOpen_ziranInitState uint8
+
+func StoreOpen_ziranInit() {
+	if StoreOpen_ziranInitState == 2 {
+		return
+	}
+	if StoreOpen_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	StoreOpen_ziranInitState = 1
+	StoreSchema_ziranInit()
+	StoreOpen_ziranInitState = 2
+}

@@ -27,7 +27,7 @@ type zir_8bac33c9dac611c2_WriteResult struct {
 
 type zir_458cde001c61ce88_Hijacker = http.Hijacker
 
-type UserInfo = url.Userinfo
+type zir_66876f07bdddfd89_UserInfo = url.Userinfo
 
 type zir_83826c12324062ca_HijackerResult struct {
 	Value   zir_458cde001c61ce88_Hijacker
@@ -66,7 +66,7 @@ func Middleware_Fragment(Value *URL) string {
 	return Value.Fragment
 }
 
-func Middleware_User(Value *URL) *UserInfo {
+func Middleware_User(Value *URL) *zir_66876f07bdddfd89_UserInfo {
 	return Value.User
 }
 
@@ -191,7 +191,7 @@ func Middleware_AllowedOrigin(origin string) string {
 	}
 	var value_9 bool = value_7
 	if !value_9 {
-		var value_10 *UserInfo = Middleware_User(value)
+		var value_10 *zir_66876f07bdddfd89_UserInfo = Middleware_User(value)
 		value_9 = (value_10 != nil)
 	}
 	if value_9 {

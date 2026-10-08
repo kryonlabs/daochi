@@ -2,6 +2,9 @@
 // It queues app-owned actions; it never receives an account signing key.
 #import "std/go_types"
 chat :: #import "chat";
+entries :: #import "telegram_account_entry";
+menu :: #import "telegram_account_menu";
+authorization :: #import "authorization";
 auth :: #import "http_auth";
 body :: #import "http_body";
 response :: #import "response";
@@ -320,7 +323,40 @@ Account :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Requ
     response.JSON(writer, cast(isize)200, true)
 }
 
-Webhook :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request) {
+// This switch is enabled only after the verified Mini App build is live.
+SendAccountMenu :: (service: chat.Chat, entryService: entries.AccountEntries,
+    request: *http.Request, sender: s64, requestID: string) -> bool {
+    if !service.configuration.TelegramAccountsEnabled {
+        return false
+    }
+    issued := entries.Create(entryService, http.Context(request), sender)
+    if issued.error != null {
+        return false
+    }
+    connectID := issued.connect.entryID
+    if requestID != "" {
+        if !authorization.HexID(requestID, 32) {
+            return false
+        }
+        matches: s64
+        arguments: [5]Any = .[requestID, sender, entryService.nodeID,
+            service.configuration.BaseURL, clock.Unix(clock.Now())]
+        destinations: [1]Any = .[*matches]
+        row := sql.QueryRow(service.database, http.Context(request),
+            "SELECT COUNT(*) FROM server_authorization_requests r JOIN server_lumi_telegram t ON t.account_id=r.account_id AND t.telegram_id=r.telegram_id WHERE r.request_id=?1 AND r.telegram_id=?2 AND r.node_id=?3 AND r.audience=?4 AND r.expires_at>?5 AND r.app_id='inbe' AND r.status='pending'", arguments[:])
+        if sql.ScanRow(row, destinations[:]) != null || matches != 1 {
+            return false
+        }
+        connectID = requestID
+    }
+    create: [3]string = .[service.configuration.LumiCanvasURL, "?r=", issued.create.entryID]
+    restore: [3]string = .[service.configuration.LumiCanvasURL, "?r=", issued.restore.entryID]
+    connect: [3]string = .[service.configuration.LumiCanvasURL, "?r=", connectID]
+    return menu.Send(service.configuration.LumiBotToken, sender,
+        Join(create[:], ""), Join(restore[:], ""), Join(connect[:], ""))
+}
+
+Webhook :: (service: chat.Chat, entryService: entries.AccountEntries, writer: http.ResponseWriter, request: *http.Request) {
     if service.configuration.LumiBotToken == "" || service.configuration.LumiWebhookSecret == "" ||
     !transport.WebhookTrusted(request, service.configuration.LumiWebhookSecret) {
         response.Error(writer, cast(isize)401, "Telegram authentication required")
@@ -351,6 +387,14 @@ Webhook :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Requ
         return
     }
     text := parsed.message
+    if callback.id == "" && text.count == 44 && text[:12] == "/start auth_" {
+        if !SendAccountMenu(service, entryService, request, sender.id, text[12:]) {
+            unused transport.Deliver(service.configuration.LumiBotToken, sender.id,
+                "This Mini App request is unavailable or expired. Request access again in Inner Breeze.", "", "")
+        }
+        response.JSON(writer, 200, true)
+        return
+    }
     if callback.id == "" && text.count == 39 && text[:7] == "/start " {
         code := text[7:]
         linked := ConsumeLink(service.database, context, code, sender.id, clock.Unix(clock.Now()))
@@ -368,7 +412,11 @@ Webhook :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Requ
         } else if linked.status == "conflicting_account" {
             notice = "This Telegram chat or account is already connected to a different account or chat. Disconnect it from the existing account first."
         }
-        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", service.configuration.LumiCanvasURL)
+        canvas := ifx service.configuration.TelegramAccountsEnabled then "" else service.configuration.LumiCanvasURL
+        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", canvas)
+        if linked.status == "connected" && service.configuration.TelegramAccountsEnabled {
+            unused SendAccountMenu(service, entryService, request, sender.id, "")
+        }
         response.JSON(writer, cast(isize)200, linked)
         return
     }
@@ -382,8 +430,15 @@ Webhook :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Requ
         return
     }
     if callback.id == "" && (parsed.name == "start" || parsed.name == "app" || parsed.name == "history") {
-        notice := ifx linked then "Open Inner Breeze for your full Lumi history and app controls. Messages here use the same account chat." else "Open Inner Breeze, sign in to your account, then choose Chat on Telegram in Lumi to link this private chat. Keep your private key inside the app."
-        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", service.configuration.LumiCanvasURL)
+        if service.configuration.TelegramAccountsEnabled {
+            if !SendAccountMenu(service, entryService, request, sender.id, "") {
+                response.Error(writer, 503, "Telegram account entry unavailable")
+                return
+            }
+        } else {
+            notice := ifx linked then "Open Inner Breeze for your full Lumi history and app controls. Messages here use the same account chat." else "Open Inner Breeze, sign in to your account, then choose Chat on Telegram in Lumi to link this private chat. Keep your private key inside the app."
+            unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", service.configuration.LumiCanvasURL)
+        }
         response.JSON(writer, cast(isize)200, true)
         return
     }

@@ -66,12 +66,22 @@ type RendezvousID struct {
 }
 
 type RendezvousClaim struct {
+	EntryID       string "json:\"entry_id,omitempty\""
 	RequestID     string "json:\"request_id\""
 	ClientID      string "json:\"client_id\""
 	SigningKey    string "json:\"signing_key\""
 	EncryptionKey string "json:\"encryption_key\""
 	InitData      string "json:\"init_data\""
 	Proof         string "json:\"proof\""
+}
+
+type ClaimIdentity struct {
+	RequestID  string "json:\"request_id\""
+	BotID      int64  "json:\"bot_id\""
+	TelegramID int64  "json:\"telegram_id\""
+	InitDigest string "json:\"init_digest\""
+	NodeID     string "json:\"node_id\""
+	Audience   string "json:\"audience\""
 }
 
 type GrantIDRequest struct {
@@ -470,7 +480,18 @@ func AuthorizationHttp_Claim(service Authorizations, writer ResponseWriter, requ
 		var value_15 bool = Authorization_HexID(input.EncryptionKey, 2368)
 		value_14 = !value_15
 	}
-	if value_14 || input.SigningKey == input.EncryptionKey {
+	var value_16 bool = value_14 || input.SigningKey == input.EncryptionKey
+	var value_17 bool = value_16
+	if !value_17 {
+		var value_18 bool = input.EntryID != ""
+		var value_19 bool = value_18
+		if value_19 {
+			var value_20 bool = Authorization_HexID(input.EntryID, 32)
+			value_19 = (!value_20 || input.InitData != "")
+		}
+		value_17 = value_19
+	}
+	if value_17 {
 		AuthorizationHttp_Failure(service, writer, 400, "invalid delegate claim")
 		return
 	}
@@ -483,13 +504,13 @@ func AuthorizationHttp_Claim(service Authorizations, writer ResponseWriter, requ
 	}
 	transaction := opened.Value
 	defer (*sql.Tx).Rollback(transaction)
-	var value_16 [5]Any
-	value_16[0] = input.RequestID
-	value_16[1] = input.ClientID
-	value_16[2] = input.SigningKey
-	value_16[3] = input.EncryptionKey
-	value_16[4] = now
-	arguments := value_16
+	var value_21 [5]Any
+	value_21[0] = input.RequestID
+	value_21[1] = input.ClientID
+	value_21[2] = input.SigningKey
+	value_21[3] = input.EncryptionKey
+	value_21[4] = now
+	arguments := value_21
 	_ = arguments
 	locked := StdSqlGo_ExecTx(transaction, context, "UPDATE server_authorization_requests SET request_id=request_id WHERE request_id=?1", arguments[0:1:1])
 	if locked.Error != nil {
@@ -503,57 +524,105 @@ func AuthorizationHttp_Claim(service Authorizations, writer ResponseWriter, requ
 	}
 	digest := ""
 	if pending.BotID > 0 {
-		verified := TelegramInit_Validate(input.InitData, service.Configuration.LumiBotToken, now)
-		if !verified.Valid || verified.BotID != pending.BotID || verified.UserID != pending.TelegramID {
-			AuthorizationHttp_Failure(service, writer, 401, "verified Telegram sender required")
-			return
+		if input.EntryID != "" {
+			var value_22 [1]Any
+			value_22[0] = input.EntryID
+			entryArgument := value_22
+			_ = entryArgument
+			var value_23 [1]Any
+			value_23[0] = &(digest)
+			entryDestination := value_23
+			_ = entryDestination
+			row := StdSqlGo_QueryRowTx(transaction, context, "SELECT init_digest FROM server_telegram_account_entries WHERE entry_id=?1", entryArgument[0:1:1])
+			_ = row
+			var value_24 Error = StdSqlGo_ScanRow(row, entryDestination[0:1:1])
+			var value_25 bool = value_24 != nil
+			var value_26 bool = value_25
+			if !value_26 {
+				var value_27 bool = Authorization_HexID(digest, 64)
+				value_26 = !value_27
+			}
+			var value_28 bool = value_26
+			var value_29 bool = value_28
+			if !value_29 {
+				var value_30 bool = TelegramAccountEntry_ClaimTx(transaction, context, input.EntryID, pending.AccountID, pending.BotID, pending.TelegramID, input.ClientID, input.SigningKey, input.EncryptionKey, pending.NodeID, pending.Audience, now)
+				value_29 = !value_30
+			}
+			if value_29 {
+				AuthorizationHttp_Failure(service, writer, 409, "verified Telegram entry does not match this request")
+				return
+			}
+		} else {
+			verified := TelegramInit_Validate(input.InitData, service.Configuration.LumiBotToken, now)
+			if !verified.Valid || verified.BotID != pending.BotID || verified.UserID != pending.TelegramID {
+				AuthorizationHttp_Failure(service, writer, 401, "verified Telegram sender required")
+				return
+			}
+			digest = verified.Digest
 		}
-		digest = verified.Digest
 		var matches int64 = 0
-		var value_17 [1]Any
-		value_17[0] = &(matches)
-		destinations := value_17
+		var value_31 [1]Any
+		value_31[0] = &(matches)
+		destinations := value_31
 		_ = destinations
-		var value_18 [2]Any
-		value_18[0] = pending.AccountID
-		value_18[1] = pending.TelegramID
-		binding := value_18
+		var value_32 [2]Any
+		value_32[0] = pending.AccountID
+		value_32[1] = pending.TelegramID
+		binding := value_32
 		_ = binding
 		row := StdSqlGo_QueryRowTx(transaction, context, "SELECT COUNT(*) FROM server_lumi_telegram WHERE account_id=?1 AND telegram_id=?2", binding[0:2:2])
-		var value_19 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-		if value_19 != nil || matches != 1 {
+		_ = row
+		var value_33 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+		if value_33 != nil || matches != 1 {
 			AuthorizationHttp_Failure(service, writer, 409, "Telegram connection changed")
 			return
 		}
-	} else if input.InitData != "" {
+	} else if input.InitData != "" || input.EntryID != "" {
 		AuthorizationHttp_Failure(service, writer, 400, "unexpected Telegram claim")
 		return
 	}
-	var value_20 string = input.SigningKey
-	var value_21 string = AuthorizationHttp_ClaimMessage(pending, input, digest)
-	var value_22 bool = Session_VerifyKeyProof(value_20, value_21, input.Proof)
-	if !value_22 {
+	var value_34 string = input.SigningKey
+	var value_35 string = AuthorizationHttp_ClaimMessage(pending, input, digest)
+	var value_36 bool = Session_VerifyKeyProof(value_34, value_35, input.Proof)
+	if !value_36 {
 		AuthorizationHttp_Failure(service, writer, 401, "delegate claim proof rejected")
 		return
 	}
-	if digest != "" {
-		var value_23 [1]Any
-		value_23[0] = now
-		cutoff := value_23
+	if digest != "" && input.EntryID == "" {
+		var value_37 [1]Any
+		value_37[0] = now
+		cutoff := value_37
 		_ = cutoff
 		pruned := StdSqlGo_ExecTx(transaction, context, "DELETE FROM server_telegram_init_claims WHERE expires_at<?1", cutoff[0:1:1])
 		if pruned.Error != nil {
 			AuthorizationHttp_Failure(service, writer, 503, "claim unavailable")
 			return
 		}
-		var value_24 [3]Any
-		value_24[0] = digest
-		value_24[1] = input.RequestID
-		value_24[2] = now + 300
-		replay := value_24
+		pruned = StdSqlGo_ExecTx(transaction, context, "DELETE FROM server_telegram_init_replays WHERE expires_at<?1", cutoff[0:1:1])
+		var value_38 [2]Any
+		value_38[0] = digest
+		value_38[1] = now + 300
+		globalReplay := value_38
+		_ = globalReplay
+		var value_39 string = "INSERT INTO server_telegram_init_replays(digest,expires_at) VALUES(?1,?2) ON CONFLICT(digest) DO NOTHING"
+		globalClaim := StdSqlGo_ExecTx(transaction, context, value_39, globalReplay[0:2:2])
+		if pruned.Error != nil || globalClaim.Error != nil {
+			AuthorizationHttp_Failure(service, writer, 503, "claim unavailable")
+			return
+		}
+		globalChanged := StdSqlGo_RowsAffected(globalClaim.Value)
+		if globalChanged.Error != nil || globalChanged.Value != 1 {
+			AuthorizationHttp_Failure(service, writer, 409, "Telegram initData already claimed")
+			return
+		}
+		var value_40 [3]Any
+		value_40[0] = digest
+		value_40[1] = input.RequestID
+		value_40[2] = now + 300
+		replay := value_40
 		_ = replay
-		var value_25 string = "INSERT INTO server_telegram_init_claims(digest,request_id,expires_at) VALUES(?1,?2,?3) ON CONFLICT(digest) DO NOTHING"
-		claimed := StdSqlGo_ExecTx(transaction, context, value_25, replay[0:3:3])
+		var value_41 string = "INSERT INTO server_telegram_init_claims(digest,request_id,expires_at) VALUES(?1,?2,?3) ON CONFLICT(digest) DO NOTHING"
+		claimed := StdSqlGo_ExecTx(transaction, context, value_41, replay[0:3:3])
 		if claimed.Error != nil {
 			AuthorizationHttp_Failure(service, writer, 503, "claim unavailable")
 			return
@@ -565,25 +634,26 @@ func AuthorizationHttp_Claim(service Authorizations, writer ResponseWriter, requ
 			return
 		}
 	}
-	var value_26 string = "UPDATE server_authorization_requests SET status='claimed',client_id=?2,signing_key=?3,encryption_key=?4 WHERE request_id=?1 AND status='pending' AND expires_at>?5"
-	written := StdSqlGo_ExecTx(transaction, context, value_26, arguments[0:5:5])
+	var value_42 string = "UPDATE server_authorization_requests SET status='claimed',client_id=?2,signing_key=?3,encryption_key=?4 WHERE request_id=?1 AND status='pending' AND expires_at>?5"
+	written := StdSqlGo_ExecTx(transaction, context, value_42, arguments[0:5:5])
 	if written.Error != nil {
 		AuthorizationHttp_Failure(service, writer, 503, "claim unavailable")
 		return
 	}
 	changed := StdSqlGo_RowsAffected(written.Value)
 	_ = changed
-	var value_27 bool = changed.Error != nil || changed.Value != 1
-	var value_28 bool = value_27
-	if !value_28 {
-		var value_29 Error = StdSqlGo_Commit(transaction)
-		value_28 = (value_29 != nil)
+	var value_43 bool = changed.Error != nil || changed.Value != 1
+	var value_44 bool = value_43
+	if !value_44 {
+		var value_45 Error = StdSqlGo_Commit(transaction)
+		value_44 = (value_45 != nil)
 	}
-	if value_28 {
+	if value_44 {
 		AuthorizationHttp_Failure(service, writer, 409, "claim unavailable")
 		return
 	}
-	Response_JSON(writer, 200, true)
+	result := ClaimIdentity{RequestID: pending.RequestID, BotID: pending.BotID, TelegramID: pending.TelegramID, InitDigest: digest, NodeID: pending.NodeID, Audience: pending.Audience}
+	Response_JSON(writer, 200, result)
 }
 
 func AuthorizationHttp_Approve(service Authorizations, writer ResponseWriter, request *Request) {
@@ -683,16 +753,28 @@ func AuthorizationHttp_Approve(service Authorizations, writer ResponseWriter, re
 		AuthorizationHttp_Failure(service, writer, 409, "authorization grant already issued")
 		return
 	}
-	var value_18 Context = StdHttpGo_Context(request)
-	var value_19 string = grant.GrantID
-	var value_20 string = service.Configuration.BaseURL
-	active := Authorization_ActiveGrant(transaction, value_18, value_19, service.NodeID, value_20, StdTimeGo_Unix(StdTimeGo_Now()))
+	var value_18 [2]Any
+	value_18[0] = grant.AccountID
+	value_18[1] = grant.ClientID
+	registration := value_18
+	_ = registration
+	var value_19 Context = StdHttpGo_Context(request)
+	var value_20 string = "INSERT INTO server_clients(user_id_hash,client_id,protocol_version) VALUES(?1,?2,6) ON CONFLICT(user_id_hash,client_id) DO UPDATE SET protocol_version=6"
+	written = StdSqlGo_ExecTx(transaction, value_19, value_20, registration[0:2:2])
+	if written.Error != nil {
+		AuthorizationHttp_Failure(service, writer, 503, "delegate client registration unavailable")
+		return
+	}
+	var value_21 Context = StdHttpGo_Context(request)
+	var value_22 string = grant.GrantID
+	var value_23 string = service.Configuration.BaseURL
+	active := Authorization_ActiveGrant(transaction, value_21, value_22, service.NodeID, value_23, StdTimeGo_Unix(StdTimeGo_Now()))
 	if active.Authentication.Error != nil || active.Authentication.Status != 0 {
 		HttpAuth_Respond(writer, service.Counters, active.Authentication)
 		return
 	}
-	var value_21 Error = StdSqlGo_Commit(transaction)
-	if value_21 != nil {
+	var value_24 Error = StdSqlGo_Commit(transaction)
+	if value_24 != nil {
 		AuthorizationHttp_Failure(service, writer, 503, "approval unavailable")
 		return
 	}
@@ -983,6 +1065,7 @@ func AuthorizationHttp_ziranInit() {
 		panic("cyclic module startup")
 	}
 	AuthorizationHttp_ziranInitState = 1
+	TelegramAccountEntry_ziranInit()
 	TelegramTransport_ziranInit()
 	AuthorizationHttp_ziranInitState = 2
 }

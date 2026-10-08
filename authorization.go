@@ -56,12 +56,17 @@ func Authorization_HexID(value string, length int64) bool {
 }
 
 func Authorization_SafeCollection(appID string, collection string) bool {
-	var value_0 bool = appID == "inbe"
-	if value_0 {
-		var value_1 bool = strings.HasPrefix(collection, "private.inbe.v1.")
-		value_0 = value_1
+	var value_0 bool = collection == strings.TrimSpace(collection)
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = appID == "inbe"
+		if value_2 {
+			var value_3 bool = strings.HasPrefix(collection, "private.inbe.v1.")
+			value_2 = value_3
+		}
+		value_1 = !value_2
 	}
-	return !value_0
+	return value_1
 }
 
 func Authorization_GrantMessage(grant Grant) string {
@@ -345,7 +350,7 @@ func Authorization_ActiveGrant(transaction *Transaction, context Context, grantI
 	value_1[3] = now
 	arguments := value_1
 	_ = arguments
-	var value_2 string = "SELECT g.grant_json FROM server_authorization_grants g JOIN server_apps a ON a.app_id=g.app_id WHERE g.grant_id=?1 AND g.node_id=?2 AND g.audience=?3 AND g.revoked_at=0 AND g.not_before<=?4 AND g.expires_at>?4 AND a.status='active' AND NOT EXISTS(SELECT 1 FROM server_app_manifests m WHERE m.app_id=a.app_id AND (m.status<>'active' OR (m.expires_at>0 AND m.expires_at<?4)))"
+	var value_2 string = "SELECT g.grant_json FROM server_authorization_grants g JOIN server_apps a ON a.app_id=g.app_id WHERE g.grant_id=?1 AND g.node_id=?2 AND g.audience=?3 AND g.revoked_at=0 AND g.not_before<=?4 AND g.expires_at>?4 AND a.status='active' AND NOT EXISTS(SELECT 1 FROM server_app_manifests m WHERE m.app_id=a.app_id AND (m.status<>'active' OR (m.expires_at>0 AND m.expires_at<=?4)))"
 	row := StdSqlGo_QueryRowTx(transaction, context, value_2, arguments[0:4:4])
 	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
 	var value_4 bool = value_3 != nil
@@ -359,57 +364,75 @@ func Authorization_ActiveGrant(transaction *Transaction, context Context, grantI
 		result.Authentication = value_7
 		return result
 	}
+	var registered int64 = 0
+	var value_8 [2]Any
+	value_8[0] = result.Value.AccountID
+	value_8[1] = result.Value.ClientID
+	registration := value_8
+	_ = registration
+	var value_9 [1]Any
+	value_9[0] = &(registered)
+	registrationDestination := value_9
+	_ = registrationDestination
+	var value_10 string = "SELECT COUNT(*) FROM server_clients WHERE user_id_hash=?1 AND client_id=?2 AND protocol_version=6"
+	row = StdSqlGo_QueryRowTx(transaction, context, value_10, registration[0:2:2])
+	var value_11 Error = StdSqlGo_ScanRow(row, registrationDestination[0:1:1])
+	if value_11 != nil || registered != 1 {
+		var value_12 AuthenticationResult = Authentication_Failure(401, "delegate client is not registered")
+		result.Authentication = value_12
+		return result
+	}
 	{
-		value_8 := result.Value.Scopes[:]
-		if int64(0) < 0 || int64(int64(len(value_8))) < int64(0) || int64(int64(len(value_8))) > int64(len(value_8)) {
+		value_13 := result.Value.Scopes[:]
+		if int64(0) < 0 || int64(int64(len(value_13))) < int64(0) || int64(int64(len(value_13))) > int64(len(value_13)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_9 := value_8[0:int64(len(value_8)):int64(len(value_8))]
-		loop_count_9 := int64(len(loop_view_9))
-		var loop_cursor_9 int64 = 0
-		for loop_cursor_9 < loop_count_9 {
-			loop_index_9 := loop_cursor_9
-			scope := loop_view_9[loop_index_9]
-			var value_9 [1]Any
-			value_9[0] = scope.Collection
-			arguments := value_9
+		loop_view_17 := value_13[0:int64(len(value_13)):int64(len(value_13))]
+		loop_count_17 := int64(len(loop_view_17))
+		var loop_cursor_17 int64 = 0
+		for loop_cursor_17 < loop_count_17 {
+			loop_index_17 := loop_cursor_17
+			scope := loop_view_17[loop_index_17]
+			var value_14 [1]Any
+			value_14[0] = scope.Collection
+			arguments := value_14
 			_ = arguments
 			var app string = ""
 			var visibility string = ""
 			var owners int64 = 0
-			var value_10 [3]Any
-			value_10[0] = &(app)
-			value_10[1] = &(visibility)
-			value_10[2] = &(owners)
-			destinations := value_10
+			var value_15 [3]Any
+			value_15[0] = &(app)
+			value_15[1] = &(visibility)
+			value_15[2] = &(owners)
+			destinations := value_15
 			_ = destinations
-			var value_11 string = "WITH matches AS (SELECT app_id,visibility,length(rtrim(collection_prefix,'*')) AS specificity FROM server_app_collections WHERE collection_prefix=?1 OR (substr(collection_prefix,-1)='*' AND substr(?1,1,length(collection_prefix)-1)=substr(collection_prefix,1,length(collection_prefix)-1))), best AS (SELECT * FROM matches WHERE specificity=(SELECT MAX(specificity) FROM matches)) SELECT app_id,visibility,(SELECT COUNT(*) FROM best) FROM best LIMIT 1"
-			row = StdSqlGo_QueryRowTx(transaction, context, value_11, arguments[0:1:1])
-			var value_12 Error = StdSqlGo_ScanRow(row, destinations[0:3:3])
-			if value_12 != nil || app != result.Value.AppID || owners != 1 || visibility != scope.Visibility {
-				var value_13 AuthenticationResult = Authentication_Failure(403, "app collection visibility changed")
-				result.Authentication = value_13
+			var value_16 string = "WITH matches AS (SELECT app_id,visibility,length(rtrim(collection_prefix,'*')) AS specificity FROM server_app_collections WHERE collection_prefix=?1 OR (substr(collection_prefix,-1)='*' AND substr(?1,1,length(collection_prefix)-1)=substr(collection_prefix,1,length(collection_prefix)-1))), best AS (SELECT * FROM matches WHERE specificity=(SELECT MAX(specificity) FROM matches)) SELECT app_id,visibility,(SELECT COUNT(*) FROM best) FROM best LIMIT 1"
+			row = StdSqlGo_QueryRowTx(transaction, context, value_16, arguments[0:1:1])
+			var value_17 Error = StdSqlGo_ScanRow(row, destinations[0:3:3])
+			if value_17 != nil || app != result.Value.AppID || owners != 1 || visibility != scope.Visibility {
+				var value_18 AuthenticationResult = Authentication_Failure(403, "app collection visibility changed")
+				result.Authentication = value_18
 				return result
 			}
-			loop_cursor_9++
+			loop_cursor_17++
 		}
 	}
 	if result.Value.TelegramID > 0 {
-		var value_14 [2]Any
-		value_14[0] = result.Value.AccountID
-		value_14[1] = result.Value.TelegramID
-		arguments := value_14
+		var value_19 [2]Any
+		value_19[0] = result.Value.AccountID
+		value_19[1] = result.Value.TelegramID
+		arguments := value_19
 		_ = arguments
 		var found int64 = 0
-		var value_15 [1]Any
-		value_15[0] = &(found)
-		destinations := value_15
+		var value_20 [1]Any
+		value_20[0] = &(found)
+		destinations := value_20
 		_ = destinations
 		row = StdSqlGo_QueryRowTx(transaction, context, "SELECT COUNT(*) FROM server_lumi_telegram WHERE account_id=?1 AND telegram_id=?2", arguments[0:2:2])
-		var value_16 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-		if value_16 != nil || found != 1 {
-			var value_17 AuthenticationResult = Authentication_Failure(401, "Telegram authorization disconnected")
-			result.Authentication = value_17
+		var value_21 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+		if value_21 != nil || found != 1 {
+			var value_22 AuthenticationResult = Authentication_Failure(401, "Telegram authorization disconnected")
+			result.Authentication = value_22
 			return result
 		}
 	}

@@ -87,7 +87,7 @@ func TestAuthorizationKeyGenerationRotation(t *testing.T) {
 
 func TestAuthorizationRendezvousPrivacyAndLegacyKeyRefusal(t *testing.T) {
 	fixture := authorizationSetup(t)
-	for _, collection := range []string{"private.inbe.v1.cells", "private.inbe.v1.sessions", "private.inbe.v1.habits", "private.inbe.v1.habit_days"} {
+	for _, collection := range []string{"private.inbe.v1.cells", "private.inbe.v1.sessions", "private.inbe.v1.habits", "private.inbe.v1.habit_days", " private.inbe.v1.sessions", "private.inbe.v2.lumi "} {
 		created := fixture.ownerCall(t, "/api/v1/authorization/requests", AuthorizationRequest{AppID: "inbe",
 			Scopes: []RequestedScope{{Collection: collection, Read: true}}})
 		if created.Code != 400 {
@@ -144,6 +144,7 @@ func TestAuthorizationCurrentRegistrationAndExpiry(t *testing.T) {
 		"manifest expired":  "UPDATE server_app_manifests SET expires_at=1 WHERE app_id='inbe'",
 		"grant expired":     "UPDATE server_authorization_grants SET expires_at=1",
 		"session expired":   "UPDATE server_authorization_sessions SET expires_at=1",
+		"client removed":    "DELETE FROM server_clients WHERE client_id='" + strings.Repeat("b", 64) + "'",
 	} {
 		t.Run(name, func(t *testing.T) {
 			fixture := authorizationSetup(t)

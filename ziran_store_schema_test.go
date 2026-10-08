@@ -46,7 +46,7 @@ func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 	legacy := result.Value[:0]
 	for _, entry := range result.Value {
 		name := entry["tbl_name"].(string)
-		if strings.HasPrefix(name, "server_authorization_") || name == "server_telegram_init_claims" {
+		if strings.HasPrefix(name, "server_authorization_") || strings.HasPrefix(name, "server_telegram_") {
 			continue
 		}
 		legacy = append(legacy, entry)

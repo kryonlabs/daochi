@@ -130,5 +130,130 @@
         }
       }
     }
+  },
+  "/api/v1/telegram/environment": {
+    "get": {
+      "summary": "Read the issuing node and production bot identity",
+      "description": "Issuing-node only. Entries expire after ten minutes. Telegram identity is verified server-side; no owner private key or recovery passphrase is accepted. Status, cancel and bind require fresh one-use key proofs. Bind additionally requires an existing owner bearer and unchanged v6 owner/device transaction signatures.",
+      "responses": {
+        "200": {
+          "description": "Verified result"
+        },
+        "400": {
+          "description": "Malformed proof"
+        },
+        "401": {
+          "description": "Identity or signature rejected"
+        },
+        "409": {
+          "description": "Expired, conflicting, or replayed entry"
+        }
+      }
+    }
+  },
+  "/api/v1/telegram/entry": {
+    "post": {
+      "summary": "Read an expiring bot entry challenge",
+      "description": "Issuing-node only. Entries expire after ten minutes. Telegram identity is verified server-side; no owner private key or recovery passphrase is accepted. Status, cancel and bind require fresh one-use key proofs. Bind additionally requires an existing owner bearer and unchanged v6 owner/device transaction signatures.",
+      "responses": {
+        "200": {
+          "description": "Verified result"
+        },
+        "400": {
+          "description": "Malformed proof"
+        },
+        "401": {
+          "description": "Identity or signature rejected"
+        },
+        "409": {
+          "description": "Expired, conflicting, or replayed entry"
+        }
+      }
+    }
+  },
+  "/api/v1/telegram/entry/verify": {
+    "post": {
+      "summary": "Verify raw Telegram initData and possession of separate delegate keys",
+      "description": "Issuing-node only. Entries expire after ten minutes. Telegram identity is verified server-side; no owner private key or recovery passphrase is accepted. Status, cancel and bind require fresh one-use key proofs. Bind additionally requires an existing owner bearer and unchanged v6 owner/device transaction signatures.",
+      "responses": {
+        "200": {
+          "description": "Verified result"
+        },
+        "400": {
+          "description": "Malformed proof"
+        },
+        "401": {
+          "description": "Identity or signature rejected"
+        },
+        "409": {
+          "description": "Expired, conflicting, or replayed entry"
+        }
+      }
+    }
+  },
+  "/api/v1/telegram/entry/status": {
+    "post": {
+      "summary": "Read verified entry status using a fresh delegate proof",
+      "description": "Issuing-node only. Entries expire after ten minutes. Telegram identity is verified server-side; no owner private key or recovery passphrase is accepted. Status, cancel and bind require fresh one-use key proofs. Bind additionally requires an existing owner bearer and unchanged v6 owner/device transaction signatures.",
+      "responses": {
+        "200": {
+          "description": "Verified result"
+        },
+        "400": {
+          "description": "Malformed proof"
+        },
+        "401": {
+          "description": "Identity or signature rejected"
+        },
+        "409": {
+          "description": "Expired, conflicting, or replayed entry"
+        }
+      }
+    }
+  },
+  "/api/v1/telegram/entry/cancel": {
+    "post": {
+      "summary": "Cancel a verified entry with a fresh delegate proof",
+      "description": "Issuing-node only. Entries expire after ten minutes. Telegram identity is verified server-side; no owner private key or recovery passphrase is accepted. Status, cancel and bind require fresh one-use key proofs. Bind additionally requires an existing owner bearer and unchanged v6 owner/device transaction signatures.",
+      "responses": {
+        "200": {
+          "description": "Verified result"
+        },
+        "400": {
+          "description": "Malformed proof"
+        },
+        "401": {
+          "description": "Identity or signature rejected"
+        },
+        "409": {
+          "description": "Expired, conflicting, or replayed entry"
+        }
+      }
+    }
+  },
+  "/api/v1/telegram/account/bind": {
+    "post": {
+      "summary": "Bind a locally created or restored owner account to the verified Telegram entry",
+      "description": "Issuing-node only. Entries expire after ten minutes. Telegram identity is verified server-side; no owner private key or recovery passphrase is accepted. Status, cancel and bind require fresh one-use key proofs. Bind additionally requires an existing owner bearer and unchanged v6 owner/device transaction signatures.",
+      "responses": {
+        "200": {
+          "description": "Verified result"
+        },
+        "400": {
+          "description": "Malformed proof"
+        },
+        "401": {
+          "description": "Identity or signature rejected"
+        },
+        "409": {
+          "description": "Expired, conflicting, or replayed entry"
+        }
+      },
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ]
+    }
   }
 }

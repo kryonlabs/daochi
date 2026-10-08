@@ -54,6 +54,7 @@ Join :: (values: []string, separator: string) -> string #foreign strings;
 FormatInteger :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
 Compare :: (left: string, right: string) -> isize #foreign strings;
 HasPrefix :: (value: string, prefix: string) -> bool #foreign strings;
+TrimSpace :: (value: string) -> string #foreign strings;
 
 #scope_export
 HexID :: (value: string, length: s64) -> bool {
@@ -73,7 +74,8 @@ SafeCollection :: (appID: string, collection: string) -> bool {
     // Released Inbe private v1 collections share one global content key.
     // Giving out any of those keys exceeds an exact collection grant. Lumi
     // v2 has an independently derived key and is the initial private scope.
-    return !(appID == "inbe" && HasPrefix(collection, "private.inbe.v1."))
+    return collection == TrimSpace(collection) &&
+        !(appID == "inbe" && HasPrefix(collection, "private.inbe.v1."))
 }
 
 GrantMessage :: (grant: Grant) -> string {
@@ -179,10 +181,19 @@ ActiveGrant :: (transaction: *sql.Transaction, context: ctx.Context,
     destinations: [1]Any = .[*raw]
     arguments: [4]Any = .[grantID, nodeID, audience, now]
     row := sql.QueryRowTx(transaction, context,
-        "SELECT g.grant_json FROM server_authorization_grants g JOIN server_apps a ON a.app_id=g.app_id WHERE g.grant_id=?1 AND g.node_id=?2 AND g.audience=?3 AND g.revoked_at=0 AND g.not_before<=?4 AND g.expires_at>?4 AND a.status='active' AND NOT EXISTS(SELECT 1 FROM server_app_manifests m WHERE m.app_id=a.app_id AND (m.status<>'active' OR (m.expires_at>0 AND m.expires_at<?4)))", arguments[:])
+        "SELECT g.grant_json FROM server_authorization_grants g JOIN server_apps a ON a.app_id=g.app_id WHERE g.grant_id=?1 AND g.node_id=?2 AND g.audience=?3 AND g.revoked_at=0 AND g.not_before<=?4 AND g.expires_at>?4 AND a.status='active' AND NOT EXISTS(SELECT 1 FROM server_app_manifests m WHERE m.app_id=a.app_id AND (m.status<>'active' OR (m.expires_at>0 AND m.expires_at<=?4)))", arguments[:])
     if sql.ScanRow(row, destinations[:]) != null ||
         json.Unmarshal(text.ToBytes(raw), *result.value) != null {
         result.authentication = auth.Failure(401, "authorization inactive on this node")
+        return result
+    }
+    registered: s64
+    registration: [2]Any = .[result.value.accountID, result.value.clientID]
+    registrationDestination: [1]Any = .[*registered]
+    row = sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM server_clients WHERE user_id_hash=?1 AND client_id=?2 AND protocol_version=6", registration[:])
+    if sql.ScanRow(row, registrationDestination[:]) != null || registered != 1 {
+        result.authentication = auth.Failure(401, "delegate client is not registered")
         return result
     }
     for scope: result.value.scopes {

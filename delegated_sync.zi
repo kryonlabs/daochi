@@ -12,6 +12,7 @@ writes :: #import "sync_writes";
 views :: #import "sync_views";
 body :: #import "http_body";
 strict :: #import "strict_json";
+json :: #import "std/json_go";
 response :: #import "response";
 http_auth :: #import "http_auth";
 http :: #import "std/http_go";
@@ -135,7 +136,28 @@ Handle :: (authorizations: service.Authorizations, writer: http.ResponseWriter, 
             response.Error(writer, 503, "delegated read unavailable")
             return
         }
-        result.records = loaded.value
+        // The client parses at most one MiB. Stop before that bound and set
+        // the cursor only from records actually delivered; large photo history
+        // must paginate rather than silently skip or fail every retry.
+        returned: s64
+        responseBytes: s64 = 256
+        for record: loaded.value {
+            encoded := json.Marshal(record)
+            if encoded.error != null {
+                response.Error(writer, 503, "delegated record encoding unavailable")
+                return
+            }
+            if responseBytes + encoded.value.count + 1 > 1000000 {
+                if returned == 0 {
+                    response.Error(writer, 413, "record exceeds delegated response bound")
+                    return
+                }
+                break
+            }
+            responseBytes += encoded.value.count + 1
+            returned += 1
+        }
+        result.records = loaded.value[0:returned]
         // Each response has one collection, so another scope's version cannot
         // skip this collection's truncated records.
         if result.records.count > 0 {

@@ -402,15 +402,15 @@ Webhook :: (service: chat.Chat, entryService: entries.AccountEntries, writer: ht
             response.Error(writer, cast(isize)503, "link temporarily unavailable")
             return
         }
-        notice := "This connection code is invalid. Request a new code in Inner Breeze."
+        notice := "This link does not work. In Inner Breeze, tap Connect Telegram again."
         if linked.status == "connected" {
-            notice = "Telegram chat connected. Mini App access requires a separate approval in Inner Breeze."
+            notice = "✅ Connected to Inner Breeze.\n\nWrite to me like a chat, or try /lists, /todo Buy tea or /help. I answer while Inner Breeze is open on one of your devices."
         } else if linked.status == "expired" {
-            notice = "This connection code expired. Request a new code in Inner Breeze."
+            notice = "This link expired. In Inner Breeze, tap Connect Telegram again."
         } else if linked.status == "reused" {
-            notice = "This connection code was already used. Mini App access requires a separate approval in Inner Breeze."
+            notice = "This link was already used. If this chat is not connected yet, tap Connect Telegram in Inner Breeze again."
         } else if linked.status == "conflicting_account" {
-            notice = "This Telegram chat or account is already connected to a different account or chat. Disconnect it from the existing account first."
+            notice = "This Telegram account is already connected to another Inner Breeze account. Disconnect it there first."
         }
         canvas := ifx service.configuration.TelegramAccountsEnabled then "" else service.configuration.LumiCanvasURL
         unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", canvas)
@@ -436,14 +436,14 @@ Webhook :: (service: chat.Chat, entryService: entries.AccountEntries, writer: ht
                 return
             }
         } else {
-            notice := ifx linked then "Open Inner Breeze for your full Lumi history and app controls. Messages here use the same account chat." else "Open Inner Breeze, sign in to your account, then choose Chat on Telegram in Lumi to link this private chat. Keep your private key inside the app."
+            notice := ifx linked then "You are connected. Write to me here, or open Inner Breeze for your full Lumi history." else "Open Inner Breeze, sign in, then tap Connect Telegram in Settings to link this chat."
             unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", service.configuration.LumiCanvasURL)
         }
         response.JSON(writer, cast(isize)200, true)
         return
     }
     if !linked {
-        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, "Link your account from Lumi in Inner Breeze first.", "", service.configuration.LumiCanvasURL)
+        unused transport.Deliver(service.configuration.LumiBotToken, sender.id, "Connect this chat first: in Inner Breeze, open Settings and tap Connect Telegram.", "", service.configuration.LumiCanvasURL)
         response.JSON(writer, cast(isize)200, true)
         return
     }
@@ -488,5 +488,9 @@ Webhook :: (service: chat.Chat, entryService: entries.AccountEntries, writer: ht
     written := sql.Exec(service.database, context,
         "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text,choice) VALUES(?1,?2,?3,?4,?5)", arguments[:])
     if written.error != null { response.Error(writer, cast(isize)503, "app queue unavailable"); return }
+    if kind == "message" {
+        // Show at once that Lumi received the message; the app replies next.
+        unused transport.Typing(service.configuration.LumiBotToken, sender.id)
+    }
     response.JSON(writer, cast(isize)200, true)
 }

@@ -39,6 +39,10 @@ TelegramSend :: struct {
     text: string #go_tag "json:\"text\""
     reply_markup: KeyboardJSON #go_tag "json:\"reply_markup,omitempty\""
 }
+TelegramChatAction :: struct {
+    chat_id: s64 #go_tag "json:\"chat_id\""
+    action: string #go_tag "json:\"action\""
+}
 TelegramCallbackAnswer :: struct {
     callback_query_id: string #go_tag "json:\"callback_query_id\""
 }
@@ -106,6 +110,10 @@ Deliver :: (token: string, destination: s64, content: string, draft: string, can
         message.reply_markup = cast(KeyboardJSON)text.ToBytes(Join(markup[:], ""))
     }
     return Call(token, "sendMessage", message)
+}
+
+Typing :: (token: string, destination: s64) -> bool {
+    return Call(token, "sendChatAction", TelegramChatAction.{chat_id = destination, action = "typing"})
 }
 
 AnswerCallback :: (token: string, id: string) -> bool {

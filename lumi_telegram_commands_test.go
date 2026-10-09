@@ -16,6 +16,10 @@ func TestLumiTelegramHelpUsageAndCommandQueue(t *testing.T) {
 	server.Cfg.LumiCanvasURL = "https://inbe.example/canvas"
 	var messages []string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/botcommand-fixture-token/sendChatAction" {
+			fmt.Fprint(w, `{"ok":true}`)
+			return
+		}
 		if r.URL.Path != "/botcommand-fixture-token/sendMessage" {
 			t.Error("unexpected Telegram method")
 		}
@@ -47,7 +51,7 @@ func TestLumiTelegramHelpUsageAndCommandQueue(t *testing.T) {
 	code := lumiLink(t, handler, owner)
 	send(102, "/start@inlumi_bot "+code)
 	send(103, "/help")
-	if !strings.Contains(messages[len(messages)-1], "Keep Inner Breeze open") {
+	if !strings.Contains(messages[len(messages)-1], "while Inner Breeze is open") {
 		t.Fatal("linked help omitted the app execution requirement")
 	}
 	for i, input := range []string{"/todo", "/todo \t\n", "/feedback", "/destroy_everything", "/"} {

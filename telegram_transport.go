@@ -33,6 +33,11 @@ type TelegramSend struct {
 	ReplyMarkup KeyboardJSON "json:\"reply_markup,omitempty\""
 }
 
+type TelegramChatAction struct {
+	ChatId int64  "json:\"chat_id\""
+	Action string "json:\"action\""
+}
+
 type TelegramCallbackAnswer struct {
 	CallbackQueryId string "json:\"callback_query_id\""
 }
@@ -145,6 +150,10 @@ func TelegramTransport_Deliver(token string, destination int64, content string, 
 		message.ReplyMarkup = KeyboardJSON(value_8)
 	}
 	return TelegramTransport_Call(token, "sendMessage", message)
+}
+
+func TelegramTransport_Typing(token string, destination int64) bool {
+	return TelegramTransport_Call(token, "sendChatAction", TelegramChatAction{ChatId: destination, Action: "typing"})
 }
 
 func TelegramTransport_AnswerCallback(token string, id string) bool {

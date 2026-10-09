@@ -156,8 +156,16 @@ func TestLumiTelegramAccountLinkQueueConsentAndDelivery(t *testing.T) {
 	server.Cfg.LumiCanvasURL = "https://inbe.example/canvas"
 	var mu sync.Mutex
 	var messages []map[string]any
+	typing := 0
 	failDelivery := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/botfixture-token/sendChatAction" {
+			mu.Lock()
+			typing++
+			mu.Unlock()
+			fmt.Fprint(w, `{"ok":true}`)
+			return
+		}
 		if r.URL.Path != "/botfixture-token/sendMessage" && r.URL.Path != "/botfixture-token/answerCallbackQuery" {
 			t.Error("unexpected Telegram method")
 		}
@@ -207,6 +215,11 @@ func TestLumiTelegramAccountLinkQueueConsentAndDelivery(t *testing.T) {
 	lumiWebhook(handler, "fixture-secret", 3, "private", "/start "+otherCode)
 	lumiWebhook(handler, "fixture-secret", 4, "private", "/todo From Telegram")
 	lumiWebhook(handler, "fixture-secret", 4, "private", "/todo From Telegram")
+	mu.Lock()
+	if typing == 0 {
+		t.Error("queued message did not show that Lumi is typing")
+	}
+	mu.Unlock()
 	out := lumiRequest(handler, owner, "GET", poll, "")
 	var result LumiPoll
 	if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &result) != nil || result.Update.ID != 4 || result.Update.Text != "/todo From Telegram" || !result.Linked {

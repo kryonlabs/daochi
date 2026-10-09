@@ -16,7 +16,7 @@ type ParsedCommand struct {
 	HasArgument bool
 }
 
-const zir_d_7299f23f63b6111b = "[\n  {\"command\":\"start\",\"description\":\"Connect your Inner Breeze account\"},\n  {\"command\":\"help\",\"description\":\"Show commands and examples\"},\n  {\"command\":\"app\",\"description\":\"Open Inner Breeze\"},\n  {\"command\":\"history\",\"description\":\"Open your full Lumi conversation in Inner Breeze\"},\n  {\"command\":\"todo\",\"description\":\"Add a task: /todo <title>\"},\n  {\"command\":\"done\",\"description\":\"Complete a task: /done <title>\"},\n  {\"command\":\"reopen\",\"description\":\"Reopen a completed task: /reopen <title>\"},\n  {\"command\":\"lists\",\"description\":\"Open your lists\"},\n  {\"command\":\"habit\",\"description\":\"Complete a habit: /habit <title>\"},\n  {\"command\":\"habits\",\"description\":\"Open your habits\"},\n  {\"command\":\"journal\",\"description\":\"Write to today's diary: /journal <text>\"},\n  {\"command\":\"diary\",\"description\":\"Open your diary\"},\n  {\"command\":\"meditate\",\"description\":\"Start meditation in Inner Breeze\"},\n  {\"command\":\"whm\",\"description\":\"Start Wim Hof breathing in Inner Breeze\"},\n  {\"command\":\"practices\",\"description\":\"Open your practices\"},\n  {\"command\":\"progress\",\"description\":\"Show a chart: /progress <sessions|meditation|retention|habits> [1–31 days]\"},\n  {\"command\":\"feedback\",\"description\":\"Draft feedback for your approval: /feedback <text>\"},\n  {\"command\":\"donate\",\"description\":\"Show official donation links\"},\n  {\"command\":\"cancel\",\"description\":\"Cancel a pending diary or habit choice\"}\n]\n"
+const zir_d_7299f23f63b6111b = "[\n  {\"command\":\"start\",\"description\":\"Connect your Inner Breeze account\"},\n  {\"command\":\"help\",\"description\":\"Show commands and examples\"},\n  {\"command\":\"app\",\"description\":\"Open Inner Breeze\"},\n  {\"command\":\"history\",\"description\":\"Open your full Lumi conversation in Inner Breeze\"},\n  {\"command\":\"todo\",\"description\":\"Add a task: /todo <title>\"},\n  {\"command\":\"done\",\"description\":\"Complete a task: /done <title>\"},\n  {\"command\":\"reopen\",\"description\":\"Reopen a completed task: /reopen <title>\"},\n  {\"command\":\"lists\",\"description\":\"Show your open tasks\"},\n  {\"command\":\"habit\",\"description\":\"Complete a habit: /habit <title>\"},\n  {\"command\":\"habits\",\"description\":\"Show today's habits\"},\n  {\"command\":\"journal\",\"description\":\"Write to today's diary: /journal <text>\"},\n  {\"command\":\"diary\",\"description\":\"Open your diary\"},\n  {\"command\":\"meditate\",\"description\":\"Start meditation in Inner Breeze\"},\n  {\"command\":\"whm\",\"description\":\"Start Wim Hof breathing in Inner Breeze\"},\n  {\"command\":\"practices\",\"description\":\"Open your practices\"},\n  {\"command\":\"progress\",\"description\":\"Show a chart: /progress <sessions|meditation|retention|habits> [1–31 days]\"},\n  {\"command\":\"feedback\",\"description\":\"Draft feedback for your approval: /feedback <text>\"},\n  {\"command\":\"donate\",\"description\":\"Show official donation links\"},\n  {\"command\":\"cancel\",\"description\":\"Cancel a pending diary or habit choice\"}\n]\n"
 
 func LumiCommands_Parse(input string) ParsedCommand {
 	result := ParsedCommand{Message: input}
@@ -69,7 +69,7 @@ func LumiCommands_Parse(input string) ParsedCommand {
 
 func LumiCommands_Catalogue() []BotCommand {
 	var result []BotCommand = nil
-	var value_0 string = "[\n  {\"command\":\"start\",\"description\":\"Connect your Inner Breeze account\"},\n  {\"command\":\"help\",\"description\":\"Show commands and examples\"},\n  {\"command\":\"app\",\"description\":\"Open Inner Breeze\"},\n  {\"command\":\"history\",\"description\":\"Open your full Lumi conversation in Inner Breeze\"},\n  {\"command\":\"todo\",\"description\":\"Add a task: /todo <title>\"},\n  {\"command\":\"done\",\"description\":\"Complete a task: /done <title>\"},\n  {\"command\":\"reopen\",\"description\":\"Reopen a completed task: /reopen <title>\"},\n  {\"command\":\"lists\",\"description\":\"Open your lists\"},\n  {\"command\":\"habit\",\"description\":\"Complete a habit: /habit <title>\"},\n  {\"command\":\"habits\",\"description\":\"Open your habits\"},\n  {\"command\":\"journal\",\"description\":\"Write to today's diary: /journal <text>\"},\n  {\"command\":\"diary\",\"description\":\"Open your diary\"},\n  {\"command\":\"meditate\",\"description\":\"Start meditation in Inner Breeze\"},\n  {\"command\":\"whm\",\"description\":\"Start Wim Hof breathing in Inner Breeze\"},\n  {\"command\":\"practices\",\"description\":\"Open your practices\"},\n  {\"command\":\"progress\",\"description\":\"Show a chart: /progress <sessions|meditation|retention|habits> [1–31 days]\"},\n  {\"command\":\"feedback\",\"description\":\"Draft feedback for your approval: /feedback <text>\"},\n  {\"command\":\"donate\",\"description\":\"Show official donation links\"},\n  {\"command\":\"cancel\",\"description\":\"Cancel a pending diary or habit choice\"}\n]\n"
+	var value_0 string = "[\n  {\"command\":\"start\",\"description\":\"Connect your Inner Breeze account\"},\n  {\"command\":\"help\",\"description\":\"Show commands and examples\"},\n  {\"command\":\"app\",\"description\":\"Open Inner Breeze\"},\n  {\"command\":\"history\",\"description\":\"Open your full Lumi conversation in Inner Breeze\"},\n  {\"command\":\"todo\",\"description\":\"Add a task: /todo <title>\"},\n  {\"command\":\"done\",\"description\":\"Complete a task: /done <title>\"},\n  {\"command\":\"reopen\",\"description\":\"Reopen a completed task: /reopen <title>\"},\n  {\"command\":\"lists\",\"description\":\"Show your open tasks\"},\n  {\"command\":\"habit\",\"description\":\"Complete a habit: /habit <title>\"},\n  {\"command\":\"habits\",\"description\":\"Show today's habits\"},\n  {\"command\":\"journal\",\"description\":\"Write to today's diary: /journal <text>\"},\n  {\"command\":\"diary\",\"description\":\"Open your diary\"},\n  {\"command\":\"meditate\",\"description\":\"Start meditation in Inner Breeze\"},\n  {\"command\":\"whm\",\"description\":\"Start Wim Hof breathing in Inner Breeze\"},\n  {\"command\":\"practices\",\"description\":\"Open your practices\"},\n  {\"command\":\"progress\",\"description\":\"Show a chart: /progress <sessions|meditation|retention|habits> [1–31 days]\"},\n  {\"command\":\"feedback\",\"description\":\"Draft feedback for your approval: /feedback <text>\"},\n  {\"command\":\"donate\",\"description\":\"Show official donation links\"},\n  {\"command\":\"cancel\",\"description\":\"Cancel a pending diary or habit choice\"}\n]\n"
 	StdJsonGo_Unmarshal(StdTextGo_ToBytes(value_0), &(result))
 	return result
 }
@@ -121,43 +121,42 @@ func LumiCommands_Usage(command string) string {
 func LumiCommands_Help(linked bool) string {
 	var value_0 string = ""
 	if linked {
-		var value_1 string = "Lumi uses your linked Inner Breeze account. Keep Inner Breeze open to receive replies and run app actions. Actions need their installed sub-app. You can also chat normally.\n\n"
+		var value_1 string = "Lumi answers while Inner Breeze is open on one of your devices. Write normally or use a command:\n\n"
 		value_0 = value_1
 	} else {
-		var value_2 string = "Open Inner Breeze, sign in, and choose Chat on Telegram in Lumi to link this private chat. Keep your private key inside the app.\n\n"
-		value_0 = value_2
+		value_0 = "Open Inner Breeze, sign in, then tap Connect Telegram in Settings to link this chat.\n\n"
 	}
 	introduction := value_0
 	output := introduction
 	{
-		var value_3 []BotCommand = LumiCommands_Catalogue()
-		if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
+		var value_2 []BotCommand = LumiCommands_Catalogue()
+		if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_2 := value_3[0:int64(len(value_3)):int64(len(value_3))]
+		loop_view_2 := value_2[0:int64(len(value_2)):int64(len(value_2))]
 		loop_count_2 := int64(len(loop_view_2))
 		var loop_cursor_2 int64 = 0
 		for loop_cursor_2 < loop_count_2 {
 			loop_index_2 := loop_cursor_2
 			item := loop_view_2[loop_index_2]
-			var value_5 [6]string
-			value_5[0] = output
-			value_5[1] = "/"
-			value_5[2] = item.Command
-			value_5[3] = " — "
-			value_5[4] = item.Description
-			value_5[5] = "\n"
-			parts := value_5
+			var value_4 [6]string
+			value_4[0] = output
+			value_4[1] = "/"
+			value_4[2] = item.Command
+			value_4[3] = " — "
+			value_4[4] = item.Description
+			value_4[5] = "\n"
+			parts := value_4
 			_ = parts
 			output = strings.Join(parts[0:6:6], "")
 			loop_cursor_2++
 		}
 	}
-	var value_6 [2]string
-	value_6[0] = output
-	var value_7 string = "\nExamples:\n/todo Buy tea\n/done Buy tea\n/habit Drink water\n/journal A calm morning\n/progress meditation 7\n/feedback Describe a problem (asks before sending)"
-	value_6[1] = value_7
-	examples := value_6
+	var value_5 [2]string
+	value_5[0] = output
+	var value_6 string = "\nExamples:\n/todo Buy tea\n/done Buy tea\n/habit Drink water\n/journal A calm morning\n/progress meditation 7\n/feedback Describe a problem (asks before sending)"
+	value_5[1] = value_6
+	examples := value_5
 	_ = examples
 	return strings.Join(examples[0:2:2], "")
 }

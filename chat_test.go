@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,70 @@ func chatRequest(handler http.Handler, identity testIdentity, path, data string)
 	out := httptest.NewRecorder()
 	handler.ServeHTTP(out, req)
 	return out
+}
+
+func TestChatAppearanceToolsAndBoundedContinuations(t *testing.T) {
+	request := ChatRequest{Context: json.RawMessage(`{}`), Messages: []ChatMessage{{Role: "user", Content: "Make the buttons rounder"}}}
+	for index := 0; index < 24; index++ {
+		request.Tools = append(request.Tools, ChatTool{Type: "function", Function: ChatFunction{
+			Name: "app_tool_" + strconv.Itoa(index), Description: "App action", Parameters: json.RawMessage(`{"type":"object"}`),
+		}})
+	}
+	if len(request.Tools) < 24 || !Chat_ValidRequest(request) {
+		t.Fatal("Inbe's full tool catalog was rejected")
+	}
+	request.Messages = append(request.Messages,
+		ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "style-read", Type: "function", Function: ChatFunction{Name: "read_style", Arguments: `{"scope":"all"}`}}}},
+		ChatMessage{Role: "tool", ToolCallId: "style-read", Content: strings.Repeat("x", 98304)},
+		ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "style-preview", Type: "function", Function: ChatFunction{Name: "preview_style", Arguments: strings.Repeat("x", 8191)}}}},
+	)
+	if !Chat_ValidRequest(request) {
+		t.Fatal("Bounded appearance continuation was rejected")
+	}
+	server, _, _ := testServer(t)
+	server.Cfg.ChatAPIKey = "private-test-key"
+	server.Cfg.ChatDailyLimit = 20
+	server.Cfg.ChatGlobalDailyLimit = 100
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var received struct {
+			Messages []ChatMessage `json:"messages"`
+			Tools    []ChatTool    `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Error(err)
+		}
+		if len(received.Tools) != 24 || len(received.Messages[3].Content) != 98304 {
+			t.Error("Appearance tools or results were truncated")
+		}
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Preview ready"}}]}`))
+	}))
+	defer upstream.Close()
+	original := ChatEndpoint
+	ChatEndpoint = upstream.URL
+	defer func() { ChatEndpoint = original }()
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x79)
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := chatRequest(handler, identity, "/api/v1/chat/completions", string(encoded)); out.Code != 200 {
+		t.Fatalf("Appearance continuation: %d %s", out.Code, out.Body.String())
+	}
+	request.Messages[2].Content += "x"
+	if Chat_ValidRequest(request) {
+		t.Fatal("Oversize tool result was accepted")
+	}
+	request.Messages[2].Content = "{}"
+	request.Messages[3].ToolCalls[0].Function.Arguments = strings.Repeat("x", 65537)
+	if Chat_ValidRequest(request) {
+		t.Fatal("Oversize tool arguments were accepted")
+	}
+	request.Messages = request.Messages[:1]
+	request.Tools = append(request.Tools, make([]ChatTool, 33-len(request.Tools))...)
+	if Chat_ValidRequest(request) {
+		t.Fatal("Oversize tool catalog was accepted")
+	}
 }
 
 func TestChatAccountAuthenticationToolsAndPersistentQuota(t *testing.T) {

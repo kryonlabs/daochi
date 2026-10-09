@@ -149,7 +149,7 @@ func lumiLink(t *testing.T, handler http.Handler, identity testIdentity) string 
 	return code
 }
 
-func TestLumiTelegramAccountLinkQueueConsentAndDelivery(t *testing.T) {
+func TestLumiTelegramAccountLinkQueueAndInputOnly(t *testing.T) {
 	server, _, _ := testServer(t)
 	server.Cfg.LumiBotToken = "fixture-token"
 	server.Cfg.LumiWebhookSecret = "fixture-secret"
@@ -157,7 +157,6 @@ func TestLumiTelegramAccountLinkQueueConsentAndDelivery(t *testing.T) {
 	var mu sync.Mutex
 	var messages []map[string]any
 	typing := 0
-	failDelivery := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/botfixture-token/sendChatAction" {
 			mu.Lock()
@@ -175,9 +174,8 @@ func TestLumiTelegramAccountLinkQueueConsentAndDelivery(t *testing.T) {
 		}
 		mu.Lock()
 		messages = append(messages, value)
-		fail := failDelivery
 		mu.Unlock()
-		fmt.Fprintf(w, `{"ok":%t}`, !fail)
+		fmt.Fprint(w, `{"ok":true}`)
 	}))
 	defer upstream.Close()
 	original := TelegramAPIBase
@@ -257,38 +255,26 @@ func TestLumiTelegramAccountLinkQueueConsentAndDelivery(t *testing.T) {
 	if json.Unmarshal(out.Body.Bytes(), &result) != nil || result.Update.ID != 0 {
 		t.Fatal("owner feedback leaked to another account")
 	}
-	// Messages are idempotent; consent remains an explicit Yes/No callback.
+	// App conversation uploads from old clients are acknowledged silently.
+	mu.Lock()
+	beforeMessages := len(messages)
+	beforeTyping := typing
+	mu.Unlock()
 	body := fmt.Sprintf(`{"id":"cell.lumi.message.new","text":"Send this feedback?","draft":"%s","time":%d}`, strings.Repeat("d", 32), time.Now().UnixMicro()+1000000)
 	for i := 0; i < 2; i++ {
 		if out := lumiRequest(handler, owner, "POST", "/api/v1/lumi/telegram/messages", body); out.Code != 200 {
-			t.Fatalf("publish: %d %s", out.Code, out.Body.String())
+			t.Fatalf("old client acknowledgement: %d %s", out.Code, out.Body.String())
 		}
 	}
 	mu.Lock()
-	last := messages[len(messages)-1]
-	buttons := last["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)
-	if len(buttons) != 2 || buttons[0].(map[string]any)["callback_data"] != "Y"+strings.Repeat("d", 32) || buttons[1].(map[string]any)["callback_data"] != "N"+strings.Repeat("d", 32) {
-		t.Error("consent buttons missing")
-	}
-	before := len(messages)
-	failDelivery = true
-	mu.Unlock()
-	body = strings.Replace(body, "message.new", "message.uncertain", 1)
-	if out := lumiRequest(handler, owner, "POST", "/api/v1/lumi/telegram/messages", body); out.Code != 502 {
-		t.Fatalf("failed Telegram send: %d", out.Code)
-	}
-	if out := lumiRequest(handler, owner, "POST", "/api/v1/lumi/telegram/messages", body); out.Code != 409 {
-		t.Fatalf("uncertain send was retried: %d", out.Code)
-	}
-	mu.Lock()
-	if len(messages) != before+1 {
-		t.Error("uncertain delivery sent twice")
+	if len(messages) != beforeMessages || typing != beforeTyping {
+		t.Error("app conversation triggered Telegram activity")
 	}
 	mu.Unlock()
 	if out := lumiRequest(handler, owner, "DELETE", "/api/v1/lumi/telegram/link", ""); out.Code != 200 {
 		t.Fatal("unlink failed")
 	}
-	if out := lumiRequest(handler, owner, "POST", "/api/v1/lumi/telegram/messages", body); out.Code != 409 {
-		t.Fatal("unlinked account could publish")
+	if out := lumiRequest(handler, owner, "POST", "/api/v1/lumi/telegram/messages", body); out.Code != 200 {
+		t.Fatal("old unlinked queue did not drain silently")
 	}
 }

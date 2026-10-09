@@ -188,24 +188,43 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 		HttpAuth_Respond(writer, service.Counters, user.Authentication)
 		return
 	}
-	var value_0 bool = service.Configuration.LumiBotToken == ""
-	var value_1 bool = value_0
-	if !value_1 {
-		var value_2 bool = LumiTelegram_Schema(service, request)
-		value_1 = !value_2
+	if action == "publish" {
+		received := HttpBody_ReadJSON(writer, request, 16384)
+		_ = received
+		var input LumiMessage = LumiMessage{}
+		_ = input
+		var value_0 bool = received.Error != nil
+		var value_1 bool = value_0
+		if !value_1 {
+			var value_2 Error = StdJsonGo_Unmarshal(received.Value, &(input))
+			value_1 = (value_2 != nil)
+		}
+		var value_3 bool = value_1 || int64(len(input.ID)) < 1 || int64(len(input.ID)) > 180 || int64(len(input.Text)) < 1 || int64(len(input.Text)) > 4096
+		if value_3 || (input.Draft != "" && int64(len(input.Draft)) != 32) {
+			Response_Error(writer, int(400), "invalid message")
+			return
+		}
+		Response_JSON(writer, int(200), true)
+		return
 	}
-	if value_1 {
+	var value_4 bool = service.Configuration.LumiBotToken == ""
+	var value_5 bool = value_4
+	if !value_5 {
+		var value_6 bool = LumiTelegram_Schema(service, request)
+		value_5 = !value_6
+	}
+	if value_5 {
 		Response_Error(writer, int(503), "Lumi Telegram unavailable")
 		return
 	}
 	context := StdHttpGo_Context(request)
 	now := StdTimeGo_Unix(StdTimeGo_Now())
-	var value_3 [4]Any
-	value_3[0] = user.Value
-	value_3[1] = ""
-	value_3[2] = now
-	value_3[3] = ""
-	arguments := value_3
+	var value_7 [4]Any
+	value_7[0] = user.Value
+	value_7[1] = ""
+	value_7[2] = now
+	value_7[3] = ""
+	arguments := value_7
 	if action == "link" {
 		code := TelegramTransport_Nonce()
 		if int64(len(code)) != 32 {
@@ -220,15 +239,15 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 			Response_Error(writer, int(503), "link unavailable")
 			return
 		}
-		var value_4 [2]string
-		value_4[0] = "https://t.me/inlumi_bot?start="
-		value_4[1] = code
-		parts := value_4
+		var value_8 [2]string
+		value_8[0] = "https://t.me/inlumi_bot?start="
+		value_8[1] = code
+		parts := value_8
 		_ = parts
-		var value_5 LinkResponse = LinkResponse{}
-		var value_6 string = strings.Join(parts[0:2:2], "")
-		value_5.Url = value_6
-		result := value_5
+		var value_9 LinkResponse = LinkResponse{}
+		var value_10 string = strings.Join(parts[0:2:2], "")
+		value_9.Url = value_10
+		result := value_9
 		_ = result
 		Response_JSON(writer, int(200), result)
 		return
@@ -247,19 +266,19 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 			Response_Error(writer, 503, "unlink unavailable")
 			return
 		}
-		var value_7 [2]Any
-		value_7[0] = user.Value
-		value_7[1] = now
-		values := value_7
+		var value_11 [2]Any
+		value_11[0] = user.Value
+		value_11[1] = now
+		values := value_11
 		_ = values
-		var value_8 [3]string
-		var value_9 string = "UPDATE server_authorization_grants SET revoked_at=?2 WHERE account_id=?1 AND revoked_at=0 AND request_id IN (SELECT request_id FROM server_authorization_requests WHERE bot_id>0)"
-		value_8[0] = value_9
-		var value_10 string = "UPDATE server_authorization_requests SET status='cancelled' WHERE account_id=?1 AND bot_id>0 AND status IN ('pending','claimed')"
-		value_8[1] = value_10
-		var value_11 string = "UPDATE server_lumi_link_codes SET expires=?2 WHERE account_id=?1 AND consumed_at=0 AND expires>?2"
-		value_8[2] = value_11
-		queries := value_8
+		var value_12 [3]string
+		var value_13 string = "UPDATE server_authorization_grants SET revoked_at=?2 WHERE account_id=?1 AND revoked_at=0 AND request_id IN (SELECT request_id FROM server_authorization_requests WHERE bot_id>0)"
+		value_12[0] = value_13
+		var value_14 string = "UPDATE server_authorization_requests SET status='cancelled' WHERE account_id=?1 AND bot_id>0 AND status IN ('pending','claimed')"
+		value_12[1] = value_14
+		var value_15 string = "UPDATE server_lumi_link_codes SET expires=?2 WHERE account_id=?1 AND consumed_at=0 AND expires>?2"
+		value_12[2] = value_15
+		queries := value_12
 		for _, query := range queries {
 			written = StdSqlGo_ExecTx(transaction, context, query, values[0:2:2])
 			if written.Error != nil {
@@ -267,8 +286,8 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 				return
 			}
 		}
-		var value_12 Error = StdSqlGo_Commit(transaction)
-		if value_12 != nil {
+		var value_16 Error = StdSqlGo_Commit(transaction)
+		if value_16 != nil {
 			Response_Error(writer, 503, "unlink unavailable")
 			return
 		}
@@ -280,13 +299,13 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 		_ = received
 		var input LumiReceipt = LumiReceipt{}
 		_ = input
-		var value_13 bool = received.Error != nil
-		var value_14 bool = value_13
-		if !value_14 {
-			var value_15 Error = StdJsonGo_Unmarshal(received.Value, &(input))
-			value_14 = (value_15 != nil)
+		var value_17 bool = received.Error != nil
+		var value_18 bool = value_17
+		if !value_18 {
+			var value_19 Error = StdJsonGo_Unmarshal(received.Value, &(input))
+			value_18 = (value_19 != nil)
 		}
-		if value_14 || input.ID == 0 || int64(len(input.Client)) != 64 {
+		if value_18 || input.ID == 0 || int64(len(input.Client)) != 64 {
 			Response_Error(writer, int(400), "invalid receipt")
 			return
 		}
@@ -303,14 +322,14 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 	}
 	var destination int64 = 0
 	var linkedAt int64 = 0
-	var value_16 [2]Any
-	value_16[0] = &(destination)
-	value_16[1] = &(linkedAt)
-	destinations := value_16
+	var value_20 [2]Any
+	value_20[0] = &(destination)
+	value_20[1] = &(linkedAt)
+	destinations := value_20
 	_ = destinations
 	row := StdSqlGo_QueryRow(service.Database, context, "SELECT telegram_id,linked_at FROM server_lumi_telegram WHERE account_id=?1", arguments[0:1:1])
-	var value_17 Error = StdSqlGo_ScanRow(row, destinations[0:2:2])
-	linked := value_17 == nil
+	var value_21 Error = StdSqlGo_ScanRow(row, destinations[0:2:2])
+	linked := value_21 == nil
 	if action == "poll" {
 		client := StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "client")
 		if int64(len(client)) != 64 {
@@ -318,8 +337,8 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 			return
 		}
 		if int64(len(service.Configuration.LumiOwnerID)) == 64 && user.Value == service.Configuration.LumiOwnerID {
-			var value_18 string = "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text) SELECT -rowid,?1,'feedback',json_object('title',title,'message',message,'account_id',account_id,'report_id',id) FROM server_app_feedback WHERE app_id='inbe'"
-			written := StdSqlGo_Exec(service.Database, context, value_18, arguments[0:1:1])
+			var value_22 string = "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text) SELECT -rowid,?1,'feedback',json_object('title',title,'message',message,'account_id',account_id,'report_id',id) FROM server_app_feedback WHERE app_id='inbe'"
+			written := StdSqlGo_Exec(service.Database, context, value_22, arguments[0:1:1])
 			_ = written
 			if written.Error != nil {
 				Response_Error(writer, int(503), "feedback unavailable")
@@ -330,76 +349,21 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 		_ = result
 		result.Linked = linked
 		result.LinkedAt = linkedAt
-		var value_19 [4]Any
-		value_19[0] = &(result.Update.ID)
-		value_19[1] = &(result.Update.Kind)
-		value_19[2] = &(result.Update.Text)
-		value_19[3] = &(result.Update.Choice)
-		updateDestinations := value_19
+		var value_23 [4]Any
+		value_23[0] = &(result.Update.ID)
+		value_23[1] = &(result.Update.Kind)
+		value_23[2] = &(result.Update.Text)
+		value_23[3] = &(result.Update.Choice)
+		updateDestinations := value_23
 		_ = updateDestinations
 		arguments[1] = client
-		var value_20 string = "UPDATE server_lumi_updates SET executor=?2 WHERE account_id=?1 AND done=0 AND id=(SELECT id FROM server_lumi_updates WHERE account_id=?1 AND done=0 ORDER BY id LIMIT 1) AND (executor='' OR executor=?2) RETURNING id,kind,text,choice"
-		row = StdSqlGo_QueryRow(service.Database, context, value_20, arguments[0:2:2])
+		var value_24 string = "UPDATE server_lumi_updates SET executor=?2 WHERE account_id=?1 AND done=0 AND id=(SELECT id FROM server_lumi_updates WHERE account_id=?1 AND done=0 ORDER BY id LIMIT 1) AND (executor='' OR executor=?2) RETURNING id,kind,text,choice"
+		row = StdSqlGo_QueryRow(service.Database, context, value_24, arguments[0:2:2])
 		StdSqlGo_ScanRow(row, updateDestinations[0:4:4])
 		Response_JSON(writer, int(200), result)
 		return
 	}
-	if action != "publish" || !linked {
-		Response_Error(writer, int(409), "Telegram is not linked")
-		return
-	}
-	received := HttpBody_ReadJSON(writer, request, 16384)
-	_ = received
-	var input LumiMessage = LumiMessage{}
-	_ = input
-	var value_21 bool = received.Error != nil
-	var value_22 bool = value_21
-	if !value_22 {
-		var value_23 Error = StdJsonGo_Unmarshal(received.Value, &(input))
-		value_22 = (value_23 != nil)
-	}
-	var value_24 bool = value_22 || int64(len(input.ID)) < 1 || int64(len(input.ID)) > 180 || int64(len(input.Text)) < 1 || int64(len(input.Text)) > 4096
-	if value_24 || (input.Draft != "" && int64(len(input.Draft)) != 32) {
-		Response_Error(writer, int(400), "invalid message")
-		return
-	}
-	if input.Time < linkedAt*1000000 {
-		Response_JSON(writer, int(200), true)
-		return
-	}
-	arguments[1] = input.ID
-	claimed := StdSqlGo_Exec(service.Database, context, "INSERT OR IGNORE INTO server_lumi_deliveries(account_id,id,state) VALUES(?1,?2,'sending')", arguments[0:2:2])
-	if claimed.Error != nil {
-		Response_Error(writer, int(503), "delivery unavailable")
-		return
-	}
-	changed := StdSqlGo_RowsAffected(claimed.Value)
-	if changed.Error != nil {
-		Response_Error(writer, int(503), "delivery unavailable")
-		return
-	}
-	if changed.Value == 0 {
-		var state string = ""
-		var value_25 [1]Any
-		value_25[0] = &(state)
-		stateDestination := value_25
-		_ = stateDestination
-		row = StdSqlGo_QueryRow(service.Database, context, "SELECT state FROM server_lumi_deliveries WHERE account_id=?1 AND id=?2", arguments[0:2:2])
-		var value_26 Error = StdSqlGo_ScanRow(row, stateDestination[0:1:1])
-		if value_26 != nil || state != "sent" {
-			Response_Error(writer, int(409), "delivery outcome requires inspection")
-			return
-		}
-		Response_JSON(writer, int(200), true)
-		return
-	}
-	var value_27 bool = TelegramTransport_Deliver(service.Configuration.LumiBotToken, destination, input.Text, input.Draft, "")
-	if !value_27 {
-		Response_Error(writer, int(502), "delivery outcome requires inspection")
-		return
-	}
-	StdSqlGo_Exec(service.Database, context, "UPDATE server_lumi_deliveries SET state='sent' WHERE account_id=?1 AND id=?2", arguments[0:2:2])
-	Response_JSON(writer, int(200), true)
+	Response_Error(writer, int(409), "Telegram is not linked")
 }
 
 func LumiTelegram_SendAccountMenu(service Chat, entryService AccountEntries, request *Request, sender int64, requestID string) bool {

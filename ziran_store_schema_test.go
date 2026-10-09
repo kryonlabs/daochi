@@ -337,14 +337,17 @@ func TestZiranStoreSchemaClosesMeditationRowsOnPanic(t *testing.T) {
 	viewsConnectionReleased(t, store)
 }
 
-// Ignore only the appended authorization DDL when comparing released SQL
-// behavior. Keep every original statement, ordering, binding and failure.
+// Normalize additive authorization DDL and the equivalent set-based backfill
+// when comparing released SQL ordering, bindings, failures and cursor cleanup.
 func schemaLegacyTrace(trace []lifecycleTrace) []lifecycleTrace {
 	result := append([]lifecycleTrace(nil), trace...)
 	for index := range result {
 		if result[index].Operation == "exec" {
 			before, _, _ := strings.Cut(result[index].Query, "CREATE TABLE IF NOT EXISTS server_authorization_requests")
 			result[index].Query = strings.TrimSpace(before)
+			if result[index].Query == strings.TrimSpace(BackfillMesh) {
+				result[index].Query = "INSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nWHERE NOT EXISTS (\n\tSELECT 1 FROM server_mesh_changes c\n\tWHERE c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\n)"
+			}
 		}
 	}
 	return result

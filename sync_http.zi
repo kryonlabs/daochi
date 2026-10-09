@@ -25,6 +25,7 @@ logs :: #import "log_safety";
 body :: #import "http_body";
 http_auth :: #import "http_auth";
 response :: #import "response";
+pages :: #import "record_sync";
 http :: #import "std/http_go";
 sql :: #import "std/sql_go";
 errors :: #import "std/errors_go";
@@ -195,6 +196,16 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
         completion.transaction = header.value
     }
     requests.NormalizeMeditationDurations(input.MeditationLogs)
+    pageInput := pages.Read(read.value)
+    if pageInput.error != null {
+        response.Error(writer, cast(isize)400, "invalid encrypted record page options")
+        return
+    }
+    if pageInput.value.EncryptedRecordsOnly {
+        completion.complete = pages.Handle(sync.database, sync.counters, sync.notifications,
+            sync.missingUser, writer, request, input, pageInput.value, publicKey.value)
+        return
+    }
     base := hash.State(sync.database, context, input.UserIDHash)
     if base.error != null {
         StorageFailure(writer, "hash sync state", input.UserIDHash, base.error, "state hash failed")

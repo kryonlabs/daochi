@@ -194,6 +194,17 @@ make build
 
 The Makefile builds a minimal static liboqs from `vendor/liboqs` with `SIG_ml_dsa_44` enabled, then passes the right cgo include/library flags to Go. Use `make test` for the same setup in tests.
 
+For large v6 encrypted libraries, `POST /api/v1/sync` accepts
+`encrypted_records_only: true` and `record_limit` (1–200, default 200).
+This signed app-scoped exchange excludes legacy data and account snapshots.
+Continue incomplete pages with the returned `record_cursor` (version, collection,
+id), retaining `since_server_version` until `changes_complete` is true. Then
+checkpoint `server_version` and clear the cursor. Persist records and their
+checkpoint atomically. Each response contains at most 200 records and 4 MiB
+of ciphertext. Clients must verify `encrypted_records_only` in the response;
+older nodes do not implement this mode. Full replacements, legacy writes,
+operations and state-hash reconciliation must use the existing sync mode.
+
 Daochi is being ported to Ziran. Canonical `.zi` modules and their generated Go
 are committed together. Run `make generate` after changing Ziran source and
 `make test-ziran` to check generated files and run the server suite against both

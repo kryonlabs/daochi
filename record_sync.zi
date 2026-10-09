@@ -1,0 +1,226 @@
+// Opt-in v6 record sync keeps large encrypted libraries out of the legacy
+// account snapshot and state-hash paths. Authentication remains in sync_http.
+#import "std/go_types"
+#import "sync_types"
+#import "protocol"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+http :: #import "std/http_go";
+json :: #import "std/json_go";
+identity :: #import "identity";
+state :: #import "account_state";
+application :: #import "sync_application";
+requests :: #import "sync_request";
+response :: #import "response";
+hub :: #import "sync_hub";
+metrics :: #import "metrics";
+audit :: #import "sync_audit";
+atomic :: #import "std/atomic_go";
+native :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+// Additive options and reply live separately from the released sync structs.
+RecordCursor :: struct {
+    Version: s64 #go_tag "json:\"version\""
+    Collection: string #go_tag "json:\"collection\""
+    ID: string #go_tag "json:\"id\""
+}
+
+RecordPageOptions :: struct {
+    EncryptedRecordsOnly: bool #go_tag "json:\"encrypted_records_only,omitempty\""
+    RecordLimit: isize #go_tag "json:\"record_limit,omitempty\""
+    RecordCursor: *RecordCursor #go_tag "json:\"record_cursor,omitempty\""
+}
+
+RecordPageOptionsResult :: struct {
+    value: RecordPageOptions
+    error: Error
+}
+
+RecordSyncResponse :: struct {
+    ProtocolVersion: isize #go_tag "json:\"protocol_version\""
+    Status: string #go_tag "json:\"status\""
+    ServerVersion: s64 #go_tag "json:\"server_version\""
+    ServerClock: s64 #go_tag "json:\"server_clock\""
+    EncryptedRecordsOnly: bool #go_tag "json:\"encrypted_records_only\""
+    RecordCursor: *RecordCursor #go_tag "json:\"record_cursor,omitempty\""
+    ChangesComplete: bool #go_tag "json:\"changes_complete\""
+    Changes: SyncChanges #go_tag "json:\"changes\""
+    Applied: SyncResult #go_tag "json:\"applied\""
+    MinSupportedProtocol: isize #go_tag "json:\"min_supported_protocol\""
+    LatestProtocol: isize #go_tag "json:\"latest_protocol\""
+    ServerLatestProtocol: isize #go_tag "json:\"server_latest_protocol\""
+}
+
+RecordPage :: struct {
+    records: []EncryptedRecord
+    cursor: *RecordCursor
+    error: Error
+}
+
+#scope_file
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+AllocateRecords :: (count: isize) -> []EncryptedRecord #foreign builtin "make";
+AppendRecord :: (values: []EncryptedRecord, record: EncryptedRecord) -> []EncryptedRecord #foreign builtin "append";
+AllocateCursor :: () -> *RecordCursor #foreign builtin "new";
+
+PageSQL :: #string SQL_END
+
+SELECT r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,
+       r.deleted_at,r.content_hash,r.schema_version,r.parent_id,r.server_version
+FROM server_encrypted_records r
+WHERE r.user_id_hash=?1 AND r.server_version<=?6
+  AND (r.server_version>?3 OR (r.server_version=?3 AND ?4!='' AND
+       (r.collection>?4 OR (r.collection=?4 AND r.id>?5))))
+  AND EXISTS (SELECT 1 FROM server_app_collections c WHERE c.app_id=?2
+       AND (r.collection=c.collection_prefix OR
+            (substr(c.collection_prefix,-2)='.*' AND
+             substr(r.collection,1,length(c.collection_prefix)-1)=
+             substr(c.collection_prefix,1,length(c.collection_prefix)-1))))
+ORDER BY r.server_version,r.collection,r.id LIMIT ?7
+SQL_END;
+
+#scope_export
+Read :: (bytes: []u8) -> RecordPageOptionsResult {
+    result: RecordPageOptionsResult
+    result.error = json.Unmarshal(bytes, *result.value)
+    return result
+}
+
+Valid :: (input: SyncRequest, options: RecordPageOptions) -> bool {
+    if input.ProtocolVersion < cast(isize)6 || input.AppID == "" ||
+        input.SinceServerVersion < 0 || options.RecordLimit < cast(isize)0 ||
+        options.RecordLimit > cast(isize)200 || input.EncryptedRecords.count > 200 ||
+        input.IncludeLegacyData || input.FullSyncRequested || input.Bootstrap ||
+        input.LastServerStateHash != "" || input.ClientStateHash != "" ||
+        input.Ops.count > 0 || input.Habits.count > 0 || input.HabitDays.count > 0 ||
+        input.Sessions.count > 0 || input.MeditationLogs.count > 0 || input.SocialCache.count > 0 {
+        return false
+    }
+    if options.RecordCursor != null {
+        cursor := options.RecordCursor
+        return cursor.Version >= input.SinceServerVersion && cursor.Version > 0 &&
+            identity.ValidNamespace(cursor.Collection) && identity.ValidEncryptedRecordID(cursor.ID)
+    }
+    return true
+}
+
+Page :: (database: *sql.Database, context: ctx.Context, input: SyncRequest,
+    options: RecordPageOptions, through: s64) -> RecordPage {
+    result: RecordPage
+    result.records = AllocateRecords(cast(isize)0)
+    version := input.SinceServerVersion
+    collection := ""
+    id := ""
+    if options.RecordCursor != null {
+        version = options.RecordCursor.Version
+        collection = options.RecordCursor.Collection
+        id = options.RecordCursor.ID
+    }
+    limit := options.RecordLimit
+    if limit == cast(isize)0 {
+        limit = cast(isize)200
+    }
+    arguments: [7]Any = .[input.UserIDHash, input.AppID, version, collection, id, through, limit + cast(isize)1]
+    queried := sql.Query(database, context, PageSQL, arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    last: RecordCursor
+    bytes: s64 = 0
+    while sql.Next(rows) {
+        item: EncryptedRecord
+        itemVersion: s64
+        destinations: [11]Any = .[*item.Collection, *item.ID, *item.KeyID, *item.Nonce,
+            *item.Ciphertext, *item.UpdatedAt, *item.DeletedAt, *item.ContentHash,
+            *item.SchemaVersion, *item.ParentID, *itemVersion]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        // Bound both record count and ciphertext bytes, including wide imports.
+        if result.records.count >= cast(s64)limit ||
+            (result.records.count > 0 && bytes + item.Ciphertext.count > 4194304) {
+            result.cursor = AllocateCursor()
+            result.cursor.Version = last.Version
+            result.cursor.Collection = last.Collection
+            result.cursor.ID = last.ID
+            break
+        }
+        result.records = AppendRecord(result.records, item)
+        bytes += item.Ciphertext.count
+        last.Version = itemVersion
+        last.Collection = item.Collection
+        last.ID = item.ID
+    }
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notifications: *hub.SyncHub,
+    missingUser: Error, writer: http.ResponseWriter, request: *http.Request,
+    input: SyncRequest, options: RecordPageOptions, publicKey: []u8) -> bool {
+    if !Valid(input, options) {
+        response.Error(writer, cast(isize)400, "invalid encrypted record page request")
+        return false
+    }
+    context := http.Context(request)
+    before := state.CurrentVersion(database, context, input.UserIDHash)
+    if before.error != null {
+        response.Error(writer, cast(isize)500, "record version failed")
+        return false
+    }
+    if input.SinceServerVersion > before.value ||
+        (options.RecordCursor != null && options.RecordCursor.Version > before.value) {
+        response.Error(writer, cast(isize)409, "record cursor is ahead of this node")
+        return false
+    }
+    applied := application.Apply(database, context, input, publicKey, missingUser)
+    if applied.error != null {
+        response.Error(writer, cast(isize)500, "record upload failed")
+        return false
+    }
+    current := state.CurrentVersion(database, context, input.UserIDHash)
+    if current.error != null {
+        response.Error(writer, cast(isize)500, "record version failed")
+        return false
+    }
+    page := Page(database, context, input, options, current.value)
+    if page.error != null {
+        response.Error(writer, cast(isize)500, "record page failed")
+        return false
+    }
+    value: RecordSyncResponse
+    value.ProtocolVersion = input.ProtocolVersion
+    value.Status = "ok"
+    value.ServerVersion = current.value
+    value.ServerClock = current.value
+    value.EncryptedRecordsOnly = true
+    value.RecordCursor = page.cursor
+    value.ChangesComplete = page.cursor == null
+    value.Changes = requests.EmptyChanges()
+    value.Changes.EncryptedRecords = page.records
+    value.Applied = applied.value
+    value.MinSupportedProtocol = MinSupportedProtocol
+    value.LatestProtocol = input.ProtocolVersion
+    value.ServerLatestProtocol = LatestProtocol
+    if applied.value.EncryptedRecords > cast(isize)0 {
+        atomic.Add(*counters.syncEncryptedRecords, cast(u64)applied.value.EncryptedRecords)
+        hub.Publish(notifications, input.UserIDHash, current.value)
+    }
+    entry: SyncAuditEntry
+    entry.UserIDHash = input.UserIDHash
+    entry.ClientID = input.ClientID
+    entry.AppID = input.AppID
+    entry.ProtocolVersion = input.ProtocolVersion
+    entry.SinceServerVersion = input.SinceServerVersion
+    entry.ClientClock = input.ClientClock
+    entry.ServerVersion = current.value
+    entry.Applied = applied.value
+    audit.Record(database, context, entry)
+    response.JSON(writer, cast(isize)200, value)
+    return true
+}

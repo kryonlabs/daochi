@@ -17,8 +17,8 @@ USERNAME = "inlumi_bot"
 DESCRIPTION = (
     "Lumi is your companion in Inner Breeze. Chat, reflect on your day, "
     "track habits and tasks, and find a little space to breathe. "
-    "Link your account from Lumi in Inner Breeze, then use /help to get started. "
-    "Keep Inner Breeze open for replies and app actions."
+    "To connect, open Settings in Inner Breeze and tap Connect Telegram, then use /help. "
+    "Lumi answers while Inner Breeze is open on one of your devices."
 )
 SHORT_DESCRIPTION = "Your Inner Breeze companion for journaling, habits, tasks and breathing. Use /help to get started."
 

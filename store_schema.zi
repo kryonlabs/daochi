@@ -759,7 +759,17 @@ CREATE TABLE IF NOT EXISTS server_telegram_init_claims (
 );
 SQL_9;
 Tables: [9]string = .[Tables1, Tables2, Tables3, Tables4, Tables5, Tables6, Tables7, Tables8, Tables9];
-BackfillMesh :: "\nINSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nWHERE NOT EXISTS (\n\tSELECT 1 FROM server_mesh_changes c\n\tWHERE c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\n)";
+// Materialize existing keys once instead of scanning the entire change log
+// separately for every encrypted record during each server restart.
+BackfillMesh :: #string SQL_END
+
+INSERT INTO server_mesh_changes(user_id_hash,collection,record_id)
+SELECT r.user_id_hash,r.collection,r.id
+FROM server_encrypted_records r
+LEFT JOIN (SELECT DISTINCT user_id_hash,collection,record_id FROM server_mesh_changes) c
+  ON c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id
+WHERE c.record_id IS NULL
+SQL_END;
 AliasIndex :: "\nCREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique\nON server_users(alias)\nWHERE alias IS NOT NULL AND alias<>''";
 MeditationInfo :: "PRAGMA table_info(server_meditation_logs)";
 MeditationUpgrade :: "\nPRAGMA foreign_keys=OFF;\nBEGIN;\nCREATE TABLE IF NOT EXISTS server_meditation_logs_new (\n\tuser_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,\n\tid TEXT NOT NULL,\n\tsession_id TEXT NOT NULL,\n\tduration_seconds INTEGER NOT NULL DEFAULT 0,\n\tcompleted_at TEXT NOT NULL,\n\tserver_version INTEGER NOT NULL DEFAULT 0,\n\tcreated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\tPRIMARY KEY(user_id_hash, id)\n);\nINSERT OR IGNORE INTO server_meditation_logs_new(user_id_hash,id,session_id,duration_seconds,completed_at,server_version,created_at)\nSELECT user_id_hash,id,session_id,duration_seconds,completed_at,server_version,created_at\nFROM server_meditation_logs;\nDROP TABLE server_meditation_logs;\nALTER TABLE server_meditation_logs_new RENAME TO server_meditation_logs;\nCOMMIT;\nPRAGMA foreign_keys=ON;";

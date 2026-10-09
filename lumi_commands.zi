@@ -88,7 +88,7 @@ Usage :: (command: string) -> string {
 }
 
 Help :: (linked: bool) -> string {
-    introduction := ifx linked then "Lumi uses your linked Inner Breeze account. Keep Inner Breeze open to receive replies and run app actions. Actions need their installed sub-app. You can also chat normally.\n\n" else "Open Inner Breeze, sign in, and choose Chat on Telegram in Lumi to link this private chat. Keep your private key inside the app.\n\n"
+    introduction := ifx linked then "Lumi answers while Inner Breeze is open on one of your devices. Write normally or use a command:\n\n" else "Open Inner Breeze, sign in, then tap Connect Telegram in Settings to link this chat.\n\n"
     output := introduction
     for item: Catalogue() {
         parts: [6]string = .[output, "/", item.command, " — ", item.description, "\n"]
@@ -107,9 +107,9 @@ Document :: #string JSON
   {"command":"todo","description":"Add a task: /todo <title>"},
   {"command":"done","description":"Complete a task: /done <title>"},
   {"command":"reopen","description":"Reopen a completed task: /reopen <title>"},
-  {"command":"lists","description":"Open your lists"},
+  {"command":"lists","description":"Show your open tasks"},
   {"command":"habit","description":"Complete a habit: /habit <title>"},
-  {"command":"habits","description":"Open your habits"},
+  {"command":"habits","description":"Show today's habits"},
   {"command":"journal","description":"Write to today's diary: /journal <text>"},
   {"command":"diary","description":"Open your diary"},
   {"command":"meditate","description":"Start meditation in Inner Breeze"},

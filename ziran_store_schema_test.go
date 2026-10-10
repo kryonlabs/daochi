@@ -42,11 +42,13 @@ func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 	}
 	// These tables extend the schema; existing-table equivalence remains
 	// checked against the released migration below. Their constraints and
-	// transactional behavior are exercised by the authorization tests.
+	// transactional behavior are exercised by the authorization tests, and
+	// the state hash history with its triggers by the state history tests.
 	legacy := result.Value[:0]
 	for _, entry := range result.Value {
 		name := entry["tbl_name"].(string)
-		if strings.HasPrefix(name, "server_authorization_") || strings.HasPrefix(name, "server_telegram_") {
+		if strings.HasPrefix(name, "server_authorization_") || strings.HasPrefix(name, "server_telegram_") ||
+			name == "server_state_hashes" || strings.HasPrefix(entry["name"].(string), "server_state_hashes") {
 			continue
 		}
 		legacy = append(legacy, entry)

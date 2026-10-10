@@ -1,0 +1,134 @@
+// The state hash this node gave each account at a server version. A device
+// that last saw version V with hash H only needs the changes after V while H
+// is still this node's hash for V; any later change, by another device, a
+// delegate or the node itself, arrives as one of those changes. Writes that
+// change synced data without a newer version, and every hard delete, forget
+// the account's history here, so such a device takes a full snapshot.
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+
+MatchResult :: struct {
+    value: bool
+    error: Error
+}
+
+// Each account keeps its newest hashes; an older version falls back to a
+// full comparison with the current state, as before this history existed.
+HistoryLimit :: 256
+
+#scope_file
+ForgetOnDelete :: #string SQL_END
+
+CREATE TRIGGER IF NOT EXISTS server_state_hashes_forget_TABLE_delete
+AFTER DELETE ON TABLE
+BEGIN
+    DELETE FROM server_state_hashes WHERE user_id_hash=OLD.user_id_hash;
+END;
+SQL_END;
+
+ForgetOnStaleWrite :: #string SQL_END
+
+CREATE TRIGGER IF NOT EXISTS server_state_hashes_forget_TABLE_insert
+AFTER INSERT ON TABLE
+WHEN NEW.server_version <= (SELECT COALESCE(MAX(server_version),0) FROM server_state_hashes WHERE user_id_hash=NEW.user_id_hash)
+BEGIN
+    DELETE FROM server_state_hashes WHERE user_id_hash=NEW.user_id_hash;
+END;
+CREATE TRIGGER IF NOT EXISTS server_state_hashes_forget_TABLE_update
+AFTER UPDATE ON TABLE
+WHEN NEW.server_version <= (SELECT COALESCE(MAX(server_version),0) FROM server_state_hashes WHERE user_id_hash=NEW.user_id_hash)
+BEGIN
+    DELETE FROM server_state_hashes WHERE user_id_hash=NEW.user_id_hash;
+END;
+SQL_END;
+
+// Rounds carry no version of their own; their session's version decides.
+RoundsSchema :: #string SQL_END
+
+CREATE TRIGGER IF NOT EXISTS server_state_hashes_forget_server_session_rounds_write
+AFTER INSERT ON server_session_rounds
+WHEN COALESCE((SELECT server_version FROM server_sessions s WHERE s.user_id_hash=NEW.user_id_hash AND s.id=NEW.session_id),0) <=
+    (SELECT COALESCE(MAX(server_version),0) FROM server_state_hashes WHERE user_id_hash=NEW.user_id_hash)
+BEGIN
+    DELETE FROM server_state_hashes WHERE user_id_hash=NEW.user_id_hash;
+END;
+CREATE TRIGGER IF NOT EXISTS server_state_hashes_forget_server_session_rounds_delete
+AFTER DELETE ON server_session_rounds
+WHEN COALESCE((SELECT server_version FROM server_sessions s WHERE s.user_id_hash=OLD.user_id_hash AND s.id=OLD.session_id),0) <=
+    (SELECT COALESCE(MAX(server_version),0) FROM server_state_hashes WHERE user_id_hash=OLD.user_id_hash)
+BEGIN
+    DELETE FROM server_state_hashes WHERE user_id_hash=OLD.user_id_hash;
+END;
+SQL_END;
+
+TableSchema :: #string SQL_END
+
+CREATE TABLE IF NOT EXISTS server_state_hashes (
+    user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+    server_version INTEGER NOT NULL,
+    state_hash TEXT NOT NULL,
+    PRIMARY KEY(user_id_hash,server_version)
+);
+SQL_END;
+
+RecordSQL :: "\nINSERT INTO server_state_hashes(user_id_hash,server_version,state_hash)\nVALUES(?1,?2,?3)\nON CONFLICT(user_id_hash,server_version) DO UPDATE SET state_hash=excluded.state_hash";
+PruneSQL :: "\nDELETE FROM server_state_hashes\nWHERE user_id_hash=?1 AND server_version <= (\n    SELECT server_version FROM server_state_hashes WHERE user_id_hash=?1\n    ORDER BY server_version DESC LIMIT 1 OFFSET ?2)";
+MatchSQL :: "\nSELECT EXISTS(SELECT 1 FROM server_state_hashes\nWHERE user_id_hash=?1 AND server_version=?2 AND state_hash=lower(?3))";
+
+go_strings :: #system_library "go:strings";
+ReplaceAll :: (value: string, old: string, new: string) -> string #foreign go_strings;
+
+#scope_export
+// Synced data whose writes must carry a newer version than any hash given out.
+VersionedTables: [6]string = .["server_habits", "server_habit_days", "server_sessions",
+    "server_meditation_logs", "server_social_snapshots", "server_encrypted_records"];
+
+SchemaSQL :: () -> string {
+    result := TableSchema
+    for table: VersionedTables {
+        result = Concat(result, ReplaceAll(ForgetOnDelete, "TABLE", table))
+        result = Concat(result, ReplaceAll(ForgetOnStaleWrite, "TABLE", table))
+    }
+    return Concat(result, RoundsSchema)
+}
+
+Record :: (database: *sql.Database, context: ctx.Context, userID: string,
+    version: s64, hash: string) -> Error {
+    if version <= 0 || hash == "" {
+        return null
+    }
+    arguments: [3]Any = .[userID, version, go_lower(hash)]
+    written := sql.Exec(database, context, RecordSQL, arguments[:])
+    if written.error != null {
+        return written.error
+    }
+    bounds: [2]Any = .[userID, cast(s64)HistoryLimit]
+    pruned := sql.Exec(database, context, PruneSQL, bounds[:])
+    return pruned.error
+}
+
+// Whether the node gave this hash for this version and still stands by it.
+Matches :: (database: *sql.Database, context: ctx.Context, userID: string,
+    version: s64, hash: string) -> MatchResult {
+    result: MatchResult
+    if version <= 0 || hash == "" {
+        return result
+    }
+    found: isize
+    arguments: [3]Any = .[userID, version, hash]
+    destinations: [1]Any = .[*found]
+    row := sql.QueryRow(database, context, MatchSQL, arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    result.value = result.error == null && found != cast(isize)0
+    return result
+}
+
+#scope_file
+Concat :: (first: string, second: string) -> string {
+    parts: [2]string = .[first, second]
+    return go_join(parts[:], "")
+}
+
+go_join :: (values: []string, separator: string) -> string #foreign go_strings "Join";
+go_lower :: (value: string) -> string #foreign go_strings "ToLower";

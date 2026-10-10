@@ -591,6 +591,10 @@ func SyncViews_Changes(database *Database, context Context, userID string, since
 }
 
 func SyncViews_Clean(database *Database, context Context, userID string) CleanResult {
+	return SyncViews_CleanWithin(database, context, userID, true)
+}
+
+func SyncViews_CleanWithin(database *Database, context Context, userID string, includeRecords bool) CleanResult {
 	var result CleanResult = CleanResult{}
 	habits := SyncViews_CleanHabits(database, context, userID)
 	result.Error = habits.Error
@@ -617,10 +621,13 @@ func SyncViews_Clean(database *Database, context Context, userID string) CleanRe
 	if result.Error != nil {
 		return result
 	}
-	records := SyncViews_RecordsSince(database, context, userID, 0)
-	result.Error = records.Error
-	if result.Error != nil {
-		return result
+	var records RecordsResult = RecordsResult{}
+	if includeRecords {
+		records = SyncViews_RecordsSince(database, context, userID, 0)
+		result.Error = records.Error
+		if result.Error != nil {
+			return result
+		}
 	}
 	value := new(CleanData)
 	value.Habits = habits.Value
@@ -638,18 +645,18 @@ func SyncViews_Clean(database *Database, context Context, userID string) CleanRe
 		if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_40 := value_2[0:int64(len(value_2)):int64(len(value_2))]
-		loop_count_40 := int64(len(loop_view_40))
-		var loop_cursor_40 int64 = 0
-		for loop_cursor_40 < loop_count_40 {
-			loop_index_40 := loop_cursor_40
-			item := loop_view_40[loop_index_40]
+		loop_view_43 := value_2[0:int64(len(value_2)):int64(len(value_2))]
+		loop_count_43 := int64(len(loop_view_43))
+		var loop_cursor_43 int64 = 0
+		for loop_cursor_43 < loop_count_43 {
+			loop_index_43 := loop_cursor_43
+			item := loop_view_43[loop_index_43]
 			if item.Kind == "friends.list" {
 				value.Friends = item.JSON
 			} else if item.Kind == "friends.requests" {
 				value.FriendRequests = item.JSON
 			}
-			loop_cursor_40++
+			loop_cursor_43++
 		}
 	}
 	result.Value = value

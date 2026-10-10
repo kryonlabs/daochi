@@ -99,9 +99,20 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 	recordedClientClock := req.ClientClock
 	snapshotReason := ""
 	compactedThrough := int64(0)
-	if req.LastServerStateHash != "" &&
+	staleHash := req.LastServerStateHash != "" &&
 		!strings.EqualFold(req.LastServerStateHash, baseHash) &&
-		!req.FullSyncRequested {
+		!req.FullSyncRequested
+	if staleHash {
+		known := StateHistory_Matches(s.Store.Database, r.Context(), req.UserIDHash,
+			req.SinceServerVersion, req.LastServerStateHash)
+		if known.Error != nil {
+			slog.Error("match sync state history", "user", LogSafety_LogText(req.UserIDHash), "error", known.Error)
+			Response_Error(w, http.StatusInternalServerError, "state hash failed")
+			return
+		}
+		staleHash = !known.Value
+	}
+	if staleHash {
 		fullSnapshotRequired = true
 		changesComplete = false
 		sinceVersion = 0
@@ -267,7 +278,8 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		response.ServerVersion = serverVersion
 		response.ServerClock = serverVersion
 		response.ServerStateHash = serverHash
-		response.Data, err = s.Store.CleanData(r.Context(), req.UserIDHash)
+		clean := SyncViews_CleanWithin(s.Store.Database, r.Context(), req.UserIDHash, fullSnapshotRequired)
+		response.Data, err = clean.Value, clean.Error
 		if err != nil {
 			slog.Error("load clean data", "user", LogSafety_LogText(req.UserIDHash), "error", err)
 			Response_Error(w, http.StatusInternalServerError, "clean data failed")
@@ -293,7 +305,6 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		response.Changes.Sessions = response.Data.Sessions
 		response.Changes.MeditationLogs = response.Data.MeditationLogs
 		response.Changes.SocialCache = response.Data.Social
-		response.Changes.EncryptedRecords = response.Data.EncryptedRecords
 		response.Logs, err = s.Store.SyncLogs(r.Context(), req.UserIDHash, req.ClientClock)
 		if err != nil {
 			slog.Error("load sync logs", "user", LogSafety_LogText(req.UserIDHash), "error", err)
@@ -329,6 +340,9 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 	}
 	if result.EncryptedRecords > 0 {
 		s.Metrics.SyncEncryptedRecords.Add(uint64(result.EncryptedRecords))
+	}
+	if err := StateHistory_Record(s.Store.Database, r.Context(), req.UserIDHash, response.ServerVersion, response.ServerStateHash); err != nil {
+		slog.Error("record sync state history", "user", LogSafety_LogText(req.UserIDHash), "client", LogSafety_LogText(req.ClientID), "error", err)
 	}
 	if err := s.Store.RecordSyncAudit(r.Context(), SyncAuditEntry{
 		UserIDHash:           req.UserIDHash,

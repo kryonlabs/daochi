@@ -199,6 +199,32 @@ func TestPackageReleaseForOlderHosts(t *testing.T) {
 	if value := latest("?host_api=5", 200); value.Sequence != 1 {
 		t.Fatalf("a forged archive was served: %d", value.Sequence)
 	}
+	// A staged release reaches buckets below its share; the others keep the
+	// newest earlier release, and apps that send no bucket come last.
+	rollout := func(text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, "rollout.json"), []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rollout(`{"sequence":4,"percent":20}`)
+	for query, sequence := range map[string]int64{
+		"?bucket=0": 4, "?bucket=19": 4, "?bucket=20": 1, "?bucket=99": 1, "": 1,
+		"?host_api=6&bucket=5": 4, "?host_api=6&bucket=50": 1,
+	} {
+		if value := latest(query, 200); value.Sequence != sequence {
+			t.Fatalf("rollout %s: got sequence %d, want %d", query, value.Sequence, sequence)
+		}
+	}
+	for _, query := range []string{"?bucket=100", "?bucket=-1", "?bucket=x"} {
+		latest(query, 400)
+	}
+	for _, text := range []string{`{"sequence":3,"percent":20}`, `{"sequence":4,"percent":100}`, "{", ""} {
+		rollout(text)
+		if value := latest("?bucket=80", 200); value.Sequence != newest.Sequence {
+			t.Fatalf("rollout %q held back a released version: %d", text, value.Sequence)
+		}
+	}
 }
 
 func TestPackageReleaseDescriptorValidation(t *testing.T) {

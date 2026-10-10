@@ -7836,6 +7836,10 @@ func Docs_Paths() __type_7d6cc8a85f09fc88 {
 		(*value_45) = make(__type_7d6cc8a85f09fc88)
 	}
 	(*value_45)[value_46] = value_47
+	deviceLinks := DeviceLinkPaths_Paths()
+	for _, name := range []string{"/api/v1/link/put", "/api/v1/link/get", "/api/v1/link/close"} {
+		result[name] = deviceLinks[name]
+	}
 	var value_51 *__type_7d6cc8a85f09fc88 = &(result)
 	var value_52 string = "/healthz"
 	var value_54 __type_7d6cc8a85f09fc88 = Docs_PathHealthz()

@@ -57,6 +57,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/node/pairing/accept`
 - `POST /api/v1/node/pairing/complete`
 - `GET /api/v1/node/peers`
+- `POST /api/v1/link/put`, `POST /api/v1/link/get` and `POST /api/v1/link/close` relay one sealed request and response between two devices connecting by QR code; links expire after ten minutes
 - `POST /api/v1/namespaces`
 - `POST /api/v1/namespaces/claims`
 - `GET /api/v1/namespaces/resolve?space_id=<id>&name=<name>`

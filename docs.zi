@@ -12,6 +12,7 @@ chat_paths :: #import "chat_paths";
 telegram_paths :: #import "telegram_paths";
 authorization_paths :: #import "authorization_paths";
 package_paths :: #import "package_paths";
+device_link_paths :: #import "device_link_paths";
 go_sync :: #system_library "go:sync";
 go_format :: #system_library "go:fmt";
 go_slog :: #system_library "go:log/slog";
@@ -2115,6 +2116,11 @@ Paths :: () -> Map(string, Any) {
     packages := package_paths.Paths()
     MapSet(result, "/api/v1/packages/{app_id}/{asset}", MapGet(packages, "/api/v1/packages/{app_id}/{asset}"))
     MapSet(result, "/api/v2/packages/{app_id}/{asset}", MapGet(packages, "/api/v2/packages/{app_id}/{asset}"))
+    device_links := device_link_paths.Paths()
+    deviceLinkNames: [3]string = .["/api/v1/link/put", "/api/v1/link/get", "/api/v1/link/close"]
+    for name: deviceLinkNames {
+        MapSet(result, name, MapGet(device_links, name))
+    }
     MapSet(result, "/healthz", PathHealthz())
     MapSet(result, "/readyz", PathReadyz())
     MapSet(result, "/api/v1/node", PathApiV1Node())

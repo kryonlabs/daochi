@@ -526,6 +526,18 @@ func Server_Routes(server *Server) Handler {
 		Server_HandleDelegatedSocket(value_139, value_140, value_141)
 	}
 	Server_Route(mux, "GET /api/v1/delegated/ws", server, value_142)
+	var deviceLinkPut ServerHandler = func(value_server *Server, value_writer ResponseWriter, value_request *Request) {
+		Server_HandleDeviceLinkPut(value_server, value_writer, value_request)
+	}
+	Server_Route(mux, "POST /api/v1/link/put", server, deviceLinkPut)
+	var deviceLinkGet ServerHandler = func(value_server *Server, value_writer ResponseWriter, value_request *Request) {
+		Server_HandleDeviceLinkGet(value_server, value_writer, value_request)
+	}
+	Server_Route(mux, "POST /api/v1/link/get", server, deviceLinkGet)
+	var deviceLinkClose ServerHandler = func(value_server *Server, value_writer ResponseWriter, value_request *Request) {
+		Server_HandleDeviceLinkClose(value_server, value_writer, value_request)
+	}
+	Server_Route(mux, "POST /api/v1/link/close", server, deviceLinkClose)
 	var value_146 ServerHandler = func(value_143 *Server, value_144 ResponseWriter, value_145 *Request) {
 		Server_HandleFeedbackSubmit(value_143, value_144, value_145)
 	}
@@ -1188,6 +1200,21 @@ func Server_HandleDelegatedSync(server *Server, writer ResponseWriter, request *
 
 func Server_HandleDelegatedSocket(server *Server, writer ResponseWriter, request *Request) {
 	DelegatedWs_Handle(Server_Authorizations(server), writer, request)
+}
+
+func Server_HandleDeviceLinkPut(server *Server, writer ResponseWriter, request *Request) {
+	_ = server
+	DeviceLink_Put(writer, request)
+}
+
+func Server_HandleDeviceLinkGet(server *Server, writer ResponseWriter, request *Request) {
+	_ = server
+	DeviceLink_Get(writer, request)
+}
+
+func Server_HandleDeviceLinkClose(server *Server, writer ResponseWriter, request *Request) {
+	_ = server
+	DeviceLink_Close(writer, request)
 }
 
 func Server_GlobalInit00() {

@@ -38,6 +38,7 @@ telegram_entries :: #import "telegram_account_entry";
 response :: #import "response";
 delegated_sync :: #import "delegated_sync";
 delegated_ws :: #import "delegated_ws";
+device_link :: #import "device_link";
 feedback :: #import "feedback_http";
 docs :: #import "docs";
 types :: #import "types";
@@ -331,6 +332,9 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/authorization/session", server, HandleAuthorizationSession)
     Route(mux, "POST /api/v1/delegated/sync", server, HandleDelegatedSync)
     Route(mux, "GET /api/v1/delegated/ws", server, HandleDelegatedSocket)
+    Route(mux, "POST /api/v1/link/put", server, HandleDeviceLinkPut)
+    Route(mux, "POST /api/v1/link/get", server, HandleDeviceLinkGet)
+    Route(mux, "POST /api/v1/link/close", server, HandleDeviceLinkClose)
     Route(mux, "POST /api/v1/feedback", server, HandleFeedbackSubmit)
     Route(mux, "GET /api/v1/feedback", server, HandleFeedbackList)
     Route(mux, "GET /api/v1/admin/feedback", server, HandleFeedbackInbox)
@@ -752,4 +756,16 @@ HandleDelegatedSync :: (server: *Server, writer: http.ResponseWriter, request: *
 }
 HandleDelegatedSocket :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     delegated_ws.Handle(Authorizations(server), writer, request)
+}
+HandleDeviceLinkPut :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    unused server
+    device_link.Put(writer, request)
+}
+HandleDeviceLinkGet :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    unused server
+    device_link.Get(writer, request)
+}
+HandleDeviceLinkClose :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    unused server
+    device_link.Close(writer, request)
 }

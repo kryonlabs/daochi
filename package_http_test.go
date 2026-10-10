@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -106,6 +107,98 @@ func TestIndependentPackageReleases(t *testing.T) {
 		t.Fatal(err)
 	}
 	get("diary/"+newDiary.Artifacts[0].SHA256+".zib", 503)
+}
+
+func TestPackageReleaseForOlderHosts(t *testing.T) {
+	server, database, _ := testServer(t)
+	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x64}, ed25519.SeedSize))
+	manifest := AppManifest{ManifestVersion: 1, AppID: "diary", DisplayName: "diary",
+		Status: "active", Keys: []AppKey{{KeyID: "release", Algorithm: "ed25519",
+			PublicKey: hex.EncodeToString(private.Public().(ed25519.PublicKey)), Status: "active"}}}
+	encoded, _ := json.Marshal(manifest)
+	if err := AppStore_UpsertSignedManifest(database.Database, context.Background(),
+		manifest, encoded, "diary-fixture", "fixture", "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	root := server.Cfg.DBPath + ".packages/diary"
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Releases are archived by sequence the way Inbe's importer leaves them.
+	publish := func(sequence int64, version string, hostAPI int64, moduleAPI int64) ReleaseV2 {
+		t.Helper()
+		data := []byte("ZIB\x00diary " + version)
+		hash := sha256.Sum256(data)
+		value := ReleaseV2{AppID: "diary", Sequence: sequence, Version: version,
+			Runtime: "kryon-app-v1", HostAPI: hostAPI, ModuleAPI: moduleAPI, KeyID: "release",
+			Artifacts: []Artifact{{Variant: "module", SHA256: hex.EncodeToString(hash[:]),
+				Size: int64(len(data))}}, Dependencies: []Dependency{}}
+		value.Signature = hex.EncodeToString(ed25519.Sign(private,
+			[]byte(PackageRelease_SigningMessage(value))))
+		metadata, _ := json.Marshal(value)
+		for name, content := range map[string][]byte{
+			"latest-v2.json":                                   metadata,
+			fmt.Sprintf("release-%d.json", sequence):           metadata,
+			value.Artifacts[0].SHA256 + ".zib":                 data,
+			value.Artifacts[0].SHA256 + ".zib.release-v2.json": metadata,
+		} {
+			if err := os.WriteFile(filepath.Join(root, name), content, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return value
+	}
+	routes := server.Routes()
+	latest := func(query string, status int) ReleaseV2 {
+		t.Helper()
+		response := httptest.NewRecorder()
+		routes.ServeHTTP(response, httptest.NewRequest("GET", "/api/v2/packages/diary/latest"+query, nil))
+		if response.Code != status {
+			t.Fatalf("%s: got %d: %s", query, response.Code, response.Body.String())
+		}
+		var value ReleaseV2
+		if status == 200 {
+			if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return value
+	}
+	publish(1, "1.0.0", 4, 2)
+	forFive := publish(2, "1.0.1", 5, 2)
+	if err := os.WriteFile(filepath.Join(root, "release-3.json"), []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	newest := publish(4, "1.1.0", 6, 2)
+	if value := latest("", 200); value.Sequence != newest.Sequence {
+		t.Fatalf("a client naming no interface got sequence %d", value.Sequence)
+	}
+	if value := latest("?host_api=7&module_api=2", 200); value.Sequence != newest.Sequence {
+		t.Fatalf("a newer host did not get the newest release: %d", value.Sequence)
+	}
+	// A damaged archive is skipped, not served.
+	if value := latest("?host_api=5&module_api=2", 200); value.Sequence != forFive.Sequence ||
+		value.Signature != forFive.Signature {
+		t.Fatalf("host 5 got sequence %d", value.Sequence)
+	}
+	if value := latest("?host_api=4", 200); value.Sequence != 1 {
+		t.Fatalf("host 4 got sequence %d", value.Sequence)
+	}
+	latest("?host_api=3", 404)
+	latest("?host_api=6&module_api=3", 404)
+	for _, query := range []string{"?host_api=0", "?host_api=x", "?module_api=-1", "?host_api=65536"} {
+		latest(query, 400)
+	}
+	// An archived release whose signature no longer verifies is never served.
+	forged := forFive
+	forged.Version = "1.0.9"
+	metadata, _ := json.Marshal(forged)
+	if err := os.WriteFile(filepath.Join(root, "release-2.json"), metadata, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if value := latest("?host_api=5", 200); value.Sequence != 1 {
+		t.Fatalf("a forged archive was served: %d", value.Sequence)
+	}
 }
 
 func TestPackageReleaseDescriptorValidation(t *testing.T) {

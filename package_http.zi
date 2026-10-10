@@ -1,4 +1,6 @@
 // A verified, immutable artifact store, with one latest release per app.
+// An app that cannot run the latest release names the newest host and module
+// interfaces it has and gets the newest archived release built for them.
 #import "std/go_types"
 http :: #import "std/http_go";
 url :: #import "std/url_go";
@@ -14,6 +16,7 @@ response :: #import "response";
 registry :: #import "app_http";
 release :: #import "package_release";
 strings :: #system_library "go:strings";
+strconv :: #system_library "go:strconv";
 hex :: #system_library "go:encoding/hex";
 fmt :: #system_library "go:fmt";
 go_http :: #system_library "go:net/http";
@@ -27,12 +30,90 @@ WriteResult :: struct {
     count: isize
     error: Error
 }
+Number :: struct {
+    value: s64
+    error: Error
+}
+Interfaces :: struct {
+    host: s64
+    module: s64
+    valid: bool
+}
+Selected :: struct {
+    value: release.ReleaseV2
+    found: bool
+}
+ParseNumber :: (value: string, base: isize, bits: isize) -> Number #go_results #foreign strconv "ParseInt";
+Sequence :: (sequence: s64) -> string #foreign fmt "Sprint";
 TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
 TrimSuffix :: (value: string, suffix: string) -> string #foreign strings;
 Split :: (value: string, separator: string) -> []string #foreign strings;
 Decode :: (value: string) -> Decoded #go_results #foreign hex "DecodeString";
 Join :: (a: string, b: string) -> string #foreign fmt "Sprint";
 Write :: (writer: http.ResponseWriter, bytes: []u8) -> WriteResult #go_results #foreign go_http "ResponseWriter.Write";
+
+// Zero means the client did not name that interface and takes any release.
+Interface :: (value: string) -> s64 {
+    if value == "" {
+        return 0
+    }
+    number := ParseNumber(value, cast(isize)10, cast(isize)64)
+    if number.error != null || number.value < 1 || number.value > 65535 {
+        return -1
+    }
+    return number.value
+}
+
+Wanted :: (request: *http.Request) -> Interfaces {
+    query := url.Query(http.RequestURL(request))
+    result: Interfaces
+    result.host = Interface(url.Value(query, "host_api"))
+    result.module = Interface(url.Value(query, "module_api"))
+    result.valid = result.host >= 0 && result.module >= 0
+    return result
+}
+
+// A host runs releases built for its interface or an older one; module
+// interfaces must match exactly.
+Fits :: (value: release.ReleaseV2, wanted: Interfaces) -> bool {
+    return (wanted.host == 0 || value.HostAPI <= wanted.host) &&
+    (wanted.module == 0 || value.ModuleAPI == wanted.module)
+}
+
+Trusted :: (context: registry.Registry, request: *http.Request,
+    value: release.ReleaseV2) -> bool {
+    key := store.ActiveKey(context.database, http.Context(request), value.AppID, value.KeyID)
+    public := Decode(key.value.PublicKey)
+    signature := Decode(value.Signature)
+    return key.error == null && key.found && key.value.Algorithm == "ed25519" &&
+    (key.value.ExpiresAt <= 0 || key.value.ExpiresAt > clock.Unix(clock.Now())) &&
+    public.error == null && public.value.count == 32 &&
+    signature.error == null && signature.value.count == 64 &&
+    keys.Verify(cast(keys.PublicKey)public.value,
+        text.ToBytes(release.SigningMessage(value)), signature.value)
+}
+
+// Every published release stays archived by sequence. The walk is bounded so
+// a long history cannot make one request read the whole store.
+Older :: (context: registry.Registry, request: *http.Request, root: string,
+    appID: string, latest: s64, wanted: Interfaces) -> Selected {
+    result: Selected
+    sequence := latest - 1
+    while sequence > 0 && sequence > latest - 256 {
+        metadata := files.ReadFile(Join(root, Join(Join("release-", Sequence(sequence)), ".json")))
+        if metadata.error == null && metadata.value.count <= 65536 {
+            value: release.ReleaseV2
+            if json.Unmarshal(metadata.value, *value) == null && value.Sequence == sequence &&
+            release.Valid(value, appID) && Fits(value, wanted) && Trusted(context, request, value) {
+                result.value = value
+                result.found = true
+                return result
+            }
+        }
+        sequence -= 1
+    }
+    return result
+}
 
 #scope_export
 Route :: (context: registry.Registry, writer: http.ResponseWriter,
@@ -78,19 +159,24 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         response.Error(writer, 503, "invalid portable release")
         return
     }
-    key := store.ActiveKey(context.database, http.Context(request), appID, value.KeyID)
-    public := Decode(key.value.PublicKey)
-    signature := Decode(value.Signature)
-    if key.error != null || !key.found || key.value.Algorithm != "ed25519" ||
-    (key.value.ExpiresAt > 0 && key.value.ExpiresAt <= clock.Unix(clock.Now())) ||
-    public.error != null || public.value.count != 32 ||
-    signature.error != null || signature.value.count != 64 ||
-    !keys.Verify(cast(keys.PublicKey)public.value,
-        text.ToBytes(release.SigningMessage(value)), signature.value) {
+    if !Trusted(context, request, value) {
         response.Error(writer, 503, "untrusted portable release")
         return
     }
     if parts[1] == "latest" {
+        wanted := Wanted(request)
+        if !wanted.valid {
+            response.Error(writer, 400, "invalid interface version")
+            return
+        }
+        if !Fits(value, wanted) {
+            older := Older(context, request, root, appID, value.Sequence, wanted)
+            if !older.found {
+                response.Error(writer, 404, "no release for this app version")
+                return
+            }
+            value = older.value
+        }
         http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "no-store")
         response.JSON(writer, 200, value)
         return

@@ -44,6 +44,8 @@ type BaselineConfig struct {
 	NodeIdentityPrivateKey          ed25519.PrivateKey
 	NodeDisplayName                 string
 	LANDiscovery                    bool
+	NodeLANOnly                     bool
+	NodeLANNetworks                 []string
 	WaoziIssuerPublicKey            ed25519.PublicKey
 	WaoziIssuerPrivateKey           ed25519.PrivateKey
 	TokenProducts                   map[string]TokenProduct
@@ -132,6 +134,8 @@ func baselineLoadConfig() BaselineConfig {
 		NodeIdentityPrivateKey:          nodePrivateKey,
 		NodeDisplayName:                 baselineEnvString("DAOCHI_NODE_NAME", "Daochi Node"),
 		LANDiscovery:                    ConfigValues_Bool(os.Getenv("DAOCHI_LAN_DISCOVERY"), true),
+		NodeLANOnly:                     ConfigValues_Bool(os.Getenv("DAOCHI_LAN_ONLY"), false),
+		NodeLANNetworks:                 NetworkScope_ParseNetworks(os.Getenv("DAOCHI_LAN_NETWORKS")),
 		WaoziIssuerPublicKey:            issuerPublic,
 		WaoziIssuerPrivateKey:           issuerPrivate,
 		TokenProducts:                   ConfigValues_Products(baselineEnvString("DAOCHI_TOKEN_PRODUCTS", "")),

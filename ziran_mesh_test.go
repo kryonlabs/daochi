@@ -158,6 +158,20 @@ func TestZiranMeshScopeAgainstBaseline(t *testing.T) {
 func meshPortFixture(t *testing.T) *Store {
 	t.Helper()
 	store := grantStoreFixture(t)
+	// Mesh accounts are public-key hashes; grant fixtures use short labels.
+	for label, key := range map[string]byte{"account": 0x42, "other": 0x43} {
+		digest := sha256.Sum256([]byte{key})
+		account := hex.EncodeToString(digest[:])
+		_, err := store.Database.Exec(`
+INSERT INTO server_users(user_id_hash,public_key,last_seen_at)
+SELECT ?,public_key,last_seen_at FROM server_users WHERE user_id_hash=?;
+UPDATE server_encrypted_records SET user_id_hash=? WHERE user_id_hash=?;
+DELETE FROM server_users WHERE user_id_hash=?;
+`, account, label, account, label, label)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	_, err := store.Database.Exec(`
 CREATE TABLE server_account_tombstones(user_id_hash TEXT PRIMARY KEY);
 CREATE TABLE node_sync_cursors(peer_key TEXT PRIMARY KEY,cursor TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);

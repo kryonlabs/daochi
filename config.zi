@@ -4,6 +4,7 @@
 #import "std/go_types"
 #import "sets"
 #import "std/ed25519_go"
+network :: #import "network_scope";
 text :: #import "std/text_go";
 clock :: #import "std/time_go";
 go_os :: #system_library "go:os";
@@ -39,6 +40,8 @@ Config :: struct {
     NodeIdentityPrivateKey: PrivateKey
     NodeDisplayName: string
     LANDiscovery: bool
+    NodeLANOnly: bool
+    NodeLANNetworks: []string
     WaoziIssuerPublicKey: PublicKey
     WaoziIssuerPrivateKey: PrivateKey
     TokenProducts: Map(string, TokenProduct)
@@ -278,6 +281,8 @@ Load :: () -> Config {
     result.NodeIdentityPrivateKey = nodePrivateKey
     result.NodeDisplayName = EnvString("DAOCHI_NODE_NAME", "Daochi Node")
     result.LANDiscovery = Bool(Getenv("DAOCHI_LAN_DISCOVERY"), true)
+    result.NodeLANOnly = Bool(Getenv("DAOCHI_LAN_ONLY"), false)
+    result.NodeLANNetworks = network.ParseNetworks(Getenv("DAOCHI_LAN_NETWORKS"))
     result.WaoziIssuerPublicKey = cast(PublicKey)issuerPublic
     result.WaoziIssuerPrivateKey = issuerPrivate
     result.TokenProducts = Products(EnvString("DAOCHI_TOKEN_PRODUCTS", ""))

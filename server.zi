@@ -23,6 +23,7 @@ accounts :: #import "account_http";
 social :: #import "social_http";
 registry :: #import "app_http";
 bundles :: #import "bundle_http";
+blobs :: #import "blob_http";
 packages :: #import "package_http";
 devices :: #import "device_http";
 trust :: #import "trust_http";
@@ -30,6 +31,8 @@ mesh :: #import "mesh";
 sync_http :: #import "sync_http";
 sync_ws :: #import "sync_ws";
 middleware :: #import "middleware";
+network :: #import "network_scope";
+app_network :: #import "app_network";
 request_rate :: #import "request_rate";
 chat :: #import "chat";
 lumi_telegram :: #import "lumi_telegram";
@@ -108,6 +111,17 @@ Route :: (mux: *Mux, pattern: string, server: *Server, handler: ServerHandler) {
 #scope_export
 New :: (configuration: config.Config, store: *storage.Store, verifier: *verification.Verifier,
     signer: access.SignPrivateKey) -> *Server {
+    scope: network.NetworkScope
+    scope.LANOnly = configuration.NodeLANOnly
+    scope.Networks = configuration.NodeLANNetworks
+    networkError := network.Validate(scope, configuration.Addr)
+    if networkError != null {
+        Panic(networkError)
+    }
+    storedScopeError := app_network.StoredAllowed(scope, store.database, ctx.Background())
+    if storedScopeError != null {
+        Panic(storedScopeError)
+    }
     identity := node.New(configuration.NodeIdentityPrivateKey)
     if identity.error != null {
         Panic(identity.error)
@@ -202,6 +216,7 @@ AppRegistry :: (server: *Server) -> registry.Registry #go_method "appRegistry" {
     result.replayError = errSignedTxReplay
     result.missingUser = storage.ErrSyncUserNotFound
     result.scopeNotOwned = errAppScopeNotOwned
+    result.nodeID = RetainPath(server.node.ID)
     return result
 }
 
@@ -267,7 +282,10 @@ AuthenticateSignature :: (server: *Server, context: ctx.Context, userID: string,
 }
 
 WithCommonHeaders :: (server: *Server, next: middleware.Handler) -> middleware.Handler #go_method "withCommonHeaders" {
-    return middleware.New(*server.metrics, next)
+    scope: network.NetworkScope
+    scope.LANOnly = server.cfg.NodeLANOnly
+    scope.Networks = server.cfg.NodeLANNetworks
+    return network.Wrap(scope, middleware.New(*server.metrics, next))
 }
 
 AllowRequest :: (server: *Server, request: *http.Request, key: string, limit: isize,
@@ -375,6 +393,9 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/account/app-grants/signed", server, HandleAppHttpGrantSigned)
     Route(mux, "DELETE /api/v1/account/app-grants/", server, HandleAppHttpGrantRoute)
     Route(mux, "GET /api/v1/account/app-records", server, HandleAppHttpRecords)
+    Route(mux, "GET /api/v1/blobs/", server, HandleBlobHttpRoute)
+    Route(mux, "HEAD /api/v1/blobs/", server, HandleBlobHttpRoute)
+    Route(mux, "PUT /api/v1/blobs/", server, HandleBlobHttpRoute)
     Route(mux, "DELETE /api/v1/account", server, HandleDeleteAccount)
     Route(mux, "POST /api/v1/account/delete", server, HandleDeleteAccount)
     Route(mux, "POST /api/v1/account/delete-with-key", server, HandleDeleteAccountWithKey)
@@ -462,6 +483,10 @@ HandleAppHttpList :: (server: *Server, writer: http.ResponseWriter, request: *ht
 
 HandleBundleHttpRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     bundles.Route(AppRegistry(server), writer, request)
+}
+
+HandleBlobHttpRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    blobs.Route(AppRegistry(server), writer, request)
 }
 
 HandlePackageHttpRoute :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

@@ -12,6 +12,8 @@ apps :: #import "mesh_apps";
 records :: #import "mesh_store";
 trust :: #import "trust_store";
 policy :: #import "mesh_policy";
+network :: #import "network_scope";
+app_network :: #import "app_network";
 cursor :: #import "mesh_cursor";
 http :: #import "std/http_go";
 io :: #import "std/io_go";
@@ -156,6 +158,12 @@ Import :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request) {
         return
     }
     context := http.Context(request)
+    for app: input.Apps {
+        if !app_network.Allowed(NetworkScope(mesh), app.Manifest) {
+            response.Error(writer, cast(isize)403, "app manifest forbids this node network scope")
+            return
+        }
+    }
     importedApps := apps.Import(mesh.database, context, mesh.configuration.NodeRegistryPublicKey, input.Policy, input.Apps, mesh.convertError)
     if importedApps.error != null {
         LogError("mesh app registry import", "error", importedApps.error)
@@ -182,6 +190,16 @@ Import :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request) {
 }
 
 Authorize :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request, body: []u8) -> bool {
+    scope := NetworkScope(mesh)
+    if scope.LANOnly && !network.AllowsAddress(scope, http.RemoteAddress(request)) {
+        response.Error(writer, cast(isize)403, "peer is outside the node LAN")
+        return false
+    }
+    scopeError := app_network.StoredAllowed(scope, mesh.database, http.Context(request))
+    if scopeError != null {
+        response.Error(writer, cast(isize)403, "app manifests forbid this node network scope")
+        return false
+    }
     headers := http.Headers(request)
     if TrimSpace(http.HeaderValue(headers, "X-Daochi-Node-ID")) != "" {
         error := node_auth.Verify(mesh.database, http.Context(request), request, body)
@@ -192,6 +210,10 @@ Authorize :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request, b
         return true
     }
     token := TrimSpace(mesh.configuration.NodeSyncToken)
+    if scope.LANOnly {
+        response.Error(writer, cast(isize)401, "LAN mesh requires signed peer identity")
+        return false
+    }
     if token == "" {
         response.Error(writer, cast(isize)503, "node sync disabled")
         return false
@@ -265,6 +287,14 @@ PullPeers :: (mesh: Mesh, context: ctx.Context) {
 }
 
 PullPeer :: (mesh: Mesh, context: ctx.Context, peer: NodePeer) -> Error {
+    scope := NetworkScope(mesh)
+    if scope.LANOnly && peer.NodeID == "" {
+        return errors.New("LAN mesh requires signed peer identity")
+    }
+    scopeError := app_network.StoredAllowed(scope, mesh.database, context)
+    if scopeError != null {
+        return scopeError
+    }
     baseURL := TrimRight(TrimSpace(peer.URL), "/")
     if baseURL == "" {
         return null
@@ -292,6 +322,11 @@ PullPeer :: (mesh: Mesh, context: ctx.Context, peer: NodePeer) -> Error {
         }
         if exported.Apps.count == 0 && exported.Records.count == 0 && exported.Deletions.count == 0 && exported.Names.count == 0 {
             return null
+        }
+        for app: exported.Apps {
+            if !app_network.Allowed(scope, app.Manifest) {
+                return errors.New("app manifest forbids this node network scope")
+            }
         }
         importedApps := apps.Import(mesh.database, context, mesh.configuration.NodeRegistryPublicKey, sync, exported.Apps, mesh.convertError)
         if importedApps.error != null {
@@ -359,7 +394,7 @@ PostJSON :: (mesh: Mesh, context: ctx.Context, peerNodeID: string, target: strin
         token: [2]string = .["Bearer ", mesh.configuration.NodeSyncToken]
         http.SetHeader(headers, "Authorization", Join(token[:], ""))
     }
-    client := http.NewClient(cast(clock.Duration)20000000000)
+    client := network.Client(NetworkScope(mesh), cast(clock.Duration)20000000000)
     result := http.Do(client, outbound.value)
     if result.error != null {
         return result.error
@@ -372,4 +407,13 @@ PostJSON :: (mesh: Mesh, context: ctx.Context, peerNodeID: string, target: strin
         return RemoteFailure("node mesh request failed: %s %s", http.Status(result.value), TrimSpace(text.FromBytes(data.value)))
     }
     return json.Decode(json.NewDecoder(cast(io.Reader)body), reply)
+}
+
+RetainNetworkScope :: (value: network.NetworkScope) -> network.NetworkScope #foreign builtin "retain";
+
+NetworkScope :: (mesh: Mesh) -> network.NetworkScope {
+    scope: network.NetworkScope
+    scope.LANOnly = mesh.configuration.NodeLANOnly
+    scope.Networks = mesh.configuration.NodeLANNetworks
+    return RetainNetworkScope(scope)
 }

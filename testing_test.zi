@@ -12,6 +12,8 @@ HelperRaw :: (test: *Test) #foreign native "(*T).Helper";
 FatalRaw :: (test: *Test, message: string) #foreign native "(*T).Fatal";
 RenderRaw :: (pattern: string, arguments: []Any) -> string #go_variadic #foreign format "Sprintf";
 RunRaw :: (test: *Test, name: string, callback: TestCase) -> bool #foreign native "(*T).Run";
+SetenvRaw :: (test: *Test, key: string, value: string) #foreign native "(*T).Setenv";
+TempDirRaw :: (test: *Test) -> string #foreign native "(*T).TempDir";
 AddStringRaw :: (test: *Fuzzer, value: string) #foreign native "(*F).Add";
 FuzzStringRaw :: (test: *Fuzzer, callback: StringFuzzCase) #foreign native "(*F).Fuzz";
 
@@ -30,6 +32,16 @@ Fatalf :: (test: *Test, format: string, arguments: []Any) {
 Run :: (test: *Test, name: string, callback: TestCase) -> bool {
     HelperRaw(test)
     return RunRaw(test, name, callback)
+}
+
+Setenv :: (test: *Test, key: string, value: string) {
+    HelperRaw(test)
+    SetenvRaw(test, key, value)
+}
+
+TempDir :: (test: *Test) -> string {
+    HelperRaw(test)
+    return TempDirRaw(test)
 }
 
 AddString :: (test: *Fuzzer, value: string) {

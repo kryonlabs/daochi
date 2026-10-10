@@ -33,6 +33,10 @@ func Mesh_Cut(Value string, Separator string) HeaderParts {
 	return result
 }
 
+func Mesh_RetainNetworkScope(Value NetworkScope) NetworkScope {
+	return Value
+}
+
 func Mesh_Run(mesh Mesh, context Context) {
 	if int64(mesh.Configuration.NodeSyncInterval) <= 0 {
 		return
@@ -140,6 +144,25 @@ func Mesh_Import(mesh Mesh, writer ResponseWriter, request *Request) {
 		return
 	}
 	context := StdHttpGo_Context(request)
+	{
+		value_4 := input.Apps[:]
+		if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
+			panic("slice range out of bounds")
+		}
+		loop_view_21 := value_4[0:int64(len(value_4)):int64(len(value_4))]
+		loop_count_21 := int64(len(loop_view_21))
+		var loop_cursor_21 int64 = 0
+		for loop_cursor_21 < loop_count_21 {
+			loop_index_21 := loop_cursor_21
+			app := loop_view_21[loop_index_21]
+			var value_5 bool = AppNetwork_Allowed(Mesh_NetworkScope(mesh), app.Manifest)
+			if !value_5 {
+				Response_Error(writer, int(403), "app manifest forbids this node network scope")
+				return
+			}
+			loop_cursor_21++
+		}
+	}
 	importedApps := MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, input.Policy, input.Apps, mesh.ConvertError)
 	if importedApps.Error != nil {
 		slog.Error("mesh app registry import", "error", importedApps.Error)
@@ -160,13 +183,28 @@ func Mesh_Import(mesh Mesh, writer ResponseWriter, request *Request) {
 	}
 	var value NodeMeshImportResponse = NodeMeshImportResponse{}
 	value.Status = "ok"
-	var value_4 int64 = ((int64(len(input.Apps)) + int64(len(input.Records))) + int64(len(input.Deletions))) + int64(len(input.Names))
-	value.Records = int(value_4)
+	var value_6 int64 = ((int64(len(input.Apps)) + int64(len(input.Records))) + int64(len(input.Deletions))) + int64(len(input.Names))
+	value.Records = int(value_6)
 	value.Applied = (importedApps.Value + importedRecords.Value) + importedNames.Value
 	Response_JSON(writer, int(200), value)
 }
 
 func Mesh_Authorize(mesh Mesh, writer ResponseWriter, request *Request, body []uint8) bool {
+	scope := Mesh_NetworkScope(mesh)
+	var value_0 bool = scope.LANOnly
+	if value_0 {
+		var value_1 bool = NetworkScope_AllowsAddress(scope, StdHttpGo_RemoteAddress(request))
+		value_0 = !value_1
+	}
+	if value_0 {
+		Response_Error(writer, int(403), "peer is outside the node LAN")
+		return false
+	}
+	scopeError := AppNetwork_StoredAllowed(scope, mesh.Database, StdHttpGo_Context(request))
+	if scopeError != nil {
+		Response_Error(writer, int(403), "app manifests forbid this node network scope")
+		return false
+	}
 	headers := StdHttpGo_Headers(request)
 	if strings.TrimSpace(StdHttpGo_HeaderValue(headers, "X-Daochi-Node-ID")) != "" {
 		error := NodeAuth_Verify(mesh.Database, StdHttpGo_Context(request), request, body)
@@ -177,25 +215,29 @@ func Mesh_Authorize(mesh Mesh, writer ResponseWriter, request *Request, body []u
 		return true
 	}
 	token := strings.TrimSpace(mesh.Configuration.NodeSyncToken)
+	if scope.LANOnly {
+		Response_Error(writer, int(401), "LAN mesh requires signed peer identity")
+		return false
+	}
 	if token == "" {
 		Response_Error(writer, int(503), "node sync disabled")
 		return false
 	}
-	var value_0 [2]string
-	value_0[0] = "X-Daochi-Node-Token"
-	value_0[1] = "X-Ksync-Node-Token"
-	names := value_0
+	var value_2 [2]string
+	value_2[0] = "X-Daochi-Node-Token"
+	value_2[1] = "X-Ksync-Node-Token"
+	names := value_2
 	_ = names
 	provided := strings.TrimSpace(HttpAuth_HeaderAlias(request, names[0:2:2]))
 	if provided == "" {
 		provided = Mesh_BearerToken(StdHttpGo_HeaderValue(headers, "Authorization"))
 	}
-	var value_1 bool = provided == ""
-	if !value_1 {
-		var value_2 bool = StdConstantTime_ConstantTimeTextEqual(provided, token)
-		value_1 = !value_2
+	var value_3 bool = provided == ""
+	if !value_3 {
+		var value_4 bool = StdConstantTime_ConstantTimeTextEqual(provided, token)
+		value_3 = !value_4
 	}
-	if value_1 {
+	if value_3 {
 		Response_Error(writer, int(401), "invalid node token")
 		return false
 	}
@@ -299,6 +341,14 @@ func Mesh_PullPeers(mesh Mesh, context Context) {
 }
 
 func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
+	scope := Mesh_NetworkScope(mesh)
+	if scope.LANOnly && peer.NodeID == "" {
+		return StdErrorsGo_New("LAN mesh requires signed peer identity")
+	}
+	scopeError := AppNetwork_StoredAllowed(scope, mesh.Database, context)
+	if scopeError != nil {
+		return scopeError
+	}
 	baseURL := strings.TrimRight(strings.TrimSpace(peer.URL), "/")
 	if baseURL == "" {
 		return nil
@@ -332,6 +382,24 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 		if value_1 && int64(len(exported.Names)) == 0 {
 			return nil
 		}
+		{
+			value_2 := exported.Apps[:]
+			if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
+				panic("slice range out of bounds")
+			}
+			loop_view_36 := value_2[0:int64(len(value_2)):int64(len(value_2))]
+			loop_count_36 := int64(len(loop_view_36))
+			var loop_cursor_36 int64 = 0
+			for loop_cursor_36 < loop_count_36 {
+				loop_index_36 := loop_cursor_36
+				app := loop_view_36[loop_index_36]
+				var value_3 bool = AppNetwork_Allowed(scope, app.Manifest)
+				if !value_3 {
+					return StdErrorsGo_New("app manifest forbids this node network scope")
+				}
+				loop_cursor_36++
+			}
+		}
 		importedApps := MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, sync, exported.Apps, mesh.ConvertError)
 		if importedApps.Error != nil {
 			return importedApps.Error
@@ -349,37 +417,37 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 		if lastCursor == "" {
 			var lastSequence int64 = 0
 			{
-				value_2 := exported.Records[:]
-				if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
+				value_4 := exported.Records[:]
+				if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_44 := value_2[0:int64(len(value_2)):int64(len(value_2))]
-				loop_count_44 := int64(len(loop_view_44))
-				var loop_cursor_44 int64 = 0
-				for loop_cursor_44 < loop_count_44 {
-					loop_index_44 := loop_cursor_44
-					record := loop_view_44[loop_index_44]
+				loop_view_57 := value_4[0:int64(len(value_4)):int64(len(value_4))]
+				loop_count_57 := int64(len(loop_view_57))
+				var loop_cursor_57 int64 = 0
+				for loop_cursor_57 < loop_count_57 {
+					loop_index_57 := loop_cursor_57
+					record := loop_view_57[loop_index_57]
 					if record.MeshVersion > lastSequence {
 						lastSequence = record.MeshVersion
 					}
-					loop_cursor_44++
+					loop_cursor_57++
 				}
 			}
 			{
-				value_3 := exported.Deletions[:]
-				if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
+				value_5 := exported.Deletions[:]
+				if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_49 := value_3[0:int64(len(value_3)):int64(len(value_3))]
-				loop_count_49 := int64(len(loop_view_49))
-				var loop_cursor_49 int64 = 0
-				for loop_cursor_49 < loop_count_49 {
-					loop_index_49 := loop_cursor_49
-					deletion := loop_view_49[loop_index_49]
+				loop_view_62 := value_5[0:int64(len(value_5)):int64(len(value_5))]
+				loop_count_62 := int64(len(loop_view_62))
+				var loop_cursor_62 int64 = 0
+				for loop_cursor_62 < loop_count_62 {
+					loop_index_62 := loop_cursor_62
+					deletion := loop_view_62[loop_index_62]
 					if deletion.MeshVersion > lastSequence {
 						lastSequence = deletion.MeshVersion
 					}
-					loop_cursor_49++
+					loop_cursor_62++
 				}
 			}
 			var value MeshCursor = MeshCursor{}
@@ -423,7 +491,7 @@ func Mesh_PostJSON(mesh Mesh, context Context, peerNodeID string, target string,
 		_ = token
 		StdHttpGo_SetHeader(headers, "Authorization", strings.Join(token[0:2:2], ""))
 	}
-	client := StdHttpGo_NewClient(Duration(20000000000))
+	client := NetworkScope_Client(Mesh_NetworkScope(mesh), Duration(20000000000))
 	result := StdHttpGo_Do(client, outbound.Value)
 	if result.Error != nil {
 		return result.Error
@@ -436,4 +504,11 @@ func Mesh_PostJSON(mesh Mesh, context Context, peerNodeID string, target string,
 		return fmt.Errorf("node mesh request failed: %s %s", StdHttpGo_Status(result.Value), strings.TrimSpace(StdTextGo_FromBytes(data.Value)))
 	}
 	return StdJsonGo_Decode(StdJsonGo_NewDecoder(Reader(body)), reply)
+}
+
+func Mesh_NetworkScope(mesh Mesh) NetworkScope {
+	var scope NetworkScope = NetworkScope{}
+	scope.LANOnly = mesh.Configuration.NodeLANOnly
+	scope.Networks = mesh.Configuration.NodeLANNetworks
+	return Mesh_RetainNetworkScope(scope)
 }

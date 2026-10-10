@@ -1,0 +1,155 @@
+#import "std/go_types"
+#import "protocol"
+#import "sync_types"
+testing :: #import "testing_test";
+stores :: #import "store";
+inspect :: #import "inspect";
+codec :: #import "codec";
+text :: #import "std/text_go";
+context :: #import "std/context_go";
+io :: #import "std/io_go";
+bytes :: #system_library "go:bytes";
+sha256 :: #system_library "go:crypto/sha256";
+hex :: #system_library "go:encoding/hex";
+path :: #system_library "go:path/filepath";
+strings :: #system_library "go:strings";
+native_testing :: #system_library "go:testing";
+format :: #system_library "go:fmt";
+
+#scope_file
+InspectBuffer :: #type #foreign bytes "Buffer";
+HelperRaw :: (test: *testing.Test) #foreign native_testing "(*T).Helper";
+JoinPathRaw :: (directory: string, name: string) -> string #foreign path "Join";
+RepeatBytesRaw :: (value: []u8, count: isize) -> []u8 #foreign bytes "Repeat";
+SumRaw :: (value: []u8) -> [32]u8 #foreign sha256 "Sum256";
+EncodeHexRaw :: (value: []u8) -> string #foreign hex "EncodeToString";
+BufferTextRaw :: (value: *InspectBuffer) -> string #foreign bytes "(*Buffer).String";
+ContainsRaw :: (value: string, fragment: string) -> bool #foreign strings "Contains";
+RepeatRaw :: (value: string, count: isize) -> string #foreign strings "Repeat";
+ErrorTextRaw :: (pattern: string, value: Error) -> string #foreign format "Sprintf";
+
+CheckError :: (test: *testing.Test, error: Error) {
+    HelperRaw(test)
+    if error != null {
+        arguments: [1]Any = .[error]
+        testing.Fatalf(test, "%v", arguments[:])
+    }
+}
+
+#scope_export
+#program_export "TestInspectSummaryAndUser"
+InspectSummaryAndUser :: (test: *testing.Test) {
+    dbPath := JoinPathRaw(testing.TempDir(test), "ksync-inspect.db")
+    opened := stores.Open(dbPath)
+    CheckError(test, opened.error)
+    store := opened.value
+    defer {
+        stores.Close(store)
+    }
+    seed: [1]u8 = .[66]
+    publicKey := RepeatBytesRaw(seed[:], cast(isize)codec.mlDSA44PublicKeySize)
+    sum := SumRaw(publicKey)
+    userID := EncodeHexRaw(sum[:])
+    habits: [1]Habit = .[
+        Habit.{
+            ID = "habit-1",
+            Name = "Meditate",
+            SyncMode = 1,
+            SyncActivity = 2,
+            UpdatedAt = "2026-06-19T00:00:00Z"
+        }
+    ]
+    sessions: [1]Session = .[
+        Session.{
+            ID = "session-1",
+            StartedAt = "2026-06-19T00:00:00Z",
+            LocalDate = 20260619,
+            Topic = "0",
+            Activity = 1,
+            UpdatedAt = "2026-06-19T00:00:00Z"
+        }
+    ]
+    request := SyncRequest.{UserIDHash = userID, Habits = habits[:], Sessions = sessions[:]}
+    _, applyError := stores.ApplySync(store, context.Background(), request, publicKey)
+    CheckError(test, applyError)
+    _, payloadError := stores.StoreEncryptedPayload(store, context.Background(), userID,
+        "inspect-client", text.ToBytes("{\"v\":1,\"nonce\":\"n\",\"ciphertext\":\"c\"}"))
+    CheckError(test, payloadError)
+    entry := SyncAuditEntry.{
+        UserIDHash = userID,
+        ClientID = "inspect-client",
+        AppID = "inbe",
+        ProtocolVersion = 5,
+        ServerVersion = 2,
+        Applied = SyncResult.{EncryptedRecords = 1},
+        RemoteOps = 3,
+        FullSnapshotRequired = true,
+        SnapshotReason = "test",
+        EncryptedPayload = true
+    }
+    CheckError(test, stores.RecordSyncAudit(store, context.Background(), entry))
+    CheckError(test, stores.RecordClientSync(store, context.Background(), userID, "legacy-client", 0, 2, cast(isize)2, 0))
+    CheckError(test, stores.Close(store))
+
+    summary: InspectBuffer
+    summaryArguments: [3]string = .["--db", dbPath, "summary"]
+    summaryOptions := inspect.InspectOptions.{Out = cast(io.Writer)*summary}
+    CheckError(test, inspect.Run(context.Background(), summaryArguments[:], summaryOptions))
+    summaryText := BufferTextRaw(*summary)
+    if !ContainsRaw(summaryText, "server_users") || !ContainsRaw(summaryText, "server_sessions") {
+        arguments: [1]Any = .[summaryText]
+        testing.Fatalf(test, "summary missing counts:\n%s", arguments[:])
+    }
+
+    user: InspectBuffer
+    userArguments: [4]string = .["--db", dbPath, "user", userID]
+    userOptions := inspect.InspectOptions.{Out = cast(io.Writer)*user}
+    CheckError(test, inspect.Run(context.Background(), userArguments[:], userOptions))
+    userText := BufferTextRaw(*user)
+    if !ContainsRaw(userText, "Meditate") || !ContainsRaw(userText, "session-1") {
+        arguments: [1]Any = .[userText]
+        testing.Fatalf(test, "user output missing data:\n%s", arguments[:])
+    }
+    if ContainsRaw(userText, userID) {
+        arguments: [1]Any = .[userText]
+        testing.Fatalf(test, "user id should be redacted by default:\n%s", arguments[:])
+    }
+
+    doctor: InspectBuffer
+    doctorArguments: [4]string = .["--db", dbPath, "doctor", userID]
+    doctorOptions := inspect.InspectOptions.{Out = cast(io.Writer)*doctor}
+    CheckError(test, inspect.Run(context.Background(), doctorArguments[:], doctorOptions))
+    doctorText := BufferTextRaw(*doctor)
+    expected: [7]string = .["Daochi doctor", "Warnings", "legacy clients below protocol 5",
+        "server_sync_audit", "server_encrypted_payloads", "protocol=5", "full_snapshot=true"]
+    for fragment: expected[:] {
+        if !ContainsRaw(doctorText, fragment) {
+            arguments: [2]Any = .[fragment, doctorText]
+            testing.Fatalf(test, "doctor output missing %q:\n%s", arguments[:])
+        }
+    }
+    if ContainsRaw(doctorText, userID) {
+        arguments: [1]Any = .[doctorText]
+        testing.Fatalf(test, "doctor user id should be redacted by default:\n%s", arguments[:])
+    }
+}
+
+#program_export "TestInspectMissingUser"
+InspectMissingUser :: (test: *testing.Test) {
+    dbPath := JoinPathRaw(testing.TempDir(test), "ksync-inspect.db")
+    opened := stores.Open(dbPath)
+    CheckError(test, opened.error)
+    defer {
+        stores.Close(opened.value)
+    }
+    CheckError(test, stores.Close(opened.value))
+    userID := RepeatRaw("a", cast(isize)64)
+    output: InspectBuffer
+    arguments: [4]string = .["--db", dbPath, "user", userID]
+    options := inspect.InspectOptions.{Out = cast(io.Writer)*output}
+    error := inspect.Run(context.Background(), arguments[:], options)
+    if error == null || !ContainsRaw(ErrorTextRaw("%v", error), "user not found") {
+        values: [1]Any = .[error]
+        testing.Fatalf(test, "missing user error = %v", values[:])
+    }
+}

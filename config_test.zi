@@ -1,0 +1,107 @@
+#import "std/go_types"
+testing :: #import "testing_test";
+config :: #import "config";
+values :: #import "config_values";
+clock :: #import "std/time_go";
+strings :: #system_library "go:strings";
+hex :: #system_library "go:encoding/hex";
+
+#scope_file
+RepeatRaw :: (value: string, count: isize) -> string #foreign strings "Repeat";
+JoinRaw :: (values: []string, separator: string) -> string #foreign strings "Join";
+EncodeHexRaw :: (value: []u8) -> string #foreign hex "EncodeToString";
+
+#scope_export
+#program_export "TestLoadConfigUsesCanonicalEnv"
+LoadConfigUsesCanonicalEnv :: (test: *testing.Test) {
+    secret := RepeatRaw("11", cast(isize)32)
+    testing.Setenv(test, "DAOCHI_TOKEN_SECRET_HEX", secret)
+    testing.Setenv(test, "DAOCHI_ADDR", "0.0.0.0:18080")
+    testing.Setenv(test, "DAOCHI_BASE_URL", "http://192.168.100.97:18080")
+    testing.Setenv(test, "DAOCHI_DB", "/data/daochi.db")
+    testing.Setenv(test, "DAOCHI_KNOWN_NODES", "Waozi=https://api.waozi.xyz;sync=pull;apps=inbe+ukuvota;collections=inbe.*+profile.public;data=encrypted_records+app_registry")
+    testing.Setenv(test, "DAOCHI_NODE_SYNC_TOKEN", "node-secret")
+    testing.Setenv(test, "DAOCHI_NODE_SYNC_INTERVAL_SECONDS", "30")
+    testing.Setenv(test, "DAOCHI_NODE_SYNC_BATCH_LIMIT", "250")
+    testing.Setenv(test, "DAOCHI_TOKEN_TTL_SECONDS", "90")
+    testing.Setenv(test, "MONERO_WALLET_RPC_URL", "http://127.0.0.1:18083")
+    testing.Setenv(test, "MONERO_RATE_ATOMIC_AMOUNT", "1000000000000")
+    testing.Setenv(test, "MONERO_RATE_TOKEN_UNITS", "5000000")
+
+    cfg := config.Load()
+    encoded := EncodeHexRaw(cfg.TokenSecret)
+    if encoded != secret {
+        arguments: [1]Any = .[encoded]
+        testing.Fatalf(test, "TokenSecret=%q, want DAOCHI secret", arguments[:])
+    }
+    if cfg.Addr != "0.0.0.0:18080" || cfg.BaseURL != "http://192.168.100.97:18080" || cfg.DBPath != "/data/daochi.db" {
+        arguments: [1]Any = .[cfg]
+        testing.Fatalf(test, "config did not prefer DAOCHI env: %+v", arguments[:])
+    }
+    if cfg.TokenTTL != cast(clock.Duration)90000000000 {
+        arguments: [1]Any = .[cfg.TokenTTL]
+        testing.Fatalf(test, "TokenTTL=%s, want 90s", arguments[:])
+    }
+    if cfg.NodeSyncToken != "node-secret" || cfg.NodeSyncInterval != cast(clock.Duration)30000000000 || cfg.NodeSyncBatchLimit != 250 {
+        arguments: [3]Any = .[cfg.NodeSyncToken, cfg.NodeSyncInterval, cfg.NodeSyncBatchLimit]
+        testing.Fatalf(test, "node sync config=%q/%s/%d, want DAOCHI values", arguments[:])
+    }
+    if cfg.MoneroWalletRPCURL != "http://127.0.0.1:18083" || cfg.MoneroRateAtomicAmount != 1000000000000 || cfg.MoneroRateTokenUnits != 5000000 {
+        arguments: [1]Any = .[cfg]
+        testing.Fatalf(test, "unexpected Monero config: %+v", arguments[:])
+    }
+    if cfg.KnownNodes.count != 1 || cfg.KnownNodes[0].Name != "Waozi" || cfg.KnownNodes[0].URL != "https://api.waozi.xyz" {
+        arguments: [1]Any = .[cfg.KnownNodes]
+        testing.Fatalf(test, "KnownNodes=%+v, want DAOCHI_KNOWN_NODES", arguments[:])
+    }
+    if cfg.KnownNodes[0].Sync == null ||
+        cfg.KnownNodes[0].Sync.Direction != "pull" ||
+        JoinRaw(cfg.KnownNodes[0].Sync.Apps, ",") != "inbe,ukuvota" ||
+        JoinRaw(cfg.KnownNodes[0].Sync.Collections, ",") != "inbe.*,profile.public" ||
+        JoinRaw(cfg.KnownNodes[0].Sync.Data, ",") != "encrypted_records,app_registry" {
+        arguments: [1]Any = .[cfg.KnownNodes[0].Sync]
+        testing.Fatalf(test, "KnownNodes sync policy=%+v, want parsed peer policy", arguments[:])
+    }
+}
+
+#program_export "TestEnvNodePeersValueKeepsLegacyPeerSyntax"
+EnvNodePeersValueKeepsLegacyPeerSyntax :: (test: *testing.Test) {
+    peers := values.Peers("https://one.example,Two|https://two.example,Three=https://three.example")
+    if peers.count != 3 {
+        arguments: [2]Any = .[peers.count, peers]
+        testing.Fatalf(test, "len(peers)=%d peers=%+v, want 3", arguments[:])
+    }
+    if peers[0].URL != "https://one.example" || peers[0].Sync != null {
+        arguments: [1]Any = .[peers[0]]
+        testing.Fatalf(test, "unexpected first peer: %+v", arguments[:])
+    }
+    if peers[1].Name != "Two" || peers[1].URL != "https://two.example" {
+        arguments: [1]Any = .[peers[1]]
+        testing.Fatalf(test, "unexpected second peer: %+v", arguments[:])
+    }
+    if peers[2].Name != "Three" || peers[2].URL != "https://three.example" {
+        arguments: [1]Any = .[peers[2]]
+        testing.Fatalf(test, "unexpected third peer: %+v", arguments[:])
+    }
+}
+
+#program_export "TestEnvNodePeersValueParsesSyncPolicy"
+EnvNodePeersValueParsesSyncPolicy :: (test: *testing.Test) {
+    peers := values.Peers("Local=http://192.168.100.97:18080;mode=both;app=inbe;collection=inbe.habits;type=encrypted_records,Off=https://off.example;enabled=false")
+    if peers.count != 2 {
+        arguments: [2]Any = .[peers.count, peers]
+        testing.Fatalf(test, "len(peers)=%d peers=%+v, want 2", arguments[:])
+    }
+    if peers[0].Sync == null ||
+        peers[0].Sync.Direction != "bidirectional" ||
+        JoinRaw(peers[0].Sync.Apps, ",") != "inbe" ||
+        JoinRaw(peers[0].Sync.Collections, ",") != "inbe.habits" ||
+        JoinRaw(peers[0].Sync.Data, ",") != "encrypted_records" {
+        arguments: [1]Any = .[peers[0].Sync]
+        testing.Fatalf(test, "unexpected first sync policy: %+v", arguments[:])
+    }
+    if peers[1].Sync == null || peers[1].Sync.Direction != "none" {
+        arguments: [1]Any = .[peers[1].Sync]
+        testing.Fatalf(test, "unexpected disabled sync policy: %+v", arguments[:])
+    }
+}

@@ -123,6 +123,12 @@ func (s *Server) baselineMeshHandleNodeMeshImport(w http.ResponseWriter, r *http
 }
 
 func (s *Server) baselineMeshAuthorizeNodeSync(w http.ResponseWriter, r *http.Request, body []byte) bool {
+	// The network-scope prerequisite is shared by both implementations. These
+	// fixtures compare the retained HTTP protocol after that new safety check.
+	if err := AppNetwork_StoredAllowed(Mesh_NetworkScope(s.mesh()), s.Store.Database, r.Context()); err != nil {
+		Response_Error(w, http.StatusForbidden, "app manifests forbid this node network scope")
+		return false
+	}
 	if nodeID := strings.TrimSpace(r.Header.Get("X-Daochi-Node-ID")); nodeID != "" {
 		if err := NodeAuth_Verify(s.Store.Database, r.Context(), r, body); err != nil {
 			Response_Error(w, http.StatusUnauthorized, err.Error())

@@ -12,14 +12,14 @@ import (
 )
 
 // #import std_go_types
-type Connection = net.Conn
+type zir_fd9879bd2495e71e_Connection = net.Conn
 
 type BufferedReader = bufio.Reader
 
 type BufferedConnection = bufio.ReadWriter
 
 type AcceptedSocket struct {
-	Connection Connection
+	Connection zir_fd9879bd2495e71e_Connection
 	Buffer     *BufferedConnection
 	Error      Error
 }
@@ -88,7 +88,7 @@ func Websocket_WriteString(Buffer *BufferedConnection, Value string) zir_f5c2242
 	return result
 }
 
-func Websocket_WriteBytes(Connection Connection, Value []uint8) zir_f5c2242e7b75ab47_WriteResult {
+func Websocket_WriteBytes(Connection zir_fd9879bd2495e71e_Connection, Value []uint8) zir_f5c2242e7b75ab47_WriteResult {
 	var result zir_f5c2242e7b75ab47_WriteResult
 	result.Count, result.Error = (net.Conn).Write(Connection, Value)
 	return result
@@ -267,7 +267,7 @@ func Websocket_AddText(left string, right string) string {
 	return strings.Join(parts[0:2:2], "")
 }
 
-func Websocket_WriteJSON(connection Connection, value Any) Error {
+func Websocket_WriteJSON(connection zir_fd9879bd2495e71e_Connection, value Any) Error {
 	encoded := StdJsonGo_Marshal(value)
 	if encoded.Error != nil {
 		return encoded.Error
@@ -275,7 +275,7 @@ func Websocket_WriteJSON(connection Connection, value Any) Error {
 	return Websocket_WriteFrame(connection, 1, encoded.Value)
 }
 
-func Websocket_WriteFrame(connection Connection, opcode uint8, payload []uint8) Error {
+func Websocket_WriteFrame(connection zir_fd9879bd2495e71e_Connection, opcode uint8, payload []uint8) Error {
 	header := make([]uint8, int(int(2)))
 	header[0] = 128 | opcode
 	if int64(len(payload)) < 126 {

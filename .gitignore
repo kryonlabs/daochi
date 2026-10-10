@@ -11,3 +11,4 @@ secrets/
 *.sqlite3
 daochi
 monero-wallet-cli.log
+.wrangler/

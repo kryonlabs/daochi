@@ -2,6 +2,7 @@
 #import "identity"
 #import "codec"
 #import "scope"
+network :: #import "network_scope";
 
 go_strings :: #system_library "go:strings";
 TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";
@@ -36,6 +37,9 @@ AppManifest :: struct {
     SourceURL: string #go_tag "json:\"source_url,omitempty\""
     Status: string #go_tag "json:\"status,omitempty\""
     ExpiresAt: s64 #go_tag "json:\"expires_at,omitempty\""
+    LANOnly: bool #go_tag "json:\"lan_only,omitempty\""
+    LANNetworks: []string #go_tag "json:\"lan_networks,omitempty\""
+    RegistrationNodeID: string #go_tag "json:\"registration_node_id,omitempty\""
     AppSchemaVersion: isize #go_tag "json:\"app_schema_version,omitempty\""
     MinClientVersion: string #go_tag "json:\"min_supported_client_version,omitempty\""
     CurrentVersion: string #go_tag "json:\"current_client_version,omitempty\""
@@ -91,6 +95,12 @@ Normalize :: (manifest: *AppManifest) {
     manifest.Description = TrimSpace(manifest.Description)
     manifest.HomepageURL = TrimSpace(manifest.HomepageURL)
     manifest.SourceURL = TrimSpace(manifest.SourceURL)
+    manifest.RegistrationNodeID = TrimSpace(manifest.RegistrationNodeID)
+    indexNetwork: s64 = 0
+    while indexNetwork < manifest.LANNetworks.count {
+        manifest.LANNetworks[indexNetwork] = TrimSpace(manifest.LANNetworks[indexNetwork])
+        indexNetwork += 1
+    }
     manifest.Status = TrimSpace(manifest.Status)
     if manifest.Status == "" {
         manifest.Status = "active"
@@ -212,6 +222,16 @@ Validate :: (manifest: AppManifest, now: s64) -> string {
     }
     if manifest.Status != "active" && manifest.Status != "suspended" {
         return "invalid status"
+    }
+    if manifest.LANOnly {
+        if !network.ValidNetworks(manifest.LANNetworks) {
+            return "LAN-only manifests require explicit private LAN networks"
+        }
+        if manifest.RegistrationNodeID != "" && !ValidUserID(manifest.RegistrationNodeID) {
+            return "invalid registration_node_id"
+        }
+    } else if manifest.LANNetworks.count != 0 || manifest.RegistrationNodeID != "" {
+        return "LAN restrictions require lan_only"
     }
     if manifest.Keys.count == 0 || manifest.Keys.count > 16 {
         return "invalid app keys"

@@ -1,0 +1,109 @@
+#import "std/go_types"
+#import "protocol"
+testing :: #import "testing_test";
+apps :: #import "app_http";
+registration :: #import "app_registration";
+schema :: #import "manifest";
+scope :: #import "scope";
+transaction :: #import "transaction";
+signed :: #import "signed_tx";
+clock :: #import "std/time_go";
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+requests :: #system_library "go:net/http/httptest";
+strings :: #system_library "go:strings";
+
+#scope_file
+ScopeRecorder :: #type #foreign requests "ResponseRecorder";
+ScopeReader :: #type #foreign strings "Reader";
+NewRequestRaw :: (method: string, target: string, body: io.Reader) -> *http.Request #foreign requests "NewRequest";
+NewRecorderRaw :: () -> *ScopeRecorder #foreign requests "NewRecorder";
+NewReaderRaw :: (value: string) -> *ScopeReader #foreign strings "NewReader";
+RepeatRaw :: (value: string, count: isize) -> string #foreign strings "Repeat";
+JoinRaw :: (values: []string, separator: string) -> string #foreign strings "Join";
+PrefixRaw :: (value: string, prefix: string) -> bool #foreign strings "HasPrefix";
+ContainsRaw :: (value: string, fragment: string) -> bool #foreign strings "Contains";
+
+ReadRegistration :: (value: string) -> registration.AppDecodeResult {
+    body := cast(io.Reader)NewReaderRaw(value)
+    request := NewRequestRaw("POST", "/api/v1/apps", body)
+    recorder := cast(http.ResponseWriter)NewRecorderRaw()
+    return apps.ReadRegistration(recorder, request, 1048576)
+}
+
+#scope_export
+#program_export "TestAppRegistrationOwnsItsDeclaredScopes"
+AppRegistrationOwnsItsDeclaredScopes :: (test: *testing.Test) {
+    valid := "{\"app_id\":\"ukuvota\",\"display_name\":\"Ukuvota\",\"status\":\"active\",\"collections\":[{\"collection_prefix\":\"private.ukuvota.v1.records.*\",\"visibility\":\"private\"}],\"features\":[{\"id\":\"records.sync\",\"collections\":[\"private.ukuvota.v1.records.*\"]}]}"
+    accepted := ReadRegistration(valid)
+    if accepted.error != null {
+        arguments: [1]Any = .[accepted.error]
+        testing.Fatalf(test, "own scope rejected: %v", arguments[:])
+    }
+
+    foreign := "{\"app_id\":\"ukuvota\",\"display_name\":\"Ukuvota\",\"status\":\"active\",\"collections\":[{\"collection_prefix\":\"private.krait.v1.records.*\",\"visibility\":\"private\"}]}"
+    foreignScope := ReadRegistration(foreign)
+    if foreignScope.error == null {
+        testing.Fatal(test, "app registration accepted another app's scope")
+    }
+
+    mismatchedVisibility := "{\"app_id\":\"ukuvota\",\"display_name\":\"Ukuvota\",\"status\":\"active\",\"collections\":[{\"collection_prefix\":\"public.ukuvota.v1.records.*\",\"visibility\":\"private\"}]}"
+    visibility := ReadRegistration(mismatchedVisibility)
+    if visibility.error == null {
+        testing.Fatal(test, "app registration accepted a visibility mismatch")
+    }
+}
+
+#program_export "TestAppFeatureReferencesDeclaredScope"
+AppFeatureReferencesDeclaredScope :: (test: *testing.Test) {
+    collections: [1]AppCollection = .[
+        AppCollection.{CollectionPrefix = "private.ukuvota.v1.records.*", Visibility = "private"}
+    ]
+    featureScopes: [1]string = .["private.ukuvota.v1.archive.*"]
+    features: [1]AppFeature = .[
+        AppFeature.{ID = "archive.sync", Collections = featureScopes[:]}
+    ]
+    keys: [1]schema.AppKey = .[
+        schema.AppKey.{KeyID = "main-key", Algorithm = "Ed25519", PublicKey = RepeatRaw("00", cast(isize)32)}
+    ]
+    manifest := schema.AppManifest.{
+        ManifestVersion = 1,
+        AppID = "ukuvota",
+        DisplayName = "Ukuvota",
+        Status = "active",
+        Collections = collections[:],
+        Features = features[:],
+        Keys = keys[:]
+    }
+    if schema.Validate(manifest, clock.Unix(clock.Now())) == "" {
+        testing.Fatal(test, "manifest feature accepted an undeclared scope")
+    }
+}
+
+#program_export "TestInbeReleasedAndCurrentScopesRemainValid"
+InbeReleasedAndCurrentScopesRemainValid :: (test: *testing.Test) {
+    scopes: [5]AppCollection = .[
+        AppCollection.{CollectionPrefix = "inbe.habits", Visibility = "private"},
+        AppCollection.{CollectionPrefix = "inbe.habit_days", Visibility = "private"},
+        AppCollection.{CollectionPrefix = "inbe.sessions", Visibility = "private"},
+        AppCollection.{CollectionPrefix = "private.inbe.v1.records.*", Visibility = "private"},
+        AppCollection.{CollectionPrefix = "shared.inbe.v1.records.*", Visibility = "shared"}
+    ]
+    for value: scopes[:] {
+        if !scope.AppOwnsDeclaredScope("inbe", value) {
+            arguments: [1]Any = .[value]
+            testing.Fatalf(test, "Inbe scope rejected: %#v", arguments[:])
+        }
+    }
+}
+
+#program_export "TestSignedTransactionContextIsNotCallerDefined"
+SignedTransactionContextIsNotCallerDefined :: (test: *testing.Test) {
+    tx := transaction.SignedTxEnvelope.{protocolVersion = 6, signatureContext = "attacker-context"}
+    message := transaction.CanonicalMessage(signed.TransactionContext, tx)
+    prefix: [2]string = .[signed.TransactionContext, ""]
+    if !PrefixRaw(message, JoinRaw(prefix[:], "\n")) || ContainsRaw(message, "attacker-context") {
+        arguments: [1]Any = .[message]
+        testing.Fatalf(test, "canonical transaction context was caller-controlled: %q", arguments[:])
+    }
+}

@@ -37,6 +37,7 @@ NodePeer :: struct {
 NodeSyncPolicy :: struct {
     Direction: string #go_tag "json:\"direction,omitempty\""
     Apps: []string #go_tag "json:\"apps,omitempty\""
+    Accounts: []string #go_tag "json:\"accounts,omitempty\""
     Collections: []string #go_tag "json:\"collections,omitempty\""
     Spaces: []string #go_tag "json:\"spaces,omitempty\""
     Data: []string #go_tag "json:\"data,omitempty\""

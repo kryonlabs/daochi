@@ -1,0 +1,39 @@
+#import "std/go_types"
+#import "std/map_go"
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+
+Paths :: () -> Map(string, Any) {
+    paths: Map(string, Any)
+    json.Unmarshal(text.ToBytes(Document), *paths)
+    return paths
+}
+
+Document :: #string JSON
+{
+  "/api/v1/blobs/{app_id}/{sha256}": {
+    "parameters": [
+      {"name":"app_id","in":"path","required":true,"schema":{"type":"string"}},
+      {"name":"sha256","in":"path","required":true,"schema":{"type":"string","pattern":"^[0-9a-f]{64}$"}},
+      {"name":"X-Daochi-Tx","in":"header","required":true,"schema":{"type":"string"}}
+    ],
+    "put": {
+      "summary":"Store immutable private encrypted bytes on this node",
+      "description":"Bearer and account/device transaction signatures are required. Body SHA-256 must equal the path. Maximum 16 MiB. Blobs are scoped to account and active app; they are excluded from mesh replication.",
+      "security":[{"bearerAuth":[]}],
+      "requestBody":{"required":true,"content":{"application/octet-stream":{"schema":{"type":"string","format":"binary"}}}},
+      "responses":{"204":{"description":"Stored atomically"},"400":{"description":"Invalid address or hash"},"401":{"description":"Missing or invalid authorization"},"403":{"description":"App inactive"},"409":{"description":"Replay rejected"},"413":{"description":"Empty or oversized blob"},"507":{"description":"Storage unavailable"}}
+    },
+    "get": {
+      "summary":"Read account-private encrypted bytes",
+      "security":[{"bearerAuth":[]}],
+      "responses":{"200":{"description":"Integrity-checked ciphertext","content":{"application/octet-stream":{"schema":{"type":"string","format":"binary"}}}},"401":{"description":"Authorization required"},"404":{"description":"No blob in this account/app"},"503":{"description":"Integrity check failed"}}
+    },
+    "head": {
+      "summary":"Check an account-private ciphertext blob before resuming upload",
+      "security":[{"bearerAuth":[]}],
+      "responses":{"200":{"description":"Blob available"},"401":{"description":"Authorization required"},"404":{"description":"Blob unavailable"}}
+    }
+  }
+}
+JSON;

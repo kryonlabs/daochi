@@ -27,3 +27,11 @@ Discovery does not imply trust. New peer and replication paths must authenticate
 node identity, reject replays, enforce explicit data scopes, and preserve the
 zero-configuration public-node path. Add tests for unauthorized, malformed,
 expired, and partition/reconnection behavior with every mesh protocol change.
+
+## Bend
+
+When using Bend:
+- run `bend guide` to learn it
+- use `LAWS.bend` to keep important rules
+- run `bend PROOF.bend` before committing
+- parallelize the code whenever possible

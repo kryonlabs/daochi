@@ -28,7 +28,7 @@ type ServerVerifier func(*Server, []uint8, []uint8, []uint8) bool
 
 type ServerStats func(*Server, Context, string) PublicStatsResult
 
-type zir_023bfa0b0a836cce_Results__string__Error struct {
+type zir_f5948c6fe72c657d_Results__string__Error struct {
 	Value0 string
 	Value1 Error
 }
@@ -101,6 +101,18 @@ func Server_Route(mux *Mux, pattern string, server *Server, handler ServerHandle
 }
 
 func Server_New(configuration Config, store *Store, verifier *Verifier, signer SignPrivateKey) *Server {
+	var scope NetworkScope = NetworkScope{}
+	scope.LANOnly = configuration.NodeLANOnly
+	scope.Networks = configuration.NodeLANNetworks
+	networkError := NetworkScope_Validate(scope, configuration.Addr)
+	if networkError != nil {
+		panic(networkError)
+	}
+	var value_0 *Database = store.Database
+	storedScopeError := AppNetwork_StoredAllowed(scope, value_0, StdContextGo_Background())
+	if storedScopeError != nil {
+		panic(storedScopeError)
+	}
 	identity := NodeIdentity_New(configuration.NodeIdentityPrivateKey)
 	if identity.Error != nil {
 		panic(identity.Error)
@@ -108,15 +120,15 @@ func Server_New(configuration Config, store *Store, verifier *Verifier, signer S
 	server := new(Server)
 	server.Cfg = configuration
 	server.Store = store
-	var value_0 *ChallengeStore = Challenge_New(configuration.ChallengeTTL)
-	server.Challenges = value_0
+	var value_1 *ChallengeStore = Challenge_New(configuration.ChallengeTTL)
+	server.Challenges = value_1
 	server.Verifier = verifier
-	var value_1 *SyncHub = SyncHub_New()
-	server.SyncHub = value_1
-	var value_2 *RateLimiter = RateLimit_New()
-	server.Limiter = value_2
-	var value_3 *ServerMetrics = new(ServerMetrics)
-	server.Metrics = value_3
+	var value_2 *SyncHub = SyncHub_New()
+	server.SyncHub = value_2
+	var value_3 *RateLimiter = RateLimit_New()
+	server.Limiter = value_3
+	var value_4 *ServerMetrics = new(ServerMetrics)
+	server.Metrics = value_4
 	server.Node = identity.Value
 	server.Signer = signer
 	return server
@@ -228,6 +240,8 @@ func Server_AppRegistry(server *Server) Registry {
 	result.ReplayError = errSignedTxReplay
 	result.MissingUser = ErrSyncUserNotFound
 	result.ScopeNotOwned = errAppScopeNotOwned
+	var value_0 string = Server_RetainPath(server.Node.ID)
+	result.NodeID = value_0
 	return result
 }
 
@@ -276,9 +290,9 @@ func (receiver *Server) mesh() Mesh {
 	return Server_Mesh(receiver)
 }
 
-func Server_AuthenticateToken(server *Server, request *Request) zir_023bfa0b0a836cce_Results__string__Error {
+func Server_AuthenticateToken(server *Server, request *Request) zir_f5948c6fe72c657d_Results__string__Error {
 	result := HttpAuth_AuthenticateToken(server.Store.Database, request, server.Cfg.TokenSecret)
-	var value_2 zir_023bfa0b0a836cce_Results__string__Error = zir_023bfa0b0a836cce_Results__string__Error{}
+	var value_2 zir_f5948c6fe72c657d_Results__string__Error = zir_f5948c6fe72c657d_Results__string__Error{}
 	value_2.Value0 = result.Value
 	var value_3 Error = AuthenticationError_Convert(result.Authentication)
 	value_2.Value1 = value_3
@@ -342,7 +356,11 @@ func (receiver *Server) authenticateSignature(argument1 Context, argument2 strin
 }
 
 func Server_WithCommonHeaders(server *Server, next Handler) Handler {
-	return Middleware_New(&(server.Metrics), next)
+	var scope NetworkScope = NetworkScope{}
+	scope.LANOnly = server.Cfg.NodeLANOnly
+	scope.Networks = server.Cfg.NodeLANNetworks
+	var value_0 NetworkScope = scope
+	return NetworkScope_Wrap(value_0, Middleware_New(&(server.Metrics), next))
 }
 
 func (receiver *Server) withCommonHeaders(argument1 Handler) Handler {
@@ -697,53 +715,65 @@ func Server_Routes(server *Server) Handler {
 	}
 	Server_Route(mux, "GET /api/v1/account/app-records", server, value_300)
 	var value_304 ServerHandler = func(value_301 *Server, value_302 ResponseWriter, value_303 *Request) {
-		Server_HandleDeleteAccount(value_301, value_302, value_303)
+		Server_HandleBlobHttpRoute(value_301, value_302, value_303)
 	}
-	Server_Route(mux, "DELETE /api/v1/account", server, value_304)
+	Server_Route(mux, "GET /api/v1/blobs/", server, value_304)
 	var value_308 ServerHandler = func(value_305 *Server, value_306 ResponseWriter, value_307 *Request) {
-		Server_HandleDeleteAccount(value_305, value_306, value_307)
+		Server_HandleBlobHttpRoute(value_305, value_306, value_307)
 	}
-	Server_Route(mux, "POST /api/v1/account/delete", server, value_308)
+	Server_Route(mux, "HEAD /api/v1/blobs/", server, value_308)
 	var value_312 ServerHandler = func(value_309 *Server, value_310 ResponseWriter, value_311 *Request) {
-		Server_HandleDeleteAccountWithKey(value_309, value_310, value_311)
+		Server_HandleBlobHttpRoute(value_309, value_310, value_311)
 	}
-	Server_Route(mux, "POST /api/v1/account/delete-with-key", server, value_312)
+	Server_Route(mux, "PUT /api/v1/blobs/", server, value_312)
 	var value_316 ServerHandler = func(value_313 *Server, value_314 ResponseWriter, value_315 *Request) {
-		Server_HandleSocialHttpFriends(value_313, value_314, value_315)
+		Server_HandleDeleteAccount(value_313, value_314, value_315)
 	}
-	Server_Route(mux, "GET /api/v1/friends", server, value_316)
+	Server_Route(mux, "DELETE /api/v1/account", server, value_316)
 	var value_320 ServerHandler = func(value_317 *Server, value_318 ResponseWriter, value_319 *Request) {
-		Server_HandleSocialHttpRemoveFriend(value_317, value_318, value_319)
+		Server_HandleDeleteAccount(value_317, value_318, value_319)
 	}
-	Server_Route(mux, "DELETE /api/v1/friends/", server, value_320)
+	Server_Route(mux, "POST /api/v1/account/delete", server, value_320)
 	var value_324 ServerHandler = func(value_321 *Server, value_322 ResponseWriter, value_323 *Request) {
-		Server_HandleSocialHttpRequests(value_321, value_322, value_323)
+		Server_HandleDeleteAccountWithKey(value_321, value_322, value_323)
 	}
-	Server_Route(mux, "GET /api/v1/friends/requests", server, value_324)
+	Server_Route(mux, "POST /api/v1/account/delete-with-key", server, value_324)
 	var value_328 ServerHandler = func(value_325 *Server, value_326 ResponseWriter, value_327 *Request) {
-		Server_HandleSocialHttpCreateRequest(value_325, value_326, value_327)
+		Server_HandleSocialHttpFriends(value_325, value_326, value_327)
 	}
-	Server_Route(mux, "POST /api/v1/friends/requests", server, value_328)
+	Server_Route(mux, "GET /api/v1/friends", server, value_328)
 	var value_332 ServerHandler = func(value_329 *Server, value_330 ResponseWriter, value_331 *Request) {
-		Server_HandleSocialHttpRequestAction(value_329, value_330, value_331)
+		Server_HandleSocialHttpRemoveFriend(value_329, value_330, value_331)
 	}
-	Server_Route(mux, "POST /api/v1/friends/requests/", server, value_332)
+	Server_Route(mux, "DELETE /api/v1/friends/", server, value_332)
 	var value_336 ServerHandler = func(value_333 *Server, value_334 ResponseWriter, value_335 *Request) {
-		Server_HandleSocialHttpPutStats(value_333, value_334, value_335)
+		Server_HandleSocialHttpRequests(value_333, value_334, value_335)
 	}
-	Server_Route(mux, "PUT /api/v1/profile/stats", server, value_336)
+	Server_Route(mux, "GET /api/v1/friends/requests", server, value_336)
 	var value_340 ServerHandler = func(value_337 *Server, value_338 ResponseWriter, value_339 *Request) {
-		Server_HandleSocialHttpFriendStats(value_337, value_338, value_339)
+		Server_HandleSocialHttpCreateRequest(value_337, value_338, value_339)
 	}
-	Server_Route(mux, "GET /api/v1/friends/stats", server, value_340)
+	Server_Route(mux, "POST /api/v1/friends/requests", server, value_340)
 	var value_344 ServerHandler = func(value_341 *Server, value_342 ResponseWriter, value_343 *Request) {
-		Server_HandleBundleHttpRoute(value_341, value_342, value_343)
+		Server_HandleSocialHttpRequestAction(value_341, value_342, value_343)
 	}
-	Server_Route(mux, "GET /api/v1/packages/", server, value_344)
+	Server_Route(mux, "POST /api/v1/friends/requests/", server, value_344)
 	var value_348 ServerHandler = func(value_345 *Server, value_346 ResponseWriter, value_347 *Request) {
-		Server_HandlePackageHttpRoute(value_345, value_346, value_347)
+		Server_HandleSocialHttpPutStats(value_345, value_346, value_347)
 	}
-	Server_Route(mux, "GET /api/v2/packages/", server, value_348)
+	Server_Route(mux, "PUT /api/v1/profile/stats", server, value_348)
+	var value_352 ServerHandler = func(value_349 *Server, value_350 ResponseWriter, value_351 *Request) {
+		Server_HandleSocialHttpFriendStats(value_349, value_350, value_351)
+	}
+	Server_Route(mux, "GET /api/v1/friends/stats", server, value_352)
+	var value_356 ServerHandler = func(value_353 *Server, value_354 ResponseWriter, value_355 *Request) {
+		Server_HandleBundleHttpRoute(value_353, value_354, value_355)
+	}
+	Server_Route(mux, "GET /api/v1/packages/", server, value_356)
+	var value_360 ServerHandler = func(value_357 *Server, value_358 ResponseWriter, value_359 *Request) {
+		Server_HandlePackageHttpRoute(value_357, value_358, value_359)
+	}
+	Server_Route(mux, "GET /api/v2/packages/", server, value_360)
 	return Server_WithCommonHeaders(server, Handler(mux))
 }
 
@@ -835,6 +865,10 @@ func Server_HandleAppHttpList(server *Server, writer ResponseWriter, request *Re
 
 func Server_HandleBundleHttpRoute(server *Server, writer ResponseWriter, request *Request) {
 	BundleHttp_Route(Server_AppRegistry(server), writer, request)
+}
+
+func Server_HandleBlobHttpRoute(server *Server, writer ResponseWriter, request *Request) {
+	BlobHttp_Route(Server_AppRegistry(server), writer, request)
 }
 
 func Server_HandlePackageHttpRoute(server *Server, writer ResponseWriter, request *Request) {

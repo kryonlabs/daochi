@@ -265,7 +265,7 @@ func floatToInt(x float64, w uint, signed bool) uint64 {
 	if signed {
 		bits--
 	}
-	bound := float64(uint64(1) << bits)
+	bound := float64(uint64(1)<<(bits-1)) * 2
 	lower := float64(0)
 	if signed {
 		lower = -bound

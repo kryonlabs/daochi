@@ -51,14 +51,47 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "host_api",
+          "in": "query",
+          "description": "For latest: the newest host interface the app runs; an older archived release is served when the latest needs a newer one",
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        {
+          "name": "module_api",
+          "in": "query",
+          "description": "For latest: the module interface the app requires",
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        {
+          "name": "bucket",
+          "in": "query",
+          "description": "For latest: the device's stable rollout bucket; a staged release reaches buckets below its share until it expires. Apps without a bucket count as 99",
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99
+          }
         }
       ],
       "responses": {
         "200": {
           "description": "Signed release metadata or the portable bundle"
         },
+        "400": {
+          "description": "Invalid interface version or bucket"
+        },
         "404": {
-          "description": "App or release is unavailable"
+          "description": "App or release is unavailable, or no release fits the app"
         }
       }
     }

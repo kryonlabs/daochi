@@ -27,6 +27,7 @@ http_auth :: #import "http_auth";
 response :: #import "response";
 pages :: #import "record_sync";
 storage :: #import "account_storage";
+history :: #import "state_history";
 http :: #import "std/http_go";
 sql :: #import "std/sql_go";
 errors :: #import "std/errors_go";
@@ -127,7 +128,8 @@ ProjectClean :: (value: *SyncResponse, request: SyncRequest) {
     value.Changes.Sessions = value.Data.Sessions
     value.Changes.MeditationLogs = value.Data.MeditationLogs
     value.Changes.SocialCache = value.Data.Social
-    value.Changes.EncryptedRecords = value.Data.EncryptedRecords
+    // Encrypted records stay the changes after the device's version. A full
+    // snapshot reads from version zero, so its changes hold every record.
 }
 
 #scope_export
@@ -224,7 +226,20 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     compactedThrough: s64 = 0
     apply := true
     storageLimit := sync.configuration.AccountStorageLimitBytes
-    if input.LastServerStateHash != "" && !EqualFold(input.LastServerStateHash, base.value) && !input.FullSyncRequested {
+    staleHash := input.LastServerStateHash != "" && !EqualFold(input.LastServerStateHash, base.value) &&
+        !input.FullSyncRequested
+    if staleHash {
+        // Changes after the device's version reach it as changes; only a
+        // hash the node never gave for that version needs a full snapshot.
+        known := history.Matches(sync.database, context, input.UserIDHash,
+            input.SinceServerVersion, input.LastServerStateHash)
+        if known.error != null {
+            StorageFailure(writer, "match sync state history", input.UserIDHash, known.error, "state hash failed")
+            return
+        }
+        staleHash = !known.value
+    }
+    if staleHash {
         fullSnapshot = true
         completeChanges = false
         sinceVersion = 0
@@ -392,7 +407,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
         value.ServerVersion = current.value
         value.ServerClock = current.value
         value.ServerStateHash = migratedHash.value
-        clean := views.Clean(sync.database, context, input.UserIDHash)
+        clean := views.CleanWithin(sync.database, context, input.UserIDHash, fullSnapshot)
         if clean.error != null {
             StorageFailure(writer, "load clean data", input.UserIDHash, clean.error, "clean data failed")
             return
@@ -446,6 +461,10 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     entry.RemoteOps = cast(isize)remote.count
     entry.FullSnapshotRequired = fullSnapshot
     entry.SnapshotReason = snapshotReason
+    error = history.Record(sync.database, context, input.UserIDHash, value.ServerVersion, value.ServerStateHash)
+    if error != null {
+        LogClientError("record sync state history", "user", logs.LogText(input.UserIDHash), "client", logs.LogText(input.ClientID), "error", error)
+    }
     error = audit.Record(sync.database, context, entry)
     if error != null {
         LogClientError("record sync audit", "user", logs.LogText(input.UserIDHash), "client", logs.LogText(input.ClientID), "error", error)

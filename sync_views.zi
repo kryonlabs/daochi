@@ -480,6 +480,13 @@ Changes :: (database: *sql.Database, context: ctx.Context, userID: string, since
 }
 
 Clean :: (database: *sql.Database, context: ctx.Context, userID: string) -> CleanResult {
+    return CleanWithin(database, context, userID, true)
+}
+
+// A full snapshot carries every encrypted record; a normal sync already
+// carries the new ones as changes and leaves them out of the clean data.
+CleanWithin :: (database: *sql.Database, context: ctx.Context, userID: string,
+    includeRecords: bool) -> CleanResult {
     result: CleanResult
     habits := CleanHabits(database, context, userID)
     result.error = habits.error
@@ -506,10 +513,13 @@ Clean :: (database: *sql.Database, context: ctx.Context, userID: string) -> Clea
     if result.error != null {
         return result
     }
-    records := RecordsSince(database, context, userID, 0)
-    result.error = records.error
-    if result.error != null {
-        return result
+    records: RecordsResult
+    if includeRecords {
+        records = RecordsSince(database, context, userID, 0)
+        result.error = records.error
+        if result.error != null {
+            return result
+        }
     }
     value := AllocateClean()
     value.Habits = habits.value

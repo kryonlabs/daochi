@@ -27,19 +27,19 @@ type SyncCompletion struct {
 	Transaction SignedTxEnvelope
 }
 
-type zir_c6df48d464b0614f_FinishCallback func(*SyncCompletion, Synchronization, *Request)
+type zir_f42dd54e2a1e2480_FinishCallback func(*SyncCompletion, Synchronization, *Request)
 
-type zir_322363603ffcb8c2_IntegerResult struct {
+type zir_531df467e178e7c3_IntegerResult struct {
 	Value int64
 	Error Error
 }
 
-func SyncHttp_FinishAtReturn(Callback zir_c6df48d464b0614f_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
+func SyncHttp_FinishAtReturn(Callback zir_f42dd54e2a1e2480_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
 	Callback(Completion, Sync, Request)
 }
 
-func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_322363603ffcb8c2_IntegerResult {
-	var result zir_322363603ffcb8c2_IntegerResult
+func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_531df467e178e7c3_IntegerResult {
+	var result zir_531df467e178e7c3_IntegerResult
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }
@@ -116,13 +116,12 @@ func SyncHttp_ProjectClean(value *SyncResponse, request SyncRequest) {
 	value.Changes.Sessions = value.Data.Sessions
 	value.Changes.MeditationLogs = value.Data.MeditationLogs
 	value.Changes.SocialCache = value.Data.Social
-	value.Changes.EncryptedRecords = value.Data.EncryptedRecords
 }
 
 func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Request) {
 	StdAtomicGo_Add(&(sync.Counters.SyncRequests), 1)
 	var completion SyncCompletion = SyncCompletion{}
-	var value_3 zir_c6df48d464b0614f_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
+	var value_3 zir_f42dd54e2a1e2480_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
 		SyncHttp_Finish(value_0, value_1, value_2)
 	}
 	defer SyncHttp_FinishAtReturn(value_3, &(completion), sync, request)
@@ -225,7 +224,16 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		var value_13 bool = strings.EqualFold(input.LastServerStateHash, base.Value)
 		value_12 = !value_13
 	}
-	if value_12 && !input.FullSyncRequested {
+	staleHash := value_12 && !input.FullSyncRequested
+	if staleHash {
+		known := StateHistory_Matches(sync.Database, context, input.UserIDHash, input.SinceServerVersion, input.LastServerStateHash)
+		if known.Error != nil {
+			SyncHttp_StorageFailure(writer, "match sync state history", input.UserIDHash, known.Error, "state hash failed")
+			return
+		}
+		staleHash = !known.Value
+	}
+	if staleHash {
 		fullSnapshot = true
 		completeChanges = false
 		sinceVersion = 0
@@ -404,7 +412,7 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		value.ServerVersion = current.Value
 		value.ServerClock = current.Value
 		value.ServerStateHash = migratedHash.Value
-		clean := SyncViews_Clean(sync.Database, context, input.UserIDHash)
+		clean := SyncViews_CleanWithin(sync.Database, context, input.UserIDHash, fullSnapshot)
 		if clean.Error != nil {
 			SyncHttp_StorageFailure(writer, "load clean data", input.UserIDHash, clean.Error, "clean data failed")
 			return
@@ -459,11 +467,17 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	entry.RemoteOps = int(int64(len(remote)))
 	entry.FullSnapshotRequired = fullSnapshot
 	entry.SnapshotReason = snapshotReason
-	error = SyncAudit_Record(sync.Database, context, entry)
+	error = StateHistory_Record(sync.Database, context, input.UserIDHash, value.ServerVersion, value.ServerStateHash)
 	if error != nil {
 		var value_24 string = LogSafety_LogText(input.UserIDHash)
 		var value_25 string = LogSafety_LogText(input.ClientID)
-		slog.Error("record sync audit", "user", value_24, "client", value_25, "error", error)
+		slog.Error("record sync state history", "user", value_24, "client", value_25, "error", error)
+	}
+	error = SyncAudit_Record(sync.Database, context, entry)
+	if error != nil {
+		var value_26 string = LogSafety_LogText(input.UserIDHash)
+		var value_27 string = LogSafety_LogText(input.ClientID)
+		slog.Error("record sync audit", "user", value_26, "client", value_27, "error", error)
 	}
 	completion.Complete = true
 	Response_JSON(writer, int(200), value)

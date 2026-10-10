@@ -1,6 +1,7 @@
 // A verified, immutable artifact store, with one latest release per app.
 // An app that cannot run the latest release names the newest host and module
-// interfaces it has and gets the newest archived release built for them.
+// interfaces it has and gets the newest archived release built for them. A
+// staged release reaches only the devices whose bucket is below its share.
 #import "std/go_types"
 http :: #import "std/http_go";
 url :: #import "std/url_go";
@@ -43,6 +44,12 @@ Selected :: struct {
     value: release.ReleaseV2
     found: bool
 }
+// The publisher's rollout of one release sequence. It is not signed: it only
+// holds back a signed release, it can never select unsigned bytes.
+Rollout :: struct {
+    Sequence: s64 #go_tag "json:\"sequence\""
+    Percent: s64 #go_tag "json:\"percent\""
+}
 ParseNumber :: (value: string, base: isize, bits: isize) -> Number #go_results #foreign strconv "ParseInt";
 Sequence :: (sequence: s64) -> string #foreign fmt "Sprint";
 TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
@@ -62,6 +69,34 @@ Interface :: (value: string) -> s64 {
         return -1
     }
     return number.value
+}
+
+// Devices pick a stable bucket from 0 to 99. Apps that send none are served
+// last, once a release reaches every device.
+Bucket :: (request: *http.Request) -> s64 {
+    value := url.Value(url.Query(http.RequestURL(request)), "bucket")
+    if value == "" {
+        return 99
+    }
+    number := ParseNumber(value, cast(isize)10, cast(isize)64)
+    if number.error != null || number.value < 0 || number.value > 99 {
+        return -1
+    }
+    return number.value
+}
+
+// A missing or unreadable rollout file releases to everyone.
+HeldBack :: (root: string, sequence: s64, bucket: s64) -> bool {
+    metadata := files.ReadFile(Join(root, "rollout.json"))
+    if metadata.error != null || metadata.value.count > 4096 {
+        return false
+    }
+    rollout: Rollout
+    if json.Unmarshal(metadata.value, *rollout) != null || rollout.Sequence != sequence ||
+    rollout.Percent < 0 || rollout.Percent >= 100 {
+        return false
+    }
+    return bucket >= rollout.Percent
 }
 
 Wanted :: (request: *http.Request) -> Interfaces {
@@ -165,11 +200,12 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
     }
     if parts[1] == "latest" {
         wanted := Wanted(request)
-        if !wanted.valid {
-            response.Error(writer, 400, "invalid interface version")
+        bucket := Bucket(request)
+        if !wanted.valid || bucket < 0 {
+            response.Error(writer, 400, "invalid interface version or bucket")
             return
         }
-        if !Fits(value, wanted) {
+        if !Fits(value, wanted) || HeldBack(root, value.Sequence, bucket) {
             older := Older(context, request, root, appID, value.Sequence, wanted)
             if !older.found {
                 response.Error(writer, 404, "no release for this app version")

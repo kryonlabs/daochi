@@ -10,12 +10,12 @@ import (
 )
 
 // #import std_go_types
-type zir_19886dcfd8e5ae3d_Decoded struct {
+type zir_36836ada4d48137e_Decoded struct {
 	Value []uint8
 	Error Error
 }
 
-type zir_9d9d51abad2885b9_WriteResult struct {
+type zir_ba984eb6218aeafa_WriteResult struct {
 	Count int
 	Error Error
 }
@@ -36,20 +36,25 @@ type Selected struct {
 	Found bool
 }
 
+type Rollout struct {
+	Sequence int64 "json:\"sequence\""
+	Percent  int64 "json:\"percent\""
+}
+
 func PackageHttp_ParseNumber(Value string, Base int, Bits int) Number {
 	var result Number
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }
 
-func PackageHttp_Decode(Value string) zir_19886dcfd8e5ae3d_Decoded {
-	var result zir_19886dcfd8e5ae3d_Decoded
+func PackageHttp_Decode(Value string) zir_36836ada4d48137e_Decoded {
+	var result zir_36836ada4d48137e_Decoded
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }
 
-func PackageHttp_Write(Writer ResponseWriter, Bytes []uint8) zir_9d9d51abad2885b9_WriteResult {
-	var result zir_9d9d51abad2885b9_WriteResult
+func PackageHttp_Write(Writer ResponseWriter, Bytes []uint8) zir_ba984eb6218aeafa_WriteResult {
+	var result zir_ba984eb6218aeafa_WriteResult
 	result.Count, result.Error = (http.ResponseWriter).Write(Writer, Bytes)
 	return result
 }
@@ -63,6 +68,31 @@ func PackageHttp_Interface(value string) int64 {
 		return -1
 	}
 	return number.Value
+}
+
+func PackageHttp_Bucket(request *Request) int64 {
+	value := StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "bucket")
+	if value == "" {
+		return 99
+	}
+	number := PackageHttp_ParseNumber(value, int(int(10)), int(int(64)))
+	if number.Error != nil || number.Value < 0 || number.Value > 99 {
+		return -1
+	}
+	return number.Value
+}
+
+func PackageHttp_HeldBack(root string, sequence int64, bucket int64) bool {
+	metadata := StdFileGo_ReadFile(fmt.Sprint(root, "rollout.json"))
+	if metadata.Error != nil || int64(len(metadata.Value)) > 4096 {
+		return false
+	}
+	var rollout Rollout = Rollout{}
+	var value_0 Error = StdJsonGo_Unmarshal(metadata.Value, &(rollout))
+	if value_0 != nil || rollout.Sequence != sequence || rollout.Percent < 0 || rollout.Percent >= 100 {
+		return false
+	}
+	return bucket >= rollout.Percent
 }
 
 func PackageHttp_Wanted(request *Request) Interfaces {
@@ -217,12 +247,18 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 	}
 	if parts[1] == "latest" {
 		wanted := PackageHttp_Wanted(request)
-		if !wanted.Valid {
-			Response_Error(writer, 400, "invalid interface version")
+		bucket := PackageHttp_Bucket(request)
+		if !wanted.Valid || bucket < 0 {
+			Response_Error(writer, 400, "invalid interface version or bucket")
 			return
 		}
 		var value_16 bool = PackageHttp_Fits(value, wanted)
-		if !value_16 {
+		var value_17 bool = !value_16
+		if !value_17 {
+			var value_18 bool = PackageHttp_HeldBack(root, value.Sequence, bucket)
+			value_17 = value_18
+		}
+		if value_17 {
 			older := PackageHttp_Older(context, request, root, appID, value.Sequence, wanted)
 			if !older.Found {
 				Response_Error(writer, 404, "no release for this app version")
@@ -236,20 +272,20 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 	}
 	var expected int64 = 0
 	{
-		value_17 := value.Artifacts[:]
-		if int64(0) < 0 || int64(int64(len(value_17))) < int64(0) || int64(int64(len(value_17))) > int64(len(value_17)) {
+		value_19 := value.Artifacts[:]
+		if int64(0) < 0 || int64(int64(len(value_19))) < int64(0) || int64(int64(len(value_19))) > int64(len(value_19)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_60 := value_17[0:int64(len(value_17)):int64(len(value_17))]
-		loop_count_60 := int64(len(loop_view_60))
-		var loop_cursor_60 int64 = 0
-		for loop_cursor_60 < loop_count_60 {
-			loop_index_60 := loop_cursor_60
-			artifact := loop_view_60[loop_index_60]
+		loop_view_61 := value_19[0:int64(len(value_19)):int64(len(value_19))]
+		loop_count_61 := int64(len(loop_view_61))
+		var loop_cursor_61 int64 = 0
+		for loop_cursor_61 < loop_count_61 {
+			loop_index_61 := loop_cursor_61
+			artifact := loop_view_61[loop_index_61]
 			if artifact.SHA256 == hash {
 				expected = artifact.Size
 			}
-			loop_cursor_60++
+			loop_cursor_61++
 		}
 	}
 	if expected == 0 {
@@ -257,13 +293,13 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		return
 	}
 	bundle := StdFileGo_ReadFile(fmt.Sprint(root, parts[1]))
-	var value_18 bool = bundle.Error != nil || int64(len(bundle.Value)) != expected
-	var value_19 bool = value_18
-	if !value_19 {
-		var value_20 bool = Signing_SHA256Hex(bundle.Value) != hash
-		value_19 = value_20
+	var value_20 bool = bundle.Error != nil || int64(len(bundle.Value)) != expected
+	var value_21 bool = value_20
+	if !value_21 {
+		var value_22 bool = Signing_SHA256Hex(bundle.Value) != hash
+		value_21 = value_22
 	}
-	if value_19 {
+	if value_21 {
 		Response_Error(writer, 503, "portable release bytes do not match")
 		return
 	}

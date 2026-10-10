@@ -33,6 +33,7 @@ type Config struct {
 	EncryptedPayloadMaxReturn       int
 	EncryptedPayloadMaxAccountBytes int64
 	EncryptedPayloadRetention       Duration
+	AccountStorageLimitBytes        int64
 	NodeRegistryPublicKey           PublicKey
 	KnownNodes                      []NodePeer
 	NodeSyncToken                   string
@@ -292,6 +293,7 @@ func Config_Load() Config {
 	result.EncryptedPayloadMaxReturn = Config_EnvInt("DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN", int(0))
 	result.EncryptedPayloadMaxAccountBytes = Config_EnvInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0)
 	result.EncryptedPayloadRetention = Config_EnvDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", Duration(0))
+	result.AccountStorageLimitBytes = Config_EnvInt64("DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES", 0)
 	result.NodeRegistryPublicKey = nodeRegistryPublic
 	result.KnownNodes = ConfigValues_Peers(Config_EnvString("DAOCHI_KNOWN_NODES", ""))
 	result.NodeSyncToken = Config_EnvString("DAOCHI_NODE_SYNC_TOKEN", "")

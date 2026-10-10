@@ -29,6 +29,7 @@ Config :: struct {
     EncryptedPayloadMaxReturn: isize
     EncryptedPayloadMaxAccountBytes: s64
     EncryptedPayloadRetention: clock.Duration
+    AccountStorageLimitBytes: s64
     NodeRegistryPublicKey: PublicKey
     KnownNodes: []NodePeer
     NodeSyncToken: string
@@ -266,6 +267,8 @@ Load :: () -> Config {
     result.EncryptedPayloadMaxReturn = EnvInt("DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN", cast(isize)0)
     result.EncryptedPayloadMaxAccountBytes = EnvInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", cast(s64)0)
     result.EncryptedPayloadRetention = EnvDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", cast(clock.Duration)0)
+    // Zero keeps account storage unlimited; the public node sets its free allowance.
+    result.AccountStorageLimitBytes = EnvInt64("DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES", cast(s64)0)
     result.NodeRegistryPublicKey = nodeRegistryPublic
     result.KnownNodes = Peers(EnvString("DAOCHI_KNOWN_NODES", ""))
     result.NodeSyncToken = EnvString("DAOCHI_NODE_SYNC_TOKEN", "")

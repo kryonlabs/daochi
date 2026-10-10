@@ -143,6 +143,13 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
+	storedBytes := AccountStorage_Used(s.Store.Database, r.Context(), req.UserIDHash)
+	if storedBytes.Error != nil {
+		slog.Error("load account storage", "user", LogSafety_LogText(req.UserIDHash), "error", storedBytes.Error)
+		Response_Error(w, http.StatusInternalServerError, "account storage failed")
+		return
+	}
+	accountStorage := AccountStorage_Report(storedBytes.Value, s.Cfg.AccountStorageLimitBytes)
 	if fullSnapshotRequired {
 		Metrics_RecordFullSnapshot(s.Metrics, snapshotReason)
 	}
@@ -211,6 +218,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		ServerCapabilities:   NodeInfo_Capabilities(),
 		TransitionMode:       SyncRequest_TransitionMode(req),
 		Applied:              result,
+		AccountStorage:       &accountStorage,
 		AccountAlias:         accountAlias,
 		ProfileIcon:          profileIcon,
 		ServerVersion:        serverVersion,

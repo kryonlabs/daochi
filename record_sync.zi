@@ -10,12 +10,14 @@ json :: #import "std/json_go";
 identity :: #import "identity";
 state :: #import "account_state";
 application :: #import "sync_application";
+storage :: #import "account_storage";
 requests :: #import "sync_request";
 response :: #import "response";
 hub :: #import "sync_hub";
 metrics :: #import "metrics";
 audit :: #import "sync_audit";
 atomic :: #import "std/atomic_go";
+errors :: #import "std/errors_go";
 native :: #system_library "go:database/sql";
 builtin :: #system_library "go:builtin";
 
@@ -50,6 +52,7 @@ RecordSyncResponse :: struct {
     MinSupportedProtocol: isize #go_tag "json:\"min_supported_protocol\""
     LatestProtocol: isize #go_tag "json:\"latest_protocol\""
     ServerLatestProtocol: isize #go_tag "json:\"server_latest_protocol\""
+    AccountStorage: *AccountStorage #go_tag "json:\"account_storage,omitempty\""
 }
 
 RecordPage :: struct {
@@ -162,7 +165,7 @@ Page :: (database: *sql.Database, context: ctx.Context, input: SyncRequest,
 
 Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notifications: *hub.SyncHub,
     missingUser: Error, writer: http.ResponseWriter, request: *http.Request,
-    input: SyncRequest, options: RecordPageOptions, publicKey: []u8) -> bool {
+    input: SyncRequest, options: RecordPageOptions, publicKey: []u8, storageLimit: s64) -> bool {
     if !Valid(input, options) {
         response.Error(writer, cast(isize)400, "invalid encrypted record page request")
         return false
@@ -178,7 +181,11 @@ Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notificati
         response.Error(writer, cast(isize)409, "record cursor is ahead of this node")
         return false
     }
-    applied := application.Apply(database, context, input, publicKey, missingUser)
+    applied := application.ApplyWithinLimit(database, context, input, publicKey, missingUser, storageLimit)
+    if errors.Is(applied.error, storage.ErrStorageFull) {
+        storage.RespondFull(writer, applied.storage)
+        return false
+    }
     if applied.error != null {
         response.Error(writer, cast(isize)500, "record upload failed")
         return false
@@ -186,6 +193,11 @@ Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notificati
     current := state.CurrentVersion(database, context, input.UserIDHash)
     if current.error != null {
         response.Error(writer, cast(isize)500, "record version failed")
+        return false
+    }
+    used := storage.Used(database, context, input.UserIDHash)
+    if used.error != null {
+        response.Error(writer, cast(isize)500, "account storage failed")
         return false
     }
     page := Page(database, context, input, options, current.value)
@@ -207,6 +219,8 @@ Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notificati
     value.MinSupportedProtocol = MinSupportedProtocol
     value.LatestProtocol = input.ProtocolVersion
     value.ServerLatestProtocol = LatestProtocol
+    accountStorage := storage.Report(used.value, storageLimit)
+    value.AccountStorage = *accountStorage
     if applied.value.EncryptedRecords > cast(isize)0 {
         atomic.Add(*counters.syncEncryptedRecords, cast(u64)applied.value.EncryptedRecords)
         hub.Publish(notifications, input.UserIDHash, current.value)

@@ -234,7 +234,7 @@ func TestZiranSyncApplicationNativeFailures(t *testing.T) {
 								results[index] = SyncApplication_Apply(store.Database, t.Context(), request, key, ErrSyncUserNotFound)
 							} else {
 								value, accepted, err := store.baselineApplicationApplySyncDetailed(t.Context(), request, key)
-								results[index] = SyncApplicationResult{value, accepted, err}
+								results[index] = SyncApplicationResult{Value: value, Accepted: accepted, Error: err}
 							}
 						})
 						viewsConnectionReleased(t, store)

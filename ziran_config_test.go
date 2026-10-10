@@ -34,6 +34,7 @@ type BaselineConfig struct {
 	EncryptedPayloadMaxReturn       int
 	EncryptedPayloadMaxAccountBytes int64
 	EncryptedPayloadRetention       time.Duration
+	AccountStorageLimitBytes        int64
 	NodeRegistryPublicKey           ed25519.PublicKey
 	KnownNodes                      []NodePeer
 	NodeSyncToken                   string
@@ -121,6 +122,7 @@ func baselineLoadConfig() BaselineConfig {
 		EncryptedPayloadMaxReturn:       baselineEnvInt("DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN", 0),
 		EncryptedPayloadMaxAccountBytes: baselineEnvInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0),
 		EncryptedPayloadRetention:       baselineEnvDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", 0),
+		AccountStorageLimitBytes:        baselineEnvInt64("DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES", 0),
 		NodeRegistryPublicKey:           nodeRegistryPublic,
 		KnownNodes:                      ConfigValues_Peers(baselineEnvString("DAOCHI_KNOWN_NODES", "")),
 		NodeSyncToken:                   baselineEnvString("DAOCHI_NODE_SYNC_TOKEN", ""),
@@ -287,6 +289,7 @@ var configEnvironmentKeys = []string{
 	"DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES",
 	"DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN",
 	"DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS",
+	"DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES",
 	"DAOCHI_GOOGLE_OAUTH_CLIENT_JSON",
 	"DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE",
 	"DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN",
@@ -455,6 +458,7 @@ func TestZiranConfigIntegerAndDurationBoundaries(t *testing.T) {
 	}
 	t.Setenv("DAOCHI_TOKEN_TTL_SECONDS", "9223372036854775807")
 	t.Setenv("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", "9223372036854775807")
+	t.Setenv("DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES", "10485760")
 	t.Setenv("MONERO_CONFIRMATIONS_REQUIRED", "9223372036854775807")
 	actual := assertConfigurationMatchesBaseline(t)
 	if actual.MoneroConfirmationsRequired != math.MaxInt64 {

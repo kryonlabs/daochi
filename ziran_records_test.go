@@ -116,15 +116,41 @@ func TestZiranProtocolRecordsKeepReleasedLayout(t *testing.T) {
 		typ := reflect.TypeOf(record)
 		t.Run(typ.Name(), func(t *testing.T) {
 			fields, found := fixture.Records[typ.Name()]
-			if !found || typ.NumField() != len(fields) {
+			extensions := map[string]map[string]string{
+				"SyncResponse": {"AccountStorage": "*main.AccountStorage"},
+			}
+			expectedExtensions := extensions[typ.Name()]
+			if !found || typ.NumField() != len(fields)+len(expectedExtensions) {
 				t.Fatal("record field inventory changed")
 			}
-			for index, expected := range fields {
+			original := make([]reflect.StructField, 0, len(fields))
+			for index := 0; index < typ.NumField(); index++ {
 				field := typ.Field(index)
+				if storageType, added := expectedExtensions[field.Name]; added {
+					if field.Type.String() != storageType || !strings.Contains(field.Tag.Get("json"), ",omitempty") {
+						t.Fatalf("optional protocol extension changed: %+v", field)
+					}
+					continue
+				}
+				original = append(original, field)
+			}
+			if len(original) != len(fields) {
+				t.Fatal("released fields were removed")
+			}
+			for index, expected := range fields {
+				field := original[index]
 				actualType := strings.ReplaceAll(field.Type.String(), "main.", "")
 				if field.Name != expected.Name || actualType != expected.Type || string(field.Tag) != expected.Tag {
 					t.Fatalf("field %d = %s %s %q; want %s %s %q", index,
 						field.Name, actualType, field.Tag, expected.Name, expected.Type, expected.Tag)
+				}
+				actualJSON, err := json.Marshal(record)
+				if err != nil {
+					t.Fatal(err)
+				}
+				releasedJSON, err := json.Marshal(reflect.New(reflect.StructOf(original)).Elem().Interface())
+				if err != nil || string(actualJSON) != string(releasedJSON) {
+					t.Fatal("optional fields changed the released zero-value wire format")
 				}
 			}
 		})

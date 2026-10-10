@@ -70,6 +70,13 @@ SyncResponse :: struct {
     LegacyWriteRequired: bool #go_tag "json:\"legacy_write_required\""
     LegacyProjectionEpoch: s64 #go_tag "json:\"legacy_projection_epoch,omitempty\""
     Diagnostics: *SyncDiagnostics #go_tag "json:\"diagnostics,omitempty\""
+    AccountStorage: *AccountStorage #go_tag "json:\"account_storage,omitempty\""
+}
+
+// Stored bytes for the signed-in account; a zero limit means no node limit.
+AccountStorage :: struct {
+    UsedBytes: s64 #go_tag "json:\"used_bytes\""
+    LimitBytes: s64 #go_tag "json:\"limit_bytes,omitempty\""
 }
 
 CleanData :: struct {

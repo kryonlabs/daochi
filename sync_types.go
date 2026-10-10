@@ -69,6 +69,12 @@ type SyncResponse struct {
 	LegacyWriteRequired               bool               "json:\"legacy_write_required\""
 	LegacyProjectionEpoch             int64              "json:\"legacy_projection_epoch,omitempty\""
 	Diagnostics                       *SyncDiagnostics   "json:\"diagnostics,omitempty\""
+	AccountStorage                    *AccountStorage    "json:\"account_storage,omitempty\""
+}
+
+type AccountStorage struct {
+	UsedBytes  int64 "json:\"used_bytes\""
+	LimitBytes int64 "json:\"limit_bytes,omitempty\""
 }
 
 type CleanData struct {

@@ -9,6 +9,7 @@ service :: #import "authorization_http";
 session :: #import "session";
 validation :: #import "sync_validation";
 writes :: #import "sync_writes";
+storage :: #import "account_storage";
 body :: #import "http_body";
 strict :: #import "strict_json";
 json :: #import "std/json_go";
@@ -134,6 +135,17 @@ Handle :: (authorizations: service.Authorizations, writer: http.ResponseWriter, 
         }
     }
     result := DelegatedSyncResponse.{collection = input.collection, nextVersion = input.sinceVersion}
+    storageLimit := authorizations.configuration.AccountStorageLimitBytes
+    checkStorage := storageLimit > 0 && sync.EncryptedRecords.count > 0
+    usedBefore: s64 = 0
+    if checkStorage {
+        measured := storage.UsedTx(transaction, context, grant.accountID)
+        if measured.error != null {
+            response.Error(writer, 503, "delegated sync unavailable")
+            return
+        }
+        usedBefore = measured.value
+    }
     for record: sync.EncryptedRecords {
         if record.Collection != input.collection || record.KeyID != keyID || record.DeletedAt != 0 {
             response.Error(writer, 403, "delegate collection, key or operation mismatch")
@@ -160,6 +172,17 @@ Handle :: (authorizations: service.Authorizations, writer: http.ResponseWriter, 
             return
         }
         result.applied += written.applied
+    }
+    if checkStorage {
+        measured := storage.UsedTx(transaction, context, grant.accountID)
+        if measured.error != null {
+            response.Error(writer, 503, "delegated sync unavailable")
+            return
+        }
+        if storage.Exceeds(usedBefore, measured.value, storageLimit) {
+            storage.RespondFull(writer, storage.Report(usedBefore, storageLimit))
+            return
+        }
     }
     if input.read {
         arguments: [5]Any = .[grant.accountID, input.collection, keyID, input.sinceVersion, input.limit]

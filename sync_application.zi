@@ -12,6 +12,7 @@ state :: #import "account_state";
 identifiers :: #import "habit_id";
 writes :: #import "sync_writes";
 records :: #import "encrypted_record";
+storage :: #import "account_storage";
 timestamp :: #import "timestamp";
 native :: #system_library "go:database/sql";
 builtin :: #system_library "go:builtin";
@@ -19,6 +20,7 @@ builtin :: #system_library "go:builtin";
 SyncApplicationResult :: struct {
     value: SyncResult
     accepted: []string
+    storage: AccountStorage
     error: Error
 }
 OperationsWriteResult :: struct {
@@ -202,6 +204,14 @@ ApplyOperations :: (transaction: *sql.Transaction, context: ctx.Context, userID:
 
 Apply :: (database: *sql.Database, context: ctx.Context, request: SyncRequest,
     publicKey: []u8, missingUser: Error) -> SyncApplicationResult {
+    return ApplyWithinLimit(database, context, request, publicKey, missingUser, cast(s64)0)
+}
+
+// With a positive storage limit, a request that would grow the account past
+// it is rolled back with ErrStorageFull and the usage before the request.
+// Without a limit, storage is not measured here.
+ApplyWithinLimit :: (database: *sql.Database, context: ctx.Context, request: SyncRequest,
+    publicKey: []u8, missingUser: Error, storageLimit: s64) -> SyncApplicationResult {
     result: SyncApplicationResult
     started := sql.Begin(database, context, null)
     result.error = started.error
@@ -217,6 +227,15 @@ Apply :: (database: *sql.Database, context: ctx.Context, request: SyncRequest,
     }
     if result.error != null {
         return result
+    }
+    usedBefore: s64 = 0
+    if storageLimit > 0 {
+        measured := storage.UsedTx(transaction, context, request.UserIDHash)
+        result.error = measured.error
+        if result.error != null {
+            return result
+        }
+        usedBefore = measured.value
     }
     if request.FullSyncRequested {
         result.error = writes.ReplaceData(transaction, context, request.UserIDHash)
@@ -327,6 +346,19 @@ Apply :: (database: *sql.Database, context: ctx.Context, request: SyncRequest,
     result.error = operations.error
     if result.error != null {
         return result
+    }
+    if storageLimit > 0 {
+        usedAfter := storage.UsedTx(transaction, context, request.UserIDHash)
+        result.error = usedAfter.error
+        if result.error != null {
+            return result
+        }
+        result.storage = storage.Report(usedAfter.value, storageLimit)
+        if storage.Exceeds(usedBefore, usedAfter.value, storageLimit) {
+            result.storage = storage.Report(usedBefore, storageLimit)
+            result.error = storage.ErrStorageFull
+            return result
+        }
     }
     result.error = sql.Commit(transaction)
     if result.error == null {

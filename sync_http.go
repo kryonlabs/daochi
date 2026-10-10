@@ -27,19 +27,19 @@ type SyncCompletion struct {
 	Transaction SignedTxEnvelope
 }
 
-type zir_a5e4b7ccc334324e_FinishCallback func(*SyncCompletion, Synchronization, *Request)
+type zir_c6df48d464b0614f_FinishCallback func(*SyncCompletion, Synchronization, *Request)
 
-type zir_15286655cb9a5381_IntegerResult struct {
+type zir_322363603ffcb8c2_IntegerResult struct {
 	Value int64
 	Error Error
 }
 
-func SyncHttp_FinishAtReturn(Callback zir_a5e4b7ccc334324e_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
+func SyncHttp_FinishAtReturn(Callback zir_c6df48d464b0614f_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
 	Callback(Completion, Sync, Request)
 }
 
-func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_15286655cb9a5381_IntegerResult {
-	var result zir_15286655cb9a5381_IntegerResult
+func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_322363603ffcb8c2_IntegerResult {
+	var result zir_322363603ffcb8c2_IntegerResult
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }
@@ -122,7 +122,7 @@ func SyncHttp_ProjectClean(value *SyncResponse, request SyncRequest) {
 func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Request) {
 	StdAtomicGo_Add(&(sync.Counters.SyncRequests), 1)
 	var completion SyncCompletion = SyncCompletion{}
-	var value_3 zir_a5e4b7ccc334324e_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
+	var value_3 zir_c6df48d464b0614f_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
 		SyncHttp_Finish(value_0, value_1, value_2)
 	}
 	defer SyncHttp_FinishAtReturn(value_3, &(completion), sync, request)
@@ -199,7 +199,7 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		return
 	}
 	if pageInput.Value.EncryptedRecordsOnly {
-		var value_10 bool = RecordSync_Handle(sync.Database, sync.Counters, sync.Notifications, sync.MissingUser, writer, request, input, pageInput.Value, publicKey.Value)
+		var value_10 bool = RecordSync_Handle(sync.Database, sync.Counters, sync.Notifications, sync.MissingUser, writer, request, input, pageInput.Value, publicKey.Value, sync.Configuration.AccountStorageLimitBytes)
 		completion.Complete = value_10
 		return
 	}
@@ -218,6 +218,7 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	snapshotReason := ""
 	var compactedThrough int64 = 0
 	apply := true
+	storageLimit := sync.Configuration.AccountStorageLimitBytes
 	var value_11 bool = input.LastServerStateHash != ""
 	var value_12 bool = value_11
 	if value_12 {
@@ -246,8 +247,12 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		}
 	}
 	if apply {
-		applied := SyncApplication_Apply(sync.Database, context, input, publicKey.Value, sync.MissingUser)
+		applied := SyncApplication_ApplyWithinLimit(sync.Database, context, input, publicKey.Value, sync.MissingUser, storageLimit)
 		_ = applied
+		if StdErrorsGo_Is(applied.Error, ErrStorageFull) {
+			AccountStorage_RespondFull(writer, applied.Storage)
+			return
+		}
 		if applied.Error != nil {
 			SyncHttp_StorageFailure(writer, "apply sync", input.UserIDHash, applied.Error, "sync failed")
 			return
@@ -262,14 +267,23 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		value_15 = value_16
 	}
 	if value_15 {
-		applied := SyncApplication_Apply(sync.Database, context, input, publicKey.Value, sync.MissingUser)
+		applied := SyncApplication_ApplyWithinLimit(sync.Database, context, input, publicKey.Value, sync.MissingUser, storageLimit)
 		_ = applied
+		if StdErrorsGo_Is(applied.Error, ErrStorageFull) {
+			AccountStorage_RespondFull(writer, applied.Storage)
+			return
+		}
 		if applied.Error != nil {
 			SyncHttp_StorageFailure(writer, "apply stale sync uploads", input.UserIDHash, applied.Error, "sync failed")
 			return
 		}
 		result = applied.Value
 		accepted = applied.Accepted
+	}
+	used := AccountStorage_Used(sync.Database, context, input.UserIDHash)
+	if used.Error != nil {
+		SyncHttp_StorageFailure(writer, "load account storage", input.UserIDHash, used.Error, "account storage failed")
+		return
 	}
 	if fullSnapshot {
 		Metrics_RecordFullSnapshot(sync.Counters, snapshotReason)
@@ -341,6 +355,8 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	var value_20 string = SyncRequest_TransitionMode(input)
 	value.TransitionMode = value_20
 	value.Applied = result
+	accountStorage := AccountStorage_Report(used.Value, storageLimit)
+	value.AccountStorage = &(accountStorage)
 	value.AccountAlias = alias.Value
 	value.ProfileIcon = icon.Value
 	value.ServerVersion = serverVersion
@@ -531,6 +547,19 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 			return false
 		}
 	}
+	storageLimit := sync.Configuration.AccountStorageLimitBytes
+	if storageLimit > 0 {
+		used := AccountStorage_Used(sync.Database, context, user)
+		if used.Error != nil {
+			SyncHttp_StorageFailure(writer, "load account storage", user, used.Error, "encrypted sync failed")
+			return false
+		}
+		if AccountStorage_Exceeds(used.Value, used.Value+int64(len(bytes)), storageLimit) {
+			var value_11 ResponseWriter = writer
+			AccountStorage_RespondFull(value_11, AccountStorage_Report(used.Value, storageLimit))
+			return false
+		}
+	}
 	alias := AccountProfile_Alias(sync.Database, context, user)
 	if alias.Error != nil {
 		SyncHttp_StorageFailure(writer, "load encrypted sync account alias", user, alias.Error, "alias failed")
@@ -557,11 +586,11 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 	}
 	pruned := EncryptedPayloads_Prune(sync.Database, context, user, sync.Configuration.EncryptedPayloadRetention, 0)
 	if pruned.Error != nil {
-		var value_11 string = LogSafety_LogText(user)
-		slog.Error("prune encrypted payloads", "user", value_11, "error", pruned.Error)
-	} else if pruned.Value.Deleted > 0 {
 		var value_12 string = LogSafety_LogText(user)
-		slog.Info("pruned encrypted payloads", "user", value_12, "deleted", int64(pruned.Value.Deleted))
+		slog.Error("prune encrypted payloads", "user", value_12, "error", pruned.Error)
+	} else if pruned.Value.Deleted > 0 {
+		var value_13 string = LogSafety_LogText(user)
+		slog.Info("pruned encrypted payloads", "user", value_13, "deleted", int64(pruned.Value.Deleted))
 	}
 	loaded := EncryptedPayloads_Since(sync.Database, context, user, sinceVersion, limit.Value)
 	if loaded.Error != nil {
@@ -570,9 +599,9 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 	}
 	error := SyncClients_RecordSync(sync.Database, context, user, client, sinceVersion, stored.Version, 6, stored.Version)
 	if error != nil {
-		var value_13 string = LogSafety_LogText(user)
-		var value_14 string = LogSafety_LogText(client)
-		slog.Error("record encrypted sync client", "user", value_13, "client", value_14, "error", error)
+		var value_14 string = LogSafety_LogText(user)
+		var value_15 string = LogSafety_LogText(client)
+		slog.Error("record encrypted sync client", "user", value_14, "client", value_15, "error", error)
 	}
 	var entry SyncAuditEntry = SyncAuditEntry{}
 	entry.UserIDHash = user
@@ -585,25 +614,25 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 	entry.EncryptedPayloadBytes = int64(len(bytes))
 	error = SyncAudit_Record(sync.Database, context, entry)
 	if error != nil {
-		var value_15 string = LogSafety_LogText(user)
-		var value_16 string = LogSafety_LogText(client)
-		slog.Error("record encrypted sync audit", "user", value_15, "client", value_16, "error", error)
+		var value_16 string = LogSafety_LogText(user)
+		var value_17 string = LogSafety_LogText(client)
+		slog.Error("record encrypted sync audit", "user", value_16, "client", value_17, "error", error)
 	}
 	StdAtomicGo_Add(&(sync.Counters.SyncEncryptedPayloads), 1)
 	SyncHub_Publish(sync.Notifications, user, stored.Version)
 	var value SyncResponse = SyncResponse{}
 	value.ProtocolVersion = 6
 	value.Status = "ok"
-	var value_17 []string = NodeInfo_Capabilities()
-	value.ServerCapabilities = value_17
+	var value_18 []string = NodeInfo_Capabilities()
+	value.ServerCapabilities = value_18
 	value.TransitionMode = "encrypted_payload"
 	value.AccountAlias = alias.Value
 	value.ProfileIcon = icon.Value
 	value.ServerVersion = stored.Version
 	value.ServerClock = stored.Version
 	value.ChangesComplete = true
-	var value_18 SyncChanges = SyncRequest_EmptyChanges()
-	value.Changes = value_18
+	var value_19 SyncChanges = SyncRequest_EmptyChanges()
+	value.Changes = value_19
 	value.EncryptedPayloads = loaded.Value
 	value.MinSupportedProtocol = 1
 	value.ServerLatestProtocol = 6
@@ -614,4 +643,20 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 	}
 	Response_JSON(writer, int(200), value)
 	return true
+}
+
+var SyncHttp_ziranInitState uint8
+
+func SyncHttp_ziranInit() {
+	if SyncHttp_ziranInitState == 2 {
+		return
+	}
+	if SyncHttp_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	SyncHttp_ziranInitState = 1
+	SyncApplication_ziranInit()
+	RecordSync_ziranInit()
+	AccountStorage_ziranInit()
+	SyncHttp_ziranInitState = 2
 }

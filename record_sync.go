@@ -24,18 +24,19 @@ type RecordPageOptionsResult struct {
 }
 
 type RecordSyncResponse struct {
-	ProtocolVersion      int           "json:\"protocol_version\""
-	Status               string        "json:\"status\""
-	ServerVersion        int64         "json:\"server_version\""
-	ServerClock          int64         "json:\"server_clock\""
-	EncryptedRecordsOnly bool          "json:\"encrypted_records_only\""
-	RecordCursor         *RecordCursor "json:\"record_cursor,omitempty\""
-	ChangesComplete      bool          "json:\"changes_complete\""
-	Changes              SyncChanges   "json:\"changes\""
-	Applied              SyncResult    "json:\"applied\""
-	MinSupportedProtocol int           "json:\"min_supported_protocol\""
-	LatestProtocol       int           "json:\"latest_protocol\""
-	ServerLatestProtocol int           "json:\"server_latest_protocol\""
+	ProtocolVersion      int             "json:\"protocol_version\""
+	Status               string          "json:\"status\""
+	ServerVersion        int64           "json:\"server_version\""
+	ServerClock          int64           "json:\"server_clock\""
+	EncryptedRecordsOnly bool            "json:\"encrypted_records_only\""
+	RecordCursor         *RecordCursor   "json:\"record_cursor,omitempty\""
+	ChangesComplete      bool            "json:\"changes_complete\""
+	Changes              SyncChanges     "json:\"changes\""
+	Applied              SyncResult      "json:\"applied\""
+	MinSupportedProtocol int             "json:\"min_supported_protocol\""
+	LatestProtocol       int             "json:\"latest_protocol\""
+	ServerLatestProtocol int             "json:\"server_latest_protocol\""
+	AccountStorage       *AccountStorage "json:\"account_storage,omitempty\""
 }
 
 type RecordPage struct {
@@ -153,7 +154,7 @@ func RecordSync_Page(database *Database, context Context, input SyncRequest, opt
 	return result
 }
 
-func RecordSync_Handle(database *Database, counters *ServerMetrics, notifications *SyncHub, missingUser Error, writer ResponseWriter, request *Request, input SyncRequest, options RecordPageOptions, publicKey []uint8) bool {
+func RecordSync_Handle(database *Database, counters *ServerMetrics, notifications *SyncHub, missingUser Error, writer ResponseWriter, request *Request, input SyncRequest, options RecordPageOptions, publicKey []uint8, storageLimit int64) bool {
 	var value_0 bool = RecordSync_Valid(input, options)
 	if !value_0 {
 		Response_Error(writer, int(400), "invalid encrypted record page request")
@@ -169,7 +170,11 @@ func RecordSync_Handle(database *Database, counters *ServerMetrics, notification
 		Response_Error(writer, int(409), "record cursor is ahead of this node")
 		return false
 	}
-	applied := SyncApplication_Apply(database, context, input, publicKey, missingUser)
+	applied := SyncApplication_ApplyWithinLimit(database, context, input, publicKey, missingUser, storageLimit)
+	if StdErrorsGo_Is(applied.Error, ErrStorageFull) {
+		AccountStorage_RespondFull(writer, applied.Storage)
+		return false
+	}
 	if applied.Error != nil {
 		Response_Error(writer, int(500), "record upload failed")
 		return false
@@ -177,6 +182,11 @@ func RecordSync_Handle(database *Database, counters *ServerMetrics, notification
 	current := AccountState_CurrentVersion(database, context, input.UserIDHash)
 	if current.Error != nil {
 		Response_Error(writer, int(500), "record version failed")
+		return false
+	}
+	used := AccountStorage_Used(database, context, input.UserIDHash)
+	if used.Error != nil {
+		Response_Error(writer, int(500), "account storage failed")
 		return false
 	}
 	page := RecordSync_Page(database, context, input, options, current.Value)
@@ -199,6 +209,8 @@ func RecordSync_Handle(database *Database, counters *ServerMetrics, notification
 	value.MinSupportedProtocol = 1
 	value.LatestProtocol = input.ProtocolVersion
 	value.ServerLatestProtocol = 6
+	accountStorage := AccountStorage_Report(used.Value, storageLimit)
+	value.AccountStorage = &(accountStorage)
 	if applied.Value.EncryptedRecords > int(0) {
 		StdAtomicGo_Add(&(counters.SyncEncryptedRecords), uint64(applied.Value.EncryptedRecords))
 		SyncHub_Publish(notifications, input.UserIDHash, current.Value)
@@ -215,4 +227,19 @@ func RecordSync_Handle(database *Database, counters *ServerMetrics, notification
 	SyncAudit_Record(database, context, entry)
 	Response_JSON(writer, int(200), value)
 	return true
+}
+
+var RecordSync_ziranInitState uint8
+
+func RecordSync_ziranInit() {
+	if RecordSync_ziranInitState == 2 {
+		return
+	}
+	if RecordSync_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	RecordSync_ziranInitState = 1
+	SyncApplication_ziranInit()
+	AccountStorage_ziranInit()
+	RecordSync_ziranInitState = 2
 }

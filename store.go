@@ -646,6 +646,7 @@ func Store_ziranInit() {
 	}
 	Store_ziranInitState = 1
 	StoreOpen_ziranInit()
+	SyncApplication_ziranInit()
 	Store_GlobalInit00()
 	Store_ziranInitState = 2
 }

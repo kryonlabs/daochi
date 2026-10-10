@@ -1,0 +1,78 @@
+// An account's stored bytes on this node, counted like the node storage
+// report: encrypted records plus encrypted payloads. A node may limit them.
+#import "std/go_types"
+#import "sync_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+errors :: #import "std/errors_go";
+http :: #import "std/http_go";
+response :: #import "response";
+
+UsageResult :: struct {
+    value: s64
+    error: Error
+}
+
+StorageFullResponse :: struct {
+    Message: string #go_tag "json:\"error\""
+    Code: string #go_tag "json:\"code\""
+    AccountStorage: AccountStorage #go_tag "json:\"account_storage\""
+}
+
+ErrStorageFull: Error = errors.New("account storage limit reached");
+
+#scope_file
+UsageSQL :: #string SQL_END
+
+SELECT
+  (SELECT COALESCE(SUM(LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+
+                       LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)),0)
+   FROM server_encrypted_records WHERE user_id_hash=?1)
++ (SELECT COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)
+   FROM server_encrypted_payloads WHERE user_id_hash=?1)
+SQL_END;
+
+#scope_export
+Used :: (database: *sql.Database, context: ctx.Context, userID: string) -> UsageResult {
+    result: UsageResult
+    arguments: [1]Any = .[userID]
+    destinations: [1]Any = .[*result.value]
+    row := sql.QueryRow(database, context, UsageSQL, arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    return result
+}
+
+UsedTx :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> UsageResult {
+    result: UsageResult
+    arguments: [1]Any = .[userID]
+    destinations: [1]Any = .[*result.value]
+    row := sql.QueryRowTx(transaction, context, UsageSQL, arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    return result
+}
+
+// A write may not grow an account past a positive limit. Writes that keep or
+// shrink usage still apply, so an account above its limit can free space.
+Exceeds :: (before: s64, after: s64, limit: s64) -> bool {
+    if limit <= 0 {
+        return false
+    }
+    return after > limit && after > before
+}
+
+Report :: (used: s64, limit: s64) -> AccountStorage {
+    result: AccountStorage
+    result.UsedBytes = used
+    if limit > 0 {
+        result.LimitBytes = limit
+    }
+    return result
+}
+
+RespondFull :: (writer: http.ResponseWriter, storage: AccountStorage) {
+    value: StorageFullResponse
+    value.Message = "account storage limit reached"
+    value.Code = "storage_full"
+    value.AccountStorage = storage
+    response.JSON(writer, cast(isize)413, value)
+}

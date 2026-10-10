@@ -10,6 +10,7 @@ import sql "database/sql"
 type SyncApplicationResult struct {
 	Value    SyncResult
 	Accepted []string
+	Storage  AccountStorage
 	Error    Error
 }
 
@@ -213,6 +214,10 @@ func SyncApplication_ApplyOperations(transaction *Transaction, context Context, 
 }
 
 func SyncApplication_Apply(database *Database, context Context, request SyncRequest, publicKey []uint8, missingUser Error) SyncApplicationResult {
+	return SyncApplication_ApplyWithinLimit(database, context, request, publicKey, missingUser, 0)
+}
+
+func SyncApplication_ApplyWithinLimit(database *Database, context Context, request SyncRequest, publicKey []uint8, missingUser Error, storageLimit int64) SyncApplicationResult {
 	var result SyncApplicationResult = SyncApplicationResult{}
 	started := StdSqlGo_Begin(database, context, nil)
 	result.Error = started.Error
@@ -230,6 +235,15 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 	if result.Error != nil {
 		return result
 	}
+	var usedBefore int64 = 0
+	if storageLimit > 0 {
+		measured := AccountStorage_UsedTx(transaction, context, request.UserIDHash)
+		result.Error = measured.Error
+		if result.Error != nil {
+			return result
+		}
+		usedBefore = measured.Value
+	}
 	if request.FullSyncRequested {
 		result.Error = SyncWrites_ReplaceData(transaction, context, request.UserIDHash)
 		if result.Error != nil {
@@ -245,19 +259,19 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_27 := value_1[0:int64(len(value_1)):int64(len(value_1))]
-		loop_count_27 := int64(len(loop_view_27))
-		var loop_cursor_27 int64 = 0
-		for loop_cursor_27 < loop_count_27 {
-			loop_index_27 := loop_cursor_27
-			item := loop_view_27[loop_index_27]
+		loop_view_36 := value_1[0:int64(len(value_1)):int64(len(value_1))]
+		loop_count_36 := int64(len(loop_view_36))
+		var loop_cursor_36 int64 = 0
+		for loop_cursor_36 < loop_count_36 {
+			loop_index_36 := loop_cursor_36
+			item := loop_view_36[loop_index_36]
 			_ = item
 			var value_2 bool = EncryptedRecord_ValidForProtocol(item, request.ProtocolVersion)
 			if !value_2 {
 				result.Error = StdErrorsGo_New("invalid encrypted record")
 				return result
 			}
-			loop_cursor_27++
+			loop_cursor_36++
 		}
 	}
 	var applied SyncResult = SyncResult{}
@@ -267,12 +281,12 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_35 := value_3[0:int64(len(value_3)):int64(len(value_3))]
-		loop_count_35 := int64(len(loop_view_35))
-		var loop_cursor_35 int64 = 0
-		for loop_cursor_35 < loop_count_35 {
-			loop_index_35 := loop_cursor_35
-			item := loop_view_35[loop_index_35]
+		loop_view_44 := value_3[0:int64(len(value_3)):int64(len(value_3))]
+		loop_count_44 := int64(len(loop_view_44))
+		var loop_cursor_44 int64 = 0
+		for loop_cursor_44 < loop_count_44 {
+			loop_index_44 := loop_cursor_44
+			item := loop_view_44[loop_index_44]
 			_ = item
 			written := SyncWrites_UpsertMeditation(transaction, context, request.UserIDHash, item)
 			_ = written
@@ -281,7 +295,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 				return result
 			}
 			applied.MeditationLogs += written.Applied
-			loop_cursor_35++
+			loop_cursor_44++
 		}
 	}
 	{
@@ -289,12 +303,12 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_43 := value_4[0:int64(len(value_4)):int64(len(value_4))]
-		loop_count_43 := int64(len(loop_view_43))
-		var loop_cursor_43 int64 = 0
-		for loop_cursor_43 < loop_count_43 {
-			loop_index_43 := loop_cursor_43
-			habit := loop_view_43[loop_index_43]
+		loop_view_52 := value_4[0:int64(len(value_4)):int64(len(value_4))]
+		loop_count_52 := int64(len(loop_view_52))
+		var loop_cursor_52 int64 = 0
+		for loop_cursor_52 < loop_count_52 {
+			loop_index_52 := loop_cursor_52
+			habit := loop_view_52[loop_index_52]
 			originalID := habit.ID
 			canonical := HabitId_ForWrite(transaction, context, request.UserIDHash, habit.ID, "legacy-write")
 			_ = canonical
@@ -318,7 +332,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 					(*value_8) = make(__type_c922d3f56b74fd5a)
 				}
 				(*value_8)[value_9] = value_10
-				loop_cursor_43++
+				loop_cursor_52++
 				continue
 			}
 			if habit.DeletedAt > 0 {
@@ -343,7 +357,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 					return result
 				}
 				applied.Habits += deleted.Applied
-				loop_cursor_43++
+				loop_cursor_52++
 				continue
 			}
 			written := SyncWrites_UpsertHabit(transaction, context, request.UserIDHash, habit)
@@ -353,7 +367,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 				return result
 			}
 			applied.Habits += written.Applied
-			loop_cursor_43++
+			loop_cursor_52++
 		}
 	}
 	{
@@ -361,17 +375,17 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		if int64(0) < 0 || int64(int64(len(value_17))) < int64(0) || int64(int64(len(value_17))) > int64(len(value_17)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_74 := value_17[0:int64(len(value_17)):int64(len(value_17))]
-		loop_count_74 := int64(len(loop_view_74))
-		var loop_cursor_74 int64 = 0
-		for loop_cursor_74 < loop_count_74 {
-			loop_index_74 := loop_cursor_74
-			day := loop_view_74[loop_index_74]
+		loop_view_83 := value_17[0:int64(len(value_17)):int64(len(value_17))]
+		loop_count_83 := int64(len(loop_view_83))
+		var loop_cursor_83 int64 = 0
+		for loop_cursor_83 < loop_count_83 {
+			loop_index_83 := loop_cursor_83
+			day := loop_view_83[loop_index_83]
 			var value_18 __type_c922d3f56b74fd5a = deletedHabits
 			var value_19 string = day.HabitID
 			var value_20 bool = value_18[value_19]
 			if value_20 {
-				loop_cursor_74++
+				loop_cursor_83++
 				continue
 			}
 			canonical := HabitId_ForWrite(transaction, context, request.UserIDHash, day.HabitID, "legacy-day-write")
@@ -385,7 +399,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 			var value_22 string = day.HabitID
 			var value_23 bool = value_21[value_22]
 			if value_23 {
-				loop_cursor_74++
+				loop_cursor_83++
 				continue
 			}
 			written := SyncWrites_UpsertDay(transaction, context, request.UserIDHash, day)
@@ -395,7 +409,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 				return result
 			}
 			applied.HabitDays += written.Applied
-			loop_cursor_74++
+			loop_cursor_83++
 		}
 	}
 	{
@@ -403,14 +417,14 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		if int64(0) < 0 || int64(int64(len(value_24))) < int64(0) || int64(int64(len(value_24))) > int64(len(value_24)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_94 := value_24[0:int64(len(value_24)):int64(len(value_24))]
-		loop_count_94 := int64(len(loop_view_94))
-		var loop_cursor_94 int64 = 0
-		for loop_cursor_94 < loop_count_94 {
-			loop_index_94 := loop_cursor_94
-			session := loop_view_94[loop_index_94]
+		loop_view_103 := value_24[0:int64(len(value_24)):int64(len(value_24))]
+		loop_count_103 := int64(len(loop_view_103))
+		var loop_cursor_103 int64 = 0
+		for loop_cursor_103 < loop_count_103 {
+			loop_index_103 := loop_cursor_103
+			session := loop_view_103[loop_index_103]
 			if request.Bootstrap && session.DeletedAt > 0 {
-				loop_cursor_94++
+				loop_cursor_103++
 				continue
 			}
 			if session.DeletedAt > 0 {
@@ -421,7 +435,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 					return result
 				}
 				applied.Sessions += deleted.Applied
-				loop_cursor_94++
+				loop_cursor_103++
 				continue
 			}
 			written := SyncWrites_UpsertSession(transaction, context, request.UserIDHash, session)
@@ -431,7 +445,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 				return result
 			}
 			applied.Sessions += written.Applied
-			loop_cursor_94++
+			loop_cursor_103++
 		}
 	}
 	{
@@ -439,12 +453,12 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 		if int64(0) < 0 || int64(int64(len(value_25))) < int64(0) || int64(int64(len(value_25))) > int64(len(value_25)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_114 := value_25[0:int64(len(value_25)):int64(len(value_25))]
-		loop_count_114 := int64(len(loop_view_114))
-		var loop_cursor_114 int64 = 0
-		for loop_cursor_114 < loop_count_114 {
-			loop_index_114 := loop_cursor_114
-			item := loop_view_114[loop_index_114]
+		loop_view_123 := value_25[0:int64(len(value_25)):int64(len(value_25))]
+		loop_count_123 := int64(len(loop_view_123))
+		var loop_cursor_123 int64 = 0
+		for loop_cursor_123 < loop_count_123 {
+			loop_index_123 := loop_cursor_123
+			item := loop_view_123[loop_index_123]
 			_ = item
 			written := SyncWrites_UpsertRecord(transaction, context, request.UserIDHash, item)
 			_ = written
@@ -453,7 +467,7 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 				return result
 			}
 			applied.EncryptedRecords += written.Applied
-			loop_cursor_114++
+			loop_cursor_123++
 		}
 	}
 	operations := SyncApplication_ApplyOperations(transaction, context, request.UserIDHash, request.Ops, &(applied))
@@ -461,10 +475,37 @@ func SyncApplication_Apply(database *Database, context Context, request SyncRequ
 	if result.Error != nil {
 		return result
 	}
+	if storageLimit > 0 {
+		usedAfter := AccountStorage_UsedTx(transaction, context, request.UserIDHash)
+		result.Error = usedAfter.Error
+		if result.Error != nil {
+			return result
+		}
+		result.Storage = AccountStorage_Report(usedAfter.Value, storageLimit)
+		if AccountStorage_Exceeds(usedBefore, usedAfter.Value, storageLimit) {
+			result.Storage = AccountStorage_Report(usedBefore, storageLimit)
+			result.Error = ErrStorageFull
+			return result
+		}
+	}
 	result.Error = StdSqlGo_Commit(transaction)
 	if result.Error == nil {
 		result.Value = applied
 		result.Accepted = operations.Value
 	}
 	return result
+}
+
+var SyncApplication_ziranInitState uint8
+
+func SyncApplication_ziranInit() {
+	if SyncApplication_ziranInitState == 2 {
+		return
+	}
+	if SyncApplication_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	SyncApplication_ziranInitState = 1
+	AccountStorage_ziranInit()
+	SyncApplication_ziranInitState = 2
 }

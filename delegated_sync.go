@@ -157,17 +157,29 @@ func DelegatedSync_Handle(authorizations Authorizations, writer ResponseWriter, 
 		}
 	}
 	result := DelegatedSyncResponse{Collection: input.Collection, NextVersion: input.SinceVersion}
+	storageLimit := authorizations.Configuration.AccountStorageLimitBytes
+	checkStorage := storageLimit > 0 && int64(len(sync.EncryptedRecords)) > 0
+	var usedBefore int64 = 0
+	if checkStorage {
+		measured := AccountStorage_UsedTx(transaction, context, grant.AccountID)
+		_ = measured
+		if measured.Error != nil {
+			Response_Error(writer, 503, "delegated sync unavailable")
+			return
+		}
+		usedBefore = measured.Value
+	}
 	{
 		value_21 := sync.EncryptedRecords[:]
 		if int64(0) < 0 || int64(int64(len(value_21))) < int64(0) || int64(int64(len(value_21))) > int64(len(value_21)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_43 := value_21[0:int64(len(value_21)):int64(len(value_21))]
-		loop_count_43 := int64(len(loop_view_43))
-		var loop_cursor_43 int64 = 0
-		for loop_cursor_43 < loop_count_43 {
-			loop_index_43 := loop_cursor_43
-			record := loop_view_43[loop_index_43]
+		loop_view_54 := value_21[0:int64(len(value_21)):int64(len(value_21))]
+		loop_count_54 := int64(len(loop_view_54))
+		var loop_cursor_54 int64 = 0
+		for loop_cursor_54 < loop_count_54 {
+			loop_index_54 := loop_cursor_54
+			record := loop_view_54[loop_index_54]
 			if record.Collection != input.Collection || record.KeyID != keyID || record.DeletedAt != 0 {
 				Response_Error(writer, 403, "delegate collection, key or operation mismatch")
 				return
@@ -201,7 +213,19 @@ func DelegatedSync_Handle(authorizations Authorizations, writer ResponseWriter, 
 				return
 			}
 			result.Applied += written.Applied
-			loop_cursor_43++
+			loop_cursor_54++
+		}
+	}
+	if checkStorage {
+		measured := AccountStorage_UsedTx(transaction, context, grant.AccountID)
+		_ = measured
+		if measured.Error != nil {
+			Response_Error(writer, 503, "delegated sync unavailable")
+			return
+		}
+		if AccountStorage_Exceeds(usedBefore, measured.Value, storageLimit) {
+			AccountStorage_RespondFull(writer, AccountStorage_Report(usedBefore, storageLimit))
+			return
 		}
 	}
 	if input.Read {
@@ -287,5 +311,6 @@ func DelegatedSync_ziranInit() {
 	}
 	DelegatedSync_ziranInitState = 1
 	AuthorizationHttp_ziranInit()
+	AccountStorage_ziranInit()
 	DelegatedSync_ziranInitState = 2
 }

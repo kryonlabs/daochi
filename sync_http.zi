@@ -26,6 +26,7 @@ body :: #import "http_body";
 http_auth :: #import "http_auth";
 response :: #import "response";
 pages :: #import "record_sync";
+storage :: #import "account_storage";
 http :: #import "std/http_go";
 sql :: #import "std/sql_go";
 errors :: #import "std/errors_go";
@@ -203,7 +204,8 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     }
     if pageInput.value.EncryptedRecordsOnly {
         completion.complete = pages.Handle(sync.database, sync.counters, sync.notifications,
-            sync.missingUser, writer, request, input, pageInput.value, publicKey.value)
+            sync.missingUser, writer, request, input, pageInput.value, publicKey.value,
+            sync.configuration.AccountStorageLimitBytes)
         return
     }
     base := hash.State(sync.database, context, input.UserIDHash)
@@ -221,6 +223,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     snapshotReason := ""
     compactedThrough: s64 = 0
     apply := true
+    storageLimit := sync.configuration.AccountStorageLimitBytes
     if input.LastServerStateHash != "" && !EqualFold(input.LastServerStateHash, base.value) && !input.FullSyncRequested {
         fullSnapshot = true
         completeChanges = false
@@ -243,7 +246,12 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
         }
     }
     if apply {
-        applied := application.Apply(sync.database, context, input, publicKey.value, sync.missingUser)
+        applied := application.ApplyWithinLimit(sync.database, context, input, publicKey.value,
+            sync.missingUser, storageLimit)
+        if errors.Is(applied.error, storage.ErrStorageFull) {
+            storage.RespondFull(writer, applied.storage)
+            return
+        }
         if applied.error != null {
             StorageFailure(writer, "apply sync", input.UserIDHash, applied.error, "sync failed")
             return
@@ -252,13 +260,23 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
         accepted = applied.accepted
     }
     if fullSnapshot && requests.HasLocalChanges(input) {
-        applied := application.Apply(sync.database, context, input, publicKey.value, sync.missingUser)
+        applied := application.ApplyWithinLimit(sync.database, context, input, publicKey.value,
+            sync.missingUser, storageLimit)
+        if errors.Is(applied.error, storage.ErrStorageFull) {
+            storage.RespondFull(writer, applied.storage)
+            return
+        }
         if applied.error != null {
             StorageFailure(writer, "apply stale sync uploads", input.UserIDHash, applied.error, "sync failed")
             return
         }
         result = applied.value
         accepted = applied.accepted
+    }
+    used := storage.Used(sync.database, context, input.UserIDHash)
+    if used.error != null {
+        StorageFailure(writer, "load account storage", input.UserIDHash, used.error, "account storage failed")
+        return
     }
     if fullSnapshot {
         metrics.RecordFullSnapshot(sync.counters, snapshotReason)
@@ -327,6 +345,8 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     value.ServerCapabilities = node.Capabilities()
     value.TransitionMode = requests.TransitionMode(input)
     value.Applied = result
+    accountStorage := storage.Report(used.value, storageLimit)
+    value.AccountStorage = *accountStorage
     value.AccountAlias = alias.value
     value.ProfileIcon = icon.value
     value.ServerVersion = serverVersion
@@ -487,6 +507,18 @@ EncryptedEnvelope :: (sync: Synchronization, writer: http.ResponseWriter, reques
         if bytes.count > sync.configuration.EncryptedPayloadMaxAccountBytes ||
             usage.value + bytes.count > sync.configuration.EncryptedPayloadMaxAccountBytes {
             response.Error(writer, cast(isize)413, "encrypted payload quota exceeded")
+            return false
+        }
+    }
+    storageLimit := sync.configuration.AccountStorageLimitBytes
+    if storageLimit > 0 {
+        used := storage.Used(sync.database, context, user)
+        if used.error != null {
+            StorageFailure(writer, "load account storage", user, used.error, "encrypted sync failed")
+            return false
+        }
+        if storage.Exceeds(used.value, used.value + bytes.count, storageLimit) {
+            storage.RespondFull(writer, storage.Report(used.value, storageLimit))
             return false
         }
     }

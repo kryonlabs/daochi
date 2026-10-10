@@ -30,7 +30,7 @@ type EventResult struct {
 	Present bool
 }
 
-type zir_9967e96ab11c08f3_ReaderWorker func(Connection, *BufferedReader, CancelFunc)
+type zir_9967e96ab11c08f3_ReaderWorker func(zir_fd9879bd2495e71e_Connection, *BufferedReader, CancelFunc)
 
 type zir_9de58f4e2bed614c_CancelCallback func(CancelFunc)
 
@@ -44,7 +44,7 @@ func SyncWs_UnsubscribeAtReturn(Callback UnsubscribeCallback, Hub *SyncHub, User
 	Callback(Hub, UserID, Subscription)
 }
 
-func SyncWs_SpawnReader(Callback zir_9967e96ab11c08f3_ReaderWorker, Connection Connection, Reader *BufferedReader, Cancel CancelFunc) {
+func SyncWs_SpawnReader(Callback zir_9967e96ab11c08f3_ReaderWorker, Connection zir_fd9879bd2495e71e_Connection, Reader *BufferedReader, Cancel CancelFunc) {
 	go Callback(Connection, Reader, Cancel)
 }
 
@@ -87,7 +87,7 @@ func SyncWs_CurrentVersion(value SyncSocket, context Context, userID string) zir
 	return result
 }
 
-func SyncWs_ReadLoop(connection Connection, reader *BufferedReader, cancel CancelFunc) {
+func SyncWs_ReadLoop(connection zir_fd9879bd2495e71e_Connection, reader *BufferedReader, cancel CancelFunc) {
 	for true {
 		(net.Conn).SetReadDeadline(connection, StdTimeGo_Add(StdTimeGo_Now(), Duration(90000000000)))
 		frame := Websocket_ReadClientFrame(reader)
@@ -173,11 +173,11 @@ func SyncWs_Handle(value SyncSocket, writer ResponseWriter, request *Request) {
 	child := StdContextGo_WithCancel(StdHttpGo_Context(request))
 	var value_12 zir_9de58f4e2bed614c_CancelCallback = func(value_11 CancelFunc) { StdContextGo_Cancel(value_11) }
 	defer SyncWs_CancelAtReturn(value_12, child.Cancel)
-	var value_16 zir_9967e96ab11c08f3_ReaderWorker = func(value_13 Connection, value_14 *BufferedReader, value_15 CancelFunc) {
+	var value_16 zir_9967e96ab11c08f3_ReaderWorker = func(value_13 zir_fd9879bd2495e71e_Connection, value_14 *BufferedReader, value_15 CancelFunc) {
 		SyncWs_ReadLoop(value_13, value_14, value_15)
 	}
 	var value_17 zir_9967e96ab11c08f3_ReaderWorker = value_16
-	var value_18 Connection = accepted.Connection
+	var value_18 zir_fd9879bd2495e71e_Connection = accepted.Connection
 	var value_19 *BufferedReader = SyncWs_Reader(accepted.Buffer)
 	SyncWs_SpawnReader(value_17, value_18, value_19, child.Cancel)
 	ticker := StdTimeGo_NewTicker(Duration(30000000000))
@@ -194,7 +194,7 @@ func SyncWs_Handle(value SyncSocket, writer ResponseWriter, request *Request) {
 		if chosen.Chosen == int(0) {
 			return
 		}
-		var value_23 Connection = accepted.Connection
+		var value_23 zir_fd9879bd2495e71e_Connection = accepted.Connection
 		(net.Conn).SetWriteDeadline(value_23, StdTimeGo_Add(StdTimeGo_Now(), Duration(10000000000)))
 		if chosen.Chosen == int(1) {
 			event := SyncWs_AsEvent((reflect.Value).Interface(chosen.Value))

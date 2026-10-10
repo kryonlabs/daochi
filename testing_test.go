@@ -35,6 +35,16 @@ func TestingTest_Run(test *Test, name string, callback TestCase) bool {
 	return (*testing.T).Run(test, name, callback)
 }
 
+func TestingTest_Setenv(test *Test, key string, value string) {
+	(*testing.T).Helper(test)
+	(*testing.T).Setenv(test, key, value)
+}
+
+func TestingTest_TempDir(test *Test) string {
+	(*testing.T).Helper(test)
+	return (*testing.T).TempDir(test)
+}
+
 func TestingTest_AddString(test *Fuzzer, value string) {
 	(*testing.F).Add(test, value)
 }

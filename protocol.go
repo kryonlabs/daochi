@@ -32,6 +32,7 @@ type NodePeer struct {
 type NodeSyncPolicy struct {
 	Direction   string   "json:\"direction,omitempty\""
 	Apps        []string "json:\"apps,omitempty\""
+	Accounts    []string "json:\"accounts,omitempty\""
 	Collections []string "json:\"collections,omitempty\""
 	Spaces      []string "json:\"spaces,omitempty\""
 	Data        []string "json:\"data,omitempty\""

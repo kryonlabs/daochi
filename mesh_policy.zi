@@ -1,6 +1,7 @@
 #import "protocol"
 config :: #import "config_values";
 scope :: #import "collection_scope";
+identity :: #import "identity";
 #import "std/map_go"
 go_strings :: #system_library "go:strings";
 
@@ -38,6 +39,11 @@ Inverse :: (policy: NodeSyncPolicy) -> NodeSyncPolicy {
 }
 
 ValidInbound :: (policy: NodeSyncPolicy) -> bool {
+    for account: policy.Accounts {
+        if !identity.ValidUserID(account) {
+            return false
+        }
+    }
     if policy.Data.count == 0 {
         return false
     }
@@ -84,6 +90,13 @@ AllowsOperation :: (approved: NodeSyncPolicy, requested: NodeSyncPolicy, operati
     if operation == "import" && direction != "pull" && direction != "bidirectional" {
         return false
     }
+    // An omitted account filter cannot widen a restricted invitation.
+    if approved.Accounts.count > 0 && requested.Accounts.count == 0 {
+        return false
+    }
+    if !Contains(approved.Accounts, requested.Accounts) && approved.Accounts.count > 0 {
+        return false
+    }
     return Contains(approved.Apps, requested.Apps) &&
         Contains(approved.Collections, requested.Collections) &&
         Contains(approved.Spaces, requested.Spaces) && Contains(approved.Data, requested.Data)
@@ -121,6 +134,22 @@ AllowsRecord :: (policy: NodeSyncPolicy, matchers: []scope.CollectionMatcher, co
     }
     for app: policy.Apps {
         if EqualFold(TrimSpace(app), matcher.AppID) {
+            return true
+        }
+    }
+    return false
+}
+
+// Account filters are exact public-key hashes, never collection wildcards.
+AllowsAccount :: (policy: NodeSyncPolicy, account: string) -> bool {
+    if !identity.ValidUserID(account) {
+        return false
+    }
+    if policy.Accounts.count == 0 {
+        return true
+    }
+    for allowed: policy.Accounts {
+        if allowed == account {
             return true
         }
     }

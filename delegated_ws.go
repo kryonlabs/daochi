@@ -19,7 +19,7 @@ type CollectionVersion struct {
 	Active bool
 }
 
-type zir_3ff5d436043035f5_ReaderWorker func(Connection, *BufferedReader, CancelFunc)
+type zir_3ff5d436043035f5_ReaderWorker func(zir_fd9879bd2495e71e_Connection, *BufferedReader, CancelFunc)
 
 type zir_7deb62481a0eca37_CancelCallback func(CancelFunc)
 
@@ -27,7 +27,7 @@ func DelegatedWs_BufferedReaderFor(Buffer *BufferedConnection) *BufferedReader {
 	return Buffer.Reader
 }
 
-func DelegatedWs_SpawnReader(Callback zir_3ff5d436043035f5_ReaderWorker, Connection Connection, Reader *BufferedReader, Cancel CancelFunc) {
+func DelegatedWs_SpawnReader(Callback zir_3ff5d436043035f5_ReaderWorker, Connection zir_fd9879bd2495e71e_Connection, Reader *BufferedReader, Cancel CancelFunc) {
 	go Callback(Connection, Reader, Cancel)
 }
 
@@ -35,7 +35,7 @@ func DelegatedWs_CancelAtReturn(Callback zir_7deb62481a0eca37_CancelCallback, Ca
 	Callback(Cancel)
 }
 
-func DelegatedWs_ReadLoop(connection Connection, reader *BufferedReader, cancel CancelFunc) {
+func DelegatedWs_ReadLoop(connection zir_fd9879bd2495e71e_Connection, reader *BufferedReader, cancel CancelFunc) {
 	for true {
 		(net.Conn).SetReadDeadline(connection, StdTimeGo_Add(StdTimeGo_Now(), Duration(90000000000)))
 		var value_0 Frame = Websocket_ReadClientFrame(reader)
@@ -171,7 +171,7 @@ func DelegatedWs_Handle(value Authorizations, writer ResponseWriter, request *Re
 	defer (net.Conn).Close(accepted.Connection)
 	child := StdContextGo_WithCancel(context)
 	defer DelegatedWs_CancelAtReturn(func(value_6 CancelFunc) { StdContextGo_Cancel(value_6) }, child.Cancel)
-	var value_10 zir_3ff5d436043035f5_ReaderWorker = func(value_7 Connection, value_8 *BufferedReader, value_9 CancelFunc) {
+	var value_10 zir_3ff5d436043035f5_ReaderWorker = func(value_7 zir_fd9879bd2495e71e_Connection, value_8 *BufferedReader, value_9 CancelFunc) {
 		DelegatedWs_ReadLoop(value_7, value_8, value_9)
 	}
 	DelegatedWs_SpawnReader(value_10, accepted.Connection, DelegatedWs_BufferedReaderFor(accepted.Buffer), child.Cancel)

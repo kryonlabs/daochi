@@ -36,6 +36,9 @@ type AppManifest struct {
 	SourceURL          string           "json:\"source_url,omitempty\""
 	Status             string           "json:\"status,omitempty\""
 	ExpiresAt          int64            "json:\"expires_at,omitempty\""
+	LANOnly            bool             "json:\"lan_only,omitempty\""
+	LANNetworks        []string         "json:\"lan_networks,omitempty\""
+	RegistrationNodeID string           "json:\"registration_node_id,omitempty\""
 	AppSchemaVersion   int              "json:\"app_schema_version,omitempty\""
 	MinClientVersion   string           "json:\"min_supported_client_version,omitempty\""
 	CurrentVersion     string           "json:\"current_client_version,omitempty\""
@@ -96,8 +99,16 @@ func Manifest_Normalize(manifest *AppManifest) {
 	manifest.HomepageURL = value_3
 	var value_4 string = strings.TrimSpace(manifest.SourceURL)
 	manifest.SourceURL = value_4
-	var value_5 string = strings.TrimSpace(manifest.Status)
-	manifest.Status = value_5
+	var value_5 string = strings.TrimSpace(manifest.RegistrationNodeID)
+	manifest.RegistrationNodeID = value_5
+	var indexNetwork int64 = 0
+	for indexNetwork < int64(len(manifest.LANNetworks)) {
+		var value_6 string = strings.TrimSpace(manifest.LANNetworks[indexNetwork])
+		manifest.LANNetworks[indexNetwork] = value_6
+		indexNetwork++
+	}
+	var value_7 string = strings.TrimSpace(manifest.Status)
+	manifest.Status = value_7
 	if manifest.Status == "" {
 		manifest.Status = "active"
 	}
@@ -105,73 +116,73 @@ func Manifest_Normalize(manifest *AppManifest) {
 	var inner int64 = 0
 	index = 0
 	for index < int64(len(manifest.Keys)) {
-		var value_6 string = strings.TrimSpace((manifest.Keys[index]).KeyID)
-		(manifest.Keys[index]).KeyID = value_6
-		var value_7 string = strings.TrimSpace((manifest.Keys[index]).Algorithm)
-		(manifest.Keys[index]).Algorithm = value_7
-		var value_8 string = strings.TrimSpace((manifest.Keys[index]).PublicKey)
-		(manifest.Keys[index]).PublicKey = value_8
-		var value_9 string = strings.TrimSpace((manifest.Keys[index]).Purpose)
-		(manifest.Keys[index]).Purpose = value_9
-		var value_10 string = strings.TrimSpace((manifest.Keys[index]).Status)
-		(manifest.Keys[index]).Status = value_10
+		var value_8 string = strings.TrimSpace((manifest.Keys[index]).KeyID)
+		(manifest.Keys[index]).KeyID = value_8
+		var value_9 string = strings.TrimSpace((manifest.Keys[index]).Algorithm)
+		(manifest.Keys[index]).Algorithm = value_9
+		var value_10 string = strings.TrimSpace((manifest.Keys[index]).PublicKey)
+		(manifest.Keys[index]).PublicKey = value_10
+		var value_11 string = strings.TrimSpace((manifest.Keys[index]).Purpose)
+		(manifest.Keys[index]).Purpose = value_11
+		var value_12 string = strings.TrimSpace((manifest.Keys[index]).Status)
+		(manifest.Keys[index]).Status = value_12
 		index++
 	}
 	index = 0
 	for index < int64(len(manifest.Collections)) {
 		(manifest.Collections[index]).AppID = manifest.AppID
-		var value_11 string = strings.TrimSpace((manifest.Collections[index]).CollectionPrefix)
-		(manifest.Collections[index]).CollectionPrefix = value_11
-		var value_12 string = strings.TrimSpace((manifest.Collections[index]).Visibility)
-		(manifest.Collections[index]).Visibility = value_12
-		var value_13 string = strings.TrimSpace((manifest.Collections[index]).Description)
-		(manifest.Collections[index]).Description = value_13
+		var value_13 string = strings.TrimSpace((manifest.Collections[index]).CollectionPrefix)
+		(manifest.Collections[index]).CollectionPrefix = value_13
+		var value_14 string = strings.TrimSpace((manifest.Collections[index]).Visibility)
+		(manifest.Collections[index]).Visibility = value_14
+		var value_15 string = strings.TrimSpace((manifest.Collections[index]).Description)
+		(manifest.Collections[index]).Description = value_15
 		index++
 	}
 	index = 0
 	for index < int64(len(manifest.Capabilities)) {
-		var value_14 string = strings.TrimSpace(manifest.Capabilities[index])
-		manifest.Capabilities[index] = value_14
+		var value_16 string = strings.TrimSpace(manifest.Capabilities[index])
+		manifest.Capabilities[index] = value_16
 		index++
 	}
 	index = 0
 	for index < int64(len(manifest.Features)) {
-		var value_15 string = strings.TrimSpace((manifest.Features[index]).ID)
-		(manifest.Features[index]).ID = value_15
-		var value_16 string = strings.TrimSpace((manifest.Features[index]).Description)
-		(manifest.Features[index]).Description = value_16
+		var value_17 string = strings.TrimSpace((manifest.Features[index]).ID)
+		(manifest.Features[index]).ID = value_17
+		var value_18 string = strings.TrimSpace((manifest.Features[index]).Description)
+		(manifest.Features[index]).Description = value_18
 		inner = 0
 		for inner < int64(len((manifest.Features[index]).Collections)) {
-			var value_17 string = strings.TrimSpace((manifest.Features[index]).Collections[inner])
-			(manifest.Features[index]).Collections[inner] = value_17
+			var value_19 string = strings.TrimSpace((manifest.Features[index]).Collections[inner])
+			(manifest.Features[index]).Collections[inner] = value_19
 			inner++
 		}
 		index++
 	}
 	index = 0
 	for index < int64(len(manifest.LegacyProtocols)) {
-		var value_18 string = strings.TrimSpace((manifest.LegacyProtocols[index]).Name)
-		(manifest.LegacyProtocols[index]).Name = value_18
-		var value_19 string = strings.TrimSpace((manifest.LegacyProtocols[index]).Status)
-		(manifest.LegacyProtocols[index]).Status = value_19
-		var value_20 string = strings.TrimSpace((manifest.LegacyProtocols[index]).ValidUntil)
-		(manifest.LegacyProtocols[index]).ValidUntil = value_20
+		var value_20 string = strings.TrimSpace((manifest.LegacyProtocols[index]).Name)
+		(manifest.LegacyProtocols[index]).Name = value_20
+		var value_21 string = strings.TrimSpace((manifest.LegacyProtocols[index]).Status)
+		(manifest.LegacyProtocols[index]).Status = value_21
+		var value_22 string = strings.TrimSpace((manifest.LegacyProtocols[index]).ValidUntil)
+		(manifest.LegacyProtocols[index]).ValidUntil = value_22
 		index++
 	}
-	var value_21 string = strings.TrimSpace(manifest.MinClientVersion)
-	manifest.MinClientVersion = value_21
-	var value_22 string = strings.TrimSpace(manifest.CurrentVersion)
-	manifest.CurrentVersion = value_22
-	var value_23 string = strings.TrimSpace(manifest.CompatibilityUntil)
-	manifest.CompatibilityUntil = value_23
+	var value_23 string = strings.TrimSpace(manifest.MinClientVersion)
+	manifest.MinClientVersion = value_23
+	var value_24 string = strings.TrimSpace(manifest.CurrentVersion)
+	manifest.CurrentVersion = value_24
+	var value_25 string = strings.TrimSpace(manifest.CompatibilityUntil)
+	manifest.CompatibilityUntil = value_25
 	index = 0
 	for index < int64(len(manifest.TokenPolicies)) {
-		var value_24 string = strings.TrimSpace((manifest.TokenPolicies[index]).AssetID)
-		(manifest.TokenPolicies[index]).AssetID = value_24
-		var value_25 string = strings.TrimSpace((manifest.TokenPolicies[index]).Permission)
-		(manifest.TokenPolicies[index]).Permission = value_25
-		var value_26 string = strings.TrimSpace((manifest.TokenPolicies[index]).Status)
-		(manifest.TokenPolicies[index]).Status = value_26
+		var value_26 string = strings.TrimSpace((manifest.TokenPolicies[index]).AssetID)
+		(manifest.TokenPolicies[index]).AssetID = value_26
+		var value_27 string = strings.TrimSpace((manifest.TokenPolicies[index]).Permission)
+		(manifest.TokenPolicies[index]).Permission = value_27
+		var value_28 string = strings.TrimSpace((manifest.TokenPolicies[index]).Status)
+		(manifest.TokenPolicies[index]).Status = value_28
 		if (manifest.TokenPolicies[index]).Status == "" {
 			(manifest.TokenPolicies[index]).Status = "active"
 		}
@@ -237,34 +248,50 @@ func Manifest_Validate(manifest AppManifest, now int64) string {
 	if manifest.Status != "active" && manifest.Status != "suspended" {
 		return "invalid status"
 	}
+	if manifest.LANOnly {
+		var value_1 bool = NetworkScope_ValidNetworks(manifest.LANNetworks)
+		if !value_1 {
+			return "LAN-only manifests require explicit private LAN networks"
+		}
+		var value_2 bool = manifest.RegistrationNodeID != ""
+		if value_2 {
+			var value_3 bool = Identity_ValidUserID(manifest.RegistrationNodeID)
+			value_2 = !value_3
+		}
+		if value_2 {
+			return "invalid registration_node_id"
+		}
+	} else if int64(len(manifest.LANNetworks)) != 0 || manifest.RegistrationNodeID != "" {
+		return "LAN restrictions require lan_only"
+	}
 	if int64(len(manifest.Keys)) == 0 || int64(len(manifest.Keys)) > 16 {
 		return "invalid app keys"
 	}
 	if manifest.AppSchemaVersion < int(0) || manifest.AppSchemaVersion > int(65535) {
 		return "invalid app_schema_version"
 	}
-	var value_1 bool = manifest.CompatibilityUntil != ""
-	if value_1 {
-		var value_2 bool = Manifest_ValidDate(manifest.CompatibilityUntil)
-		value_1 = !value_2
+	var value_4 bool = manifest.CompatibilityUntil != ""
+	if value_4 {
+		var value_5 bool = Manifest_ValidDate(manifest.CompatibilityUntil)
+		value_4 = !value_5
 	}
-	if value_1 {
+	if value_4 {
 		return "invalid compatibility_until"
 	}
-	var value_3 bool = int64(len(manifest.Collections)) > 64 || int64(len(manifest.Capabilities)) > 64 || int64(len(manifest.Features)) > 128
-	if value_3 || int64(len(manifest.LegacyProtocols)) > 64 || int64(len(manifest.TokenPolicies)) > 64 {
+	var value_6 bool = int64(len(manifest.Collections)) > 64 || int64(len(manifest.Capabilities)) > 64 || int64(len(manifest.Features)) > 128
+	if value_6 || int64(len(manifest.LegacyProtocols)) > 64 || int64(len(manifest.TokenPolicies)) > 64 {
 		return "too many manifest fields"
 	}
 	var index int64 = 0
 	for index < int64(len(manifest.Keys)) {
 		key := manifest.Keys[index]
-		var value_4 bool = Identity_ValidClientID(key.KeyID)
-		var value_5 bool = !value_4
-		if !value_5 {
-			var value_6 bool = strings.EqualFold(key.Algorithm, "Ed25519")
-			value_5 = !value_6
+		var value_7 bool = Identity_ValidClientID(key.KeyID)
+		var value_8 bool = !value_7
+		if !value_8 {
+			var value_9 bool = strings.EqualFold(key.Algorithm, "Ed25519")
+			value_8 = !value_9
 		}
-		if value_5 {
+		if value_8 {
 			return "invalid app key"
 		}
 		publicKey := Codec_DecodeBinaryField(key.PublicKey)
@@ -279,26 +306,26 @@ func Manifest_Validate(manifest AppManifest, now int64) string {
 	index = 0
 	for index < int64(len(manifest.Collections)) {
 		collection := manifest.Collections[index]
-		var value_7 bool = Scope_ValidCollectionPrefix(collection.CollectionPrefix)
-		var value_8 bool = !value_7
-		if !value_8 {
-			var value_9 bool = Scope_ValidAppVisibility(collection.Visibility)
-			value_8 = !value_9
+		var value_10 bool = Scope_ValidCollectionPrefix(collection.CollectionPrefix)
+		var value_11 bool = !value_10
+		if !value_11 {
+			var value_12 bool = Scope_ValidAppVisibility(collection.Visibility)
+			value_11 = !value_12
 		}
-		var value_10 bool = value_8
-		if !value_10 {
-			var value_11 bool = Scope_AppOwnsDeclaredScope(manifest.AppID, collection)
-			value_10 = !value_11
+		var value_13 bool = value_11
+		if !value_13 {
+			var value_14 bool = Scope_AppOwnsDeclaredScope(manifest.AppID, collection)
+			value_13 = !value_14
 		}
-		if value_10 {
+		if value_13 {
 			return "invalid app collection"
 		}
 		index++
 	}
 	index = 0
 	for index < int64(len(manifest.Capabilities)) {
-		var value_12 bool = Identity_ValidNamespace(manifest.Capabilities[index])
-		if !value_12 {
+		var value_15 bool = Identity_ValidNamespace(manifest.Capabilities[index])
+		if !value_15 {
 			return "invalid capability"
 		}
 		index++
@@ -306,14 +333,14 @@ func Manifest_Validate(manifest AppManifest, now int64) string {
 	index = 0
 	for index < int64(len(manifest.Features)) {
 		feature := manifest.Features[index]
-		var value_13 bool = Identity_ValidNamespace(feature.ID)
-		if !value_13 || int64(len(feature.Collections)) > 16 {
+		var value_16 bool = Identity_ValidNamespace(feature.ID)
+		if !value_16 || int64(len(feature.Collections)) > 16 {
 			return "invalid app feature"
 		}
 		var inner int64 = 0
 		for inner < int64(len(feature.Collections)) {
-			var value_14 bool = Scope_DeclaresCollection(manifest.Collections, feature.Collections[inner])
-			if !value_14 {
+			var value_17 bool = Scope_DeclaresCollection(manifest.Collections, feature.Collections[inner])
+			if !value_17 {
 				return "invalid app feature collection"
 			}
 			inner++
@@ -323,18 +350,18 @@ func Manifest_Validate(manifest AppManifest, now int64) string {
 	index = 0
 	for index < int64(len(manifest.LegacyProtocols)) {
 		legacy := manifest.LegacyProtocols[index]
-		var value_15 bool = Identity_ValidNamespace(legacy.Name)
-		var value_16 bool = !value_15 || legacy.Version < int(0)
-		if !value_16 {
-			var value_17 bool = Scope_ValidLegacyProtocolStatus(legacy.Status)
-			value_16 = !value_17
+		var value_18 bool = Identity_ValidNamespace(legacy.Name)
+		var value_19 bool = !value_18 || legacy.Version < int(0)
+		if !value_19 {
+			var value_20 bool = Scope_ValidLegacyProtocolStatus(legacy.Status)
+			value_19 = !value_20
 		}
-		var value_18 bool = value_16
-		if !value_18 {
-			var value_19 bool = Manifest_ValidDate(legacy.ValidUntil)
-			value_18 = !value_19
+		var value_21 bool = value_19
+		if !value_21 {
+			var value_22 bool = Manifest_ValidDate(legacy.ValidUntil)
+			value_21 = !value_22
 		}
-		if value_18 {
+		if value_21 {
 			return "invalid legacy protocol"
 		}
 		index++
@@ -342,13 +369,13 @@ func Manifest_Validate(manifest AppManifest, now int64) string {
 	index = 0
 	for index < int64(len(manifest.TokenPolicies)) {
 		policy := manifest.TokenPolicies[index]
-		var value_20 bool = Scope_ValidTokenPolicyPermission(policy.Permission)
-		var value_21 bool = !value_20
-		if !value_21 {
-			var value_22 bool = strings.TrimSpace(policy.AssetID) == ""
-			value_21 = value_22
+		var value_23 bool = Scope_ValidTokenPolicyPermission(policy.Permission)
+		var value_24 bool = !value_23
+		if !value_24 {
+			var value_25 bool = strings.TrimSpace(policy.AssetID) == ""
+			value_24 = value_25
 		}
-		if value_21 {
+		if value_24 {
 			return "invalid token policy"
 		}
 		if policy.Status != "" && policy.Status != "active" && policy.Status != "suspended" {

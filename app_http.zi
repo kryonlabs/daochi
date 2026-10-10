@@ -22,6 +22,8 @@ json :: #import "std/json_go";
 errors :: #import "std/errors_go";
 metrics :: #import "metrics";
 logs :: #import "log_safety";
+network :: #import "network_scope";
+app_network :: #import "app_network";
 go_strings :: #system_library "go:strings";
 go_slog :: #system_library "go:log/slog";
 builtin :: #system_library "go:builtin";
@@ -34,6 +36,7 @@ Registry :: struct {
     replayError: Error
     missingUser: Error
     scopeNotOwned: Error
+    nodeID: string
 }
 
 #scope_file
@@ -245,6 +248,14 @@ RegisterSigned :: (registry: Registry, writer: http.ResponseWriter, request: *ht
         return
     }
     value := decoded.value
+    nodeScope: network.NetworkScope
+    nodeScope.LANOnly = registry.configuration.NodeLANOnly
+    nodeScope.Networks = registry.configuration.NodeLANNetworks
+    if !app_network.Allowed(nodeScope, value.Manifest) ||
+        (value.Manifest.RegistrationNodeID != "" && value.Manifest.RegistrationNodeID != registry.nodeID) {
+        response.Error(writer, cast(isize)403, "app manifest is restricted to its local node and LAN")
+        return
+    }
     verified := registration.Verify(value, registry.configuration.NodeRegistryPublicKey)
     if verified.authentication.error != null || verified.authentication.status != cast(isize)0 {
         http_auth.Respond(writer, registry.counters, verified.authentication)

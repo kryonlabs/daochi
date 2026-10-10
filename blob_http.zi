@@ -1,0 +1,145 @@
+// Private immutable ciphertext. Blobs stay on this node; mesh exports contain
+// only records. Clients hold content keys and put blob references in records.
+#import "std/go_types"
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+files :: #import "std/file_go";
+url :: #import "std/url_go";
+clock :: #import "std/time_go";
+registry :: #import "app_http";
+apps :: #import "app_store";
+identity :: #import "identity";
+signing :: #import "signing";
+signed :: #import "signed_tx";
+auth :: #import "http_auth";
+response :: #import "response";
+strings :: #system_library "go:strings";
+os :: #system_library "go:os";
+native_http :: #system_library "go:net/http";
+fmt :: #system_library "go:fmt";
+
+MaxBlobBytes :: 16777216;
+File :: #type #foreign os "File";
+Opened :: struct { value: *File; error: Error; }
+Written :: struct { count: isize; error: Error; }
+Split :: (value: string, separator: string) -> []string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+Join :: (parts: []string, separator: string) -> string #foreign strings;
+Temporary :: (folder: string, pattern: string) -> Opened #go_results #foreign os "CreateTemp";
+Name :: (file: *File) -> string #foreign os "(*File).Name";
+Close :: (file: *File) -> Error #foreign os "(*File).Close";
+Sync :: (file: *File) -> Error #foreign os "(*File).Sync";
+Write :: (file: *File, value: []u8) -> Written #go_results #foreign os "(*File).Write";
+WriteResponse :: (writer: http.ResponseWriter, value: []u8) -> Written #go_results #foreign native_http "ResponseWriter.Write";
+Length :: (value: s64) -> string #foreign fmt "Sprint";
+Concat :: (a: string, b: string) -> string #foreign fmt "Sprint";
+
+ValidHash :: (hash: string) -> bool {
+    if hash.count != 64 { return false }
+    for i: 0..63 {
+        byte := hash[i]
+        if !((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102)) { return false }
+    }
+    return true
+}
+
+Save :: (folder: string, path: string, data: []u8) -> Error {
+    error := files.MkdirAll(folder, cast(files.FileMode)448)
+    if error != null { return error }
+    opened := Temporary(folder, ".upload-*")
+    if opened.error != null { return opened.error }
+    temporary := Name(opened.value)
+    defer { unused files.Remove(temporary) }
+    written := Write(opened.value, data)
+    if written.error != null {
+        unused Close(opened.value)
+        return written.error
+    }
+    error = Sync(opened.value)
+    closed := Close(opened.value)
+    if error != null { return error }
+    if closed != null { return closed }
+    return files.Rename(temporary, path)
+}
+
+Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(store.database, request, store.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, store.counters, user.authentication)
+        return
+    }
+    parts := Split(TrimPrefix(url.Path(http.RequestURL(request)), "/api/v1/blobs/"), "/")
+    if parts.count != 2 || !identity.ValidNamespace(parts[0]) || !ValidHash(parts[1]) {
+        response.Error(writer, 400, "invalid blob address")
+        return
+    }
+    app := apps.ByID(store.database, http.Context(request), parts[0])
+    if app.error != null {
+        response.Error(writer, 500, "blob registry unavailable")
+        return
+    }
+    if !app.found || app.value.Status != "active" ||
+        (app.value.ManifestExpiresAt > 0 && app.value.ManifestExpiresAt <= clock.Unix(clock.Now())) {
+        response.Error(writer, 403, "active app required")
+        return
+    }
+    method := http.Method(request)
+    if method != "PUT" && method != "GET" && method != "HEAD" {
+        response.Error(writer, 405, "unsupported blob method")
+        return
+    }
+    data: []u8
+    if method == "PUT" {
+        bounded := http.MaxBytesReader(writer, http.Body(request), MaxBlobBytes)
+        read := io.ReadAll(cast(io.Reader)bounded)
+        unused io.Close(bounded)
+        if read.error != null || read.value.count == 0 || read.value.count > MaxBlobBytes {
+            response.Error(writer, 413, "blob exceeds limit or is empty")
+            return
+        }
+        data = read.value
+        if signing.SHA256Hex(data) != parts[1] {
+            response.Error(writer, 400, "blob hash mismatch")
+            return
+        }
+    }
+    header := signed.ReadHeader(request)
+    if header.authentication.error != null || header.authentication.status != 0 {
+        auth.Respond(writer, store.counters, header.authentication)
+        return
+    }
+    verified := signed.Verify(store.database, http.Context(request), request, data,
+        header.value, user.value, parts[0], store.verify, store.replayError)
+    if verified.error != null || verified.status != 0 {
+        auth.Respond(writer, store.counters, verified)
+        return
+    }
+    pathParts: [4]string = .[Concat(store.configuration.DBPath, ".blobs"), user.value, parts[0], parts[1]]
+    folderParts: [3]string = .[pathParts[0], pathParts[1], pathParts[2]]
+    path := Join(pathParts[:], "/")
+    folder := Join(folderParts[:], "/")
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    if method == "PUT" {
+        error := Save(folder, path, data)
+        if error != null {
+            signed.Forget(store.database, http.Context(request), header.value)
+            response.Error(writer, 507, "could not store blob")
+            return
+        }
+        http.WriteHeader(writer, 204)
+        return
+    }
+    read := files.ReadFile(path)
+    if read.error != null {
+        response.Error(writer, 404, "blob not found")
+        return
+    }
+    if read.value.count > MaxBlobBytes || signing.SHA256Hex(read.value) != parts[1] {
+        response.Error(writer, 503, "blob integrity failure")
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Content-Type", "application/octet-stream")
+    http.SetHeader(http.ResponseHeaders(writer), "Content-Length", Length(read.value.count))
+    if method == "HEAD" { http.WriteHeader(writer, 200); return }
+    unused WriteResponse(writer, read.value)
+}

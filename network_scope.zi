@@ -1,0 +1,266 @@
+#import "std/go_types"
+net :: #import "std/net_go";
+http :: #import "std/http_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+go_net :: #system_library "go:net";
+go_http :: #system_library "go:net/http";
+go_native :: #system_library "go:daochi/native";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+NetworkScope :: struct {
+    LANOnly: bool
+    Networks: []string
+}
+NetworkMiddleware :: struct {
+    scope: NetworkScope
+    next: NetworkHandler
+}
+NetworkHandler :: #type #foreign go_http "Handler";
+IPNetwork :: #type #foreign go_net "IPNet";
+Connection :: #type #foreign go_net "Conn";
+SocketDialer :: #type #foreign go_net "Dialer";
+HTTPTransport :: #type #foreign go_http "Transport";
+IPAddress :: #type #foreign go_net "IPAddr";
+DNSResolver :: #type #foreign go_net "Resolver";
+InterfaceAddress :: #type #foreign go_net "Addr";
+NetworkParseResult :: struct { ip: net.IP; network: *IPNetwork; error: Error; }
+ConnectionResult :: #type #foreign go_native "DialResult";
+AddressesResult :: struct { value: []IPAddress; error: Error; }
+InterfaceAddressesResult :: struct { value: []InterfaceAddress; error: Error; }
+NetworkDial :: #type (context: ctx.Context, network: string, address: string) -> ConnectionResult;
+NetworkRedirect :: #type (request: *http.Request, previous: []*http.Request) -> Error;
+
+#scope_export
+ParseCIDRRaw :: (value: string) -> NetworkParseResult #go_results #foreign go_net "ParseCIDR";
+ContainsRaw :: (network: *IPNetwork, ip: net.IP) -> bool #foreign go_net "(*IPNet).Contains";
+Mask :: (network: *IPNetwork) -> []u8 #go_field #foreign go_net "(*IPNet).Mask";
+NetworkIPRaw :: (network: *IPNetwork) -> net.IP #go_field #foreign go_net "(*IPNet).IP";
+#scope_file
+PrivateIP :: (ip: net.IP) -> bool #foreign go_net "(IP).IsPrivate";
+LinkLocalIP :: (ip: net.IP) -> bool #foreign go_net "(IP).IsLinkLocalUnicast";
+JoinHostPort :: (host: string, port: string) -> string #foreign go_net;
+DefaultResolver :: () -> *DNSResolver #go_field #foreign go_net "DefaultResolver";
+InterfaceAddresses :: () -> InterfaceAddressesResult #go_results #foreign go_net "InterfaceAddrs";
+InterfaceString :: (address: InterfaceAddress) -> string #foreign go_net "Addr.String";
+Lookup :: (resolver: *DNSResolver, context: ctx.Context, host: string) -> AddressesResult #go_results #foreign go_net "(*Resolver).LookupIPAddr";
+AddressIP :: (address: IPAddress) -> net.IP #go_field #foreign go_net "(IPAddr).IP";
+AddressString :: (address: *IPAddress) -> string #foreign go_net "(*IPAddr).String";
+AllocateDialer :: () -> *SocketDialer #foreign builtin "new";
+DialRaw :: (dialer: *SocketDialer, context: ctx.Context, network: string, address: string) -> ConnectionResult #foreign go_native "Dial";
+DialError :: (result: ConnectionResult) -> Error #foreign go_native;
+FailedDial :: (error: Error) -> ConnectionResult #foreign go_native;
+AllocateTransport :: () -> *HTTPTransport #foreign builtin "new";
+SetDial :: (transport: *HTTPTransport, callback: NetworkDial) #foreign go_native "InstallDial";
+SetTransport :: (client: *http.Client, transport: *HTTPTransport) #go_field #foreign go_http "(*Client).Transport";
+SetRedirect :: (client: *http.Client, callback: NetworkRedirect) #go_field #foreign go_http "(*Client).CheckRedirect";
+ScopedDial :: #type (scope: NetworkScope, context: ctx.Context, network: string, address: string) -> ConnectionResult;
+BindDial :: (callback: ScopedDial, scope: NetworkScope) -> NetworkDial #foreign builtin "bind";
+LastResponse :: () -> Error #go_field #foreign go_http "ErrUseLastResponse";
+AllocateMiddleware :: () -> *NetworkMiddleware #foreign builtin "new";
+Serve :: (handler: NetworkHandler, writer: http.ResponseWriter, request: *http.Request) #foreign go_http "Handler.ServeHTTP";
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+
+#scope_export
+ParseCIDR :: (value: string) -> NetworkParseResult {
+    return ParseCIDRRaw(value)
+}
+
+Contains :: (network: *IPNetwork, ip: net.IP) -> bool {
+    return ContainsRaw(network, ip)
+}
+
+NetworkIP :: (network: *IPNetwork) -> net.IP {
+    return NetworkIPRaw(network)
+}
+
+ParseNetworks :: (value: string) -> []string {
+    result: []string
+    if value == "" {
+        return result
+    }
+    result = Split(value, ",")
+    index: s64 = 0
+    while index < result.count {
+        result[index] = TrimSpace(result[index])
+        index += 1
+    }
+    return result
+}
+
+ValidNetworks :: (networks: []string) -> bool {
+    if networks.count == 0 {
+        return false
+    }
+    for value: networks {
+        parsed := ParseCIDR(value)
+        if parsed.error != null || parsed.network == null {
+            return false
+        }
+        first := NetworkIP(parsed.network)
+        // A private starting address must not admit a public range through
+        // an overly broad mask.
+        if !PrivateIP(first) && !net.IsLoopback(first) && !LinkLocalIP(first) {
+            return false
+        }
+        if !PrivateRange(value) {
+            return false
+        }
+    }
+    return true
+}
+
+PrivateRange :: (value: string) -> bool {
+    candidate := ParseCIDR(value)
+    if candidate.error != null {
+        return false
+    }
+    private: [8]string = .["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "fc00::/7", "fe80::/10", "::1/128"]
+    for allowed: private {
+        parent := ParseCIDR(allowed)
+        if Contains(parent.network, NetworkIP(candidate.network)) && Narrower(candidate.network, parent.network) {
+            return true
+        }
+    }
+    return false
+}
+
+Narrower :: (child: *IPNetwork, parent: *IPNetwork) -> bool {
+    childMask := Mask(child)
+    parentMask := Mask(parent)
+    if childMask.count != parentMask.count {
+        return false
+    }
+    index: s64 = 0
+    while index < childMask.count {
+        if (childMask[index] & parentMask[index]) != parentMask[index] {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+AllowsIP :: (scope: NetworkScope, ip: net.IP) -> bool {
+    if !scope.LANOnly {
+        return true
+    }
+    if !net.ValidIP(ip) {
+        return false
+    }
+    if net.IsLoopback(ip) {
+        return true
+    }
+    if !PrivateIP(ip) && !LinkLocalIP(ip) {
+        return false
+    }
+    for value: scope.Networks {
+        parsed := ParseCIDR(value)
+        if parsed.error == null && Contains(parsed.network, ip) {
+            return true
+        }
+    }
+    return false
+}
+
+AllowsAddress :: (scope: NetworkScope, address: string) -> bool {
+    split := net.SplitHostPort(address)
+    if split.error != null {
+        return false
+    }
+    host := Split(split.host, "%")
+    return AllowsIP(scope, net.ParseIP(host[0]))
+}
+
+Validate :: (scope: NetworkScope, address: string) -> Error {
+    if !scope.LANOnly {
+        return null
+    }
+    if !ValidNetworks(scope.Networks) || !AllowsAddress(scope, address) {
+        return errors.New("LAN-only nodes require explicit private LAN networks and a local bind address")
+    }
+    local := InterfaceAddresses()
+    if local.error != null {
+        return local.error
+    }
+    for declared: scope.Networks {
+        child := ParseCIDR(declared)
+        connected := false
+        for interface: local.value {
+            parent := ParseCIDR(InterfaceString(interface))
+            if parent.error == null && Contains(parent.network, NetworkIP(child.network)) && Narrower(child.network, parent.network) {
+                connected = true
+            }
+        }
+        if !connected {
+            return errors.New("LAN network is not within a connected local subnet")
+        }
+    }
+    return null
+}
+
+Wrap :: (scope: NetworkScope, next: NetworkHandler) -> NetworkHandler {
+    if !scope.LANOnly {
+        return next
+    }
+    value := AllocateMiddleware()
+    value.scope = scope
+    value.next = next
+    return cast(NetworkHandler)value
+}
+
+ServeHTTP :: (middleware: *NetworkMiddleware, writer: http.ResponseWriter, request: *http.Request) #go_method "ServeHTTP" {
+    if !AllowsAddress(middleware.scope, http.RemoteAddress(request)) {
+        http.WriteHeader(writer, cast(isize)403)
+        return
+    }
+    Serve(middleware.next, writer, request)
+}
+
+NoRedirect :: (request: *http.Request, previous: []*http.Request) -> Error {
+    return LastResponse()
+}
+
+Dial :: (scope: NetworkScope, context: ctx.Context, network: string, address: string) -> ConnectionResult {
+    result: ConnectionResult
+    split := net.SplitHostPort(address)
+    if split.error != null {
+        return FailedDial(split.error)
+    }
+    // Resolve once, reject mixed/public answers, and dial the numeric result.
+    // The HTTP URL remains unchanged for TLS hostname verification.
+    resolved := Lookup(DefaultResolver(), context, split.host)
+    if resolved.error != null {
+        return FailedDial(resolved.error)
+    }
+    for ip: resolved.value {
+        if !AllowsIP(scope, AddressIP(ip)) {
+            return FailedDial(errors.New("peer is outside the node LAN"))
+        }
+    }
+    if resolved.value.count == 0 {
+        return FailedDial(errors.New("peer has no LAN address"))
+    }
+    dialer := AllocateDialer()
+    for ip: resolved.value {
+        result = DialRaw(dialer, context, network, JoinHostPort(AddressString(*ip), split.port))
+        if DialError(result) == null {
+            return result
+        }
+    }
+    return result
+}
+
+Client :: (scope: NetworkScope, timeout: clock.Duration) -> *http.Client {
+    client := http.NewClient(timeout)
+    if scope.LANOnly {
+        transport := AllocateTransport()
+        SetDial(transport, BindDial(Dial, scope))
+        SetTransport(client, transport)
+        SetRedirect(client, NoRedirect)
+    }
+    return client
+}

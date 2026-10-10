@@ -13,6 +13,7 @@ telegram_paths :: #import "telegram_paths";
 authorization_paths :: #import "authorization_paths";
 package_paths :: #import "package_paths";
 device_link_paths :: #import "device_link_paths";
+blob_paths :: #import "blob_paths";
 go_sync :: #system_library "go:sync";
 go_format :: #system_library "go:fmt";
 go_slog :: #system_library "go:log/slog";
@@ -2114,6 +2115,8 @@ Paths :: () -> Map(string, Any) {
         MapSet(result, name, MapGet(authorization, name))
     }
     packages := package_paths.Paths()
+    blobs := blob_paths.Paths()
+    MapSet(result, "/api/v1/blobs/{app_id}/{sha256}", MapGet(blobs, "/api/v1/blobs/{app_id}/{sha256}"))
     MapSet(result, "/api/v1/packages/{app_id}/{asset}", MapGet(packages, "/api/v1/packages/{app_id}/{asset}"))
     MapSet(result, "/api/v2/packages/{app_id}/{asset}", MapGet(packages, "/api/v2/packages/{app_id}/{asset}"))
     device_links := device_link_paths.Paths()

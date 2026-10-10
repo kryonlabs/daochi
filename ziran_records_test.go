@@ -117,7 +117,9 @@ func TestZiranProtocolRecordsKeepReleasedLayout(t *testing.T) {
 		t.Run(typ.Name(), func(t *testing.T) {
 			fields, found := fixture.Records[typ.Name()]
 			extensions := map[string]map[string]string{
-				"SyncResponse": {"AccountStorage": "*main.AccountStorage"},
+				"AppManifest":    {"LANOnly": "bool", "LANNetworks": "[]string", "RegistrationNodeID": "string"},
+				"NodeSyncPolicy": {"Accounts": "[]string"},
+				"SyncResponse":   {"AccountStorage": "*main.AccountStorage"},
 			}
 			expectedExtensions := extensions[typ.Name()]
 			if !found || typ.NumField() != len(fields)+len(expectedExtensions) {

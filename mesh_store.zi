@@ -211,6 +211,9 @@ ExportEncryptedRecords :: (database: *sql.Database, context: ctx.Context, meshPo
         if result.error != null {
             return result
         }
+        if !policy.AllowsAccount(meshPolicy, userID) {
+            continue
+        }
         if !policy.AllowsRecord(meshPolicy, matchers.value, collection) {
             continue
         }
@@ -300,6 +303,9 @@ ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPoli
                 result.error = errors.New("invalid mesh deletion user_id_hash")
                 return result
             }
+            if !policy.AllowsAccount(meshPolicy, change.deletion.UserIDHash) {
+                continue
+            }
             if !policy.AllowsRecord(meshPolicy, matchers.value, change.deletion.Collection) {
                 continue
             }
@@ -323,6 +329,9 @@ ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPoli
         if !identity.ValidUserID(item.UserIDHash) {
             result.error = errors.New("invalid mesh user_id_hash")
             return result
+        }
+        if !policy.AllowsAccount(meshPolicy, item.UserIDHash) {
+            continue
         }
         key := DecodeHex(TrimSpace(item.PublicKey))
         if key.error != null || key.value.count == 0 {

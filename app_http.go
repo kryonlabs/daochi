@@ -17,6 +17,7 @@ type Registry struct {
 	ReplayError   Error
 	MissingUser   Error
 	ScopeNotOwned Error
+	NodeID        string
 }
 
 type CollectionsResponse struct {
@@ -27,9 +28,9 @@ type StatusResponse struct {
 	Status string "json:\"status\""
 }
 
-type zir_a9f2e3112734250a_ReplayCleanup func(*Database, Context, SignedTxEnvelope, *bool)
+type zir_21605951d81ff535_ReplayCleanup func(*Database, Context, SignedTxEnvelope, *bool)
 
-func AppHttp_CleanupAtReturn(Callback zir_a9f2e3112734250a_ReplayCleanup, Database *Database, Context Context, Transaction SignedTxEnvelope, Completed *bool) {
+func AppHttp_CleanupAtReturn(Callback zir_21605951d81ff535_ReplayCleanup, Database *Database, Context Context, Transaction SignedTxEnvelope, Completed *bool) {
 	Callback(Database, Context, Transaction, Completed)
 }
 
@@ -232,6 +233,14 @@ func AppHttp_RegisterSigned(registry Registry, writer ResponseWriter, request *R
 		return
 	}
 	value := decoded.Value
+	var nodeScope NetworkScope = NetworkScope{}
+	nodeScope.LANOnly = registry.Configuration.NodeLANOnly
+	nodeScope.Networks = registry.Configuration.NodeLANNetworks
+	var value_0 bool = AppNetwork_Allowed(nodeScope, value.Manifest)
+	if !value_0 || (value.Manifest.RegistrationNodeID != "" && value.Manifest.RegistrationNodeID != registry.NodeID) {
+		Response_Error(writer, int(403), "app manifest is restricted to its local node and LAN")
+		return
+	}
 	verified := AppRegistration_Verify(value, registry.Configuration.NodeRegistryPublicKey)
 	if verified.Authentication.Error != nil || verified.Authentication.Status != int(0) {
 		HttpAuth_Respond(writer, registry.Counters, verified.Authentication)
@@ -315,7 +324,7 @@ func AppHttp_GrantSigned(registry Registry, writer ResponseWriter, request *Requ
 		return
 	}
 	completed := false
-	var value_4 zir_a9f2e3112734250a_ReplayCleanup = func(value_0 *Database, value_1 Context, value_2 SignedTxEnvelope, value_3 *bool) {
+	var value_4 zir_21605951d81ff535_ReplayCleanup = func(value_0 *Database, value_1 Context, value_2 SignedTxEnvelope, value_3 *bool) {
 		AppHttp_ForgetOnFailure(value_0, value_1, value_2, value_3)
 	}
 	defer AppHttp_CleanupAtReturn(value_4, registry.Database, context, value.Tx, &(completed))
@@ -390,7 +399,7 @@ func AppHttp_Records(registry Registry, writer ResponseWriter, request *Request)
 		return
 	}
 	completed := false
-	var value_9 zir_a9f2e3112734250a_ReplayCleanup = func(value_5 *Database, value_6 Context, value_7 SignedTxEnvelope, value_8 *bool) {
+	var value_9 zir_21605951d81ff535_ReplayCleanup = func(value_5 *Database, value_6 Context, value_7 SignedTxEnvelope, value_8 *bool) {
 		AppHttp_ForgetOnFailure(value_5, value_6, value_7, value_8)
 	}
 	defer AppHttp_CleanupAtReturn(value_9, registry.Database, context, header.Value, &(completed))

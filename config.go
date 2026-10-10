@@ -43,6 +43,8 @@ type Config struct {
 	NodeIdentityPrivateKey          PrivateKey
 	NodeDisplayName                 string
 	LANDiscovery                    bool
+	NodeLANOnly                     bool
+	NodeLANNetworks                 []string
 	WaoziIssuerPublicKey            PublicKey
 	WaoziIssuerPrivateKey           PrivateKey
 	TokenProducts                   __type_cd75cecb5feef7fa
@@ -304,6 +306,9 @@ func Config_Load() Config {
 	result.NodeDisplayName = Config_EnvString("DAOCHI_NODE_NAME", "Daochi Node")
 	var value_4 string = os.Getenv("DAOCHI_LAN_DISCOVERY")
 	result.LANDiscovery = ConfigValues_Bool(value_4, true)
+	var value_5 string = os.Getenv("DAOCHI_LAN_ONLY")
+	result.NodeLANOnly = ConfigValues_Bool(value_5, false)
+	result.NodeLANNetworks = NetworkScope_ParseNetworks(os.Getenv("DAOCHI_LAN_NETWORKS"))
 	result.WaoziIssuerPublicKey = PublicKey(issuerPublic)
 	result.WaoziIssuerPrivateKey = issuerPrivate
 	result.TokenProducts = ConfigValues_Products(Config_EnvString("DAOCHI_TOKEN_PRODUCTS", ""))
@@ -319,16 +324,16 @@ func Config_Load() Config {
 	result.MoneroRateTokenUnits = Config_EnvInt64("MONERO_RATE_TOKEN_UNITS", 0)
 	result.MoneroMinimumAtomicAmount = Config_EnvInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", 1)
 	result.MoneroConfirmationsRequired = Config_EnvInt64("MONERO_CONFIRMATIONS_REQUIRED", 10)
-	var value_5 string = os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED")
-	result.TokenDirectPurchasesEnabled = ConfigValues_Bool(value_5, false)
+	var value_6 string = os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED")
+	result.TokenDirectPurchasesEnabled = ConfigValues_Bool(value_6, false)
 	result.ChatAPIKey = Config_EnvStringOrFile("DAOCHI_CHAT_API_KEY", "DAOCHI_CHAT_API_KEY_FILE", "")
 	result.ChatAPIEndpoint = Config_EnvString("DAOCHI_CHAT_ENDPOINT", "")
 	result.FeedbackToken = Config_EnvStringOrFile("DAOCHI_FEEDBACK_TOKEN", "DAOCHI_FEEDBACK_TOKEN_FILE", "")
 	result.LumiBotToken = Config_EnvStringOrFile("DAOCHI_LUMI_BOT_TOKEN", "DAOCHI_LUMI_BOT_TOKEN_FILE", "")
 	result.LumiWebhookSecret = Config_EnvStringOrFile("DAOCHI_LUMI_WEBHOOK_SECRET", "DAOCHI_LUMI_WEBHOOK_SECRET_FILE", "")
 	result.LumiOwnerID = Config_EnvString("DAOCHI_LUMI_OWNER_ID", "")
-	var value_6 string = os.Getenv("DAOCHI_TELEGRAM_ACCOUNTS_ENABLED")
-	result.TelegramAccountsEnabled = ConfigValues_Bool(value_6, false)
+	var value_7 string = os.Getenv("DAOCHI_TELEGRAM_ACCOUNTS_ENABLED")
+	result.TelegramAccountsEnabled = ConfigValues_Bool(value_7, false)
 	result.LumiCanvasURL = Config_EnvString("DAOCHI_LUMI_CANVAS_URL", "https://inbe.waozi.xyz/build/telegram/index.html")
 	result.ChatModel = Config_EnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash")
 	result.ChatDailyLimit = Config_EnvInt64("DAOCHI_CHAT_DAILY_LIMIT", 20)

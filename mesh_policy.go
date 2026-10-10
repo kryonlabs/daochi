@@ -44,15 +44,33 @@ func MeshPolicy_Inverse(policy NodeSyncPolicy) NodeSyncPolicy {
 }
 
 func MeshPolicy_ValidInbound(policy NodeSyncPolicy) bool {
+	{
+		value_0 := policy.Accounts[:]
+		if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
+			panic("slice range out of bounds")
+		}
+		loop_view_0 := value_0[0:int64(len(value_0)):int64(len(value_0))]
+		loop_count_0 := int64(len(loop_view_0))
+		var loop_cursor_0 int64 = 0
+		for loop_cursor_0 < loop_count_0 {
+			loop_index_0 := loop_cursor_0
+			account := loop_view_0[loop_index_0]
+			var value_1 bool = Identity_ValidUserID(account)
+			if !value_1 {
+				return false
+			}
+			loop_cursor_0++
+		}
+	}
 	if int64(len(policy.Data)) == 0 {
 		return false
 	}
-	var value_0 bool = MeshPolicy_IncludesData(&(policy), "encrypted_records")
-	hasRecords := value_0 && (int64(len(policy.Apps)) > 0 || int64(len(policy.Collections)) > 0)
-	var value_1 bool = MeshPolicy_IncludesData(&(policy), "names")
-	hasNames := value_1 && int64(len(policy.Spaces)) > 0
-	var value_2 bool = MeshPolicy_IncludesData(&(policy), "app_registry")
-	hasAppRegistry := value_2 && int64(len(policy.Apps)) > 0
+	var value_2 bool = MeshPolicy_IncludesData(&(policy), "encrypted_records")
+	hasRecords := value_2 && (int64(len(policy.Apps)) > 0 || int64(len(policy.Collections)) > 0)
+	var value_3 bool = MeshPolicy_IncludesData(&(policy), "names")
+	hasNames := value_3 && int64(len(policy.Spaces)) > 0
+	var value_4 bool = MeshPolicy_IncludesData(&(policy), "app_registry")
+	hasAppRegistry := value_4 && int64(len(policy.Apps)) > 0
 	return hasRecords || hasNames || hasAppRegistry
 }
 
@@ -113,23 +131,30 @@ func MeshPolicy_AllowsOperation(approved NodeSyncPolicy, requested NodeSyncPolic
 	if operation == "import" && direction != "pull" && direction != "bidirectional" {
 		return false
 	}
-	var value_0 bool = MeshPolicy_Contains(approved.Apps, requested.Apps)
-	var value_1 bool = value_0
-	if value_1 {
-		var value_2 bool = MeshPolicy_Contains(approved.Collections, requested.Collections)
-		value_1 = value_2
+	if int64(len(approved.Accounts)) > 0 && int64(len(requested.Accounts)) == 0 {
+		return false
 	}
-	var value_3 bool = value_1
-	if value_3 {
-		var value_4 bool = MeshPolicy_Contains(approved.Spaces, requested.Spaces)
-		value_3 = value_4
+	var value_0 bool = MeshPolicy_Contains(approved.Accounts, requested.Accounts)
+	if !value_0 && int64(len(approved.Accounts)) > 0 {
+		return false
 	}
-	var value_5 bool = value_3
-	if value_5 {
-		var value_6 bool = MeshPolicy_Contains(approved.Data, requested.Data)
-		value_5 = value_6
+	var value_1 bool = MeshPolicy_Contains(approved.Apps, requested.Apps)
+	var value_2 bool = value_1
+	if value_2 {
+		var value_3 bool = MeshPolicy_Contains(approved.Collections, requested.Collections)
+		value_2 = value_3
 	}
-	return value_5
+	var value_4 bool = value_2
+	if value_4 {
+		var value_5 bool = MeshPolicy_Contains(approved.Spaces, requested.Spaces)
+		value_4 = value_5
+	}
+	var value_6 bool = value_4
+	if value_6 {
+		var value_7 bool = MeshPolicy_Contains(approved.Data, requested.Data)
+		value_6 = value_7
+	}
+	return value_6
 }
 
 func MeshPolicy_CollectionAllowed(allowed []string, collection string) bool {
@@ -184,6 +209,34 @@ func MeshPolicy_AllowsRecord(policy NodeSyncPolicy, matchers []CollectionMatcher
 				return true
 			}
 			loop_cursor_10++
+		}
+	}
+	return false
+}
+
+func MeshPolicy_AllowsAccount(policy NodeSyncPolicy, account string) bool {
+	var value_0 bool = Identity_ValidUserID(account)
+	if !value_0 {
+		return false
+	}
+	if int64(len(policy.Accounts)) == 0 {
+		return true
+	}
+	{
+		value_1 := policy.Accounts[:]
+		if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
+			panic("slice range out of bounds")
+		}
+		loop_view_6 := value_1[0:int64(len(value_1)):int64(len(value_1))]
+		loop_count_6 := int64(len(loop_view_6))
+		var loop_cursor_6 int64 = 0
+		for loop_cursor_6 < loop_count_6 {
+			loop_index_6 := loop_cursor_6
+			allowed := loop_view_6[loop_index_6]
+			if allowed == account {
+				return true
+			}
+			loop_cursor_6++
 		}
 	}
 	return false

@@ -256,8 +256,12 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 		if result.Error != nil {
 			return result
 		}
-		var value_2 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, collection)
+		var value_2 bool = MeshPolicy_AllowsAccount(meshPolicy, userID)
 		if !value_2 {
+			continue
+		}
+		var value_3 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, collection)
+		if !value_3 {
 			continue
 		}
 		if operation == "delete" {
@@ -269,13 +273,13 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 			}
 			continue
 		}
-		var value_3 bool = StdSqlGo_NullStringValid(recordID)
-		var value_4 bool = !value_3
-		if !value_4 {
-			var value_5 bool = StdSqlGo_NullStringValid(created)
-			value_4 = !value_5
+		var value_4 bool = StdSqlGo_NullStringValid(recordID)
+		var value_5 bool = !value_4
+		if !value_5 {
+			var value_6 bool = StdSqlGo_NullStringValid(created)
+			value_5 = !value_6
 		}
-		if value_4 {
+		if value_5 {
 			continue
 		}
 		var item MeshEncryptedRecord = MeshEncryptedRecord{}
@@ -291,8 +295,8 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 		item.Record.UpdatedAt = StdSqlGo_NullStringValue(updated)
 		item.Record.DeletedAt = MeshStore_IntegerValue(recordDeleted)
 		item.Record.ContentHash = StdSqlGo_NullStringValue(hash)
-		var value_6 int64 = MeshStore_IntegerValue(schema)
-		item.Record.SchemaVersion = int(value_6)
+		var value_7 int64 = MeshStore_IntegerValue(schema)
+		item.Record.SchemaVersion = int(value_7)
 		item.Record.ParentID = StdSqlGo_NullStringValue(parent)
 		item.PublicKey = hex.EncodeToString(publicKey)
 		records = append(records, item)
@@ -353,8 +357,12 @@ func MeshStore_ImportEncryptedBatch(database *Database, context Context, meshPol
 				result.Error = StdErrorsGo_New("invalid mesh deletion user_id_hash")
 				return result
 			}
-			var value_2 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, change.Deletion.Collection)
+			var value_2 bool = MeshPolicy_AllowsAccount(meshPolicy, change.Deletion.UserIDHash)
 			if !value_2 {
+				continue
+			}
+			var value_3 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, change.Deletion.Collection)
+			if !value_3 {
 				continue
 			}
 			deleted := MeshStore_Tombstoned(transaction, context, change.Deletion.UserIDHash, &(tombstones))
@@ -376,10 +384,14 @@ func MeshStore_ImportEncryptedBatch(database *Database, context Context, meshPol
 			continue
 		}
 		item := *(change.Record)
-		var value_3 bool = Identity_ValidUserID(item.UserIDHash)
-		if !value_3 {
+		var value_4 bool = Identity_ValidUserID(item.UserIDHash)
+		if !value_4 {
 			result.Error = StdErrorsGo_New("invalid mesh user_id_hash")
 			return result
+		}
+		var value_5 bool = MeshPolicy_AllowsAccount(meshPolicy, item.UserIDHash)
+		if !value_5 {
+			continue
 		}
 		key := MeshStore_DecodeHex(strings.TrimSpace(item.PublicKey))
 		if key.Error != nil || int64(len(key.Value)) == 0 {
@@ -390,13 +402,13 @@ func MeshStore_ImportEncryptedBatch(database *Database, context Context, meshPol
 		if result.Error != nil {
 			return result
 		}
-		var value_4 bool = EncryptedRecord_ValidForProtocol(item.Record, 5)
-		if !value_4 {
+		var value_6 bool = EncryptedRecord_ValidForProtocol(item.Record, 5)
+		if !value_6 {
 			result.Error = StdErrorsGo_New("invalid mesh encrypted record")
 			return result
 		}
-		var value_5 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, item.Record.Collection)
-		if !value_5 {
+		var value_7 bool = MeshPolicy_AllowsRecord(meshPolicy, matchers.Value, item.Record.Collection)
+		if !value_7 {
 			continue
 		}
 		deleted := MeshStore_Tombstoned(transaction, context, item.UserIDHash, &(tombstones))

@@ -128,7 +128,7 @@ func Middleware_Hijack(writer *CapturedWriter) AcceptedSocket {
 	return Middleware_HijackRaw(hijacker.Value)
 }
 
-func (receiver *CapturedWriter) Hijack() (Connection, *BufferedConnection, Error) {
+func (receiver *CapturedWriter) Hijack() (zir_fd9879bd2495e71e_Connection, *BufferedConnection, Error) {
 	result := Middleware_Hijack(receiver)
 	return result.Connection, result.Buffer, result.Error
 }

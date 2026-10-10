@@ -1,0 +1,61 @@
+// Reusable app-owned node core. Platform hosts supply private storage,
+// transport and supervision; this module does not read process environment.
+#import "std/go_types"
+configuration :: #import "config";
+storage :: #import "store";
+application :: #import "server";
+verification :: #import "ml_dsa44";
+signatures :: #import "account_access";
+errors :: #import "std/errors_go";
+
+EmbeddedCore :: struct {
+    server: *application.Server
+    store: *storage.Store
+}
+EmbeddedCoreResult :: struct {
+    value: EmbeddedCore
+    error: Error
+}
+
+#scope_export
+Open :: (config: configuration.Config) -> EmbeddedCoreResult {
+    result: EmbeddedCoreResult
+    privateKey := cast([]u8)config.NodeIdentityPrivateKey
+    if config.TokenSecret.count < 32 || privateKey.count != 64 ||
+        config.MaxBodyBytes < 1 || config.DBPath == "" {
+        result.error = errors.New("invalid embedded node configuration")
+        return result
+    }
+    opened := storage.Open(config.DBPath)
+    if opened.error != null {
+        result.error = opened.error
+        return result
+    }
+    verifier := verification.New()
+    if verifier.error != null {
+        unused storage.Close(opened.value)
+        result.error = verifier.error
+        return result
+    }
+    result.value.store = opened.value
+    result.value.server = application.New(config, opened.value, verifier.value, verification.Sign)
+    return result
+}
+
+Close :: (core: EmbeddedCore) -> Error {
+    return storage.Close(core.store)
+}
+
+// Bundled nodes deliberately omit unrelated social and payment routes.
+AllowedPath :: (path: string) -> bool {
+    return path == "/healthz" || path == "/readyz" ||
+        path == "/api/v1/node" || path == "/api/v1/node/peers" ||
+        path == "/api/v1/node/pairing/invites" ||
+        path == "/api/v1/node/pairing/accept" ||
+        path == "/api/v1/node/pairing/complete" ||
+        path == "/api/v1/node/mesh/export" || path == "/api/v1/node/mesh/import" ||
+        path == "/api/v1/sync/challenge" || path == "/api/v1/sync/login" ||
+        path == "/api/v1/sync" || path == "/api/v1/sync/diagnostics" ||
+        path == "/api/v1/sync/ws" || path == "/api/v1/apps" ||
+        path == "/api/v1/apps/register-signed"
+}

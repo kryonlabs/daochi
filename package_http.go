@@ -177,6 +177,25 @@ func PackageHttp_Older(context Registry, request *Request, root string, appID st
 	return result
 }
 
+func PackageHttp_LatestSequence(dbPath string, appID string) int64 {
+	var value_0 bool = Identity_ValidNamespace(appID)
+	if !value_0 {
+		return 0
+	}
+	metadata := StdFileGo_ReadFile(fmt.Sprint(fmt.Sprint(dbPath, ".packages/"), fmt.Sprint(appID, "/latest-v2.json")))
+	var value ReleaseV2 = ReleaseV2{}
+	var value_1 bool = metadata.Error != nil || int64(len(metadata.Value)) > 65536
+	var value_2 bool = value_1
+	if !value_2 {
+		var value_3 Error = StdJsonGo_Unmarshal(metadata.Value, &(value))
+		value_2 = (value_3 != nil)
+	}
+	if value_2 || value.AppID != appID || value.Sequence < 0 {
+		return 0
+	}
+	return value.Sequence
+}
+
 func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request) {
 	path := strings.TrimPrefix(StdUrlGo_Path(StdHttpGo_RequestURL(request)), "/api/v2/packages/")
 	parts := strings.Split(path, "/")

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -112,5 +113,42 @@ func TestStateHistoryKeepsNewestVersions(t *testing.T) {
 	}
 	if StateHistory_Matches(fixture.store.Database, t.Context(), fixture.owner.UserID, 10, fmt.Sprintf("%064x", 10)).Value {
 		t.Fatal("a pruned version still matched")
+	}
+}
+
+func TestSyncTellsAppsAboutNewPackages(t *testing.T) {
+	fixture := authorizationSetup(t)
+	sequence := func() int64 {
+		t.Helper()
+		input := map[string]any{"protocol_version": 6, "app_id": "inbe", "user_id_hash": fixture.owner.UserID,
+			"client_id": strings.Repeat("a", 64), "since_server_version": 0, "client_clock": 0}
+		result := fixture.ownerCall(t, "/api/v1/sync", input)
+		var value struct {
+			PackageSequence int64 `json:"package_sequence"`
+		}
+		if result.Code != 200 || json.Unmarshal(result.Body.Bytes(), &value) != nil {
+			t.Fatalf("sync: %d %s", result.Code, result.Body.String())
+		}
+		return value.PackageSequence
+	}
+	if got := sequence(); got != 0 {
+		t.Fatalf("a node without packages reported sequence %d", got)
+	}
+	root := fixture.server.Cfg.DBPath + ".packages/inbe"
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for text, want := range map[string]int64{
+		`{"app_id":"inbe","sequence":23}`:       23,
+		`{"app_id":"inbe.diary","sequence":24}`: 0,
+		`{"app_id":"inbe","sequence":"x"}`:      0,
+		`{`:                                     0,
+	} {
+		if err := os.WriteFile(root+"/latest-v2.json", []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if got := sequence(); got != want {
+			t.Fatalf("%s: package sequence %d, want %d", text, got, want)
+		}
 	}
 }

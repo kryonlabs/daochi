@@ -153,6 +153,20 @@ Older :: (context: registry.Registry, request: *http.Request, root: string,
 }
 
 #scope_export
+// Only a hint for apps to check for updates; the update itself is verified.
+LatestSequence :: (dbPath: string, appID: string) -> s64 {
+    if !identity.ValidNamespace(appID) {
+        return 0
+    }
+    metadata := files.ReadFile(Join(Join(dbPath, ".packages/"), Join(appID, "/latest-v2.json")))
+    value: release.ReleaseV2
+    if metadata.error != null || metadata.value.count > 65536 ||
+    json.Unmarshal(metadata.value, *value) != null || value.AppID != appID || value.Sequence < 0 {
+        return 0
+    }
+    return value.Sequence
+}
+
 Route :: (context: registry.Registry, writer: http.ResponseWriter,
     request: *http.Request) {
     path := TrimPrefix(url.Path(http.RequestURL(request)), "/api/v2/packages/")

@@ -28,6 +28,7 @@ response :: #import "response";
 pages :: #import "record_sync";
 storage :: #import "account_storage";
 history :: #import "state_history";
+packages :: #import "package_http";
 http :: #import "std/http_go";
 sql :: #import "std/sql_go";
 errors :: #import "std/errors_go";
@@ -362,6 +363,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     value.Applied = result
     accountStorage := storage.Report(used.value, storageLimit)
     value.AccountStorage = *accountStorage
+    value.PackageSequence = packages.LatestSequence(sync.configuration.DBPath, input.AppID)
     value.AccountAlias = alias.value
     value.ProfileIcon = icon.value
     value.ServerVersion = serverVersion

@@ -70,6 +70,7 @@ type SyncResponse struct {
 	LegacyProjectionEpoch             int64              "json:\"legacy_projection_epoch,omitempty\""
 	Diagnostics                       *SyncDiagnostics   "json:\"diagnostics,omitempty\""
 	AccountStorage                    *AccountStorage    "json:\"account_storage,omitempty\""
+	PackageSequence                   int64              "json:\"package_sequence,omitempty\""
 }
 
 type AccountStorage struct {

@@ -15,6 +15,7 @@ builtin :: #system_library "go:builtin";
 
 Feedback :: struct {
     account_id: string #go_tag "json:\"account_id,omitempty\""
+    account_alias: string #go_tag "json:\"account_alias,omitempty\""
     id: string #go_tag "json:\"id\""
     app_id: string #go_tag "json:\"app_id\""
     title: string #go_tag "json:\"title\""
@@ -112,7 +113,8 @@ List :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request
         query = "SELECT id,app_id,'','','',reply,created_at FROM server_app_feedback WHERE account_id=?1 AND reply<>'' ORDER BY created_at DESC,id DESC LIMIT 2 OFFSET ?2"
     }
     if admin {
-        query = "SELECT id,app_id,title,message,context,reply,created_at,account_id FROM server_app_feedback ORDER BY created_at DESC,id DESC LIMIT 100"
+        // The operator inbox names each reporting account by its public alias.
+        query = "SELECT f.id,f.app_id,f.title,f.message,f.context,f.reply,f.created_at,f.account_id,COALESCE(u.alias,'') FROM server_app_feedback f LEFT JOIN server_users u ON u.user_id_hash=f.account_id ORDER BY f.created_at DESC,f.id DESC LIMIT 100"
     }
     queried := sql.Query(service.database, http.Context(request), query,
         ifx admin then arguments[0:0] else ifx replies then page_arguments[:] else arguments[:])
@@ -125,7 +127,7 @@ List :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request
     value: FeedbackList
     while sql.Next(rows) {
         item: Feedback
-        destinations: [8]Any = .[*item.id, *item.app_id, *item.title, *item.message, *item.context, *item.reply, *item.created_at, *item.account_id]
+        destinations: [9]Any = .[*item.id, *item.app_id, *item.title, *item.message, *item.context, *item.reply, *item.created_at, *item.account_id, *item.account_alias]
         if sql.ScanRows(rows, ifx admin then destinations[:] else destinations[0:7]) != null {
             response.Error(writer, cast(isize)503, "feedback unavailable")
             return

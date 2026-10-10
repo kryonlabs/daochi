@@ -31,7 +31,8 @@ Reports contain the user's message and app diagnostics, without copying diary,
 task or habit content into diagnostics.
 
 The developer harness reads `GET /api/v1/admin/feedback` with `X-Daochi-Admin`.
-The inbox includes `account_id`. Reply through
+The inbox includes `account_id` and the account's public `account_alias` (empty
+when it has none). Reply through
 `POST /api/v1/admin/feedback/reply` with `account_id`, `id` and `reply`.
 Both operator endpoints are disabled unless `DAOCHI_FEEDBACK_TOKEN_FILE`,
 `DAOCHI_FEEDBACK_TOKEN` or the existing `DAOCHI_ADMIN_TOKEN` is configured.

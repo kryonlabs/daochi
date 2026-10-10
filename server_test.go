@@ -2744,6 +2744,24 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		t.Fatalf("sun avg hold should be rejected, status = %d body=%s", res.Code, res.Body.String())
 	}
 
+	// Breathing patterns rank by their own sessions (activity 3), not Wim Hof.
+	syncWithBody(t, handler, "", bob.UserID, bob.Token, []byte(`{"user_id_hash":"`+bob.UserID+`","client_id":"bob-patterns-stats","sessions":[{"id":"bob-patterns-1","started_at":"2026-06-28T01:00:00Z","local_date":`+time.Now().UTC().Format("20060102")+`,"topic":"0","activity":3,"source":"test","rounds_hash":"patterns-1","deleted_at":0,"updated_at":"2026-06-28T01:00:00Z","rounds":[]}]}`))
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=patterns&metric=streak", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("patterns streak status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != bob.UserID || stats.Rows[0].Value != 1 ||
+		stats.Rows[1].UserIDHash != alice.UserID || stats.Rows[1].Value != 0 {
+		t.Fatalf("unexpected patterns streak stats: %#v", stats.Rows)
+	}
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=patterns&metric=avg_hold", bob, nil)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("patterns avg hold should be rejected, status = %d body=%s", res.Code, res.Body.String())
+	}
+
 	res = friendJSONRequest(t, handler, http.MethodDelete, "/api/v1/friends/"+alice.UserID, bob, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("remove status = %d body=%s", res.Code, res.Body.String())

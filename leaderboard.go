@@ -62,7 +62,7 @@ func Leaderboard_DateInteger(Value string) zir_6eb4a12e7d5dd633_IntegerResult {
 	return result
 }
 
-const CalculationVersion = 4
+const CalculationVersion = 5
 
 func Leaderboard_Less(left FriendStatRow, right FriendStatRow) bool {
 	if left.Value != right.Value {
@@ -140,6 +140,9 @@ func Leaderboard_Activity(practice string) int {
 	if practice == "sun_salutation" {
 		return int(2)
 	}
+	if practice == "patterns" {
+		return int(3)
+	}
 	return int(0)
 }
 
@@ -212,7 +215,7 @@ func Leaderboard_Cached(database *Database, context Context, user VisibleStatsUs
 		result.Error = nil
 		return result
 	}
-	if result.Error != nil || sourceVersion != user.SourceVersion || calcVersion != int(4) {
+	if result.Error != nil || sourceVersion != user.SourceVersion || calcVersion != int(5) {
 		return result
 	}
 	var value_4 bool = metric == "streak"
@@ -365,7 +368,7 @@ func Leaderboard_Compute(database *Database, context Context, user VisibleStatsU
 	arguments[2] = practice
 	arguments[3] = metric
 	arguments[4] = user.SourceVersion
-	arguments[5] = 4
+	arguments[5] = 5
 	arguments[6] = result.Value.Value
 	arguments[7] = result.Value.Label
 	arguments[8] = result.Value.LocalDate

@@ -17,7 +17,7 @@ type baselineLeaderboardVisibleStatsUser struct {
 	SourceVersion int64
 }
 
-const baselineLeaderboardLeaderboardStatsCalcVersion = 4
+const baselineLeaderboardLeaderboardStatsCalcVersion = 5
 
 func baselineLeaderboardLeaderboardActivity(practice string) int {
 	switch practice {
@@ -25,6 +25,8 @@ func baselineLeaderboardLeaderboardActivity(practice string) int {
 		return 1
 	case "sun_salutation":
 		return 2
+	case "patterns":
+		return 3
 	default:
 		return 0
 	}

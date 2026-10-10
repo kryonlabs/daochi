@@ -39,7 +39,7 @@ AverageResult :: struct {
     label: string
     error: Error
 }
-CalculationVersion :: 4;
+CalculationVersion :: 5;
 
 #scope_file
 UsersResult :: struct {
@@ -129,6 +129,9 @@ Activity :: (practice: string) -> isize {
     }
     if practice == "sun_salutation" {
         return cast(isize)2
+    }
+    if practice == "patterns" {
+        return cast(isize)3
     }
     return cast(isize)0
 }

@@ -1,0 +1,31 @@
+// Route documentation for the device link mailbox.
+#import "std/go_types"
+#import "std/map_go"
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+
+Paths :: () -> Map(string, Any) {
+    result: Map(string, Any)
+    unused json.Unmarshal(text.ToBytes(DeviceLinkDocument), *result)
+    return result
+}
+
+DeviceLinkDocument :: #string JSON
+{
+  "/api/v1/link/put": {"post": {
+    "summary": "Send one sealed message through a device link",
+    "description": "Body: {\"id\": 32 lowercase hex link ID shown in a QR code, \"slot\": \"request\" or \"response\", \"data\": sealed text up to 16384 bytes}. Each slot is written once. Links expire ten minutes after their first message. Messages are sealed between the two devices; the node relays them without reading them.",
+    "responses": {"200": {"description": "Message stored"}, "400": {"description": "Invalid link, slot or message"}, "409": {"description": "Slot already written"}, "429": {"description": "Rate limit exceeded"}}
+  }},
+  "/api/v1/link/get": {"post": {
+    "summary": "Read a device link slot",
+    "description": "Body: {\"id\", \"slot\"}. Returns {\"data\"} once the other device has written the slot.",
+    "responses": {"200": {"description": "Sealed message"}, "404": {"description": "Waiting for the other device, or the link expired"}, "429": {"description": "Rate limit exceeded"}}
+  }},
+  "/api/v1/link/close": {"post": {
+    "summary": "Forget a device link",
+    "description": "Body: {\"id\"}. Either device closes the link once it is connected or cancelled.",
+    "responses": {"200": {"description": "Link removed"}, "400": {"description": "Invalid link"}}
+  }}
+}
+JSON;

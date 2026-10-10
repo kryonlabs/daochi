@@ -1,0 +1,204 @@
+// A short-lived mailbox that connects a device by QR code. The device showing
+// the code chooses a random link ID; the scanning device and the showing
+// device then exchange at most one request and one response through it. The
+// messages are sealed between the two devices, so Daochi relays opaque text
+// and never sees an account key. Links live in memory and expire after ten
+// minutes; a restart only asks the user to show the code again.
+#import "std/go_types"
+#import "std/map_go"
+#import "std/sync_go"
+clock :: #import "std/time_go";
+http :: #import "std/http_go";
+response :: #import "response";
+body :: #import "http_body";
+strict :: #import "strict_json";
+limiting :: #import "rate_limit";
+address :: #import "client_address";
+strings :: #system_library "go:strings";
+
+LinkInput :: struct {
+    id: string #go_tag "json:\"id\""
+    slot: string #go_tag "json:\"slot,omitempty\""
+    data: string #go_tag "json:\"data,omitempty\""
+}
+
+LinkMessage :: struct {
+    data: string #go_tag "json:\"data\""
+}
+
+LinkStatus :: struct {
+    ok: bool #go_tag "json:\"ok\""
+}
+
+LinkEntry :: struct {
+    Request: string
+    Response: string
+    ExpiresAt: clock.Time
+}
+
+Links :: struct {
+    mu: Mutex
+    entries: Map(string, LinkEntry)
+    limiter: *limiting.RateLimiter
+}
+
+LINK_ID_LENGTH :: 32
+// A sealed account key and its envelope fit well inside this limit.
+LINK_DATA_MAX :: 16384
+LINK_ENTRIES_MAX :: 4096
+
+#scope_file
+Join :: (parts: []string, separator: string) -> string #foreign strings;
+
+device_links: Links;
+
+Lifetime :: () -> clock.Duration {
+    return cast(clock.Duration)600000000000
+}
+
+// Polling twice a second from both devices stays well inside this limit.
+Guard :: (writer: http.ResponseWriter, request: *http.Request) -> bool {
+    Lock(*device_links.mu)
+    if device_links.limiter == null {
+        device_links.limiter = limiting.New()
+    }
+    limiter := device_links.limiter
+    Unlock(*device_links.mu)
+    fields: [2]string = .["device-link:", address.FromRequest(request)]
+    if !limiting.Allow(limiter, Join(fields[:], ""), 300, cast(clock.Duration)60000000000) {
+        response.Error(writer, 429, "device link rate limit exceeded")
+        return false
+    }
+    return true
+}
+
+ReadInput :: (writer: http.ResponseWriter, request: *http.Request, input: *LinkInput) -> bool {
+    raw := body.ReadJSON(writer, request, LINK_DATA_MAX + 1024)
+    if raw.error != null || strict.Decode(raw.value, input) != null ||
+        !IDValid(input.id) {
+        response.Error(writer, 400, "invalid device link")
+        return false
+    }
+    return true
+}
+
+// A link ID is 32 lowercase hexadecimal characters: 128 random bits.
+IDValid :: (value: string) -> bool {
+    if value.count != LINK_ID_LENGTH {
+        return false
+    }
+    for byte: value {
+        digit := byte >= cast(u8)48 && byte <= cast(u8)57
+        letter := byte >= cast(u8)97 && byte <= cast(u8)102
+        if !digit && !letter {
+            return false
+        }
+    }
+    return true
+}
+
+SlotValid :: (slot: string) -> bool {
+    return slot == "request" || slot == "response"
+}
+
+// Removes expired links. The caller holds the lock.
+Prune :: (now: clock.Time) {
+    keys := MapKeys(device_links.entries)
+    for key: keys {
+        entry := MapGet(device_links.entries, key)
+        if clock.After(now, entry.ExpiresAt) {
+            MapDelete(device_links.entries, key)
+        }
+    }
+}
+
+#scope_export
+// Stores one message. Each slot is written once, so a message that a device
+// already sent cannot be replaced by anyone else who learns the link ID.
+Put :: (writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(writer, request) {
+        return
+    }
+    input: LinkInput
+    if !ReadInput(writer, request, *input) {
+        return
+    }
+    if !SlotValid(input.slot) || input.data.count == 0 || input.data.count > LINK_DATA_MAX {
+        response.Error(writer, 400, "invalid device link message")
+        return
+    }
+    now := clock.Now()
+    Lock(*device_links.mu)
+    defer Unlock(*device_links.mu)
+    if MapCount(device_links.entries) >= LINK_ENTRIES_MAX {
+        Prune(now)
+    }
+    // An absent link reads as a zero entry, whose expiry has passed.
+    entry := MapGet(device_links.entries, input.id)
+    if clock.After(now, entry.ExpiresAt) {
+        if MapCount(device_links.entries) >= LINK_ENTRIES_MAX {
+            response.Error(writer, 503, "device links are busy")
+            return
+        }
+        entry = LinkEntry.{ExpiresAt = clock.Add(now, Lifetime())}
+    }
+    if input.slot == "request" {
+        if entry.Request != "" {
+            response.Error(writer, 409, "device link request already sent")
+            return
+        }
+        entry.Request = input.data
+    } else {
+        if entry.Response != "" {
+            response.Error(writer, 409, "device link response already sent")
+            return
+        }
+        entry.Response = input.data
+    }
+    MapSet(device_links.entries, input.id, entry)
+    response.JSON(writer, 200, LinkStatus.{ok = true})
+}
+
+// Returns a slot's message, or 404 while the other device has not sent it.
+Get :: (writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(writer, request) {
+        return
+    }
+    input: LinkInput
+    if !ReadInput(writer, request, *input) {
+        return
+    }
+    if !SlotValid(input.slot) {
+        response.Error(writer, 400, "invalid device link slot")
+        return
+    }
+    now := clock.Now()
+    Lock(*device_links.mu)
+    defer Unlock(*device_links.mu)
+    entry := MapGet(device_links.entries, input.id)
+    if clock.After(now, entry.ExpiresAt) {
+        response.Error(writer, 404, "device link waiting")
+        return
+    }
+    data := ifx input.slot == "request" then entry.Request else entry.Response
+    if data == "" {
+        response.Error(writer, 404, "device link waiting")
+        return
+    }
+    response.JSON(writer, 200, LinkMessage.{data = data})
+}
+
+// Forgets a link once either device is done with it.
+Close :: (writer: http.ResponseWriter, request: *http.Request) {
+    if !Guard(writer, request) {
+        return
+    }
+    input: LinkInput
+    if !ReadInput(writer, request, *input) {
+        return
+    }
+    Lock(*device_links.mu)
+    defer Unlock(*device_links.mu)
+    MapDelete(device_links.entries, input.id)
+    response.JSON(writer, 200, LinkStatus.{ok = true})
+}

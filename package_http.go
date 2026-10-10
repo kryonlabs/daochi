@@ -5,29 +5,137 @@ import (
 	hex "encoding/hex"
 	fmt "fmt"
 	http "net/http"
+	strconv "strconv"
 	strings "strings"
 )
 
 // #import std_go_types
-type zir_c2c2166dca1099f2_Decoded struct {
+type zir_19886dcfd8e5ae3d_Decoded struct {
 	Value []uint8
 	Error Error
 }
 
-type zir_36836ada4d48137e_WriteResult struct {
+type zir_9d9d51abad2885b9_WriteResult struct {
 	Count int
 	Error Error
 }
 
-func PackageHttp_Decode(Value string) zir_c2c2166dca1099f2_Decoded {
-	var result zir_c2c2166dca1099f2_Decoded
+type Number struct {
+	Value int64
+	Error Error
+}
+
+type Interfaces struct {
+	Host   int64
+	Module int64
+	Valid  bool
+}
+
+type Selected struct {
+	Value ReleaseV2
+	Found bool
+}
+
+func PackageHttp_ParseNumber(Value string, Base int, Bits int) Number {
+	var result Number
+	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
+	return result
+}
+
+func PackageHttp_Decode(Value string) zir_19886dcfd8e5ae3d_Decoded {
+	var result zir_19886dcfd8e5ae3d_Decoded
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }
 
-func PackageHttp_Write(Writer ResponseWriter, Bytes []uint8) zir_36836ada4d48137e_WriteResult {
-	var result zir_36836ada4d48137e_WriteResult
+func PackageHttp_Write(Writer ResponseWriter, Bytes []uint8) zir_9d9d51abad2885b9_WriteResult {
+	var result zir_9d9d51abad2885b9_WriteResult
 	result.Count, result.Error = (http.ResponseWriter).Write(Writer, Bytes)
+	return result
+}
+
+func PackageHttp_Interface(value string) int64 {
+	if value == "" {
+		return 0
+	}
+	number := PackageHttp_ParseNumber(value, int(int(10)), int(int(64)))
+	if number.Error != nil || number.Value < 1 || number.Value > 65535 {
+		return -1
+	}
+	return number.Value
+}
+
+func PackageHttp_Wanted(request *Request) Interfaces {
+	query := StdUrlGo_Query(StdHttpGo_RequestURL(request))
+	var result Interfaces = Interfaces{}
+	result.Host = PackageHttp_Interface(StdUrlGo_Value(query, "host_api"))
+	result.Module = PackageHttp_Interface(StdUrlGo_Value(query, "module_api"))
+	result.Valid = result.Host >= 0 && result.Module >= 0
+	return result
+}
+
+func PackageHttp_Fits(value ReleaseV2, wanted Interfaces) bool {
+	return (wanted.Host == 0 || value.HostAPI <= wanted.Host) && (wanted.Module == 0 || value.ModuleAPI == wanted.Module)
+}
+
+func PackageHttp_Trusted(context Registry, request *Request, value ReleaseV2) bool {
+	key := AppStore_ActiveKey(context.Database, StdHttpGo_Context(request), value.AppID, value.KeyID)
+	public := PackageHttp_Decode(key.Value.PublicKey)
+	signature := PackageHttp_Decode(value.Signature)
+	var value_0 bool = key.Error == nil && key.Found && key.Value.Algorithm == "ed25519"
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = key.Value.ExpiresAt <= 0
+		if !value_2 {
+			var value_3 bool = key.Value.ExpiresAt > StdTimeGo_Unix(StdTimeGo_Now())
+			value_2 = value_3
+		}
+		value_1 = value_2
+	}
+	var value_4 bool = value_1 && public.Error == nil && int64(len(public.Value)) == 32 && signature.Error == nil && int64(len(signature.Value)) == 64
+	var value_5 bool = value_4
+	var value_6 bool = value_5
+	if value_6 {
+		var value_7 bool = StdEd25519Go_Verify(PublicKey(public.Value), StdTextGo_ToBytes(PackageRelease_SigningMessage(value)), signature.Value)
+		value_6 = value_7
+	}
+	return value_6
+}
+
+func PackageHttp_Older(context Registry, request *Request, root string, appID string, latest int64, wanted Interfaces) Selected {
+	var result Selected = Selected{}
+	sequence := latest - 1
+	for sequence > 0 && sequence > latest-256 {
+		metadata := StdFileGo_ReadFile(fmt.Sprint(root, fmt.Sprint(fmt.Sprint("release-", fmt.Sprint(int64(sequence))), ".json")))
+		if metadata.Error == nil && int64(len(metadata.Value)) <= 65536 {
+			var value ReleaseV2 = ReleaseV2{}
+			var value_0 Error = StdJsonGo_Unmarshal(metadata.Value, &(value))
+			var value_1 bool = value_0 == nil && value.Sequence == sequence
+			var value_2 bool = value_1
+			if value_2 {
+				var value_3 bool = PackageRelease_Valid(value, appID)
+				value_2 = value_3
+			}
+			var value_4 bool = value_2
+			var value_5 bool = value_4
+			if value_5 {
+				var value_6 bool = PackageHttp_Fits(value, wanted)
+				value_5 = value_6
+			}
+			var value_7 bool = value_5
+			var value_8 bool = value_7
+			if value_8 {
+				var value_9 bool = PackageHttp_Trusted(context, request, value)
+				value_8 = value_9
+			}
+			if value_8 {
+				result.Value = value
+				result.Found = true
+				return result
+			}
+		}
+		sequence--
+	}
 	return result
 }
 
@@ -102,52 +210,46 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		Response_Error(writer, 503, "invalid portable release")
 		return
 	}
-	var value_15 Context = StdHttpGo_Context(request)
-	key := AppStore_ActiveKey(context.Database, value_15, appID, value.KeyID)
-	public := PackageHttp_Decode(key.Value.PublicKey)
-	signature := PackageHttp_Decode(value.Signature)
-	var value_16 bool = key.Error != nil || !key.Found || key.Value.Algorithm != "ed25519"
-	var value_17 bool = value_16
-	if !value_17 {
-		var value_18 bool = key.Value.ExpiresAt > 0
-		if value_18 {
-			var value_19 bool = key.Value.ExpiresAt <= StdTimeGo_Unix(StdTimeGo_Now())
-			value_18 = value_19
-		}
-		value_17 = value_18
-	}
-	var value_20 bool = value_17 || public.Error != nil || int64(len(public.Value)) != 32 || signature.Error != nil || int64(len(signature.Value)) != 64
-	var value_21 bool = value_20
-	var value_22 bool = value_21
-	if !value_22 {
-		var value_23 bool = StdEd25519Go_Verify(PublicKey(public.Value), StdTextGo_ToBytes(PackageRelease_SigningMessage(value)), signature.Value)
-		value_22 = !value_23
-	}
-	if value_22 {
+	var value_15 bool = PackageHttp_Trusted(context, request, value)
+	if !value_15 {
 		Response_Error(writer, 503, "untrusted portable release")
 		return
 	}
 	if parts[1] == "latest" {
+		wanted := PackageHttp_Wanted(request)
+		if !wanted.Valid {
+			Response_Error(writer, 400, "invalid interface version")
+			return
+		}
+		var value_16 bool = PackageHttp_Fits(value, wanted)
+		if !value_16 {
+			older := PackageHttp_Older(context, request, root, appID, value.Sequence, wanted)
+			if !older.Found {
+				Response_Error(writer, 404, "no release for this app version")
+				return
+			}
+			value = older.Value
+		}
 		StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "no-store")
 		Response_JSON(writer, 200, value)
 		return
 	}
 	var expected int64 = 0
 	{
-		value_24 := value.Artifacts[:]
-		if int64(0) < 0 || int64(int64(len(value_24))) < int64(0) || int64(int64(len(value_24))) > int64(len(value_24)) {
+		value_17 := value.Artifacts[:]
+		if int64(0) < 0 || int64(int64(len(value_17))) < int64(0) || int64(int64(len(value_17))) > int64(len(value_17)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_50 := value_24[0:int64(len(value_24)):int64(len(value_24))]
-		loop_count_50 := int64(len(loop_view_50))
-		var loop_cursor_50 int64 = 0
-		for loop_cursor_50 < loop_count_50 {
-			loop_index_50 := loop_cursor_50
-			artifact := loop_view_50[loop_index_50]
+		loop_view_60 := value_17[0:int64(len(value_17)):int64(len(value_17))]
+		loop_count_60 := int64(len(loop_view_60))
+		var loop_cursor_60 int64 = 0
+		for loop_cursor_60 < loop_count_60 {
+			loop_index_60 := loop_cursor_60
+			artifact := loop_view_60[loop_index_60]
 			if artifact.SHA256 == hash {
 				expected = artifact.Size
 			}
-			loop_cursor_50++
+			loop_cursor_60++
 		}
 	}
 	if expected == 0 {
@@ -155,13 +257,13 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		return
 	}
 	bundle := StdFileGo_ReadFile(fmt.Sprint(root, parts[1]))
-	var value_25 bool = bundle.Error != nil || int64(len(bundle.Value)) != expected
-	var value_26 bool = value_25
-	if !value_26 {
-		var value_27 bool = Signing_SHA256Hex(bundle.Value) != hash
-		value_26 = value_27
+	var value_18 bool = bundle.Error != nil || int64(len(bundle.Value)) != expected
+	var value_19 bool = value_18
+	if !value_19 {
+		var value_20 bool = Signing_SHA256Hex(bundle.Value) != hash
+		value_19 = value_20
 	}
-	if value_26 {
+	if value_19 {
 		Response_Error(writer, 503, "portable release bytes do not match")
 		return
 	}

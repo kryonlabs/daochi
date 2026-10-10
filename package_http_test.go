@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestIndependentPackageReleases(t *testing.T) {
@@ -207,7 +208,8 @@ func TestPackageReleaseForOlderHosts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rollout(`{"sequence":4,"percent":20}`)
+	until := time.Now().Add(time.Hour).Unix()
+	rollout(fmt.Sprintf(`{"sequence":4,"percent":20,"until":%d}`, until))
 	for query, sequence := range map[string]int64{
 		"?bucket=0": 4, "?bucket=19": 4, "?bucket=20": 1, "?bucket=99": 1, "": 1,
 		"?host_api=6&bucket=5": 4, "?host_api=6&bucket=50": 1,
@@ -219,7 +221,10 @@ func TestPackageReleaseForOlderHosts(t *testing.T) {
 	for _, query := range []string{"?bucket=100", "?bucket=-1", "?bucket=x"} {
 		latest(query, 400)
 	}
-	for _, text := range []string{`{"sequence":3,"percent":20}`, `{"sequence":4,"percent":100}`, "{", ""} {
+	for _, text := range []string{fmt.Sprintf(`{"sequence":3,"percent":20,"until":%d}`, until),
+		fmt.Sprintf(`{"sequence":4,"percent":100,"until":%d}`, until),
+		fmt.Sprintf(`{"sequence":4,"percent":20,"until":%d}`, time.Now().Add(-time.Second).Unix()),
+		`{"sequence":4,"percent":20}`, "{", ""} {
 		rollout(text)
 		if value := latest("?bucket=80", 200); value.Sequence != newest.Sequence {
 			t.Fatalf("rollout %q held back a released version: %d", text, value.Sequence)

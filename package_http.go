@@ -39,6 +39,7 @@ type Selected struct {
 type Rollout struct {
 	Sequence int64 "json:\"sequence\""
 	Percent  int64 "json:\"percent\""
+	Until    int64 "json:\"until\""
 }
 
 func PackageHttp_ParseNumber(Value string, Base int, Bits int) Number {
@@ -89,7 +90,14 @@ func PackageHttp_HeldBack(root string, sequence int64, bucket int64) bool {
 	}
 	var rollout Rollout = Rollout{}
 	var value_0 Error = StdJsonGo_Unmarshal(metadata.Value, &(rollout))
-	if value_0 != nil || rollout.Sequence != sequence || rollout.Percent < 0 || rollout.Percent >= 100 {
+	var value_1 bool = value_0 != nil || rollout.Sequence != sequence || rollout.Percent < 0 || rollout.Percent >= 100
+	var value_2 bool = value_1
+	if !value_2 {
+		var value_3 int64 = rollout.Until
+		var value_4 bool = value_3 <= StdTimeGo_Unix(StdTimeGo_Now())
+		value_2 = value_4
+	}
+	if value_2 {
 		return false
 	}
 	return bucket >= rollout.Percent

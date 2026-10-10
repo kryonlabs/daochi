@@ -49,6 +49,7 @@ Selected :: struct {
 Rollout :: struct {
     Sequence: s64 #go_tag "json:\"sequence\""
     Percent: s64 #go_tag "json:\"percent\""
+    Until: s64 #go_tag "json:\"until\""
 }
 ParseNumber :: (value: string, base: isize, bits: isize) -> Number #go_results #foreign strconv "ParseInt";
 Sequence :: (sequence: s64) -> string #foreign fmt "Sprint";
@@ -85,7 +86,8 @@ Bucket :: (request: *http.Request) -> s64 {
     return number.value
 }
 
-// A missing or unreadable rollout file releases to everyone.
+// A missing, unreadable or expired rollout file releases to everyone, so a
+// staged release never stays held back without a publisher.
 HeldBack :: (root: string, sequence: s64, bucket: s64) -> bool {
     metadata := files.ReadFile(Join(root, "rollout.json"))
     if metadata.error != null || metadata.value.count > 4096 {
@@ -93,7 +95,7 @@ HeldBack :: (root: string, sequence: s64, bucket: s64) -> bool {
     }
     rollout: Rollout
     if json.Unmarshal(metadata.value, *rollout) != null || rollout.Sequence != sequence ||
-    rollout.Percent < 0 || rollout.Percent >= 100 {
+    rollout.Percent < 0 || rollout.Percent >= 100 || rollout.Until <= clock.Unix(clock.Now()) {
         return false
     }
     return bucket >= rollout.Percent

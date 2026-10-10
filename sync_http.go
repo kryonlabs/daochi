@@ -27,19 +27,19 @@ type SyncCompletion struct {
 	Transaction SignedTxEnvelope
 }
 
-type zir_f42dd54e2a1e2480_FinishCallback func(*SyncCompletion, Synchronization, *Request)
+type zir_15286655cb9a5381_FinishCallback func(*SyncCompletion, Synchronization, *Request)
 
-type zir_531df467e178e7c3_IntegerResult struct {
+type zir_7018f17255db4d04_IntegerResult struct {
 	Value int64
 	Error Error
 }
 
-func SyncHttp_FinishAtReturn(Callback zir_f42dd54e2a1e2480_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
+func SyncHttp_FinishAtReturn(Callback zir_15286655cb9a5381_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
 	Callback(Completion, Sync, Request)
 }
 
-func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_531df467e178e7c3_IntegerResult {
-	var result zir_531df467e178e7c3_IntegerResult
+func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_7018f17255db4d04_IntegerResult {
+	var result zir_7018f17255db4d04_IntegerResult
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }
@@ -121,7 +121,7 @@ func SyncHttp_ProjectClean(value *SyncResponse, request SyncRequest) {
 func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Request) {
 	StdAtomicGo_Add(&(sync.Counters.SyncRequests), 1)
 	var completion SyncCompletion = SyncCompletion{}
-	var value_3 zir_f42dd54e2a1e2480_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
+	var value_3 zir_15286655cb9a5381_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
 		SyncHttp_Finish(value_0, value_1, value_2)
 	}
 	defer SyncHttp_FinishAtReturn(value_3, &(completion), sync, request)
@@ -365,6 +365,8 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	value.Applied = result
 	accountStorage := AccountStorage_Report(used.Value, storageLimit)
 	value.AccountStorage = &(accountStorage)
+	var value_21 int64 = PackageHttp_LatestSequence(sync.Configuration.DBPath, input.AppID)
+	value.PackageSequence = value_21
 	value.AccountAlias = alias.Value
 	value.ProfileIcon = icon.Value
 	value.ServerVersion = serverVersion
@@ -385,13 +387,13 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	diagnostics.EffectiveSinceServerVersion = sinceVersion
 	diagnostics.ClientClock = input.ClientClock
 	diagnostics.CompactedThroughVersion = compactedThrough
-	var value_21 bool = SyncRequest_HasLocalChanges(input)
-	diagnostics.HasLocalChanges = value_21
+	var value_22 bool = SyncRequest_HasLocalChanges(input)
+	diagnostics.HasLocalChanges = value_22
 	diagnostics.AcceptedOps = int(int64(len(accepted)))
 	diagnostics.RemoteOps = int(int64(len(remote)))
 	diagnostics.AppliedInput = result
-	var value_22 SyncResult = SyncHttp_ChangesResult(changes)
-	diagnostics.ReturnedChanges = value_22
+	var value_23 SyncResult = SyncHttp_ChangesResult(changes)
+	diagnostics.ReturnedChanges = value_23
 	value.Diagnostics = &(diagnostics)
 	if input.ProtocolVersion >= int(3) {
 		error = HabitMigration_ForProtocol(sync.Database, context, input.UserIDHash, input.ProtocolVersion)
@@ -449,8 +451,8 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	value.LegacyWriteRequired = policy.Required
 	value.LegacyProjectionEpoch = policy.Epoch
 	if value.Diagnostics != nil {
-		var value_23 SyncResult = SyncHttp_ChangesResult(value.Changes)
-		value.Diagnostics.ReturnedChanges = value_23
+		var value_24 SyncResult = SyncHttp_ChangesResult(value.Changes)
+		value.Diagnostics.ReturnedChanges = value_24
 	}
 	if result.EncryptedRecords > int(0) {
 		StdAtomicGo_Add(&(sync.Counters.SyncEncryptedRecords), uint64(result.EncryptedRecords))
@@ -469,15 +471,15 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	entry.SnapshotReason = snapshotReason
 	error = StateHistory_Record(sync.Database, context, input.UserIDHash, value.ServerVersion, value.ServerStateHash)
 	if error != nil {
-		var value_24 string = LogSafety_LogText(input.UserIDHash)
-		var value_25 string = LogSafety_LogText(input.ClientID)
-		slog.Error("record sync state history", "user", value_24, "client", value_25, "error", error)
+		var value_25 string = LogSafety_LogText(input.UserIDHash)
+		var value_26 string = LogSafety_LogText(input.ClientID)
+		slog.Error("record sync state history", "user", value_25, "client", value_26, "error", error)
 	}
 	error = SyncAudit_Record(sync.Database, context, entry)
 	if error != nil {
-		var value_26 string = LogSafety_LogText(input.UserIDHash)
-		var value_27 string = LogSafety_LogText(input.ClientID)
-		slog.Error("record sync audit", "user", value_26, "client", value_27, "error", error)
+		var value_27 string = LogSafety_LogText(input.UserIDHash)
+		var value_28 string = LogSafety_LogText(input.ClientID)
+		slog.Error("record sync audit", "user", value_27, "client", value_28, "error", error)
 	}
 	completion.Complete = true
 	Response_JSON(writer, int(200), value)

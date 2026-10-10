@@ -71,6 +71,9 @@ SyncResponse :: struct {
     LegacyProjectionEpoch: s64 #go_tag "json:\"legacy_projection_epoch,omitempty\""
     Diagnostics: *SyncDiagnostics #go_tag "json:\"diagnostics,omitempty\""
     AccountStorage: *AccountStorage #go_tag "json:\"account_storage,omitempty\""
+    // The newest sequence of the app's root package. Every package release
+    // advances it, so a change tells a running app to check for updates.
+    PackageSequence: s64 #go_tag "json:\"package_sequence,omitempty\""
 }
 
 // Stored bytes for the signed-in account; a zero limit means no node limit.

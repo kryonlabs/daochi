@@ -8,14 +8,15 @@ import (
 
 // #import std_go_types
 type Feedback struct {
-	AccountId string "json:\"account_id,omitempty\""
-	ID        string "json:\"id\""
-	AppId     string "json:\"app_id\""
-	Title     string "json:\"title\""
-	Message   string "json:\"message\""
-	Context   string "json:\"context\""
-	Reply     string "json:\"reply\""
-	CreatedAt string "json:\"created_at\""
+	AccountId    string "json:\"account_id,omitempty\""
+	AccountAlias string "json:\"account_alias,omitempty\""
+	ID           string "json:\"id\""
+	AppId        string "json:\"app_id\""
+	Title        string "json:\"title\""
+	Message      string "json:\"message\""
+	Context      string "json:\"context\""
+	Reply        string "json:\"reply\""
+	CreatedAt    string "json:\"created_at\""
 }
 
 type FeedbackList struct {
@@ -141,7 +142,7 @@ func FeedbackHttp_List(service Chat, writer ResponseWriter, request *Request, ad
 		query = "SELECT id,app_id,'','','',reply,created_at FROM server_app_feedback WHERE account_id=?1 AND reply<>'' ORDER BY created_at DESC,id DESC LIMIT 2 OFFSET ?2"
 	}
 	if admin {
-		query = "SELECT id,app_id,title,message,context,reply,created_at,account_id FROM server_app_feedback ORDER BY created_at DESC,id DESC LIMIT 100"
+		query = "SELECT f.id,f.app_id,f.title,f.message,f.context,f.reply,f.created_at,f.account_id,COALESCE(u.alias,'') FROM server_app_feedback f LEFT JOIN server_users u ON u.user_id_hash=f.account_id ORDER BY f.created_at DESC,f.id DESC LIMIT 100"
 	}
 	var value_5 Context = StdHttpGo_Context(request)
 	var value_6 []Any = nil
@@ -166,7 +167,7 @@ func FeedbackHttp_List(service Chat, writer ResponseWriter, request *Request, ad
 	var value FeedbackList = FeedbackList{}
 	for StdSqlGo_Next(rows) {
 		var item Feedback = Feedback{}
-		var value_8 [8]Any
+		var value_8 [9]Any
 		value_8[0] = &(item.ID)
 		value_8[1] = &(item.AppId)
 		value_8[2] = &(item.Title)
@@ -175,11 +176,12 @@ func FeedbackHttp_List(service Chat, writer ResponseWriter, request *Request, ad
 		value_8[5] = &(item.Reply)
 		value_8[6] = &(item.CreatedAt)
 		value_8[7] = &(item.AccountId)
+		value_8[8] = &(item.AccountAlias)
 		destinations := value_8
 		_ = destinations
 		var value_9 []Any = nil
 		if admin {
-			value_9 = destinations[0:8:8]
+			value_9 = destinations[0:9:9]
 		} else {
 			value_9 = destinations[0:7:7]
 		}

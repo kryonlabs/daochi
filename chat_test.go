@@ -321,4 +321,20 @@ func TestFeedbackRetryPrivacyAndDeveloperReply(t *testing.T) {
 	if strings.Count(out.Body.String(), "freezes") != 1 || !strings.Contains(out.Body.String(), "Fixed in the next update") {
 		t.Fatalf("feedback lost or duplicated: %s", out.Body.String())
 	}
+	alias := httptest.NewRequest(http.MethodPost, "/api/v1/account/alias", strings.NewReader(`{"user_id_hash":"`+first.UserID+`","alias":"@reporter"}`))
+	alias.Header.Set("Content-Type", "application/json")
+	alias.Header.Set("X-Daochi-User", first.UserID)
+	alias.Header.Set("Authorization", "Bearer "+first.Token)
+	out = httptest.NewRecorder()
+	handler.ServeHTTP(out, alias)
+	if out.Code != 200 {
+		t.Fatalf("reporter alias: %d %s", out.Code, out.Body.String())
+	}
+	inbox := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feedback", nil)
+	inbox.Header.Set("X-Daochi-Admin", "developer-token")
+	out = httptest.NewRecorder()
+	handler.ServeHTTP(out, inbox)
+	if out.Code != 200 || !strings.Contains(out.Body.String(), `"account_id":"`+first.UserID+`","account_alias":"reporter"`) {
+		t.Fatalf("operator inbox does not name the reporting account: %d %s", out.Code, out.Body.String())
+	}
 }

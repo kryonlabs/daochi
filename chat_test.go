@@ -102,12 +102,15 @@ func TestChatAccountAuthenticationToolsAndPersistentQuota(t *testing.T) {
 		if json.NewDecoder(r.Body).Decode(&data) != nil {
 			t.Error("invalid provider JSON")
 		}
-		if data["model"] != "glm-4.7-flash" || data["max_tokens"] != float64(256) {
+		if data["model"] != "glm-4.7-flash" || data["max_tokens"] != float64(512) {
 			t.Error("provider budget or model changed")
 		}
 		messages := data["messages"].([]any)
 		if !strings.Contains(messages[0].(map[string]any)["content"].(string), "report_feedback") {
 			t.Error("feedback instructions missing")
+		}
+		if !strings.Contains(messages[0].(map[string]any)["content"].(string), "done_last_14_days") {
+			t.Error("coaching instructions missing")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"report_feedback","arguments":"{\"title\":\"Lag\",\"message\":\"Lumi freezes\"}"}}]}}]}`))

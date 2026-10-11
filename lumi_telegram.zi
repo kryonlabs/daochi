@@ -414,7 +414,7 @@ Webhook :: (service: chat.Chat, entryService: entries.AccountEntries, writer: ht
                 return
             }
         } else {
-            notice := ifx linked then "You are connected. Write to me here, or open Inner Breeze for your full Lumi history." else "Open Inner Breeze, sign in, then tap Connect Telegram in Settings to link this chat."
+            notice := ifx linked then "You are connected. Write to me here, or open Inner Breeze for your full Lumi history." else "Open Inner Breeze, sign in, then open Profile, Telegram input, and tap Connect Telegram to link this chat."
             unused transport.Deliver(service.configuration.LumiBotToken, sender.id, notice, "", service.configuration.LumiCanvasURL)
         }
         response.JSON(writer, cast(isize)200, true)

@@ -124,7 +124,7 @@ func LumiCommands_Help(linked bool) string {
 		var value_1 string = "Lumi answers while Inner Breeze is open on one of your devices. Write normally or use a command:\n\n"
 		value_0 = value_1
 	} else {
-		value_0 = "Open Inner Breeze, sign in, then tap Connect Telegram in Settings to link this chat.\n\n"
+		value_0 = "Open Inner Breeze, sign in, then open Profile, Telegram input, and tap Connect Telegram to link this chat.\n\n"
 	}
 	introduction := value_0
 	output := introduction

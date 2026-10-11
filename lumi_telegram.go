@@ -549,7 +549,7 @@ func LumiTelegram_Webhook(service Chat, entryService AccountEntries, writer Resp
 			if linked {
 				value_18 = "You are connected. Write to me here, or open Inner Breeze for your full Lumi history."
 			} else {
-				value_18 = "Open Inner Breeze, sign in, then tap Connect Telegram in Settings to link this chat."
+				value_18 = "Open Inner Breeze, sign in, then open Profile, Telegram input, and tap Connect Telegram to link this chat."
 			}
 			notice := value_18
 			_ = notice

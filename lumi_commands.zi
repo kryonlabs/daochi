@@ -88,7 +88,7 @@ Usage :: (command: string) -> string {
 }
 
 Help :: (linked: bool) -> string {
-    introduction := ifx linked then "Lumi answers while Inner Breeze is open on one of your devices. Write normally or use a command:\n\n" else "Open Inner Breeze, sign in, then tap Connect Telegram in Settings to link this chat.\n\n"
+    introduction := ifx linked then "Lumi answers while Inner Breeze is open on one of your devices. Write normally or use a command:\n\n" else "Open Inner Breeze, sign in, then open Profile, Telegram input, and tap Connect Telegram to link this chat.\n\n"
     output := introduction
     for item: Catalogue() {
         parts: [6]string = .[output, "/", item.command, " — ", item.description, "\n"]

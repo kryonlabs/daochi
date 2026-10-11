@@ -327,6 +327,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "GET /metrics", server, HandleMetrics)
     Route(mux, "GET /api/v1/apps", server, HandleAppHttpList)
     Route(mux, "POST /api/v1/chat/completions", server, HandleChat)
+    Route(mux, "POST /api/v1/chat/spelling", server, HandleSpelling)
     Route(mux, "POST /api/v1/lumi/telegram/link", server, HandleLumiLink)
     Route(mux, "DELETE /api/v1/lumi/telegram/link", server, HandleLumiUnlink)
     Route(mux, "GET /api/v1/lumi/telegram/updates", server, HandleLumiPoll)
@@ -421,6 +422,9 @@ ChatService :: (server: *Server) -> chat.Chat {
 }
 HandleChat :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     chat.Complete(ChatService(server), writer, request)
+}
+HandleSpelling :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    chat.Spelling(ChatService(server), writer, request)
 }
 HandleFeedbackSubmit :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     feedback.Submit(ChatService(server), writer, request)

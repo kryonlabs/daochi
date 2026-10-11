@@ -2095,6 +2095,7 @@ Paths :: () -> Map(string, Any) {
     MapInit(result)
     additions := chat_paths.Paths()
     MapSet(result, "/api/v1/chat/completions", MapGet(additions, "/api/v1/chat/completions"))
+    MapSet(result, "/api/v1/chat/spelling", MapGet(additions, "/api/v1/chat/spelling"))
     MapSet(result, "/api/v1/feedback", MapGet(additions, "/api/v1/feedback"))
     MapSet(result, "/api/v1/admin/feedback", MapGet(additions, "/api/v1/admin/feedback"))
     MapSet(result, "/api/v1/admin/feedback/reply", MapGet(additions, "/api/v1/admin/feedback/reply"))

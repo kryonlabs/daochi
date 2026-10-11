@@ -338,3 +338,88 @@ func TestFeedbackRetryPrivacyAndDeveloperReply(t *testing.T) {
 		t.Fatalf("operator inbox does not name the reporting account: %d %s", out.Code, out.Body.String())
 	}
 }
+
+func TestSpellingCorrectsTextAndSharesChatAllowance(t *testing.T) {
+	server, _, _ := testServer(t)
+	server.Cfg.ChatAPIKey = "server-only-key"
+	server.Cfg.ChatModel = "glm-4.7-flash"
+	server.Cfg.ChatDailyLimit = 2
+	server.Cfg.ChatGlobalDailyLimit = 10
+	var calls atomic.Int32
+	failUpstream := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var payload struct {
+			Model     string `json:"model"`
+			MaxTokens int    `json:"max_tokens"`
+			Thinking  struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Tools []any `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if payload.Model != "glm-4.7-flash" || payload.MaxTokens != 6144 || payload.Thinking.Type != "disabled" || len(payload.Tools) != 0 {
+			t.Errorf("unexpected spelling request: %+v", payload)
+		}
+		if len(payload.Messages) != 2 || payload.Messages[0].Role != "system" || !strings.Contains(payload.Messages[0].Content, "spelling") {
+			t.Errorf("spelling instructions missing: %+v", payload.Messages)
+		}
+		if payload.Messages[1].Role != "user" || payload.Messages[1].Content != "I wnet **home**.\nIt was nice." {
+			t.Errorf("entry was not sent without its surrounding blank space: %q", payload.Messages[1].Content)
+		}
+		if failUpstream {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"\n I went **home**.\nIt was nice.  "}}]}`))
+	}))
+	defer upstream.Close()
+	server.Cfg.ChatAPIEndpoint = upstream.URL
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x7c)
+	entry := `{"text":"\n\n  I wnet **home**.\nIt was nice. \n"}`
+
+	if out := chatRequest(handler, testIdentity{}, "/api/v1/chat/spelling", entry); out.Code != 401 || calls.Load() != 0 {
+		t.Fatalf("unauthorized spelling: %d, calls %d", out.Code, calls.Load())
+	}
+	for _, invalid := range []string{`{"text":"  \n "}`, `{"text":""}`, `{}`, `{"text":"` + strings.Repeat("a", 8193) + `"}`} {
+		if out := chatRequest(handler, identity, "/api/v1/chat/spelling", invalid); out.Code != 400 {
+			t.Fatalf("invalid spelling request %.40q: %d", invalid, out.Code)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("invalid requests reached the provider: %d", calls.Load())
+	}
+
+	out := chatRequest(handler, identity, "/api/v1/chat/spelling", entry)
+	var corrected struct {
+		Text      string `json:"text"`
+		Remaining int64  `json:"remaining"`
+	}
+	if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &corrected) != nil {
+		t.Fatalf("spelling: %d %s", out.Code, out.Body.String())
+	}
+	if corrected.Text != "\n\n  I went **home**.\nIt was nice. \n" || corrected.Remaining != 1 {
+		t.Fatalf("corrected entry: %q, remaining %d", corrected.Text, corrected.Remaining)
+	}
+
+	failUpstream = true
+	if out := chatRequest(handler, identity, "/api/v1/chat/spelling", entry); out.Code != 503 {
+		t.Fatalf("provider failure: %d %s", out.Code, out.Body.String())
+	}
+	// Spelling uses the same daily allowance as online chat.
+	data := `{"messages":[{"role":"user","content":"Hi"}]}`
+	if out := chatRequest(handler, identity, "/api/v1/chat/completions", data); out.Code != 429 {
+		t.Fatalf("spelling did not use the chat allowance: %d", out.Code)
+	}
+	if out := chatRequest(handler, identity, "/api/v1/chat/spelling", entry); out.Code != 429 || calls.Load() != 2 {
+		t.Fatalf("spelling allowance: %d, calls %d", out.Code, calls.Load())
+	}
+}

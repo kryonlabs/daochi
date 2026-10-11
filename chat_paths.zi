@@ -8,7 +8,7 @@ Join :: (parts: []string, separator: string) -> string #foreign strings;
 // Additive OpenAPI documentation for node-hosted chat and private feedback.
 Paths :: () -> Map(string, Any) {
     result: Map(string, Any)
-    parts: [9]string = .["{", Document1, ",", Document2, ",", Document3, ",", Document4, "}"]
+    parts: [11]string = .["{", Document1, ",", Document2, ",", Document3, ",", Document4, ",", Document5, "}"]
     json.Unmarshal(text.ToBytes(Join(parts[:], "")), *result)
     return result
 }
@@ -238,3 +238,53 @@ Document4 :: #string JSON_4
     }
   }
 JSON_4;
+
+Document5 :: #string JSON_5
+"/api/v1/chat/spelling": {
+    "post": {
+      "summary": "Account-limited spelling correction",
+      "description": "Requires a Daochi bearer token and X-Daochi-User. Corrects only misspelled words in one text of up to 8192 bytes and returns the whole text with its surrounding blank space unchanged. The text is not stored. Each request uses one unit of the same daily account and node allowance as online chat. A disabled or unavailable provider returns 503; exhausted allowances return 429.",
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "text"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Corrected text and remaining allowance"
+        },
+        "400": {
+          "description": "Empty or oversized text"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "429": {
+          "description": "Daily allowance exhausted"
+        },
+        "503": {
+          "description": "Online chat unavailable"
+        }
+      }
+    }
+  }
+JSON_5;

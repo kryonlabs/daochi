@@ -549,7 +549,8 @@ func LumiTelegram_Webhook(service Chat, entryService AccountEntries, writer Resp
 			if linked {
 				value_18 = "You are connected. Write to me here, or open Inner Breeze for your full Lumi history."
 			} else {
-				value_18 = "Open Inner Breeze, sign in, then open Profile, Telegram input, and tap Connect Telegram to link this chat."
+				var value_19 string = "Open Inner Breeze, sign in, then open Profile, Telegram input, and tap Connect Telegram to link this chat."
+				value_18 = value_19
 			}
 			notice := value_18
 			_ = notice
@@ -566,16 +567,16 @@ func LumiTelegram_Webhook(service Chat, entryService AccountEntries, writer Resp
 	if callback.ID == "" && int64(len(text)) > 0 && text[0] == 47 {
 		var notice string = ""
 		_ = notice
-		var value_19 bool = LumiCommands_Known(parsed.Name)
-		if !value_19 {
+		var value_20 bool = LumiCommands_Known(parsed.Name)
+		if !value_20 {
 			notice = "Unknown command. Use /help to see Lumi's commands, or send a normal chat message."
 		} else {
 			usage := LumiCommands_Usage(parsed.Name)
 			if usage != "" && !parsed.HasArgument {
-				var value_20 [2]string
-				value_20[0] = "Use "
-				value_20[1] = usage
-				parts := value_20
+				var value_21 [2]string
+				value_21[0] = "Use "
+				value_21[1] = usage
+				parts := value_21
 				_ = parts
 				notice = strings.Join(parts[0:2:2], "")
 			}
@@ -594,18 +595,18 @@ func LumiTelegram_Webhook(service Chat, entryService AccountEntries, writer Resp
 			return
 		}
 		kind = "confirmation"
-		value_21 := callback.Data
-		if int64(1) < 0 || int64(len(value_21)) < int64(1) || int64(len(value_21)) > int64(len(value_21)) {
+		value_22 := callback.Data
+		if int64(1) < 0 || int64(len(value_22)) < int64(1) || int64(len(value_22)) > int64(len(value_22)) {
 			panic("string range out of bounds")
 		}
-		text = value_21[1:len(value_21)]
-		var value_22 int = 0
+		text = value_22[1:len(value_22)]
+		var value_23 int = 0
 		if callback.Data[0] == 89 {
-			value_22 = 1
+			value_23 = 1
 		} else {
-			value_22 = 2
+			value_23 = 2
 		}
-		choice = value_22
+		choice = value_23
 		TelegramTransport_AnswerCallback(service.Configuration.LumiBotToken, callback.ID)
 	}
 	if int64(len(text)) == 0 || int64(len(text)) >= 1024 {
@@ -617,8 +618,8 @@ func LumiTelegram_Webhook(service Chat, entryService AccountEntries, writer Resp
 	arguments[2] = kind
 	arguments[3] = text
 	arguments[4] = choice
-	var value_23 string = "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text,choice) VALUES(?1,?2,?3,?4,?5)"
-	written := StdSqlGo_Exec(service.Database, context, value_23, arguments[0:5:5])
+	var value_24 string = "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text,choice) VALUES(?1,?2,?3,?4,?5)"
+	written := StdSqlGo_Exec(service.Database, context, value_24, arguments[0:5:5])
 	if written.Error != nil {
 		Response_Error(writer, int(503), "app queue unavailable")
 		return

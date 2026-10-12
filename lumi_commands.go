@@ -124,39 +124,40 @@ func LumiCommands_Help(linked bool) string {
 		var value_1 string = "Lumi answers while Inner Breeze is open on one of your devices. Write normally or use a command:\n\n"
 		value_0 = value_1
 	} else {
-		value_0 = "Open Inner Breeze, sign in, then open Profile, Telegram input, and tap Connect Telegram to link this chat.\n\n"
+		var value_2 string = "Open Inner Breeze, sign in, then open Profile, Telegram input, and tap Connect Telegram to link this chat.\n\n"
+		value_0 = value_2
 	}
 	introduction := value_0
 	output := introduction
 	{
-		var value_2 []BotCommand = LumiCommands_Catalogue()
-		if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
+		var value_3 []BotCommand = LumiCommands_Catalogue()
+		if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_2 := value_2[0:int64(len(value_2)):int64(len(value_2))]
+		loop_view_2 := value_3[0:int64(len(value_3)):int64(len(value_3))]
 		loop_count_2 := int64(len(loop_view_2))
 		var loop_cursor_2 int64 = 0
 		for loop_cursor_2 < loop_count_2 {
 			loop_index_2 := loop_cursor_2
 			item := loop_view_2[loop_index_2]
-			var value_4 [6]string
-			value_4[0] = output
-			value_4[1] = "/"
-			value_4[2] = item.Command
-			value_4[3] = " — "
-			value_4[4] = item.Description
-			value_4[5] = "\n"
-			parts := value_4
+			var value_5 [6]string
+			value_5[0] = output
+			value_5[1] = "/"
+			value_5[2] = item.Command
+			value_5[3] = " — "
+			value_5[4] = item.Description
+			value_5[5] = "\n"
+			parts := value_5
 			_ = parts
 			output = strings.Join(parts[0:6:6], "")
 			loop_cursor_2++
 		}
 	}
-	var value_5 [2]string
-	value_5[0] = output
-	var value_6 string = "\nExamples:\n/todo Buy tea\n/done Buy tea\n/habit Drink water\n/journal A calm morning\n/progress meditation 7\n/feedback Describe a problem (asks before sending)"
-	value_5[1] = value_6
-	examples := value_5
+	var value_6 [2]string
+	value_6[0] = output
+	var value_7 string = "\nExamples:\n/todo Buy tea\n/done Buy tea\n/habit Drink water\n/journal A calm morning\n/progress meditation 7\n/feedback Describe a problem (asks before sending)"
+	value_6[1] = value_7
+	examples := value_6
 	_ = examples
 	return strings.Join(examples[0:2:2], "")
 }

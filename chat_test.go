@@ -426,3 +426,180 @@ func TestSpellingCorrectsTextAndSharesChatAllowance(t *testing.T) {
 		t.Fatalf("spelling allowance: %d, calls %d", out.Code, calls.Load())
 	}
 }
+
+func TestHabitIconsChooseOfferedIconsAndShareChatAllowance(t *testing.T) {
+	boundary := HabitIconRequest{}
+	for index := 0; index < 64; index++ {
+		boundary.Icons = append(boundary.Icons, strings.Repeat("a", 30)+strconv.Itoa(index+10))
+	}
+	for index := 0; index < 32; index++ {
+		boundary.Habits = append(boundary.Habits, HabitIconHabit{Name: strings.Repeat("h", 64), Description: strings.Repeat("d", 256)})
+	}
+	if len(boundary.Icons[63]) != 32 || !Chat_ValidHabitIconRequest(boundary) {
+		t.Fatal("the largest valid habit icon request was rejected")
+	}
+
+	server, _, _ := testServer(t)
+	server.Cfg.ChatAPIKey = "server-only-key"
+	server.Cfg.ChatModel = "glm-4.7-flash"
+	server.Cfg.ChatDailyLimit = 3
+	server.Cfg.ChatGlobalDailyLimit = 10
+	const (
+		answerChoices = iota
+		answerFailure
+		answerWrongLength
+	)
+	var calls atomic.Int32
+	var answer atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var payload struct {
+			Model     string `json:"model"`
+			MaxTokens int    `json:"max_tokens"`
+			Thinking  struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Tools []any `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if payload.Model != "glm-4.7-flash" || payload.MaxTokens != 1024 || payload.Thinking.Type != "disabled" || len(payload.Tools) != 0 {
+			t.Errorf("unexpected habit icon request: %+v", payload)
+		}
+		if len(payload.Messages) != 2 || payload.Messages[0].Role != "system" || !strings.Contains(payload.Messages[0].Content, "icon") {
+			t.Errorf("habit icon instructions missing: %+v", payload.Messages)
+		}
+		if len(payload.Messages) == 2 {
+			sent := payload.Messages[1].Content
+			for _, expected := range []string{`"lotus"`, `"fork_knife"`, `"Meditate"`, `"Cook dinner"`, `"Call grandma"`, `"Ten quiet minutes"`} {
+				if payload.Messages[1].Role != "user" || !strings.Contains(sent, expected) {
+					t.Errorf("habit icon document misses %s: %q", expected, sent)
+				}
+			}
+		}
+		switch answer.Load() {
+		case answerFailure:
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		case answerWrongLength:
+			w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"[\"lotus\"]"}}]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"\n` + "```json" + `\n[\"lotus\", \"\", \"telephone\"]\n` + "```" + `\n"}}]}`))
+	}))
+	defer upstream.Close()
+	server.Cfg.ChatAPIEndpoint = upstream.URL
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x7d)
+	path := "/api/v1/chat/habit-icons"
+	habits := `{"icons":["lotus","fork_knife","book"],"habits":[{"name":"Meditate","description":"Ten quiet minutes"},{"name":"Cook dinner"},{"name":"Call grandma","description":""}]}`
+
+	if out := chatRequest(handler, testIdentity{}, path, habits); out.Code != 401 || calls.Load() != 0 {
+		t.Fatalf("unauthorized habit icons: %d, calls %d", out.Code, calls.Load())
+	}
+	distinctIcons := []string{}
+	for index := 0; index < 65; index++ {
+		distinctIcons = append(distinctIcons, "icon_"+strconv.Itoa(index))
+	}
+	manyIcons := `{"icons":["` + strings.Join(distinctIcons, `","`) + `"],"habits":[{"name":"Run"}]}`
+	manyHabits := `{"icons":["run"],"habits":[{"name":"Run"}` + strings.Repeat(`,{"name":"Run"}`, 32) + `]}`
+	invalid := []string{
+		`{}`,
+		`not json`,
+		`{"icons":[],"habits":[{"name":"Run"}]}`,
+		`{"icons":["run"],"habits":[]}`,
+		`{"icons":["run"]}`,
+		`{"habits":[{"name":"Run"}]}`,
+		`{"icons":"run","habits":[{"name":"Run"}]}`,
+		`{"icons":["run"],"habits":[1]}`,
+		`{"icons":[""],"habits":[{"name":"Run"}]}`,
+		`{"icons":[null],"habits":[{"name":"Run"}]}`,
+		`{"icons":["Run"],"habits":[{"name":"Run"}]}`,
+		`{"icons":["fork-knife"],"habits":[{"name":"Run"}]}`,
+		`{"icons":["` + strings.Repeat("a", 33) + `"],"habits":[{"name":"Run"}]}`,
+		`{"icons":["run","run"],"habits":[{"name":"Run"}]}`,
+		manyIcons,
+		manyHabits,
+		`{"icons":["run"],"habits":[{"name":" \n "}]}`,
+		`{"icons":["run"],"habits":[{"description":"Run every day"}]}`,
+		`{"icons":["run"],"habits":[{"name":"` + strings.Repeat("r", 65) + `"}]}`,
+		`{"icons":["run"],"habits":[{"name":"Run","description":"` + strings.Repeat("d", 257) + `"}]}`,
+	}
+	for _, request := range invalid {
+		out := chatRequest(handler, identity, path, request)
+		if out.Code != 400 || !strings.Contains(out.Body.String(), "invalid habit icon request") {
+			t.Fatalf("invalid habit icon request %.60q: %d %s", request, out.Code, out.Body.String())
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("invalid requests reached the provider: %d", calls.Load())
+	}
+
+	out := chatRequest(handler, identity, path, habits)
+	var chosen struct {
+		Icons     []string `json:"icons"`
+		Remaining int64    `json:"remaining"`
+	}
+	if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &chosen) != nil {
+		t.Fatalf("habit icons: %d %s", out.Code, out.Body.String())
+	}
+	if len(chosen.Icons) != 3 || chosen.Icons[0] != "lotus" || chosen.Icons[1] != "" || chosen.Icons[2] != "" || chosen.Remaining != 2 {
+		t.Fatalf("chosen icons: %q, remaining %d", chosen.Icons, chosen.Remaining)
+	}
+
+	answer.Store(answerFailure)
+	if out := chatRequest(handler, identity, path, habits); out.Code != 503 || !strings.Contains(out.Body.String(), "online chat unavailable") {
+		t.Fatalf("provider failure: %d %s", out.Code, out.Body.String())
+	}
+	answer.Store(answerWrongLength)
+	if out := chatRequest(handler, identity, path, habits); out.Code != 503 || !strings.Contains(out.Body.String(), "invalid model response") {
+		t.Fatalf("wrong-length answer: %d %s", out.Code, out.Body.String())
+	}
+	// Habit icons use the same daily allowance as online chat.
+	data := `{"messages":[{"role":"user","content":"Hi"}]}`
+	if out := chatRequest(handler, identity, "/api/v1/chat/completions", data); out.Code != 429 {
+		t.Fatalf("habit icons did not use the chat allowance: %d", out.Code)
+	}
+	if out := chatRequest(handler, identity, path, habits); out.Code != 429 || calls.Load() != 3 {
+		t.Fatalf("habit icon allowance: %d, calls %d", out.Code, calls.Load())
+	}
+}
+
+func TestHabitIconAnswersAreReadStrictly(t *testing.T) {
+	request := HabitIconRequest{
+		Icons:  []string{"lotus", "book"},
+		Habits: []HabitIconHabit{{Name: "Meditate"}, {Name: "Read"}},
+	}
+	cases := []struct {
+		reply string
+		icons []string
+	}{
+		{`["lotus","book"]`, []string{"lotus", "book"}},
+		{" ```JSON\n[\"book\", \"lotus\"]\n``` ", []string{"book", "lotus"}},
+		{"```\n[\"lotus\",null]\n```", []string{"lotus", ""}},
+		{`["Lotus", 3]`, []string{"", ""}},
+		{`[" lotus", "books"]`, []string{"", ""}},
+	}
+	for _, test := range cases {
+		parsed := Chat_ParseHabitIcons(test.reply, request)
+		if !parsed.Valid || len(parsed.Icons) != len(test.icons) {
+			t.Fatalf("reply %q: %+v", test.reply, parsed)
+		}
+		for index := range test.icons {
+			if parsed.Icons[index] != test.icons[index] {
+				t.Fatalf("reply %q: %q", test.reply, parsed.Icons)
+			}
+		}
+	}
+	for _, reply := range []string{``, `lotus`, `null`, `{"icons":["lotus","book"]}`, `["lotus"]`, `["lotus","book","lotus"]`, "```json\n[\"lotus\",\n```"} {
+		if parsed := Chat_ParseHabitIcons(reply, request); parsed.Valid {
+			t.Fatalf("unusable reply %q was accepted: %+v", reply, parsed)
+		}
+	}
+}

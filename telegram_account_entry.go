@@ -1109,6 +1109,10 @@ func TelegramAccountEntry_ziranInit() {
 		panic("cyclic module startup")
 	}
 	TelegramAccountEntry_ziranInitState = 1
+	Authorization_ziranInit()
+	Session_ziranInit()
+	TelegramInit_ziranInit()
+	SignedTx_ziranInit()
 	TelegramTransport_ziranInit()
 	TelegramAccountEntry_ziranInitState = 2
 }

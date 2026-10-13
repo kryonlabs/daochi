@@ -50,7 +50,8 @@ func (s *middlewareBaseline) withCommonHeaders(next http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			Metrics_RecordHTTP(s.metrics, r.Method, r.URL.Path, status, time.Since(start))
+			// Since the 2026-10-13 security fix unmatched paths share one label.
+			Metrics_RecordHTTP(s.metrics, r.Method, Metrics_RouteLabel(r.URL.Path, r.Pattern), status, time.Since(start))
 		}()
 		w = mw
 		w.Header().Set("X-Content-Type-Options", "nosniff")

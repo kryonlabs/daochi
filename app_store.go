@@ -9,6 +9,12 @@ import (
 // #import std_go_types
 // #import manifest
 // #import protocol
+type ManifestSequenceResult struct {
+	Value int64
+	Found bool
+	Error Error
+}
+
 type AppKeyResult struct {
 	Value AppKey
 	Found bool
@@ -62,83 +68,83 @@ type ExistsResult struct {
 	Error Error
 }
 
-type zir_540733553e5c58bb_TransactionResult struct {
+type zir_8cd83731da9eae62_TransactionResult struct {
 	Value *Transaction
 	Error Error
 }
 
-type zir_29bde45da7d805e7_ExecResult struct {
+type zir_00998b9e5dd627ee_ExecResult struct {
 	Value Result
 	Error Error
 }
 
-type zir_add2c8397c1add63_RowsResult struct {
+type zir_84ae6f7a3218ff6a_RowsResult struct {
 	Value *Rows
 	Error Error
 }
 
-func AppStore_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_540733553e5c58bb_TransactionResult {
-	var result zir_540733553e5c58bb_TransactionResult
+func AppStore_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_8cd83731da9eae62_TransactionResult {
+	var result zir_8cd83731da9eae62_TransactionResult
 	result.Value, result.Error = (*sql.DB).BeginTx(Database, Context, Options)
 	return result
 }
 
-func AppStore_DeleteByApp(Transaction *Transaction, Context Context, Query string, AppID string) zir_29bde45da7d805e7_ExecResult {
-	var result zir_29bde45da7d805e7_ExecResult
+func AppStore_DeleteByApp(Transaction *Transaction, Context Context, Query string, AppID string) zir_00998b9e5dd627ee_ExecResult {
+	var result zir_00998b9e5dd627ee_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AppID)
 	return result
 }
 
-func AppStore_InsertApp(Transaction *Transaction, Context Context, Query string, AppID string, Name string, Description string, Homepage string, Source string, Key string, Status string, Schema int, Minimum string, Current string, Compatibility string, Features string, Legacy string) zir_29bde45da7d805e7_ExecResult {
-	var result zir_29bde45da7d805e7_ExecResult
+func AppStore_InsertApp(Transaction *Transaction, Context Context, Query string, AppID string, Name string, Description string, Homepage string, Source string, Key string, Status string, Schema int, Minimum string, Current string, Compatibility string, Features string, Legacy string) zir_00998b9e5dd627ee_ExecResult {
+	var result zir_00998b9e5dd627ee_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AppID, Name, Description, Homepage, Source, Key, Status, Schema, Minimum, Current, Compatibility, Features, Legacy)
 	return result
 }
 
-func AppStore_InsertCollection(Transaction *Transaction, Context Context, Query string, AppID string, Prefix string, Visibility string, Schema int, Description string) zir_29bde45da7d805e7_ExecResult {
-	var result zir_29bde45da7d805e7_ExecResult
+func AppStore_InsertCollection(Transaction *Transaction, Context Context, Query string, AppID string, Prefix string, Visibility string, Schema int, Description string) zir_00998b9e5dd627ee_ExecResult {
+	var result zir_00998b9e5dd627ee_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AppID, Prefix, Visibility, Schema, Description)
 	return result
 }
 
-func AppStore_InsertCapability(Transaction *Transaction, Context Context, Query string, AppID string, Capability string) zir_29bde45da7d805e7_ExecResult {
-	var result zir_29bde45da7d805e7_ExecResult
+func AppStore_InsertCapability(Transaction *Transaction, Context Context, Query string, AppID string, Capability string) zir_00998b9e5dd627ee_ExecResult {
+	var result zir_00998b9e5dd627ee_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AppID, Capability)
 	return result
 }
 
-func AppStore_InsertPolicy(Transaction *Transaction, Context Context, Query string, AppID string, Asset string, Permission string, Status string, Legacy int64) zir_29bde45da7d805e7_ExecResult {
-	var result zir_29bde45da7d805e7_ExecResult
+func AppStore_InsertPolicy(Transaction *Transaction, Context Context, Query string, AppID string, Asset string, Permission string, Status string, Legacy int64) zir_00998b9e5dd627ee_ExecResult {
+	var result zir_00998b9e5dd627ee_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AppID, Asset, Permission, Status, Legacy)
 	return result
 }
 
-func AppStore_InsertManifest(Transaction *Transaction, Context Context, Query string, AppID string, Version int, Value string, Hash string, Signature string, Approval string, Expiry int64, Status string) zir_29bde45da7d805e7_ExecResult {
-	var result zir_29bde45da7d805e7_ExecResult
+func AppStore_InsertManifest(Transaction *Transaction, Context Context, Query string, AppID string, Version int, Value string, Hash string, Signature string, Approval string, Expiry int64, Status string) zir_00998b9e5dd627ee_ExecResult {
+	var result zir_00998b9e5dd627ee_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AppID, Version, Value, Hash, Signature, Approval, Expiry, Status)
 	return result
 }
 
-func AppStore_InsertKey(Transaction *Transaction, Context Context, Query string, AppID string, KeyID string, Algorithm string, Key string, Purpose string, Status string, Expiry int64) zir_29bde45da7d805e7_ExecResult {
-	var result zir_29bde45da7d805e7_ExecResult
+func AppStore_InsertKey(Transaction *Transaction, Context Context, Query string, AppID string, KeyID string, Algorithm string, Key string, Purpose string, Status string, Expiry int64) zir_00998b9e5dd627ee_ExecResult {
+	var result zir_00998b9e5dd627ee_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AppID, KeyID, Algorithm, Key, Purpose, Status, Expiry)
 	return result
 }
 
-func AppStore_QueryRows(Database *Database, Context Context, Query string, AppID string) zir_add2c8397c1add63_RowsResult {
-	var result zir_add2c8397c1add63_RowsResult
+func AppStore_QueryRows(Database *Database, Context Context, Query string, AppID string) zir_84ae6f7a3218ff6a_RowsResult {
+	var result zir_84ae6f7a3218ff6a_RowsResult
 	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query, AppID)
 	return result
 }
 
-func AppStore_QueryAll(Database *Database, Context Context, Query string) zir_add2c8397c1add63_RowsResult {
-	var result zir_add2c8397c1add63_RowsResult
+func AppStore_QueryAll(Database *Database, Context Context, Query string) zir_84ae6f7a3218ff6a_RowsResult {
+	var result zir_84ae6f7a3218ff6a_RowsResult
 	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query)
 	return result
 }
 
 const RegistryListSQL = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps ORDER BY app_id\n"
-const zir_d_6f5c18a9652f6c10 = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps WHERE app_id=?1\n"
+const zir_d_628f6460c5cb42bd = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps WHERE app_id=?1\n"
 const CollectionsSQL = "\nSELECT app_id,collection_prefix,visibility,schema_version,description,created_at\nFROM server_app_collections WHERE app_id=?1 ORDER BY collection_prefix\n"
 const CapabilitiesSQL = "SELECT capability FROM server_app_capabilities WHERE app_id=?1 ORDER BY capability"
 const AppInsertSQL = "\nINSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status,app_schema_version,min_supported_client_version,current_client_version,compatibility_until,features_json,legacy_protocols_json)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(app_id) DO UPDATE SET\n display_name=excluded.display_name,\n description=excluded.description,\n homepage_url=excluded.homepage_url,\n source_url=excluded.source_url,\n public_key=excluded.public_key,\n status=excluded.status,\n app_schema_version=excluded.app_schema_version,\n min_supported_client_version=excluded.min_supported_client_version,\n current_client_version=excluded.current_client_version,\n compatibility_until=excluded.compatibility_until,\n features_json=excluded.features_json,\n legacy_protocols_json=excluded.legacy_protocols_json,\n updated_at=CURRENT_TIMESTAMP\n"
@@ -152,6 +158,9 @@ const KeysSQL = "\nSELECT key_id,algorithm,public_key,purpose,status,expires_at,
 const PoliciesSQL = "\nSELECT asset_id,permission,status,legacy_unsigned_until\nFROM token_app_permissions WHERE app_id=?1 ORDER BY asset_id,permission\n"
 const PermissionSQL = "\nSELECT asset_id,permission,status,legacy_unsigned_until\nFROM token_app_permissions\nWHERE app_id=?1 AND asset_id=?2 AND permission=?3 AND status='active'\n"
 const HydrateSQL = "\nSELECT manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at\nFROM server_app_manifests WHERE app_id=?1 AND status='active'\n"
+const InstalledManifestSQL = "SELECT manifest_json FROM server_app_manifests WHERE app_id=?1"
+
+var ErrManifestOutdated Error
 
 func AppStore_DecodeMetadata(features string, legacy string, app *AppRegistration) Error {
 	if strings.TrimSpace(features) != "" {
@@ -291,6 +300,14 @@ func AppStore_Upsert(database *Database, context Context, app AppRegistration) E
 	return StdSqlGo_Commit(transaction)
 }
 
+func AppStore_InstalledSequence(database *Database, context Context, appID string) ManifestSequenceResult {
+	var value_0 [1]Any
+	value_0[0] = appID
+	arguments := value_0
+	_ = arguments
+	return AppStore_ReadSequence(StdSqlGo_QueryRow(database, context, "SELECT manifest_json FROM server_app_manifests WHERE app_id=?1", arguments[0:1:1]))
+}
+
 func AppStore_UpsertSignedManifest(database *Database, context Context, value AppManifest, bytes []uint8, hash string, signature string, approval string) Error {
 	begun := AppStore_Begin(database, context, nil)
 	if begun.Error != nil {
@@ -298,6 +315,17 @@ func AppStore_UpsertSignedManifest(database *Database, context Context, value Ap
 	}
 	transaction := begun.Value
 	defer (*sql.Tx).Rollback(transaction)
+	var value_0 [1]Any
+	value_0[0] = value.AppID
+	arguments := value_0
+	_ = arguments
+	installed := AppStore_ReadSequence(StdSqlGo_QueryRowTx(transaction, context, "SELECT manifest_json FROM server_app_manifests WHERE app_id=?1", arguments[0:1:1]))
+	if installed.Error != nil {
+		return installed.Error
+	}
+	if installed.Found && value.ManifestSequence < installed.Value {
+		return ErrManifestOutdated
+	}
 	status := value.Status
 	if status == "" {
 		status = "active"
@@ -325,11 +353,11 @@ func AppStore_UpsertSignedManifest(database *Database, context Context, value Ap
 	if error != nil {
 		return error
 	}
-	var value_0 string = "\nINSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at,status)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8)\nON CONFLICT(app_id) DO UPDATE SET\n manifest_version=excluded.manifest_version,\n manifest_json=excluded.manifest_json,\n manifest_hash=excluded.manifest_hash,\n manifest_signature=excluded.manifest_signature,\n approval_signature=excluded.approval_signature,\n expires_at=excluded.expires_at,\n status=excluded.status,\n updated_at=CURRENT_TIMESTAMP\n"
-	var value_1 string = value.AppID
-	var value_2 int = value.ManifestVersion
-	var value_3 string = StdTextGo_FromBytes(bytes)
-	written := AppStore_InsertManifest(transaction, context, value_0, value_1, int(value_2), value_3, hash, signature, approval, int64(value.ExpiresAt), status)
+	var value_1 string = "\nINSERT INTO server_app_manifests(app_id,manifest_version,manifest_json,manifest_hash,manifest_signature,approval_signature,expires_at,status)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8)\nON CONFLICT(app_id) DO UPDATE SET\n manifest_version=excluded.manifest_version,\n manifest_json=excluded.manifest_json,\n manifest_hash=excluded.manifest_hash,\n manifest_signature=excluded.manifest_signature,\n approval_signature=excluded.approval_signature,\n expires_at=excluded.expires_at,\n status=excluded.status,\n updated_at=CURRENT_TIMESTAMP\n"
+	var value_2 string = value.AppID
+	var value_3 int = value.ManifestVersion
+	var value_4 string = StdTextGo_FromBytes(bytes)
+	written := AppStore_InsertManifest(transaction, context, value_1, value_2, int(value_3), value_4, hash, signature, approval, int64(value.ExpiresAt), status)
 	if written.Error != nil {
 		return written.Error
 	}
@@ -338,23 +366,23 @@ func AppStore_UpsertSignedManifest(database *Database, context Context, value Ap
 		return deleted.Error
 	}
 	{
-		value_4 := value.Keys[:]
-		if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
+		value_5 := value.Keys[:]
+		if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_41 := value_4[0:int64(len(value_4)):int64(len(value_4))]
-		loop_count_41 := int64(len(loop_view_41))
-		var loop_cursor_41 int64 = 0
-		for loop_cursor_41 < loop_count_41 {
-			loop_index_41 := loop_cursor_41
-			key := loop_view_41[loop_index_41]
-			var value_5 string = "INSERT INTO server_app_keys(app_id,key_id,algorithm,public_key,purpose,status,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7)"
-			var value_6 string = value.AppID
-			inserted := AppStore_InsertKey(transaction, context, value_5, value_6, key.KeyID, key.Algorithm, key.PublicKey, Manifest_DefaultString(key.Purpose, "signing"), Manifest_DefaultString(key.Status, "active"), int64(key.ExpiresAt))
+		loop_view_49 := value_5[0:int64(len(value_5)):int64(len(value_5))]
+		loop_count_49 := int64(len(loop_view_49))
+		var loop_cursor_49 int64 = 0
+		for loop_cursor_49 < loop_count_49 {
+			loop_index_49 := loop_cursor_49
+			key := loop_view_49[loop_index_49]
+			var value_6 string = "INSERT INTO server_app_keys(app_id,key_id,algorithm,public_key,purpose,status,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7)"
+			var value_7 string = value.AppID
+			inserted := AppStore_InsertKey(transaction, context, value_6, value_7, key.KeyID, key.Algorithm, key.PublicKey, Manifest_DefaultString(key.Purpose, "signing"), Manifest_DefaultString(key.Status, "active"), int64(key.ExpiresAt))
 			if inserted.Error != nil {
 				return inserted.Error
 			}
-			loop_cursor_41++
+			loop_cursor_49++
 		}
 	}
 	error = AppStore_ReplacePolicies(transaction, context, value.AppID, value.TokenPolicies)
@@ -782,3 +810,48 @@ func AppStore_SeedBuiltin(database *Database, context Context) Error {
 	}
 	return AppStore_Upsert(database, context, app)
 }
+
+func AppStore_ReadSequence(row *Row) ManifestSequenceResult {
+	var result ManifestSequenceResult = ManifestSequenceResult{}
+	var encoded string = ""
+	var value_0 [1]Any
+	value_0[0] = &(encoded)
+	destinations := value_0
+	_ = destinations
+	error := StdSqlGo_ScanRow(row, destinations[0:1:1])
+	if StdErrorsGo_Is(error, StdSqlGo_NoRows()) {
+		return result
+	}
+	result.Error = error
+	if error != nil {
+		return result
+	}
+	var installed AppManifest = AppManifest{}
+	result.Error = StdJsonGo_Unmarshal(StdTextGo_ToBytes(encoded), &(installed))
+	if result.Error != nil {
+		return result
+	}
+	result.Value = installed.ManifestSequence
+	result.Found = true
+	return result
+}
+
+func AppStore_GlobalInit00() {
+	ErrManifestOutdated = StdErrorsGo_New("app manifest is older than the installed manifest")
+}
+
+var AppStore_ziranInitState uint8
+
+func AppStore_ziranInit() {
+	if AppStore_ziranInitState == 2 {
+		return
+	}
+	if AppStore_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	AppStore_ziranInitState = 1
+	AppStore_GlobalInit00()
+	AppStore_ziranInitState = 2
+}
+
+func init() { AppStore_ziranInit() }

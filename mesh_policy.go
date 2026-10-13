@@ -138,6 +138,15 @@ func MeshPolicy_AllowsOperation(approved NodeSyncPolicy, requested NodeSyncPolic
 	if !value_0 && int64(len(approved.Accounts)) > 0 {
 		return false
 	}
+	if int64(len(approved.Apps)) > 0 && int64(len(requested.Apps)) == 0 {
+		return false
+	}
+	if int64(len(approved.Collections)) > 0 && int64(len(requested.Collections)) == 0 {
+		return false
+	}
+	if int64(len(approved.Spaces)) > 0 && int64(len(requested.Spaces)) == 0 {
+		return false
+	}
 	var value_1 bool = MeshPolicy_Contains(approved.Apps, requested.Apps)
 	var value_2 bool = value_1
 	if value_2 {

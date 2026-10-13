@@ -1,23 +1,31 @@
 network :: #import "std/net_go";
 http :: #import "std/http_go";
 go_strings :: #system_library "go:strings";
+go_http :: #system_library "go:net/http";
 
 #scope_file
 Split :: (value: string, separator: string) -> []string #foreign go_strings;
 TrimSpace :: (value: string) -> string #foreign go_strings;
+HeaderValues :: (header: http.Header, name: string) -> []string #foreign go_http "Header.Values";
 
-#scope_export
-FirstForwardedFor :: (header: string) -> string {
-    if header == "" {
-        return ""
-    }
-    parts := Split(header, ",")
-    first := TrimSpace(parts[0])
-    ip := network.ParseIP(first)
+ValidAddress :: (value: string) -> string {
+    ip := network.ParseIP(TrimSpace(value))
     if network.ValidIP(ip) {
         return network.FormatIP(ip)
     }
     return ""
+}
+
+#scope_export
+// Proxies append the address they saw, so only the last X-Forwarded-For
+// entry comes from the proxy in front of Daochi. Earlier entries are
+// whatever the client sent and must never choose a rate-limit bucket.
+LastForwardedFor :: (values: []string) -> string {
+    if values.count == 0 {
+        return ""
+    }
+    parts := Split(values[values.count - 1], ",")
+    return ValidAddress(parts[parts.count - 1])
 }
 
 IsLoopbackHost :: (host: string) -> bool {
@@ -34,7 +42,14 @@ FromRequest :: (request: *http.Request) -> string {
     }
     host = TrimSpace(host)
     if IsLoopbackHost(host) {
-        forwarded := FirstForwardedFor(http.HeaderValue(http.Headers(request), "X-Forwarded-For"))
+        headers := http.Headers(request)
+        // Cloudflare replaces any client-sent CF-Connecting-IP with the
+        // address it saw, so it is the real client behind the CDN.
+        cloudflare := ValidAddress(http.HeaderValue(headers, "CF-Connecting-IP"))
+        if cloudflare != "" {
+            return cloudflare
+        }
+        forwarded := LastForwardedFor(HeaderValues(headers, "X-Forwarded-For"))
         if forwarded != "" {
             return forwarded
         }

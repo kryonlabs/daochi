@@ -155,10 +155,10 @@ func OperationalHttp_Ready(operations Operations, writer ResponseWriter, request
 	}
 	error := StoreDiagnostics_Health(operations.Database, StdHttpGo_Context(request))
 	if error != nil {
+		slog.Error("database readiness check failed", "error", error)
 		var value_34 *__type_9ff0571749a9f227 = &(checks)
 		var value_35 string = "database"
-		var value_37 string = StdErrorsGo_Message(error)
-		var value_36 string = value_37
+		var value_36 string = "unavailable"
 		if (*value_34) == nil {
 			(*value_34) = make(__type_9ff0571749a9f227)
 		}
@@ -170,20 +170,20 @@ func OperationalHttp_Ready(operations Operations, writer ResponseWriter, request
 		statusText = "ok"
 	}
 	var value __type_7d6cc8a85f09fc88 = *new(__type_7d6cc8a85f09fc88)
-	var value_38 *__type_7d6cc8a85f09fc88 = &(value)
-	var value_39 string = "status"
-	var value_40 Any = statusText
-	if (*value_38) == nil {
-		(*value_38) = make(__type_7d6cc8a85f09fc88)
+	var value_37 *__type_7d6cc8a85f09fc88 = &(value)
+	var value_38 string = "status"
+	var value_39 Any = statusText
+	if (*value_37) == nil {
+		(*value_37) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_38)[value_39] = value_40
-	var value_41 *__type_7d6cc8a85f09fc88 = &(value)
-	var value_42 string = "checks"
-	var value_43 Any = checks
-	if (*value_41) == nil {
-		(*value_41) = make(__type_7d6cc8a85f09fc88)
+	(*value_37)[value_38] = value_39
+	var value_40 *__type_7d6cc8a85f09fc88 = &(value)
+	var value_41 string = "checks"
+	var value_42 Any = checks
+	if (*value_40) == nil {
+		(*value_40) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_41)[value_42] = value_43
+	(*value_40)[value_41] = value_42
 	Response_JSON(writer, status, value)
 }
 
@@ -333,4 +333,18 @@ func OperationalHttp_Diagnostics(operations Operations, writer ResponseWriter, r
 		return
 	}
 	Response_JSON(writer, int(200), report.Value)
+}
+
+var OperationalHttp_ziranInitState uint8
+
+func OperationalHttp_ziranInit() {
+	if OperationalHttp_ziranInitState == 2 {
+		return
+	}
+	if OperationalHttp_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	OperationalHttp_ziranInitState = 1
+	TokenPolicy_ziranInit()
+	OperationalHttp_ziranInitState = 2
 }

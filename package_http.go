@@ -335,3 +335,18 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "ETag", fmt.Sprint("\"", fmt.Sprint(hash, "\"")))
 	PackageHttp_Write(writer, bundle.Value)
 }
+
+var PackageHttp_ziranInitState uint8
+
+func PackageHttp_ziranInit() {
+	if PackageHttp_ziranInitState == 2 {
+		return
+	}
+	if PackageHttp_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	PackageHttp_ziranInitState = 1
+	AppStore_ziranInit()
+	AppHttp_ziranInit()
+	PackageHttp_ziranInitState = 2
+}

@@ -176,14 +176,10 @@ Settle :: (monero: deposits.Monero, context: ctx.Context, accountID: string,
         return result
     }
     if inspected.value.ConfirmedAtomic >= invoice.AtomicAmount {
-        credited := ledger.CreditPayment(monero.database, context, issuer.value, "monero",
-            inspected.value.PaymentID, CreditEvent(accountID, invoice, inspected.value), monero.issuerUnavailable)
+        credited := storage.CreditPaid(monero.database, context, issuer.value, accountID, invoice.ID,
+            inspected.value.PaymentID, CreditEvent(accountID, invoice, inspected.value), false,
+            monero.issuerUnavailable)
         result.error = credited.error
-        if result.error != null {
-            return result
-        }
-        result.error = storage.MarkPendingPaid(monero.database, context, accountID, invoice.ID,
-            credited.value.ReceiptID, inspected.value.PaymentID)
         if result.error != null {
             return result
         }
@@ -248,16 +244,11 @@ SweepExpired :: (monero: deposits.Monero, context: ctx.Context, limit: isize) ->
             continue
         }
         if inspected.value.ConfirmedAtomic >= item.invoice.AtomicAmount {
-            credited := ledger.CreditPayment(monero.database, context, issuer.value, "monero",
-                inspected.value.PaymentID, CreditEvent(item.accountID, item.invoice, inspected.value), monero.issuerUnavailable)
+            credited := storage.CreditPaid(monero.database, context, issuer.value, item.accountID,
+                item.invoice.ID, inspected.value.PaymentID, CreditEvent(item.accountID, item.invoice, inspected.value),
+                true, monero.issuerUnavailable)
             if credited.error != null {
                 LogSubjectWarning("expired monero invoice credit failed", "invoice", logs.LogText(item.invoice.ID), "error", credited.error)
-                continue
-            }
-            settled := storage.SettleExpired(monero.database, context, item.accountID,
-                item.invoice.ID, credited.value.ReceiptID, inspected.value.PaymentID)
-            if settled != null {
-                LogSubjectWarning("expired monero invoice settle failed", "invoice", logs.LogText(item.invoice.ID), "error", settled)
                 continue
             }
             LogLatePayment("credited late monero invoice payment", "invoice", logs.LogText(item.invoice.ID),

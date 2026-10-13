@@ -462,6 +462,7 @@ func GooglePlay_ziranInit() {
 	}
 	GooglePlay_ziranInitState = 1
 	PaymentState_ziranInit()
+	TokenPolicy_ziranInit()
 	GooglePlay_GlobalInit00()
 	GooglePlay_ziranInitState = 2
 }

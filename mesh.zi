@@ -40,6 +40,9 @@ Mesh :: struct {
     convertError: auth.ConvertError
 }
 
+MaxPagesPerPull :: 64;
+MaxMeshResponseBytes :: 268435456;
+
 #scope_file
 HeaderParts :: struct {
     before: string
@@ -309,7 +312,11 @@ PullPeer :: (mesh: Mesh, context: ctx.Context, peer: NodePeer) -> Error {
         return loaded.error
     }
     currentCursor := loaded.value
-    while true {
+    // A peer that keeps reporting more pages must not hold the worker
+    // forever; the next round resumes from the saved cursor.
+    pages: isize = 0
+    while pages < cast(isize)MaxPagesPerPull {
+        pages += 1
         request: NodeMeshExportRequest
         request.Cursor = currentCursor
         request.Limit = cursor.BatchLimit(cast(isize)0, mesh.configuration.NodeSyncBatchLimit)
@@ -372,6 +379,9 @@ PullPeer :: (mesh: Mesh, context: ctx.Context, peer: NodePeer) -> Error {
         if !exported.Truncated || exported.NextCursor == "" {
             return null
         }
+        if exported.NextCursor == currentCursor {
+            return errors.New("mesh peer cursor did not advance")
+        }
         currentCursor = exported.NextCursor
     }
     return null
@@ -406,7 +416,9 @@ PostJSON :: (mesh: Mesh, context: ctx.Context, peerNodeID: string, target: strin
         data := io.ReadAll(io.LimitReader(cast(io.Reader)body, cast(s64)2048))
         return RemoteFailure("node mesh request failed: %s %s", http.Status(result.value), TrimSpace(text.FromBytes(data.value)))
     }
-    return json.Decode(json.NewDecoder(cast(io.Reader)body), reply)
+    // A peer cannot stream an unbounded reply into a small node's memory.
+    limited := io.LimitReader(cast(io.Reader)body, cast(s64)MaxMeshResponseBytes)
+    return json.Decode(json.NewDecoder(limited), reply)
 }
 
 RetainNetworkScope :: (value: network.NetworkScope) -> network.NetworkScope #foreign builtin "retain";

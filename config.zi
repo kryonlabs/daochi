@@ -100,6 +100,7 @@ PrivateLength :: (value: PrivateKey) -> isize #foreign builtin "len";
 Panic :: (value: Error) #foreign builtin "panic";
 Fatal :: (message: string) #foreign go_log;
 FatalValue :: (format: string, key: string, value: string) #foreign go_log "Fatalf";
+FatalKey :: (format: string, key: string) #foreign go_log "Fatalf";
 Warn :: (message: string) #foreign go_slog;
 WarnFile :: (message: string, envLabel: string, env: string, pathLabel: string, path: string, errorLabel: string, error: Error) #foreign go_slog "Warn";
 FormatKeyPath :: (format: string, path: string) -> string #foreign go_format "Sprintf";
@@ -174,7 +175,8 @@ EnvBytesHex :: (key: string, fallback: []u8) -> []u8 {
     if value != "" {
         decoded := DecodeString(value)
         if decoded.error != null {
-            FatalValue("invalid %s: not valid hex: %q", key, value)
+            // The value may be a secret, so name only the variable.
+            FatalKey("invalid %s: not valid hex", key)
         }
         return decoded.value
     }

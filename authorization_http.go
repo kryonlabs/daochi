@@ -1065,7 +1065,12 @@ func AuthorizationHttp_ziranInit() {
 		panic("cyclic module startup")
 	}
 	AuthorizationHttp_ziranInitState = 1
+	Authorization_ziranInit()
+	Session_ziranInit()
+	TelegramInit_ziranInit()
 	TelegramAccountEntry_ziranInit()
+	SignedTx_ziranInit()
 	TelegramTransport_ziranInit()
+	SyncValidation_ziranInit()
 	AuthorizationHttp_ziranInitState = 2
 }

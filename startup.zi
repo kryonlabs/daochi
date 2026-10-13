@@ -83,6 +83,7 @@ SetReadHeaderTimeout :: (server: *HTTPServer, duration: clock.Duration) #go_fiel
 SetReadTimeout :: (server: *HTTPServer, duration: clock.Duration) #go_field #foreign go_http "(*Server).ReadTimeout";
 SetWriteTimeout :: (server: *HTTPServer, duration: clock.Duration) #go_field #foreign go_http "(*Server).WriteTimeout";
 SetIdleTimeout :: (server: *HTTPServer, duration: clock.Duration) #go_field #foreign go_http "(*Server).IdleTimeout";
+SetMaxHeaderBytes :: (server: *HTTPServer, size: isize) #go_field #foreign go_http "(*Server).MaxHeaderBytes";
 SetErrorLog :: (server: *HTTPServer, logger: *Logger) #go_field #foreign go_http "(*Server).ErrorLog";
 StandardError :: () -> io.Writer #go_field #foreign go_os "Stderr";
 StandardLogFlags :: () -> isize #go_field #foreign go_log "LstdFlags";
@@ -176,6 +177,9 @@ NewHTTPServer :: (address: string, handler: middleware.Handler) -> *HTTPServer {
     SetReadTimeout(server, cast(clock.Duration)(15 * Second))
     SetWriteTimeout(server, cast(clock.Duration)(15 * Second))
     SetIdleTimeout(server, cast(clock.Duration)(60 * Second))
+    // Daochi's headers are small; Go's 1 MiB default lets each request park
+    // large values in rate-limit and challenge keys.
+    SetMaxHeaderBytes(server, cast(isize)65536)
     SetErrorLog(server, NewLogger(StandardError(), "http: ", StandardLogFlags()))
     return server
 }

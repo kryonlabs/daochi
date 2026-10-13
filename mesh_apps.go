@@ -139,11 +139,21 @@ func MeshApps_Import(database *Database, context Context, registryKey PublicKey,
 			continue
 		}
 		if current.Found && value.Manifest.ManifestVersion == current.Value.Version {
-			if verified.Hash != current.Value.Hash {
+			if verified.Hash == current.Value.Hash {
+				continue
+			}
+			installed := AppStore_InstalledSequence(database, context, value.Manifest.AppID)
+			result.Error = installed.Error
+			if result.Error != nil {
+				return result
+			}
+			if value.Manifest.ManifestSequence < installed.Value {
+				continue
+			}
+			if value.Manifest.ManifestSequence == installed.Value {
 				result.Error = fmt.Errorf("conflicting app manifest %q at version %d", value.Manifest.AppID, int(current.Value.Version))
 				return result
 			}
-			continue
 		}
 		result.Error = AppStore_UpsertSignedManifest(database, context, value.Manifest, verified.Value, verified.Hash, value.ManifestSignature, value.ApprovalSignature)
 		if result.Error != nil {
@@ -169,4 +179,19 @@ func MeshApps_LoadVersion(database *Database, context Context, appID string) Man
 		result.Found = true
 	}
 	return result
+}
+
+var MeshApps_ziranInitState uint8
+
+func MeshApps_ziranInit() {
+	if MeshApps_ziranInitState == 2 {
+		return
+	}
+	if MeshApps_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	MeshApps_ziranInitState = 1
+	AppRegistration_ziranInit()
+	AppStore_ziranInit()
+	MeshApps_ziranInitState = 2
 }

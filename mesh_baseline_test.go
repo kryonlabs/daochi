@@ -135,6 +135,13 @@ func baselinePolicyAllowsOperation(approved, requested NodeSyncPolicy, operation
 	if operation == "import" && direction != "pull" && direction != "bidirectional" {
 		return false
 	}
+	// Since the 2026-10-13 security fix an omitted list cannot widen an
+	// approved app, collection or trust-space scope.
+	if (len(approved.Apps) > 0 && len(requested.Apps) == 0) ||
+		(len(approved.Collections) > 0 && len(requested.Collections) == 0) ||
+		(len(approved.Spaces) > 0 && len(requested.Spaces) == 0) {
+		return false
+	}
 	return baselineStringSetContains(approved.Apps, requested.Apps) &&
 		baselineStringSetContains(approved.Collections, requested.Collections) &&
 		baselineStringSetContains(approved.Spaces, requested.Spaces) &&

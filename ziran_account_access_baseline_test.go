@@ -18,7 +18,7 @@ func (s *Server) baselineAccessHandleChallenge(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !s.baselineAccessAllowRequest(r, "challenge:ip:"+ClientAddress_FromRequest(r), 60, time.Minute) ||
-		!s.baselineAccessAllowRequest(r, "challenge:user:"+userID, 20, time.Minute) {
+		!s.baselineAccessAllowRequest(r, "challenge:user:"+baselineUserBucket(userID, r), 20, time.Minute) {
 		Response_Error(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
@@ -52,7 +52,7 @@ func (s *Server) baselineAccessHandleLogin(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !s.baselineAccessAllowRequest(r, "login:ip:"+ClientAddress_FromRequest(r), 40, time.Minute) ||
-		!s.baselineAccessAllowRequest(r, "login:user:"+req.UserIDHash, 20, time.Minute) {
+		!s.baselineAccessAllowRequest(r, "login:user:"+baselineUserBucket(req.UserIDHash, r), 20, time.Minute) {
 		Response_Error(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
@@ -240,4 +240,13 @@ func (s *Server) baselineAccessAllowRequest(r *http.Request, key string, limit i
 		s.Metrics.RateLimitedRequests.Add(1)
 	}
 	return allowed
+}
+
+// Since the 2026-10-13 security fix the per-account challenge and login
+// buckets also carry the client address, so strangers cannot exhaust them.
+func baselineUserBucket(user string, r *http.Request) string {
+	if !Identity_ValidUserID(user) {
+		user = "invalid"
+	}
+	return user + "|" + ClientAddress_FromRequest(r)
 }

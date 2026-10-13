@@ -142,5 +142,9 @@ func GooglePlayHttp_ziranInit() {
 	GooglePlayHttp_ziranInitState = 1
 	GooglePlay_ziranInit()
 	PaymentState_ziranInit()
+	TokenHttp_ziranInit()
+	TokenPolicy_ziranInit()
+	AppStore_ziranInit()
+	SignedTx_ziranInit()
 	GooglePlayHttp_ziranInitState = 2
 }

@@ -231,5 +231,7 @@ func DelegatedWs_ziranInit() {
 	}
 	DelegatedWs_ziranInitState = 1
 	AuthorizationHttp_ziranInit()
+	Authorization_ziranInit()
+	Session_ziranInit()
 	DelegatedWs_ziranInitState = 2
 }

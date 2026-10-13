@@ -218,3 +218,19 @@ func BlobHttp_Route(store Registry, writer ResponseWriter, request *Request) {
 	}
 	BlobHttp_WriteResponse(writer, read.Value)
 }
+
+var BlobHttp_ziranInitState uint8
+
+func BlobHttp_ziranInit() {
+	if BlobHttp_ziranInitState == 2 {
+		return
+	}
+	if BlobHttp_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	BlobHttp_ziranInitState = 1
+	AppHttp_ziranInit()
+	AppStore_ziranInit()
+	SignedTx_ziranInit()
+	BlobHttp_ziranInitState = 2
+}

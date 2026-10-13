@@ -23,23 +23,24 @@ type Synchronization struct {
 
 type SyncCompletion struct {
 	Complete    bool
+	Committed   bool
 	Signed      bool
 	Transaction SignedTxEnvelope
 }
 
-type zir_15286655cb9a5381_FinishCallback func(*SyncCompletion, Synchronization, *Request)
+type zir_7018f17255db4d04_FinishCallback func(*SyncCompletion, Synchronization, *Request)
 
-type zir_7018f17255db4d04_IntegerResult struct {
+type zir_cf09108c0d361047_IntegerResult struct {
 	Value int64
 	Error Error
 }
 
-func SyncHttp_FinishAtReturn(Callback zir_15286655cb9a5381_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
+func SyncHttp_FinishAtReturn(Callback zir_7018f17255db4d04_FinishCallback, Completion *SyncCompletion, Sync Synchronization, Request *Request) {
 	Callback(Completion, Sync, Request)
 }
 
-func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_7018f17255db4d04_IntegerResult {
-	var result zir_7018f17255db4d04_IntegerResult
+func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_cf09108c0d361047_IntegerResult {
+	var result zir_cf09108c0d361047_IntegerResult
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }
@@ -47,7 +48,7 @@ func SyncHttp_ParseInteger(Value string, Base int, Bits int) zir_7018f17255db4d0
 func SyncHttp_Finish(completion *SyncCompletion, sync Synchronization, request *Request) {
 	if !completion.Complete {
 		StdAtomicGo_Add(&(sync.Counters.SyncFailures), 1)
-		if completion.Signed {
+		if completion.Signed && !completion.Committed {
 			var value_0 *Database = sync.Database
 			var value_1 Context = StdHttpGo_Context(request)
 			SignedTx_Forget(value_0, value_1, completion.Transaction)
@@ -121,7 +122,7 @@ func SyncHttp_ProjectClean(value *SyncResponse, request SyncRequest) {
 func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Request) {
 	StdAtomicGo_Add(&(sync.Counters.SyncRequests), 1)
 	var completion SyncCompletion = SyncCompletion{}
-	var value_3 zir_15286655cb9a5381_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
+	var value_3 zir_7018f17255db4d04_FinishCallback = func(value_0 *SyncCompletion, value_1 Synchronization, value_2 *Request) {
 		SyncHttp_Finish(value_0, value_1, value_2)
 	}
 	defer SyncHttp_FinishAtReturn(value_3, &(completion), sync, request)
@@ -198,7 +199,7 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		return
 	}
 	if pageInput.Value.EncryptedRecordsOnly {
-		var value_10 bool = RecordSync_Handle(sync.Database, sync.Counters, sync.Notifications, sync.MissingUser, writer, request, input, pageInput.Value, publicKey.Value, sync.Configuration.AccountStorageLimitBytes)
+		var value_10 bool = RecordSync_Handle(sync.Database, sync.Counters, sync.Notifications, sync.MissingUser, writer, request, input, pageInput.Value, publicKey.Value, sync.Configuration.AccountStorageLimitBytes, &(completion.Committed))
 		completion.Complete = value_10
 		return
 	}
@@ -265,6 +266,7 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 			SyncHttp_StorageFailure(writer, "apply sync", input.UserIDHash, applied.Error, "sync failed")
 			return
 		}
+		completion.Committed = true
 		result = applied.Value
 		accepted = applied.Accepted
 	}
@@ -285,6 +287,7 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 			SyncHttp_StorageFailure(writer, "apply stale sync uploads", input.UserIDHash, applied.Error, "sync failed")
 			return
 		}
+		completion.Committed = true
 		result = applied.Value
 		accepted = applied.Accepted
 	}
@@ -671,8 +674,11 @@ func SyncHttp_ziranInit() {
 		panic("cyclic module startup")
 	}
 	SyncHttp_ziranInitState = 1
+	SyncValidation_ziranInit()
+	SignedTx_ziranInit()
 	SyncApplication_ziranInit()
 	RecordSync_ziranInit()
 	AccountStorage_ziranInit()
+	PackageHttp_ziranInit()
 	SyncHttp_ziranInitState = 2
 }

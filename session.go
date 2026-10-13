@@ -352,3 +352,17 @@ func Session_AuthenticateTx(transaction *Transaction, context Context, request *
 	result.Grant = grant
 	return result
 }
+
+var Session_ziranInitState uint8
+
+func Session_ziranInit() {
+	if Session_ziranInitState == 2 {
+		return
+	}
+	if Session_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	Session_ziranInitState = 1
+	Authorization_ziranInit()
+	Session_ziranInitState = 2
+}

@@ -154,7 +154,7 @@ func RecordSync_Page(database *Database, context Context, input SyncRequest, opt
 	return result
 }
 
-func RecordSync_Handle(database *Database, counters *ServerMetrics, notifications *SyncHub, missingUser Error, writer ResponseWriter, request *Request, input SyncRequest, options RecordPageOptions, publicKey []uint8, storageLimit int64) bool {
+func RecordSync_Handle(database *Database, counters *ServerMetrics, notifications *SyncHub, missingUser Error, writer ResponseWriter, request *Request, input SyncRequest, options RecordPageOptions, publicKey []uint8, storageLimit int64, committed *bool) bool {
 	var value_0 bool = RecordSync_Valid(input, options)
 	if !value_0 {
 		Response_Error(writer, int(400), "invalid encrypted record page request")
@@ -179,6 +179,7 @@ func RecordSync_Handle(database *Database, counters *ServerMetrics, notification
 		Response_Error(writer, int(500), "record upload failed")
 		return false
 	}
+	(*(committed)) = true
 	current := AccountState_CurrentVersion(database, context, input.UserIDHash)
 	if current.Error != nil {
 		Response_Error(writer, int(500), "record version failed")

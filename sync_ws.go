@@ -106,14 +106,7 @@ func SyncWs_Authenticate(value SyncSocket, request *Request) UserAuthenticationR
 	}
 	bearer := Websocket_BearerToken(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "Sec-WebSocket-Protocol"))
 	if bearer != "" {
-		var value_0 []uint8 = value.Configuration.TokenSecret
-		verified := Token_VerifyAuthToken(value_0, bearer, StdTimeGo_Unix(StdTimeGo_Now()))
-		if verified.Error != "" {
-			result.Authentication = Authentication_Failure(int(401), "invalid bearer token")
-			return result
-		}
-		result.Value = verified.Value
-		return result
+		return HttpAuth_AuthenticateBearer(value.Database, request, bearer, value.Configuration.TokenSecret)
 	}
 	return HttpAuth_AuthenticateToken(value.Database, request, value.Configuration.TokenSecret)
 }

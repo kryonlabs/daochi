@@ -50,17 +50,17 @@ type DeviceListResult struct {
 	Error Error
 }
 
-type zir_7e7cd09519a1fca6_TransactionResult struct {
+type zir_0291b470ede4d422_TransactionResult struct {
 	Value *Transaction
 	Error Error
 }
 
-type zir_0291b470ede4d422_ExecResult struct {
+type zir_a74db72b643e677e_ExecResult struct {
 	Value Result
 	Error Error
 }
 
-type zir_a74db72b643e677e_RowsResult struct {
+type zir_2b629b0738813efa_RowsResult struct {
 	Value *Rows
 	Error Error
 }
@@ -76,55 +76,57 @@ func DeviceKeys_DecodeHex(Value string) KeyResult {
 	return result
 }
 
-func DeviceKeys_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_7e7cd09519a1fca6_TransactionResult {
-	var result zir_7e7cd09519a1fca6_TransactionResult
+func DeviceKeys_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_0291b470ede4d422_TransactionResult {
+	var result zir_0291b470ede4d422_TransactionResult
 	result.Value, result.Error = (*sql.DB).BeginTx(Database, Context, Options)
 	return result
 }
 
-func DeviceKeys_DeleteNonces(Transaction *Transaction, Context Context, Query string, Cutoff string) zir_0291b470ede4d422_ExecResult {
-	var result zir_0291b470ede4d422_ExecResult
+func DeviceKeys_DeleteNonces(Transaction *Transaction, Context Context, Query string, Cutoff string) zir_a74db72b643e677e_ExecResult {
+	var result zir_a74db72b643e677e_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, Cutoff)
 	return result
 }
 
-func DeviceKeys_InsertNonce(Transaction *Transaction, Context Context, Query string, AccountID string, Nonce string, Created string) zir_0291b470ede4d422_ExecResult {
-	var result zir_0291b470ede4d422_ExecResult
+func DeviceKeys_InsertNonce(Transaction *Transaction, Context Context, Query string, AccountID string, Nonce string, Created string) zir_a74db72b643e677e_ExecResult {
+	var result zir_a74db72b643e677e_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AccountID, Nonce, Created)
 	return result
 }
 
-func DeviceKeys_InsertDevice(Transaction *Transaction, Context Context, Query string, AccountID string, AppID string, KeyID string, ClientID string, Key string, Created string) zir_0291b470ede4d422_ExecResult {
-	var result zir_0291b470ede4d422_ExecResult
+func DeviceKeys_InsertDevice(Transaction *Transaction, Context Context, Query string, AccountID string, AppID string, KeyID string, ClientID string, Key string, Created string) zir_a74db72b643e677e_ExecResult {
+	var result zir_a74db72b643e677e_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AccountID, AppID, KeyID, ClientID, Key, Created)
 	return result
 }
 
-func DeviceKeys_RevokeDevice(Transaction *Transaction, Context Context, Query string, AccountID string, AppID string, KeyID string, Revoked string) zir_0291b470ede4d422_ExecResult {
-	var result zir_0291b470ede4d422_ExecResult
+func DeviceKeys_RevokeDevice(Transaction *Transaction, Context Context, Query string, AccountID string, AppID string, KeyID string, Revoked string) zir_a74db72b643e677e_ExecResult {
+	var result zir_a74db72b643e677e_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, AccountID, AppID, KeyID, Revoked)
 	return result
 }
 
-func DeviceKeys_TouchDevice(Database *Database, Context Context, Query string, AccountID string, AppID string, KeyID string, Used string) zir_0291b470ede4d422_ExecResult {
-	var result zir_0291b470ede4d422_ExecResult
+func DeviceKeys_TouchDevice(Database *Database, Context Context, Query string, AccountID string, AppID string, KeyID string, Used string) zir_a74db72b643e677e_ExecResult {
+	var result zir_a74db72b643e677e_ExecResult
 	result.Value, result.Error = (*sql.DB).ExecContext(Database, Context, Query, AccountID, AppID, KeyID, Used)
 	return result
 }
 
-func DeviceKeys_QueryDevices(Database *Database, Context Context, Query string, AccountID string) zir_a74db72b643e677e_RowsResult {
-	var result zir_a74db72b643e677e_RowsResult
+func DeviceKeys_QueryDevices(Database *Database, Context Context, Query string, AccountID string) zir_2b629b0738813efa_RowsResult {
+	var result zir_2b629b0738813efa_RowsResult
 	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query, AccountID)
 	return result
 }
 
 const DeleteNoncesSQL = "DELETE FROM server_device_registration_nonces WHERE created_at<?1"
 const InsertNonceSQL = "INSERT INTO server_device_registration_nonces(account_id,nonce,created_at) VALUES(?1,?2,?3)"
-const RegisterSQL = "\nINSERT INTO server_device_keys(account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at)\nVALUES(?1,?2,?3,?4,?5,?6,?6,'')\nON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET\n client_id=excluded.client_id,\n public_key=excluded.public_key,\n last_used_at=excluded.last_used_at,\n revoked_at=''\n"
+const RegisterSQL = "\nINSERT INTO server_device_keys(account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at)\nVALUES(?1,?2,?3,?4,?5,?6,?6,'')\nON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET\n client_id=excluded.client_id,\n public_key=excluded.public_key,\n last_used_at=excluded.last_used_at\nWHERE server_device_keys.revoked_at=''\n"
 const RevokeSQL = "\nUPDATE server_device_keys SET revoked_at=?4\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n"
 const ActiveSQL = "\nSELECT account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at\nFROM server_device_keys\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n"
 const TouchSQL = "\nUPDATE server_device_keys SET last_used_at=?4\nWHERE account_id=?1 AND app_id=?2 AND device_key_id=?3 AND revoked_at=''\n"
 const ListSQL = "\nSELECT account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at\nFROM server_device_keys WHERE account_id=?1 ORDER BY app_id,device_key_id\n"
+
+var ErrDeviceKeyRevoked Error
 
 func DeviceKeys_RecordNonce(transaction *Transaction, context Context, accountID string, nonce string, replay Error) Error {
 	cutoff := Timestamp_CanonicalTimestamp(StdTimeGo_Add(StdTimeGo_Now(), Duration(-1800000000000)))
@@ -315,10 +317,17 @@ func DeviceKeys_Register(database *Database, context Context, device DeviceKey, 
 	if error != nil {
 		return error
 	}
-	var value_0 string = "\nINSERT INTO server_device_keys(account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at)\nVALUES(?1,?2,?3,?4,?5,?6,?6,'')\nON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET\n client_id=excluded.client_id,\n public_key=excluded.public_key,\n last_used_at=excluded.last_used_at,\n revoked_at=''\n"
+	var value_0 string = "\nINSERT INTO server_device_keys(account_id,app_id,device_key_id,client_id,public_key,created_at,last_used_at,revoked_at)\nVALUES(?1,?2,?3,?4,?5,?6,?6,'')\nON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET\n client_id=excluded.client_id,\n public_key=excluded.public_key,\n last_used_at=excluded.last_used_at\nWHERE server_device_keys.revoked_at=''\n"
 	inserted := DeviceKeys_InsertDevice(transaction, context, value_0, device.AccountID, device.AppID, device.KeyID, device.ClientID, device.PublicKey, Timestamp_CanonicalNow())
 	if inserted.Error != nil {
 		return inserted.Error
+	}
+	changed := StdSqlGo_RowsAffected(inserted.Value)
+	if changed.Error != nil {
+		return changed.Error
+	}
+	if changed.Value == 0 {
+		return ErrDeviceKeyRevoked
 	}
 	return StdSqlGo_Commit(transaction)
 }
@@ -391,3 +400,23 @@ func DeviceKeys_List(database *Database, context Context, accountID string) Devi
 	result.Error = StdSqlGo_RowsError(rows)
 	return result
 }
+
+func DeviceKeys_GlobalInit00() {
+	ErrDeviceKeyRevoked = StdErrorsGo_New("device key revoked")
+}
+
+var DeviceKeys_ziranInitState uint8
+
+func DeviceKeys_ziranInit() {
+	if DeviceKeys_ziranInitState == 2 {
+		return
+	}
+	if DeviceKeys_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	DeviceKeys_ziranInitState = 1
+	DeviceKeys_GlobalInit00()
+	DeviceKeys_ziranInitState = 2
+}
+
+func init() { DeviceKeys_ziranInit() }

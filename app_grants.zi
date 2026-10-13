@@ -46,6 +46,7 @@ RowsResult :: struct {
 }
 TrimSpace :: (value: string) -> string #foreign go_strings;
 HasSuffix :: (value: string, suffix: string) -> bool #foreign go_strings;
+TrimSuffix :: (value: string, suffix: string) -> string #foreign go_strings;
 Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
 RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
 CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
@@ -57,6 +58,7 @@ QueryTwo :: (database: *sql.Database, context: ctx.Context, query: string, first
 QueryScope :: (database: *sql.Database, context: ctx.Context, query: string, userID: string, source: string, target: string, prefix: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
 QueryRows :: (database: *sql.Database, context: ctx.Context, query: string, userID: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
 QueryRecordRows :: (database: *sql.Database, context: ctx.Context, query: string, userID: string, prefix: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
+QueryPrefixRows :: (database: *sql.Database, context: ctx.Context, query: string, userID: string, pattern: string, prefix: string) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
 ScanVisibility :: (row: *sql.Row, visibility: *string) -> Error #foreign go_sql "(*Row).Scan";
 ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
 ScanGrant :: (row: *sql.Row, id: *string, userID: *string, source: *string, target: *string, prefix: *string, permission: *string, status: *string, created: *string, updated: *string, revoked: *string) -> Error #foreign go_sql "(*Row).Scan";
@@ -264,13 +266,15 @@ Visibility :: (database: *sql.Database, context: ctx.Context, appID: string, pre
 
 Records :: (database: *sql.Database, context: ctx.Context, userID: string, prefix: string) -> GrantedRecordsResult {
     result: GrantedRecordsResult
-    query := ExactRecordsSQL
-    pattern := prefix
+    queried: RowsResult
     if HasSuffix(prefix, ".*") {
-        query = PrefixRecordsSQL
-        pattern = scope.LikePatternForCollectionPrefix(prefix)
+        // SQLite's LIKE ignores case while app IDs do not, so the exact
+        // prefix check keeps "AUTH" from reading "auth" records.
+        queried = QueryPrefixRows(database, context, PrefixRecordsSQL, userID,
+            scope.LikePatternForCollectionPrefix(prefix), TrimSuffix(prefix, "*"))
+    } else {
+        queried = QueryRecordRows(database, context, ExactRecordsSQL, userID, prefix)
     }
-    queried := QueryRecordRows(database, context, query, userID, pattern)
     result.error = queried.error
     if queried.error != null {
         return result
@@ -327,5 +331,6 @@ FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 ORDER BY c
 SQL_END;
 PrefixRecordsSQL :: #string SQL_END
 SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
-FROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\' ORDER BY collection,id
+FROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\'
+  AND substr(collection,1,length(?3))=?3 ORDER BY collection,id
 SQL_END;

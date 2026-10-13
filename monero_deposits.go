@@ -409,3 +409,17 @@ func MoneroDeposits_Reconcile(monero Monero, context Context) Error {
 	}
 	return nil
 }
+
+var MoneroDeposits_ziranInitState uint8
+
+func MoneroDeposits_ziranInit() {
+	if MoneroDeposits_ziranInitState == 2 {
+		return
+	}
+	if MoneroDeposits_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	MoneroDeposits_ziranInitState = 1
+	TokenPolicy_ziranInit()
+	MoneroDeposits_ziranInitState = 2
+}

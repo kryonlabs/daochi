@@ -154,7 +154,14 @@ AuthenticateToken :: (database: *sql.Database, request: *http.Request, secret: [
         result.authentication = auth.Failure(cast(isize)401, "bearer token required")
         return result
     }
-    verified := token.VerifyAuthToken(secret, TrimSpace(bearer.value), clock.Unix(clock.Now()))
+    return AuthenticateBearer(database, request, TrimSpace(bearer.value), secret)
+}
+
+// Shared by the Authorization header and the WebSocket subprotocol, so a
+// token of a deleted account is refused on both.
+AuthenticateBearer :: (database: *sql.Database, request: *http.Request, bearer: string, secret: []u8) -> UserAuthenticationResult {
+    result: UserAuthenticationResult
+    verified := token.VerifyAuthToken(secret, bearer, clock.Unix(clock.Now()))
     if verified.error != "" {
         result.authentication = auth.Failure(cast(isize)401, "invalid bearer token")
         return result

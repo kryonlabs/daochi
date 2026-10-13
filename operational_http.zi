@@ -97,7 +97,9 @@ Ready :: (operations: Operations, writer: http.ResponseWriter, request: *http.Re
     }
     error := diagnostics.Health(operations.database, http.Context(request))
     if error != null {
-        MapSet(checks, "database", errors.Message(error))
+        // The public readiness check names the failure, not its details.
+        LogError("database readiness check failed", "error", error)
+        MapSet(checks, "database", "unavailable")
         status = cast(isize)503
     }
     statusText := "not_ready"

@@ -106,13 +106,7 @@ Authenticate :: (value: SyncSocket, request: *http.Request) -> http_auth.UserAut
     }
     bearer := socket.BearerToken(http.HeaderValue(http.Headers(request), "Sec-WebSocket-Protocol"))
     if bearer != "" {
-        verified := token.VerifyAuthToken(value.configuration.TokenSecret, bearer, clock.Unix(clock.Now()))
-        if verified.error != "" {
-            result.authentication = auth.Failure(cast(isize)401, "invalid bearer token")
-            return result
-        }
-        result.value = verified.value
-        return result
+        return http_auth.AuthenticateBearer(value.database, request, bearer, value.configuration.TokenSecret)
     }
     return http_auth.AuthenticateToken(value.database, request, value.configuration.TokenSecret)
 }

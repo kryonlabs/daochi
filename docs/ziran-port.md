@@ -328,7 +328,9 @@ exercise shared request counters and simultaneous consumers.
 no handwritten application adapter remains. Regression cases compare Unicode
 whitespace, malformed inputs, IPv4/IPv6 canonicalization and proxy trust with
 the baseline policy. Forwarded addresses remain trusted only for direct
-loopback peers, and only the first hop/header value can select the bucket.
+loopback peers. Behind such a proxy, Cloudflare's `CF-Connecting-IP` selects the
+bucket, else the last `X-Forwarded-For` entry, which the proxy itself appended;
+the client-chosen first entry never does.
 
 `metrics.zi` owns the entire original metrics module. Atomic counters stay in
 shared native storage. Map recording and scraping keep the original mutex,

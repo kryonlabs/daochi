@@ -272,3 +272,25 @@ func TestMeshImportCannotFreezeRecords(t *testing.T) {
 		t.Fatal("mesh deletion did not remove a frozen record")
 	}
 }
+
+// An omitted list in a paired peer's request must not mean "everything" when
+// the approved policy names specific apps, collections or trust spaces.
+func TestMeshRequestCannotWidenApprovedScopeByOmission(t *testing.T) {
+	approved := NodeSyncPolicy{Direction: "push", Apps: []string{"inbe"},
+		Collections: []string{"private.inbe.v1.*"}, Spaces: []string{"home"}, Data: []string{"encrypted_records"}}
+	full := NodeSyncPolicy{Apps: []string{"inbe"}, Collections: []string{"private.inbe.v1.*"},
+		Spaces: []string{"home"}, Data: []string{"encrypted_records"}}
+	if !MeshPolicy_AllowsOperation(approved, full, "export") {
+		t.Fatal("the approved scope itself was rejected")
+	}
+	omitted := []NodeSyncPolicy{
+		{Collections: full.Collections, Spaces: full.Spaces, Data: full.Data},
+		{Apps: full.Apps, Spaces: full.Spaces, Data: full.Data},
+		{Apps: full.Apps, Collections: full.Collections, Data: full.Data},
+	}
+	for _, requested := range omitted {
+		if MeshPolicy_AllowsOperation(approved, requested, "export") {
+			t.Fatalf("omitted list widened the approved scope: %#v", requested)
+		}
+	}
+}

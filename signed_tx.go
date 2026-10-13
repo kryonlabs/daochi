@@ -200,3 +200,17 @@ func SignedTx_Record(database *Database, context Context, tx SignedTxEnvelope, r
 func SignedTx_Forget(database *Database, context Context, tx SignedTxEnvelope) {
 	SignedTx_Delete(database, context, "DELETE FROM server_signed_transactions WHERE account_id=?1 AND tx_id=?2 AND app_id=?3 AND nonce=?4", tx.AccountID, tx.TxID, tx.AppID, tx.Nonce)
 }
+
+var SignedTx_ziranInitState uint8
+
+func SignedTx_ziranInit() {
+	if SignedTx_ziranInitState == 2 {
+		return
+	}
+	if SignedTx_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	SignedTx_ziranInitState = 1
+	DeviceKeys_ziranInit()
+	SignedTx_ziranInitState = 2
+}

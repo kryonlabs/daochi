@@ -113,3 +113,18 @@ func TokenPolicy_Authorize(database *Database, context Context, request *Request
 	}
 	return result
 }
+
+var TokenPolicy_ziranInitState uint8
+
+func TokenPolicy_ziranInit() {
+	if TokenPolicy_ziranInitState == 2 {
+		return
+	}
+	if TokenPolicy_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	TokenPolicy_ziranInitState = 1
+	AppStore_ziranInit()
+	SignedTx_ziranInit()
+	TokenPolicy_ziranInitState = 2
+}

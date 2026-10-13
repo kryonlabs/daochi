@@ -643,6 +643,7 @@ func LumiTelegram_ziranInit() {
 	Chat_ziranInit()
 	TelegramAccountEntry_ziranInit()
 	TelegramAccountMenu_ziranInit()
+	Authorization_ziranInit()
 	TelegramTransport_ziranInit()
 	StoreSchema_ziranInit()
 	LumiTelegram_ziranInitState = 2

@@ -173,7 +173,13 @@ LoadOrCreateKey :: (rawPath: string) -> PrivateKeyResult {
             result.error = errors.New(Concat(path, " has invalid key length"))
             return result
         }
-        result.value = cast(keys.PrivateKey)decoded.value
+        // The node ID comes from the public half, so it must be the seed's.
+        derived := keys.NewKeyFromSeed(decoded.value[0:32])
+        if EncodeHex(cast([]u8)derived) != EncodeHex(decoded.value) {
+            result.error = errors.New(Concat(path, " public key does not match its seed"))
+            return result
+        }
+        result.value = derived
         return result
     }
     if !errors.Is(read.error, files.NotExist()) {

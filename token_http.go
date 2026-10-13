@@ -433,3 +433,19 @@ func TokenHttp_ZiSpec4d6f79df546a1bd5(values []TokenProduct, root int64, end int
 		parent = child
 	}
 }
+
+var TokenHttp_ziranInitState uint8
+
+func TokenHttp_ziranInit() {
+	if TokenHttp_ziranInitState == 2 {
+		return
+	}
+	if TokenHttp_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	TokenHttp_ziranInitState = 1
+	TokenPolicy_ziranInit()
+	AppStore_ziranInit()
+	SignedTx_ziranInit()
+	TokenHttp_ziranInitState = 2
+}

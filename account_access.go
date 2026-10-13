@@ -39,6 +39,22 @@ func AccountAccess_Allow(access AccountAccess, prefix string, subject string, li
 	return RequestRate_Allow(access.Limiter, access.Counters, strings.Join(parts[0:2:2], ""), limit, window)
 }
 
+func AccountAccess_UserBucket(user string, request *Request) string {
+	subject := user
+	var value_0 bool = Identity_ValidUserID(subject)
+	if !value_0 {
+		subject = "invalid"
+	}
+	var value_1 [3]string
+	value_1[0] = subject
+	value_1[1] = "|"
+	var value_2 string = ClientAddress_FromRequest(request)
+	value_1[2] = value_2
+	parts := value_1
+	_ = parts
+	return strings.Join(parts[0:3:3], "")
+}
+
 func AccountAccess_RequestSignature(access AccountAccess, request *Request, user string, publicKey string, body []uint8) AccountSignatureResult {
 	signed := SyncRequest_SignatureHeader(request)
 	return AccountSignature_Authenticate(access.Database, access.Challenges, access.Verify, StdHttpGo_Context(request), user, publicKey, signed.Value, signed.Context, StdHttpGo_Method(request), StdUrlGo_Path(StdHttpGo_RequestURL(request)), body)
@@ -67,7 +83,7 @@ func AccountAccess_Challenge(access AccountAccess, writer ResponseWriter, reques
 	var value_1 bool = AccountAccess_Allow(access, "challenge:ip:", ClientAddress_FromRequest(request), int(60), window)
 	var value_2 bool = !value_1
 	if !value_2 {
-		var value_3 bool = AccountAccess_Allow(access, "challenge:user:", user, int(20), window)
+		var value_3 bool = AccountAccess_Allow(access, "challenge:user:", AccountAccess_UserBucket(user, request), int(20), window)
 		value_2 = !value_3
 	}
 	if value_2 {
@@ -109,7 +125,7 @@ func AccountAccess_Login(access AccountAccess, writer ResponseWriter, request *R
 	var value_1 bool = AccountAccess_Allow(access, "login:ip:", ClientAddress_FromRequest(request), int(40), window)
 	var value_2 bool = !value_1
 	if !value_2 {
-		var value_3 bool = AccountAccess_Allow(access, "login:user:", value.UserIDHash, int(20), window)
+		var value_3 bool = AccountAccess_Allow(access, "login:user:", AccountAccess_UserBucket(value.UserIDHash, request), int(20), window)
 		value_2 = !value_3
 	}
 	if value_2 {

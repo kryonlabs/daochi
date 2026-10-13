@@ -115,6 +115,10 @@ func Startup_SetIdleTimeout(Server *HTTPServer, Duration Duration) {
 	Server.IdleTimeout = Duration
 }
 
+func Startup_SetMaxHeaderBytes(Server *HTTPServer, Size int) {
+	Server.MaxHeaderBytes = Size
+}
+
 func Startup_SetErrorLog(Server *HTTPServer, Logger *Logger) {
 	Server.ErrorLog = Logger
 }
@@ -131,7 +135,7 @@ func Startup_ServerClosed() Error {
 	return http.ErrServerClosed
 }
 
-const zir_d_2f7872f771b12738 = 60000000000
+const zir_d_8e689211290bea7b = 60000000000
 const Second = 1000000000
 
 func Startup_CloseStore(store *Store) {
@@ -234,6 +238,7 @@ func Startup_NewHTTPServer(address string, handler Handler) *HTTPServer {
 	Startup_SetReadTimeout(server, Duration(15000000000))
 	Startup_SetWriteTimeout(server, Duration(15000000000))
 	Startup_SetIdleTimeout(server, Duration(60000000000))
+	Startup_SetMaxHeaderBytes(server, int(int(65536)))
 	Startup_SetErrorLog(server, log.New(Startup_StandardError(), "http: ", int(Startup_StandardLogFlags())))
 	return server
 }
@@ -346,5 +351,7 @@ func Startup_ziranInit() {
 	Store_ziranInit()
 	Verifier_ziranInit()
 	Server_ziranInit()
+	MoneroInvoices_ziranInit()
+	Mesh_ziranInit()
 	Startup_ziranInitState = 2
 }

@@ -10,6 +10,7 @@ sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 clock :: #import "std/time_go";
 errors :: #import "std/errors_go";
+ed :: #import "std/ed25519_go";
 go_sql :: #system_library "go:database/sql";
 numbers :: #system_library "go:strconv";
 strings :: #system_library "go:strings";
@@ -30,6 +31,8 @@ InvoicesResult :: struct {
 }
 
 #scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+ReceiptSQL :: "UPDATE token_payment_intents SET receipt_id=?3 WHERE account_id=?1 AND id=?2 AND provider='monero'";
 CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
 IntegerText :: (value: isize) -> string #foreign numbers "Itoa";
 Join :: (values: []string, separator: string) -> string #foreign strings;
@@ -257,4 +260,58 @@ MarkExpired :: (database: *sql.Database, context: ctx.Context, accountID: string
 SettleExpired :: (database: *sql.Database, context: ctx.Context, accountID: string,
     id: string, receiptID: string, paymentRef: string) -> Error {
     return MarkPaid(database, context, SettleExpiredSQL, accountID, id, receiptID, paymentRef, "expired invoice no longer unsettled")
+}
+
+// Claim a pending (or unsettled expired) invoice and credit its payment in one
+// transaction. Concurrent settlements can see different transaction sets and
+// so different payment references; only the one that claims the invoice
+// credits it, so a single payment can never be credited twice.
+CreditPaid :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, accountID: string,
+    id: string, paymentRef: string, event: receipts.TokenEventInput, expired: bool,
+    unavailable: Error) -> ledger.CreditResult {
+    result: ledger.CreditResult
+    begun := sql.Begin(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    query := PaidSQL
+    unchanged := "invoice not pending"
+    if expired {
+        query = SettleExpiredSQL
+        unchanged = "expired invoice no longer unsettled"
+    }
+    claim: [4]Any = .[accountID, id, "", paymentRef]
+    claimed := sql.ExecTx(transaction, context, query, claim[:])
+    result.error = claimed.error
+    if result.error != null {
+        return result
+    }
+    changed := sql.RowsAffected(claimed.value)
+    result.error = changed.error
+    if result.error != null {
+        return result
+    }
+    if changed.value == 0 {
+        result.error = errors.New(unchanged)
+        return result
+    }
+    credited := ledger.CreditPaymentTx(transaction, context, signer, "monero", paymentRef, event, unavailable)
+    if credited.error != null {
+        result.error = credited.error
+        return result
+    }
+    receipt: [3]Any = .[accountID, id, credited.value.ReceiptID]
+    written := sql.ExecTx(transaction, context, ReceiptSQL, receipt[:])
+    result.error = written.error
+    if result.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    if result.error != null {
+        return result
+    }
+    return credited
 }

@@ -70,13 +70,18 @@ func Middleware_User(Value *URL) *zir_66876f07bdddfd89_UserInfo {
 	return Value.User
 }
 
+func Middleware_RequestPattern(Request *Request) string {
+	return Request.Pattern
+}
+
 func Middleware_Finish(writer *CapturedWriter, counters **ServerMetrics, request *Request, start Time) {
 	status := writer.Status
 	if status == 0 {
 		status = 200
 	}
+	route := Metrics_RouteLabel(StdUrlGo_Path(StdHttpGo_RequestURL(request)), Middleware_RequestPattern(request))
 	var value_0 *ServerMetrics = *(counters)
-	Metrics_RecordHTTP(value_0, StdHttpGo_Method(request), StdUrlGo_Path(StdHttpGo_RequestURL(request)), status, time.Since(start))
+	Metrics_RecordHTTP(value_0, StdHttpGo_Method(request), route, status, time.Since(start))
 }
 
 func Middleware_New(counters **ServerMetrics, next Handler) Handler {

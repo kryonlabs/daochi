@@ -44,7 +44,7 @@ CheckAddress :: (value: AddressCase, test: *testing.Test) {
 ClientAddressForwardedForTrust :: (test: *testing.Test) {
     cases: [7]AddressCase = .[
         AddressCase.{"loopback trusts proxy header", "127.0.0.1:8080", "203.0.113.9", "203.0.113.9"},
-        AddressCase.{"loopback uses first hop only", "127.0.0.1:8080", "203.0.113.9, 198.51.100.7", "203.0.113.9"},
+        AddressCase.{"loopback uses the hop its proxy added", "127.0.0.1:8080", "203.0.113.9, 198.51.100.7", "198.51.100.7"},
         AddressCase.{"loopback ignores garbage header", "127.0.0.1:8080", "not-an-ip", "127.0.0.1"},
         AddressCase.{"loopback without header", "[::1]:9000", "", "::1"},
         AddressCase.{"remote peer ignores header", "203.0.113.50:5555", "198.51.100.7", "203.0.113.50"},

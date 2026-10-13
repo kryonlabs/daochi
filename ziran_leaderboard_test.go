@@ -13,13 +13,13 @@ import (
 	"time"
 )
 
-func seedLeaderboard(t *testing.T, store *Store, users []string) {
+func seedLeaderboard(t *testing.T, store *Store, users []string, now time.Time) {
 	t.Helper()
 	for index, user := range users {
 		for _, activity := range []int{0, 1, 2} {
 			for day := 0; day < 4-index; day++ {
 				id := fmt.Sprintf("session-%d-%d-%d", index, activity, day)
-				date := time.Now().UTC().AddDate(0, 0, -day).Format("20060102")
+				date := now.UTC().AddDate(0, 0, -day).Format("20060102")
 				if _, err := store.Database.Exec("INSERT INTO server_sessions(user_id_hash,id,started_at,local_date,topic,activity,source,rounds_hash,updated_at) VALUES(?,?,?,?,'0',?,'test','rounds','2026-01-01T00:00:00Z')", user, id, "2026-01-01T00:00:00Z", date, activity); err != nil {
 					t.Fatal(err)
 				}
@@ -32,7 +32,7 @@ func seedLeaderboard(t *testing.T, store *Store, users []string) {
 		}
 		for index, duration := range []int{0, -2, 900, 1200} {
 			id := fmt.Sprintf("log-%s-%d", user[:1], index)
-			completed := time.Now().UTC().AddDate(0, 0, -index).Format(time.RFC3339)
+			completed := now.UTC().AddDate(0, 0, -index).Format(time.RFC3339)
 			if _, err := store.Database.Exec("INSERT INTO server_meditation_logs(id,user_id_hash,session_id,duration_seconds,completed_at) VALUES(?,?,?,?,?)", id, user, id, duration, completed); err != nil {
 				t.Fatal(err)
 			}
@@ -55,8 +55,11 @@ func compareLeaderboard(t *testing.T, actual, expected *Store, context context.C
 func TestZiranLeaderboardAgainstBaseline(t *testing.T) {
 	actual, users := socialHTTPFixture(t)
 	expected, _ := socialHTTPFixture(t)
-	seedLeaderboard(t, actual.Store, users)
-	seedLeaderboard(t, expected.Store, users)
+	// Both stores get the same timestamps; seeding each from its own clock
+	// reading made the comparison fail whenever a second boundary passed.
+	now := time.Now()
+	seedLeaderboard(t, actual.Store, users, now)
+	seedLeaderboard(t, expected.Store, users, now)
 	for _, user := range append(users, "missing", "' OR 1=1 --") {
 		for _, practice := range []string{"whm", "meditation", "sun_salutation", "unknown"} {
 			for _, metric := range []string{"streak", "avg_hold", "avg_time", "unknown"} {

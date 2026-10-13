@@ -76,19 +76,69 @@ LumiMessage :: struct {
     time: s64 #go_tag "json:\"time\""
 }
 
-Schema :: (service: chat.Chat, request: *http.Request) -> bool {
+// Handled updates keep only their ID, without text, for a day, so that a
+// retried Telegram update is still recognised; the retention job then deletes
+// them. A report's owner copy goes once the owner's app received it, or with
+// the report when its reporter deletes their account.
+HandledUpdateSeconds :: 86400
+
+EnsureSchema :: (database: *sql.Database, context: ctx.Context) -> bool {
     arguments: [0]Any
-    result := sql.Exec(service.database, http.Context(request),
+    result := sql.Exec(database, context,
         "CREATE TABLE IF NOT EXISTS server_lumi_link_codes(code TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS server_lumi_telegram(account_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,telegram_id INTEGER NOT NULL UNIQUE,linked_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS server_lumi_updates(id INTEGER PRIMARY KEY,account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,kind TEXT NOT NULL,text TEXT NOT NULL,choice INTEGER NOT NULL DEFAULT 0,done INTEGER NOT NULL DEFAULT 0,executor TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS server_lumi_deliveries(account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,id TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(account_id,id));", arguments[:])
     if result.error != null {
         return false
     }
-    if schema.AddColumn(service.database, http.Context(request), "server_lumi_link_codes", "consumed_at",
+    if schema.AddColumn(database, context, "server_lumi_link_codes", "consumed_at",
         "ALTER TABLE server_lumi_link_codes ADD COLUMN consumed_at INTEGER NOT NULL DEFAULT 0") != null {
         return false
     }
-    return schema.AddColumn(service.database, http.Context(request), "server_lumi_link_codes", "telegram_id",
-        "ALTER TABLE server_lumi_link_codes ADD COLUMN telegram_id INTEGER NOT NULL DEFAULT 0") == null
+    if schema.AddColumn(database, context, "server_lumi_link_codes", "telegram_id",
+        "ALTER TABLE server_lumi_link_codes ADD COLUMN telegram_id INTEGER NOT NULL DEFAULT 0") != null {
+        return false
+    }
+    if schema.AddColumn(database, context, "server_lumi_updates", "done_at",
+        "ALTER TABLE server_lumi_updates ADD COLUMN done_at INTEGER NOT NULL DEFAULT 0") != null {
+        return false
+    }
+    // A delivered report is never copied to the owner again, even after its
+    // copy is deleted.
+    if schema.AddColumn(database, context, "server_app_feedback", "owner_delivered",
+        "ALTER TABLE server_app_feedback ADD COLUMN owner_delivered INTEGER NOT NULL DEFAULT 0") != null {
+        return false
+    }
+    trigger := sql.Exec(database, context, ForgetReport, arguments[:])
+    return trigger.error == null
+}
+
+Schema :: (service: chat.Chat, request: *http.Request) -> bool {
+    return EnsureSchema(service.database, http.Context(request))
+}
+
+// Removes what Lumi no longer needs at Unix time now. The caller's
+// transaction has already ensured the schema.
+Prune :: (transaction: *sql.Transaction, context: ctx.Context, now: s64) -> Error {
+    empty: [0]Any
+    // Copies acknowledged before acknowledgements recorded delivery.
+    marked := sql.ExecTx(transaction, context, MarkAcknowledgedReports, empty[:])
+    if marked.error != null {
+        return marked.error
+    }
+    handledBefore: [1]Any = .[now - HandledUpdateSeconds]
+    handled := sql.ExecTx(transaction, context,
+        "DELETE FROM server_lumi_updates WHERE done=1 AND (kind='feedback' OR done_at<?1)", handledBefore[:])
+    if handled.error != null {
+        return handled.error
+    }
+    // Copies of reports deleted before the report trigger existed.
+    orphaned := sql.ExecTx(transaction, context, DeleteOrphanedReports, empty[:])
+    if orphaned.error != null {
+        return orphaned.error
+    }
+    expiredBy: [1]Any = .[now]
+    expired := sql.ExecTx(transaction, context,
+        "DELETE FROM server_lumi_link_codes WHERE expires<=?1", expiredBy[:])
+    return expired.error
 }
 
 // The claim takes SQLite's write lock before inspecting the binding. Binding
@@ -263,8 +313,19 @@ Account :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Requ
         }
         arguments[1] = input.id
         arguments[2] = input.client
-        written := sql.Exec(service.database, context, "UPDATE server_lumi_updates SET done=1 WHERE account_id=?1 AND id=?2 AND executor=?3", arguments[0:3])
-        if written.error != null { response.Error(writer, cast(isize)503, "receipt unavailable"); return }
+        arguments[3] = now
+        delivered := sql.Exec(service.database, context, AcknowledgeReport, arguments[0:3])
+        if delivered.error != null {
+            response.Error(writer, cast(isize)503, "receipt unavailable")
+            return
+        }
+        // The handled update keeps only its ID until the retention job deletes it.
+        written := sql.Exec(service.database, context,
+            "UPDATE server_lumi_updates SET done=1,done_at=?4,text='' WHERE account_id=?1 AND id=?2 AND executor=?3 AND done=0", arguments[:])
+        if written.error != null {
+            response.Error(writer, cast(isize)503, "receipt unavailable")
+            return
+        }
         response.JSON(writer, cast(isize)200, true)
         return
     }
@@ -283,7 +344,7 @@ Account :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Requ
         // A display name or user-chosen @alias cannot acquire this privilege.
         if service.configuration.LumiOwnerID.count == 64 && user.value == service.configuration.LumiOwnerID {
             written := sql.Exec(service.database, context,
-                "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text) SELECT -rowid,?1,'feedback',json_object('title',title,'message',message,'account_id',account_id,'report_id',id) FROM server_app_feedback WHERE app_id='inbe'", arguments[0:1])
+                "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text) SELECT -rowid,?1,'feedback',json_object('title',title,'message',message,'account_id',account_id,'report_id',id) FROM server_app_feedback WHERE app_id='inbe' AND owner_delivered=0", arguments[0:1])
             if written.error != null { response.Error(writer, cast(isize)503, "feedback unavailable"); return }
         }
         result: LumiPoll
@@ -472,3 +533,11 @@ Webhook :: (service: chat.Chat, entryService: entries.AccountEntries, writer: ht
     }
     response.JSON(writer, cast(isize)200, true)
 }
+
+#scope_file
+// An owner copy of a report holds the reporting account and report ID as JSON;
+// the CASE keeps other updates' plain text away from json_extract.
+ForgetReport :: "CREATE TRIGGER IF NOT EXISTS server_lumi_forget_report AFTER DELETE ON server_app_feedback BEGIN DELETE FROM server_lumi_updates WHERE kind='feedback' AND (CASE WHEN json_valid(text) THEN json_extract(text,'$.account_id') END)=OLD.account_id AND (CASE WHEN json_valid(text) THEN json_extract(text,'$.report_id') END)=OLD.id; END";
+AcknowledgeReport :: "UPDATE server_app_feedback SET owner_delivered=1 WHERE owner_delivered=0 AND EXISTS(SELECT 1 FROM server_lumi_updates u WHERE u.account_id=?1 AND u.id=?2 AND u.executor=?3 AND u.kind='feedback' AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.account_id') END)=server_app_feedback.account_id AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.report_id') END)=server_app_feedback.id)";
+MarkAcknowledgedReports :: "UPDATE server_app_feedback SET owner_delivered=1 WHERE owner_delivered=0 AND EXISTS(SELECT 1 FROM server_lumi_updates u WHERE u.done=1 AND u.kind='feedback' AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.account_id') END)=server_app_feedback.account_id AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.report_id') END)=server_app_feedback.id)";
+DeleteOrphanedReports :: "DELETE FROM server_lumi_updates WHERE kind='feedback' AND NOT EXISTS(SELECT 1 FROM server_app_feedback f WHERE f.account_id=(CASE WHEN json_valid(server_lumi_updates.text) THEN json_extract(server_lumi_updates.text,'$.account_id') END) AND f.id=(CASE WHEN json_valid(server_lumi_updates.text) THEN json_extract(server_lumi_updates.text,'$.report_id') END))";

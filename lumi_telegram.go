@@ -71,25 +71,88 @@ type LumiMessage struct {
 	Time  int64  "json:\"time\""
 }
 
-func LumiTelegram_Schema(service Chat, request *Request) bool {
+const HandledUpdateSeconds = 86400
+const ForgetReport = "CREATE TRIGGER IF NOT EXISTS server_lumi_forget_report AFTER DELETE ON server_app_feedback BEGIN DELETE FROM server_lumi_updates WHERE kind='feedback' AND (CASE WHEN json_valid(text) THEN json_extract(text,'$.account_id') END)=OLD.account_id AND (CASE WHEN json_valid(text) THEN json_extract(text,'$.report_id') END)=OLD.id; END"
+const AcknowledgeReport = "UPDATE server_app_feedback SET owner_delivered=1 WHERE owner_delivered=0 AND EXISTS(SELECT 1 FROM server_lumi_updates u WHERE u.account_id=?1 AND u.id=?2 AND u.executor=?3 AND u.kind='feedback' AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.account_id') END)=server_app_feedback.account_id AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.report_id') END)=server_app_feedback.id)"
+const MarkAcknowledgedReports = "UPDATE server_app_feedback SET owner_delivered=1 WHERE owner_delivered=0 AND EXISTS(SELECT 1 FROM server_lumi_updates u WHERE u.done=1 AND u.kind='feedback' AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.account_id') END)=server_app_feedback.account_id AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.report_id') END)=server_app_feedback.id)"
+const DeleteOrphanedReports = "DELETE FROM server_lumi_updates WHERE kind='feedback' AND NOT EXISTS(SELECT 1 FROM server_app_feedback f WHERE f.account_id=(CASE WHEN json_valid(server_lumi_updates.text) THEN json_extract(server_lumi_updates.text,'$.account_id') END) AND f.id=(CASE WHEN json_valid(server_lumi_updates.text) THEN json_extract(server_lumi_updates.text,'$.report_id') END))"
+
+func LumiTelegram_EnsureSchema(database *Database, context Context) bool {
 	var arguments [0]Any
 	_ = arguments
-	var value_0 Context = StdHttpGo_Context(request)
-	var value_1 string = "CREATE TABLE IF NOT EXISTS server_lumi_link_codes(code TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS server_lumi_telegram(account_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,telegram_id INTEGER NOT NULL UNIQUE,linked_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS server_lumi_updates(id INTEGER PRIMARY KEY,account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,kind TEXT NOT NULL,text TEXT NOT NULL,choice INTEGER NOT NULL DEFAULT 0,done INTEGER NOT NULL DEFAULT 0,executor TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS server_lumi_deliveries(account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,id TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(account_id,id));"
-	var value_2 []Any
-	if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
+	var value_0 string = "CREATE TABLE IF NOT EXISTS server_lumi_link_codes(code TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS server_lumi_telegram(account_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,telegram_id INTEGER NOT NULL UNIQUE,linked_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS server_lumi_updates(id INTEGER PRIMARY KEY,account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,kind TEXT NOT NULL,text TEXT NOT NULL,choice INTEGER NOT NULL DEFAULT 0,done INTEGER NOT NULL DEFAULT 0,executor TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS server_lumi_deliveries(account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,id TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(account_id,id));"
+	var value_1 []Any
+	if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
 		panic("slice range out of bounds")
 	}
-	result := StdSqlGo_Exec(service.Database, value_0, value_1, value_2[0:int64(len(value_2)):int64(len(value_2))])
+	result := StdSqlGo_Exec(database, context, value_0, value_1[0:int64(len(value_1)):int64(len(value_1))])
 	if result.Error != nil {
 		return false
 	}
-	var value_3 Error = StoreSchema_AddColumn(service.Database, StdHttpGo_Context(request), "server_lumi_link_codes", "consumed_at", "ALTER TABLE server_lumi_link_codes ADD COLUMN consumed_at INTEGER NOT NULL DEFAULT 0")
+	var value_2 Error = StoreSchema_AddColumn(database, context, "server_lumi_link_codes", "consumed_at", "ALTER TABLE server_lumi_link_codes ADD COLUMN consumed_at INTEGER NOT NULL DEFAULT 0")
+	if value_2 != nil {
+		return false
+	}
+	var value_3 Error = StoreSchema_AddColumn(database, context, "server_lumi_link_codes", "telegram_id", "ALTER TABLE server_lumi_link_codes ADD COLUMN telegram_id INTEGER NOT NULL DEFAULT 0")
 	if value_3 != nil {
 		return false
 	}
-	var value_4 Error = StoreSchema_AddColumn(service.Database, StdHttpGo_Context(request), "server_lumi_link_codes", "telegram_id", "ALTER TABLE server_lumi_link_codes ADD COLUMN telegram_id INTEGER NOT NULL DEFAULT 0")
-	return value_4 == nil
+	var value_4 Error = StoreSchema_AddColumn(database, context, "server_lumi_updates", "done_at", "ALTER TABLE server_lumi_updates ADD COLUMN done_at INTEGER NOT NULL DEFAULT 0")
+	if value_4 != nil {
+		return false
+	}
+	var value_5 Error = StoreSchema_AddColumn(database, context, "server_app_feedback", "owner_delivered", "ALTER TABLE server_app_feedback ADD COLUMN owner_delivered INTEGER NOT NULL DEFAULT 0")
+	if value_5 != nil {
+		return false
+	}
+	var value_6 string = "CREATE TRIGGER IF NOT EXISTS server_lumi_forget_report AFTER DELETE ON server_app_feedback BEGIN DELETE FROM server_lumi_updates WHERE kind='feedback' AND (CASE WHEN json_valid(text) THEN json_extract(text,'$.account_id') END)=OLD.account_id AND (CASE WHEN json_valid(text) THEN json_extract(text,'$.report_id') END)=OLD.id; END"
+	var value_7 []Any
+	if int64(0) < 0 || int64(int64(len(value_7))) < int64(0) || int64(int64(len(value_7))) > int64(len(value_7)) {
+		panic("slice range out of bounds")
+	}
+	trigger := StdSqlGo_Exec(database, context, value_6, value_7[0:int64(len(value_7)):int64(len(value_7))])
+	return trigger.Error == nil
+}
+
+func LumiTelegram_Schema(service Chat, request *Request) bool {
+	return LumiTelegram_EnsureSchema(service.Database, StdHttpGo_Context(request))
+}
+
+func LumiTelegram_Prune(transaction *Transaction, context Context, now int64) Error {
+	var empty [0]Any
+	_ = empty
+	var value_0 string = "UPDATE server_app_feedback SET owner_delivered=1 WHERE owner_delivered=0 AND EXISTS(SELECT 1 FROM server_lumi_updates u WHERE u.done=1 AND u.kind='feedback' AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.account_id') END)=server_app_feedback.account_id AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.report_id') END)=server_app_feedback.id)"
+	var value_1 []Any
+	if int64(0) < 0 || int64(int64(len(value_1))) < int64(0) || int64(int64(len(value_1))) > int64(len(value_1)) {
+		panic("slice range out of bounds")
+	}
+	marked := StdSqlGo_ExecTx(transaction, context, value_0, value_1[0:int64(len(value_1)):int64(len(value_1))])
+	if marked.Error != nil {
+		return marked.Error
+	}
+	var value_2 [1]Any
+	value_2[0] = now - 86400
+	handledBefore := value_2
+	_ = handledBefore
+	handled := StdSqlGo_ExecTx(transaction, context, "DELETE FROM server_lumi_updates WHERE done=1 AND (kind='feedback' OR done_at<?1)", handledBefore[0:1:1])
+	if handled.Error != nil {
+		return handled.Error
+	}
+	var value_3 string = "DELETE FROM server_lumi_updates WHERE kind='feedback' AND NOT EXISTS(SELECT 1 FROM server_app_feedback f WHERE f.account_id=(CASE WHEN json_valid(server_lumi_updates.text) THEN json_extract(server_lumi_updates.text,'$.account_id') END) AND f.id=(CASE WHEN json_valid(server_lumi_updates.text) THEN json_extract(server_lumi_updates.text,'$.report_id') END))"
+	var value_4 []Any
+	if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
+		panic("slice range out of bounds")
+	}
+	orphaned := StdSqlGo_ExecTx(transaction, context, value_3, value_4[0:int64(len(value_4)):int64(len(value_4))])
+	if orphaned.Error != nil {
+		return orphaned.Error
+	}
+	var value_5 [1]Any
+	value_5[0] = now
+	expiredBy := value_5
+	_ = expiredBy
+	expired := StdSqlGo_ExecTx(transaction, context, "DELETE FROM server_lumi_link_codes WHERE expires<=?1", expiredBy[0:1:1])
+	return expired.Error
 }
 
 func LumiTelegram_ConsumeLink(database *Database, requestContext Context, code string, sender int64, now int64) LinkResult {
@@ -311,7 +374,15 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 		}
 		arguments[1] = input.ID
 		arguments[2] = input.Client
-		written := StdSqlGo_Exec(service.Database, context, "UPDATE server_lumi_updates SET done=1 WHERE account_id=?1 AND id=?2 AND executor=?3", arguments[0:3:3])
+		arguments[3] = now
+		var value_20 string = "UPDATE server_app_feedback SET owner_delivered=1 WHERE owner_delivered=0 AND EXISTS(SELECT 1 FROM server_lumi_updates u WHERE u.account_id=?1 AND u.id=?2 AND u.executor=?3 AND u.kind='feedback' AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.account_id') END)=server_app_feedback.account_id AND (CASE WHEN json_valid(u.text) THEN json_extract(u.text,'$.report_id') END)=server_app_feedback.id)"
+		delivered := StdSqlGo_Exec(service.Database, context, value_20, arguments[0:3:3])
+		if delivered.Error != nil {
+			Response_Error(writer, int(503), "receipt unavailable")
+			return
+		}
+		var value_21 string = "UPDATE server_lumi_updates SET done=1,done_at=?4,text='' WHERE account_id=?1 AND id=?2 AND executor=?3 AND done=0"
+		written := StdSqlGo_Exec(service.Database, context, value_21, arguments[0:4:4])
 		_ = written
 		if written.Error != nil {
 			Response_Error(writer, int(503), "receipt unavailable")
@@ -322,14 +393,14 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 	}
 	var destination int64 = 0
 	var linkedAt int64 = 0
-	var value_20 [2]Any
-	value_20[0] = &(destination)
-	value_20[1] = &(linkedAt)
-	destinations := value_20
+	var value_22 [2]Any
+	value_22[0] = &(destination)
+	value_22[1] = &(linkedAt)
+	destinations := value_22
 	_ = destinations
 	row := StdSqlGo_QueryRow(service.Database, context, "SELECT telegram_id,linked_at FROM server_lumi_telegram WHERE account_id=?1", arguments[0:1:1])
-	var value_21 Error = StdSqlGo_ScanRow(row, destinations[0:2:2])
-	linked := value_21 == nil
+	var value_23 Error = StdSqlGo_ScanRow(row, destinations[0:2:2])
+	linked := value_23 == nil
 	if action == "poll" {
 		client := StdUrlGo_Value(StdUrlGo_Query(StdHttpGo_RequestURL(request)), "client")
 		if int64(len(client)) != 64 {
@@ -337,8 +408,8 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 			return
 		}
 		if int64(len(service.Configuration.LumiOwnerID)) == 64 && user.Value == service.Configuration.LumiOwnerID {
-			var value_22 string = "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text) SELECT -rowid,?1,'feedback',json_object('title',title,'message',message,'account_id',account_id,'report_id',id) FROM server_app_feedback WHERE app_id='inbe'"
-			written := StdSqlGo_Exec(service.Database, context, value_22, arguments[0:1:1])
+			var value_24 string = "INSERT OR IGNORE INTO server_lumi_updates(id,account_id,kind,text) SELECT -rowid,?1,'feedback',json_object('title',title,'message',message,'account_id',account_id,'report_id',id) FROM server_app_feedback WHERE app_id='inbe' AND owner_delivered=0"
+			written := StdSqlGo_Exec(service.Database, context, value_24, arguments[0:1:1])
 			_ = written
 			if written.Error != nil {
 				Response_Error(writer, int(503), "feedback unavailable")
@@ -349,16 +420,16 @@ func LumiTelegram_Account(service Chat, writer ResponseWriter, request *Request,
 		_ = result
 		result.Linked = linked
 		result.LinkedAt = linkedAt
-		var value_23 [4]Any
-		value_23[0] = &(result.Update.ID)
-		value_23[1] = &(result.Update.Kind)
-		value_23[2] = &(result.Update.Text)
-		value_23[3] = &(result.Update.Choice)
-		updateDestinations := value_23
+		var value_25 [4]Any
+		value_25[0] = &(result.Update.ID)
+		value_25[1] = &(result.Update.Kind)
+		value_25[2] = &(result.Update.Text)
+		value_25[3] = &(result.Update.Choice)
+		updateDestinations := value_25
 		_ = updateDestinations
 		arguments[1] = client
-		var value_24 string = "UPDATE server_lumi_updates SET executor=?2 WHERE account_id=?1 AND done=0 AND id=(SELECT id FROM server_lumi_updates WHERE account_id=?1 AND done=0 ORDER BY id LIMIT 1) AND (executor='' OR executor=?2) RETURNING id,kind,text,choice"
-		row = StdSqlGo_QueryRow(service.Database, context, value_24, arguments[0:2:2])
+		var value_26 string = "UPDATE server_lumi_updates SET executor=?2 WHERE account_id=?1 AND done=0 AND id=(SELECT id FROM server_lumi_updates WHERE account_id=?1 AND done=0 ORDER BY id LIMIT 1) AND (executor='' OR executor=?2) RETURNING id,kind,text,choice"
+		row = StdSqlGo_QueryRow(service.Database, context, value_26, arguments[0:2:2])
 		StdSqlGo_ScanRow(row, updateDestinations[0:4:4])
 		Response_JSON(writer, int(200), result)
 		return

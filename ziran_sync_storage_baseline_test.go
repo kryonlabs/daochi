@@ -348,6 +348,10 @@ UPDATE monero_account_addresses SET disabled_at=CURRENT_TIMESTAMP
 WHERE account_id=?1 AND disabled_at=''`, userID); err != nil {
 		return err
 	}
+	// Added with the data retention job: chat counts have no foreign key.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM server_chat_usage WHERE account_id=?1`, userID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_users WHERE user_id_hash=?1`, userID); err != nil {
 		return err
 	}

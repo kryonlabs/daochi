@@ -163,6 +163,10 @@ func AccountState_Delete(database *Database, context Context, userID string) Err
 	if disabled.Error != nil {
 		return disabled.Error
 	}
+	usage := StdSqlGo_ExecTx(opened.Value, context, "DELETE FROM server_chat_usage WHERE account_id=?1", arguments[0:1:1])
+	if usage.Error != nil {
+		return usage.Error
+	}
 	deleted := StdSqlGo_ExecTx(opened.Value, context, "DELETE FROM server_users WHERE user_id_hash=?1", arguments[0:1:1])
 	if deleted.Error != nil {
 		return deleted.Error

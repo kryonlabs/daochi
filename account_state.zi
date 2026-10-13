@@ -159,6 +159,12 @@ Delete :: (database: *sql.Database, context: ctx.Context, userID: string) -> Err
     if disabled.error != null {
         return disabled.error
     }
+    // Daily chat counts have no foreign key to the account.
+    usage := sql.ExecTx(opened.value, context,
+        "DELETE FROM server_chat_usage WHERE account_id=?1", arguments[:])
+    if usage.error != null {
+        return usage.error
+    }
     deleted := sql.ExecTx(opened.value, context,
         "DELETE FROM server_users WHERE user_id_hash=?1", arguments[:])
     if deleted.error != null {

@@ -139,6 +139,12 @@ func baselineStartWorkers(server *Server, ctx context.Context, group *WorkerGrou
 		defer group.Done()
 		workers.Discovery(server, ctx)
 	}()
+	// Added with the data retention job.
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		workers.Retention(server, ctx)
+	}()
 }
 
 func baselineShutdownOnCancel(server *HTTPServer, ctx context.Context, shutdown Shutdown) {

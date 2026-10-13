@@ -24,6 +24,7 @@ type Workers struct {
 	Invoices  Worker
 	Mesh      Worker
 	Discovery Worker
+	Retention Worker
 }
 
 type VerifierFactory func() VerifierResult
@@ -36,7 +37,7 @@ type Signal = os.Signal
 
 type Logger = log.Logger
 
-type zir_c4d9a008fd698927_CancelCallback func(CancelFunc)
+type zir_86e411f6e78af4e5_CancelCallback func(CancelFunc)
 
 type CloseCallback func(*Store)
 
@@ -75,7 +76,7 @@ func Startup_NotifyContext(Parent Context, Interrupt Signal, Terminate Signal) C
 	return result
 }
 
-func Startup_CancelAtReturn(Callback zir_c4d9a008fd698927_CancelCallback, Cancel CancelFunc) {
+func Startup_CancelAtReturn(Callback zir_86e411f6e78af4e5_CancelCallback, Cancel CancelFunc) {
 	Callback(Cancel)
 }
 
@@ -135,7 +136,7 @@ func Startup_ServerClosed() Error {
 	return http.ErrServerClosed
 }
 
-const zir_d_8e689211290bea7b = 60000000000
+const zir_d_e4db774a387b8ba5 = 60000000000
 const Second = 1000000000
 
 func Startup_CloseStore(store *Store) {
@@ -185,6 +186,10 @@ func Startup_RunDiscovery(server *Server, context Context) {
 	Discovery_Run(&(server.Cfg), &(server.Node), context, value_6, func(value_7 *Advertiser) { Discovery_Shutdown(value_7) })
 }
 
+func Startup_RunRetention(server *Server, context Context) {
+	Retention_Run(server.Store.Database, context, Duration(3600000000000))
+}
+
 func Startup_LocalHTTPURL(address string) string {
 	split := StdNetGo_SplitHostPort(address)
 	host := split.Host
@@ -213,6 +218,7 @@ func Startup_NativeWorkers() Workers {
 	result.Invoices = func(value_0 *Server, value_1 Context) { Startup_RunInvoices(value_0, value_1) }
 	result.Mesh = func(value_2 *Server, value_3 Context) { Startup_RunMesh(value_2, value_3) }
 	result.Discovery = func(value_4 *Server, value_5 Context) { Startup_RunDiscovery(value_4, value_5) }
+	result.Retention = func(value_6 *Server, value_7 Context) { Startup_RunRetention(value_6, value_7) }
 	return result
 }
 
@@ -228,6 +234,7 @@ func Startup_StartWorkers(server *Server, context Context, group *WorkerGroup, w
 	}
 	Startup_StartWorker(group, workers.Mesh, server, context)
 	Startup_StartWorker(group, workers.Discovery, server, context)
+	Startup_StartWorker(group, workers.Retention, server, context)
 }
 
 func Startup_NewHTTPServer(address string, handler Handler) *HTTPServer {
@@ -354,5 +361,6 @@ func Startup_ziranInit() {
 	AccountAccess_ziranInit()
 	MoneroInvoices_ziranInit()
 	Mesh_ziranInit()
+	Retention_ziranInit()
 	Startup_ziranInitState = 2
 }

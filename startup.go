@@ -351,6 +351,7 @@ func Startup_ziranInit() {
 	Store_ziranInit()
 	Verifier_ziranInit()
 	Server_ziranInit()
+	AccountAccess_ziranInit()
 	MoneroInvoices_ziranInit()
 	Mesh_ziranInit()
 	Startup_ziranInitState = 2

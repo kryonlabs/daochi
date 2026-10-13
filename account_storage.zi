@@ -1,5 +1,5 @@
-// An account's stored bytes on this node, counted like the node storage
-// report: encrypted records plus encrypted payloads. A node may limit them.
+// An account's stored bytes on this node: encrypted records, encrypted
+// payloads and blobs. A node may limit them.
 #import "std/go_types"
 #import "sync_types"
 sql :: #import "std/sql_go";
@@ -7,6 +7,9 @@ ctx :: #import "std/context_go";
 errors :: #import "std/errors_go";
 http :: #import "std/http_go";
 response :: #import "response";
+identity :: #import "identity";
+go_os :: #system_library "go:os";
+go_fmt :: #system_library "go:fmt";
 
 UsageResult :: struct {
     value: s64
@@ -30,7 +33,12 @@ SELECT
    FROM server_encrypted_records WHERE user_id_hash=?1)
 + (SELECT COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)
    FROM server_encrypted_payloads WHERE user_id_hash=?1)
++ (SELECT COALESCE(SUM(size),0) FROM server_blobs WHERE user_id_hash=?1)
 SQL_END;
+BlobStoredSQL :: "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3)";
+BlobRecordSQL :: "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)";
+RemoveAllRaw :: (path: string) -> Error #foreign go_os "RemoveAll";
+Concat :: (a: string, b: string) -> string #foreign go_fmt "Sprint";
 
 #scope_export
 Used :: (database: *sql.Database, context: ctx.Context, userID: string) -> UsageResult {
@@ -75,4 +83,39 @@ RespondFull :: (writer: http.ResponseWriter, storage: AccountStorage) {
     value.Code = "storage_full"
     value.AccountStorage = storage
     response.JSON(writer, cast(isize)413, value)
+}
+
+BlobStoredResult :: struct {
+    value: bool
+    error: Error
+}
+
+// Blobs live in files beside the database, one folder per account.
+BlobAccountFolder :: (dbPath: string, userID: string) -> string {
+    return Concat(Concat(Concat(dbPath, ".blobs"), "/"), userID)
+}
+
+BlobStored :: (database: *sql.Database, context: ctx.Context, userID: string, appID: string,
+    hash: string) -> BlobStoredResult {
+    result: BlobStoredResult
+    arguments: [3]Any = .[userID, appID, hash]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, BlobStoredSQL, arguments[:]), destinations[:])
+    return result
+}
+
+RecordBlob :: (database: *sql.Database, context: ctx.Context, userID: string, appID: string,
+    hash: string, size: s64) -> Error {
+    arguments: [4]Any = .[userID, appID, hash, size]
+    written := sql.Exec(database, context, BlobRecordSQL, arguments[:])
+    return written.error
+}
+
+// Account deletion removes the account's rows; this removes its blob files,
+// which would otherwise keep its ciphertext on disk.
+RemoveBlobs :: (dbPath: string, userID: string) -> Error {
+    if !identity.ValidUserID(userID) {
+        return errors.New("invalid blob account")
+    }
+    return RemoveAllRaw(BlobAccountFolder(dbPath, userID))
 }

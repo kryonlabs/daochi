@@ -39,6 +39,13 @@ func AccountAccess_Allow(access AccountAccess, prefix string, subject string, li
 	return RequestRate_Allow(access.Limiter, access.Counters, strings.Join(parts[0:2:2], ""), limit, window)
 }
 
+func AccountAccess_RemoveBlobs(access AccountAccess, userID string) {
+	error := AccountStorage_RemoveBlobs(access.Configuration.DBPath, userID)
+	if error != nil {
+		slog.Error("remove account blobs", "user", LogSafety_LogText(userID), "error", error)
+	}
+}
+
 func AccountAccess_UserBucket(user string, request *Request) string {
 	subject := user
 	var value_0 bool = Identity_ValidUserID(subject)
@@ -91,6 +98,10 @@ func AccountAccess_Challenge(access AccountAccess, writer ResponseWriter, reques
 		return
 	}
 	issued := Challenge_Issue(access.Challenges, user)
+	if StdErrorsGo_Is(issued.Error, ErrChallengesBusy) {
+		Response_Error(writer, int(503), "challenges are busy")
+		return
+	}
 	if issued.Error != nil {
 		slog.Error("issue challenge", "error", issued.Error)
 		Response_Error(writer, int(500), "challenge failed")
@@ -206,6 +217,7 @@ func AccountAccess_Delete(access AccountAccess, writer ResponseWriter, request *
 		Response_Error(writer, int(500), "delete failed")
 		return
 	}
+	AccountAccess_RemoveBlobs(access, value.UserIDHash)
 	AccountAccess_Deleted(writer)
 }
 
@@ -272,7 +284,24 @@ func AccountAccess_DeleteWithKey(access AccountAccess, writer ResponseWriter, re
 		Response_Error(writer, int(500), "delete failed")
 		return
 	}
+	AccountAccess_RemoveBlobs(access, value.UserIDHash)
 	AccountAccess_Deleted(writer)
+}
+
+var AccountAccess_ziranInitState uint8
+
+func AccountAccess_ziranInit() {
+	if AccountAccess_ziranInitState == 2 {
+		return
+	}
+	if AccountAccess_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	AccountAccess_ziranInitState = 1
+	AccountSignature_ziranInit()
+	Challenge_ziranInit()
+	AccountStorage_ziranInit()
+	AccountAccess_ziranInitState = 2
 }
 
 // floatToInt converts x to a w-bit integer, panicking when it does not fit.

@@ -13,6 +13,7 @@ address :: #import "client_address";
 identity :: #import "identity";
 accounts :: #import "account_keys";
 state :: #import "account_state";
+storage :: #import "account_storage";
 clients :: #import "sync_clients";
 profile :: #import "account_profile";
 token :: #import "token";
@@ -63,6 +64,15 @@ Allow :: (access: AccountAccess, prefix: string, subject: string, limit: isize,
     return rate.Allow(access.limiter, access.counters, Join(parts[:], ""), limit, window)
 }
 
+// The account rows are gone; a failure to remove its blob files is logged
+// for the operator rather than reported as a failed deletion.
+RemoveBlobs :: (access: AccountAccess, userID: string) {
+    error := storage.RemoveBlobs(access.configuration.DBPath, userID)
+    if error != null {
+        LogAccountError("remove account blobs", "user", logs.LogText(userID), "error", error)
+    }
+}
+
 // A per-account bucket shared by everyone lets a stranger use up a victim's
 // challenge and login quota. Keying it by account and address keeps the
 // per-account limit without that lockout; an invalid ID gets one bucket so
@@ -104,6 +114,10 @@ Challenge :: (access: AccountAccess, writer: http.ResponseWriter, request: *http
         return
     }
     issued := challenge.Issue(access.challenges, user)
+    if errors.Is(issued.Error, challenge.ErrChallengesBusy) {
+        response.Error(writer, cast(isize)503, "challenges are busy")
+        return
+    }
     if issued.Error != null {
         LogError("issue challenge", "error", issued.Error)
         response.Error(writer, cast(isize)500, "challenge failed")
@@ -208,6 +222,7 @@ Delete :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Re
         response.Error(writer, cast(isize)500, "delete failed")
         return
     }
+    RemoveBlobs(access, value.UserIDHash)
     Deleted(writer)
 }
 
@@ -256,5 +271,6 @@ DeleteWithKey :: (access: AccountAccess, writer: http.ResponseWriter, request: *
         response.Error(writer, cast(isize)500, "delete failed")
         return
     }
+    RemoveBlobs(access, value.UserIDHash)
     Deleted(writer)
 }

@@ -294,3 +294,23 @@ func TestMeshRequestCannotWidenApprovedScopeByOmission(t *testing.T) {
 		}
 	}
 }
+
+// One account cannot flood the node with full-account syncs.
+func TestSyncIsRateLimitedPerAccount(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	identity := newTestIdentity(t, handler, 0x76)
+	body := `{"protocol_version":5,"user_id_hash":"` + identity.UserID + `","client_id":"security-client"}`
+	limited := 0
+	for attempt := 0; attempt < 301; attempt++ {
+		status, _ := postSync(t, handler, identity, body)
+		if status == http.StatusTooManyRequests {
+			limited++
+		} else if status != http.StatusOK {
+			t.Fatalf("sync %d status = %d", attempt, status)
+		}
+	}
+	if limited != 1 {
+		t.Fatalf("limited %d of 301 syncs; expected only the 301st", limited)
+	}
+}

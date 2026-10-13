@@ -186,9 +186,37 @@ func BlobHttp_Route(store Registry, writer ResponseWriter, request *Request) {
 	folder := strings.Join(folderParts[0:3:3], "/")
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "private, no-store")
 	if method == "PUT" {
+		context := StdHttpGo_Context(request)
+		stored := AccountStorage_BlobStored(store.Database, context, user.Value, parts[0], parts[1])
+		if stored.Error != nil {
+			SignedTx_Forget(store.Database, context, header.Value)
+			Response_Error(writer, 500, "blob storage unavailable")
+			return
+		}
+		limit := store.Configuration.AccountStorageLimitBytes
+		if !stored.Value && limit > 0 {
+			used := AccountStorage_Used(store.Database, context, user.Value)
+			if used.Error != nil {
+				SignedTx_Forget(store.Database, context, header.Value)
+				Response_Error(writer, 500, "blob storage unavailable")
+				return
+			}
+			if AccountStorage_Exceeds(used.Value, used.Value+int64(len(data)), limit) {
+				SignedTx_Forget(store.Database, context, header.Value)
+				AccountStorage_RespondFull(writer, AccountStorage_Report(used.Value, limit))
+				return
+			}
+		}
 		error := BlobHttp_Save(folder, path, data)
 		if error != nil {
-			SignedTx_Forget(store.Database, StdHttpGo_Context(request), header.Value)
+			SignedTx_Forget(store.Database, context, header.Value)
+			Response_Error(writer, 507, "could not store blob")
+			return
+		}
+		error = AccountStorage_RecordBlob(store.Database, context, user.Value, parts[0], parts[1], int64(len(data)))
+		if error != nil {
+			StdFileGo_Remove(path)
+			SignedTx_Forget(store.Database, context, header.Value)
 			Response_Error(writer, 507, "could not store blob")
 			return
 		}
@@ -232,5 +260,6 @@ func BlobHttp_ziranInit() {
 	AppHttp_ziranInit()
 	AppStore_ziranInit()
 	SignedTx_ziranInit()
+	AccountStorage_ziranInit()
 	BlobHttp_ziranInitState = 2
 }

@@ -62,5 +62,6 @@ func Embedded_ziranInit() {
 	Store_ziranInit()
 	Server_ziranInit()
 	MlDsa44_ziranInit()
+	AccountAccess_ziranInit()
 	Embedded_ziranInitState = 2
 }

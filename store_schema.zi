@@ -439,6 +439,15 @@ CREATE TABLE IF NOT EXISTS server_app_grant_audit (
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS server_blobs (
+	user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+	app_id TEXT NOT NULL,
+	hash TEXT NOT NULL,
+	size INTEGER NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(user_id_hash, app_id, hash)
+);
+
 CREATE TABLE IF NOT EXISTS server_signed_transactions (
 	account_id TEXT NOT NULL,
 	tx_id TEXT NOT NULL,

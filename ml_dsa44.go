@@ -139,5 +139,6 @@ func MlDsa44_ziranInit() {
 	}
 	MlDsa44_ziranInitState = 1
 	Verifier_ziranInit()
+	AccountAccess_ziranInit()
 	MlDsa44_ziranInitState = 2
 }

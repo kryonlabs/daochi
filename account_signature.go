@@ -89,3 +89,17 @@ func AccountSignature_Authenticate(database *Database, challenges *ChallengeStor
 	}
 	return AccountSignature_Failure(int(401), "signature rejected")
 }
+
+var AccountSignature_ziranInitState uint8
+
+func AccountSignature_ziranInit() {
+	if AccountSignature_ziranInitState == 2 {
+		return
+	}
+	if AccountSignature_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	AccountSignature_ziranInitState = 1
+	Challenge_ziranInit()
+	AccountSignature_ziranInitState = 2
+}

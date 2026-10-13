@@ -6,6 +6,7 @@
 #import "std/text_go"
 #import "codec"
 clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
 builtin :: #system_library "go:builtin";
 strings :: #system_library "go:strings";
 
@@ -97,6 +98,9 @@ New :: (ttl: clock.Duration) -> *ChallengeStore {
     return store
 }
 
+MaxOutstandingChallenges :: 65536;
+ErrChallengesBusy: Error = errors.New("too many outstanding challenges");
+
 Issue :: (store: *ChallengeStore, userID: string) -> IssuedChallenge {
     result: IssuedChallenge
     nonce := AllocateNonce(cast(isize)32)
@@ -108,6 +112,12 @@ Issue :: (store: *ChallengeStore, userID: string) -> IssuedChallenge {
     Lock(*store.mu)
     defer Unlock(*store.mu)
     Prune(store, clock.Now())
+    // Every issue scans the store under one lock, so it must stay bounded
+    // however many accounts a flood of requests names.
+    if MapCount(store.byUser) >= MaxOutstandingChallenges {
+        result.Error = ErrChallengesBusy
+        return result
+    }
     Bound(store, userID)
     item: Challenge
     item.User = userID

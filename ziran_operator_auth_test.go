@@ -77,9 +77,7 @@ func TestZiranLocalOperatorAuthenticationAgainstBaseline(t *testing.T) {
 				server := &Server{Signer: signAccountProof}
 				request := httptest.NewRequest(http.MethodPost, "/api/v1/node/pairing/invite", nil)
 				request.RemoteAddr = address.value
-				request.Header.Set("X-Forwarded-For", "127.0.0.1")
-				request.Header.Set("X-Real-IP", "::1")
-				request.Header.Set("Forwarded", "for=127.0.0.1")
+				request.Host = "127.0.0.1:8080"
 				allowed := address.loopback
 				status := http.StatusOK
 				if mode != "no token" {
@@ -105,5 +103,63 @@ func TestZiranLocalOperatorAuthenticationAgainstBaseline(t *testing.T) {
 				compareHTTPResponse(t, actual, expected)
 			})
 		}
+	}
+}
+
+// Behind a reverse proxy on the same host every internet request arrives from
+// loopback, so without an admin token only a direct local request is the
+// operator: no forwarding header, a local Host, and no cross-site Origin.
+func TestLocalOperatorRejectsProxiedAndCrossSiteRequests(t *testing.T) {
+	tests := []struct {
+		name    string
+		host    string
+		header  string
+		value   string
+		allowed bool
+	}{
+		{"direct IPv4", "127.0.0.1:8080", "", "", true},
+		{"direct localhost", "localhost:8080", "", "", true},
+		{"direct IPv6", "[::1]:8080", "", "", true},
+		{"direct without port", "localhost", "", "", true},
+		{"local origin", "127.0.0.1:8080", "Origin", "http://localhost:3000", true},
+		{"forwarded for", "127.0.0.1:8080", "X-Forwarded-For", "203.0.113.9", false},
+		{"forwarded loopback", "127.0.0.1:8080", "X-Forwarded-For", "127.0.0.1", false},
+		{"forwarded host", "127.0.0.1:8080", "X-Forwarded-Host", "api.example", false},
+		{"forwarded proto", "127.0.0.1:8080", "X-Forwarded-Proto", "https", false},
+		{"real IP", "127.0.0.1:8080", "X-Real-IP", "203.0.113.9", false},
+		{"standard forwarded", "127.0.0.1:8080", "Forwarded", "for=203.0.113.9", false},
+		{"Cloudflare", "127.0.0.1:8080", "CF-Connecting-IP", "203.0.113.9", false},
+		{"true client", "127.0.0.1:8080", "True-Client-IP", "203.0.113.9", false},
+		{"via", "127.0.0.1:8080", "Via", "1.1 proxy", false},
+		{"public host", "api.example", "", "", false},
+		{"rebinding host", "attacker.example:8080", "", "", false},
+		{"empty host", "", "", "", false},
+		{"cross-site origin", "127.0.0.1:8080", "Origin", "https://attacker.example", false},
+		{"opaque origin", "127.0.0.1:8080", "Origin", "null", false},
+		{"origin with loopback prefix", "127.0.0.1:8080", "Origin", "http://localhost.attacker.example", false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/node/pairing/invites", nil)
+			request.RemoteAddr = "127.0.0.1:40000"
+			request.Host = test.host
+			if test.header != "" {
+				request.Header.Set(test.header, test.value)
+			}
+			recorder := httptest.NewRecorder()
+			got := HttpAuth_RequireLocalOperator(recorder, request, "")
+			if got != test.allowed {
+				t.Fatalf("operator guard = %v/%d; expected %v", got, recorder.Code, test.allowed)
+			}
+			if !got && recorder.Code != http.StatusForbidden {
+				t.Fatalf("rejected status = %d; expected %d", recorder.Code, http.StatusForbidden)
+			}
+			// With an admin token, the token alone decides, even through a proxy.
+			withToken := httptest.NewRecorder()
+			request.Header.Set("X-Daochi-Admin", "operator-secret")
+			if !HttpAuth_RequireLocalOperator(withToken, request, "operator-secret") {
+				t.Fatalf("admin token rejected: %d", withToken.Code)
+			}
+		})
 	}
 }

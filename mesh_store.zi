@@ -12,6 +12,7 @@ record :: #import "encrypted_record";
 account :: #import "account_state";
 identity :: #import "identity";
 timestamp :: #import "timestamp";
+clock :: #import "std/time_go";
 errors :: #import "std/errors_go";
 go_sql :: #system_library "go:database/sql";
 go_hex :: #system_library "go:encoding/hex";
@@ -58,8 +59,8 @@ QueryTombstone :: (transaction: *sql.Transaction, context: ctx.Context, query: s
 ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
 QueryRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
 ScanRecord :: (row: *sql.Row, keyID: *string, nonce: *string, ciphertext: *string, updated: *string, deleted: *s64, hash: *string, schema: *isize, parent: *string) -> Error #foreign go_sql "(*Row).Scan";
-DeleteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, deleted: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
-WriteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, keyID: string, nonce: string, ciphertext: string, updated: string, deleted: s64, hash: string, schema: isize, parent: string, version: s64) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+DeleteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, deleted: string, latest: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+WriteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, keyID: string, nonce: string, ciphertext: string, updated: string, deleted: s64, hash: string, schema: isize, parent: string, version: s64, latest: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
 WriteUser :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, publicKey: []u8, created: string, seen: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
 EnsureSync :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
 QueryCursor :: (database: *sql.Database, context: ctx.Context, query: string, peerKey: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
@@ -382,9 +383,10 @@ ApplyDeletion :: (transaction: *sql.Transaction, context: ctx.Context, deletion:
         result.error = errors.New("invalid mesh deletion target")
         return result
     }
-    deleted := timestamp.NormalizeTime(deletion.DeletedAt, "")
+    now := clock.Now()
+    deleted := timestamp.NormalizeWriteTime(deletion.DeletedAt, now)
     written := DeleteRecord(transaction, context, DeleteSQL, deletion.UserIDHash,
-        deletion.Collection, deletion.ID, deleted)
+        deletion.Collection, deletion.ID, deleted, timestamp.WriteTimeLimit(now))
     result.error = written.error
     if result.error != null {
         return result
@@ -437,7 +439,8 @@ UpsertUser :: (transaction: *sql.Transaction, context: ctx.Context, item: MeshEn
 
 UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, item: EncryptedRecord) -> MeshImportResult {
     result: MeshImportResult
-    updated := timestamp.NormalizeTime(item.UpdatedAt, "")
+    now := clock.Now()
+    updated := timestamp.NormalizeWriteTime(item.UpdatedAt, now)
     existing: EncryptedRecord
     row := QueryRecord(transaction, context, RecordSQL, userID, item.Collection, item.ID)
     error := ScanRecord(row, *existing.KeyID, *existing.Nonce, *existing.Ciphertext,
@@ -449,8 +452,9 @@ UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: st
     }
     if error == null {
         existingUpdated := timestamp.NormalizeTime(existing.UpdatedAt, "")
-        if Compare(updated, existingUpdated) < cast(isize)0 ||
-            (updated == existingUpdated && Compare(record.ContentKey(item), record.ContentKey(existing)) <= cast(isize)0) {
+        frozen := Compare(existingUpdated, timestamp.WriteTimeLimit(now)) > cast(isize)0
+        if !frozen && (Compare(updated, existingUpdated) < cast(isize)0 ||
+            (updated == existingUpdated && Compare(record.ContentKey(item), record.ContentKey(existing)) <= cast(isize)0)) {
             return result
         }
     }
@@ -461,7 +465,7 @@ UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: st
     }
     written := WriteRecord(transaction, context, RecordUpsertSQL, userID, item.Collection,
         item.ID, item.KeyID, item.Nonce, item.Ciphertext, updated, item.DeletedAt,
-        item.ContentHash, item.SchemaVersion, item.ParentID, version.value)
+        item.ContentHash, item.SchemaVersion, item.ParentID, version.value, timestamp.WriteTimeLimit(now))
     result.error = written.error
     if result.error == null {
         result.value = account.Affected(written.value)
@@ -484,7 +488,7 @@ SQL_END;
 TombstoneSQL :: "SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)";
 DeleteSQL :: #string SQL_END
 DELETE FROM server_encrypted_records
-WHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4
+WHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND (updated_at<=?4 OR updated_at>?5)
 SQL_END;
 CursorSQL :: "SELECT cursor FROM node_sync_cursors WHERE peer_key=?1";
 SaveCursorSQL :: #string SQL_END
@@ -519,5 +523,5 @@ ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
     schema_version=excluded.schema_version,
     parent_id=excluded.parent_id,
     server_version=excluded.server_version
-WHERE excluded.updated_at >= server_encrypted_records.updated_at
+WHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13
 SQL_END;

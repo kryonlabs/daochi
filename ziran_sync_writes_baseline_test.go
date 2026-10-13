@@ -4,25 +4,78 @@ package main
 import (
 	"context"
 	"database/sql"
+	"strings"
+	"time"
 )
 
-func baselineWritesReplaceUserData(ctx context.Context, tx *sql.Tx, userID string) error {
-	for _, query := range []string{
-		`DELETE FROM server_session_rounds WHERE user_id_hash=?1`,
-		`DELETE FROM server_sessions WHERE user_id_hash=?1`,
-		`DELETE FROM server_habit_days WHERE user_id_hash=?1`,
-		`DELETE FROM server_habits WHERE user_id_hash=?1`,
-		`DELETE FROM server_meditation_logs WHERE user_id_hash=?1`,
-		`DELETE FROM server_social_snapshots WHERE user_id_hash=?1`,
-		`DELETE FROM server_encrypted_records WHERE user_id_hash=?1`,
-		`DELETE FROM server_encrypted_payloads WHERE user_id_hash=?1`,
-	} {
-		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
+// Since the 2026-10-13 security fix a full re-sync clears only the calling
+// app's data; Inbe (no app_id) also owns the typed tables and envelopes.
+func baselineWritesReplaceUserData(ctx context.Context, tx *sql.Tx, userID string, appID string) error {
+	owner := appID
+	if owner == "" {
+		owner = "inbe"
+	}
+	if owner == "inbe" {
+		for _, query := range []string{
+			`DELETE FROM server_session_rounds WHERE user_id_hash=?1`,
+			`DELETE FROM server_sessions WHERE user_id_hash=?1`,
+			`DELETE FROM server_habit_days WHERE user_id_hash=?1`,
+			`DELETE FROM server_habits WHERE user_id_hash=?1`,
+			`DELETE FROM server_meditation_logs WHERE user_id_hash=?1`,
+			`DELETE FROM server_social_snapshots WHERE user_id_hash=?1`,
+			`DELETE FROM server_encrypted_payloads WHERE user_id_hash=?1`,
+		} {
+			if _, err := tx.ExecContext(ctx, query, userID); err != nil {
+				return err
+			}
+		}
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT collection FROM server_encrypted_records WHERE user_id_hash=?1`, userID)
+	if err != nil {
+		return err
+	}
+	var collections []string
+	for rows.Next() {
+		var collection string
+		if err := rows.Scan(&collection); err != nil {
+			rows.Close()
+			return err
+		}
+		collections = append(collections, collection)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, collection := range collections {
+		collectionOwner := baselineCollectionOwnerApp(collection)
+		if collectionOwner != owner && !(collectionOwner == "" && owner == "inbe") {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2`, userID, collection); err != nil {
 			return err
 		}
 	}
-	_, err := baselineLifecycleNextVersion(ctx, tx, userID)
+	_, err = baselineLifecycleNextVersion(ctx, tx, userID)
 	return err
+}
+
+func baselineCollectionOwnerApp(collection string) string {
+	value := strings.TrimSpace(collection)
+	if value == "inbe.habits" || value == "inbe.habit_days" || value == "inbe.sessions" {
+		return "inbe"
+	}
+	parts := strings.Split(value, ".")
+	if len(parts) >= 3 {
+		switch parts[0] {
+		case "private", "shared", "friends", "public":
+			return parts[1]
+		}
+	}
+	return ""
 }
 
 func baselineWritesUpsertSession(ctx context.Context, tx *sql.Tx, userID string, session Session) (int, error) {
@@ -76,7 +129,23 @@ VALUES(?1,?2,?3,?4,?5)`, userID, session.ID, round.RoundIndex, round.Breaths, ro
 	return applied, nil
 }
 
+// Since the 2026-10-13 security fix a record time may run at most five
+// minutes ahead, and a stored time beyond that limit yields to any edit.
+func baselineWriteTimeLimit(now time.Time) string {
+	return now.Add(5 * time.Minute).UTC().Format(CanonicalTimestampLayout)
+}
+
+func baselineWriteTime(value string, now time.Time) string {
+	normalized := Timestamp_NormalizeTime(value, "")
+	latest := baselineWriteTimeLimit(now)
+	if normalized > latest {
+		return latest
+	}
+	return normalized
+}
+
 func baselineWritesUpsertEncryptedRecord(ctx context.Context, tx *sql.Tx, userID string, item EncryptedRecord) (int, error) {
+	now := time.Now()
 	version, err := baselineLifecycleNextVersion(ctx, tx, userID)
 	if err != nil {
 		return 0, err
@@ -94,10 +163,10 @@ ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
 	schema_version=excluded.schema_version,
 	parent_id=excluded.parent_id,
 	server_version=excluded.server_version
-WHERE excluded.updated_at >= server_encrypted_records.updated_at`,
+WHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13`,
 		userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
-		Timestamp_NormalizeTime(item.UpdatedAt, ""), item.DeletedAt, item.ContentHash,
-		item.SchemaVersion, item.ParentID, version)
+		baselineWriteTime(item.UpdatedAt, now), item.DeletedAt, item.ContentHash,
+		item.SchemaVersion, item.ParentID, version, baselineWriteTimeLimit(now))
 	if err != nil {
 		return 0, err
 	}

@@ -64,6 +64,23 @@ func Scope_ValidCollectionPrefixWildcardBase(value string) bool {
 	return false
 }
 
+func Scope_CollectionOwnerApp(collection string) string {
+	value := strings.TrimSpace(collection)
+	if Identity_ValidLegacyEncryptedCollection(value) {
+		return "inbe"
+	}
+	parts := strings.Split(value, ".")
+	var value_0 bool = int64(len(parts)) >= 3
+	if value_0 {
+		var value_1 bool = Scope_ValidAppVisibility(parts[0])
+		value_0 = value_1
+	}
+	if value_0 {
+		return parts[1]
+	}
+	return ""
+}
+
 func Scope_AppOwnsDeclaredScope(appID string, collection AppCollection) bool {
 	var value_0 bool = appID == "inbe"
 	if value_0 {

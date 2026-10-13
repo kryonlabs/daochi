@@ -305,7 +305,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 		lifecycleExecute(t, store, "UPDATE server_app_manifests SET expires_at=1 WHERE app_id='syncapp'")
 	}
 	if test.mode == "unregistered collection" {
-		input.EncryptedRecords[0].Collection = "private.unregistered.v1.notes"
+		input.EncryptedRecords[0].Collection = "shared.syncapp.v1.notes"
 	}
 	if test.mode == "client failure" || test.mode == "log panic" {
 		lifecycleExecute(t, store, "CREATE TRIGGER reject_client BEFORE INSERT ON server_clients BEGIN SELECT RAISE(ABORT,'client rejected'); END")

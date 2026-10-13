@@ -1681,10 +1681,19 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	identity := newTestIdentity(t, sourceHandler, 0x6b)
 
 	body := []byte(`{"user_id_hash":"` + identity.UserID + `","client_id":"test-client-1","protocol_version":5,"encrypted_records":[` +
-		`{"collection":"inbe.habits","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"inbe-ciphertext","updated_at":"2026-08-19T12:00:00Z"},` +
-		`{"collection":"private.ukuvota.v1.drafts.one","id":"draft-1","key_id":"main","nonce":"n2","ciphertext":"uku-ciphertext","updated_at":"2026-08-19T12:01:00Z"}` +
+		`{"collection":"inbe.habits","id":"habit-1","key_id":"main","nonce":"n1","ciphertext":"inbe-ciphertext","updated_at":"2026-08-19T12:00:00Z"}` +
 		`]}`)
 	syncWithBody(t, sourceHandler, "", identity.UserID, identity.Token, body)
+	// An app-less sync may not write another app's collection, so store the
+	// second app's record directly.
+	other := EncryptedRecord{Collection: "private.ukuvota.v1.drafts.one", ID: "draft-1", KeyID: "main",
+		Nonce: "n2", Ciphertext: "uku-ciphertext", UpdatedAt: "2026-08-19T12:01:00Z"}
+	written := writesInTransaction(source.Store, t.Context(), identity.UserID, func(ctx context.Context, tx *sql.Tx, user string) SyncWriteResult {
+		return SyncWrites_UpsertRecord(tx, ctx, user, other)
+	})
+	if written.Error != nil || written.Applied != 1 {
+		t.Fatalf("seed second app record = %#v", written)
+	}
 
 	unauthorized := httptest.NewRecorder()
 	sourceHandler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/v1/node/mesh/export", strings.NewReader(`{}`)))

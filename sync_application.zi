@@ -238,7 +238,7 @@ ApplyWithinLimit :: (database: *sql.Database, context: ctx.Context, request: Syn
         usedBefore = measured.value
     }
     if request.FullSyncRequested {
-        result.error = writes.ReplaceData(transaction, context, request.UserIDHash)
+        result.error = writes.ReplaceData(transaction, context, request.UserIDHash, request.AppID)
         if result.error != null {
             return result
         }

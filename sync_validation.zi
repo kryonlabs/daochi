@@ -3,6 +3,7 @@
 apps :: #import "app_store";
 records :: #import "encrypted_record";
 identity :: #import "identity";
+scope :: #import "scope";
 logs :: #import "log_safety";
 ctx :: #import "std/context_go";
 sql :: #import "std/sql_go";
@@ -47,6 +48,13 @@ Validate :: (database: *sql.Database, context: ctx.Context, request: SyncRequest
     if request.ProtocolVersion >= cast(isize)6 && request.AppID == "" {
         return errors.New("app_id required")
     }
+    // Released Inbe clients sync without app_id. Without this check a bare
+    // bearer token could write another app's collections and skip the signed
+    // transaction that app requires.
+    requestApp := request.AppID
+    if requestApp == "" {
+        requestApp = "inbe"
+    }
     for record: request.EncryptedRecords {
         if !records.ValidForProtocol(record, request.ProtocolVersion) {
             return errors.New("invalid encrypted record")
@@ -63,6 +71,10 @@ Validate :: (database: *sql.Database, context: ctx.Context, request: SyncRequest
                 WarnCollection("sync request used unregistered app collection", "app_id",
                     logs.LogText(request.AppID), "collection", logs.LogText(record.Collection), "mode", "compat")
             }
+        }
+        owner := scope.CollectionOwnerApp(record.Collection)
+        if owner != "" && owner != requestApp {
+            return errors.New("encrypted record collection belongs to another app")
         }
     }
     return null

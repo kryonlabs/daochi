@@ -27,7 +27,7 @@ func (s *Store) baselineApplicationApplySyncDetailed(ctx context.Context, req Sy
 		return SyncResult{}, nil, err
 	}
 	if req.FullSyncRequested {
-		if err := baselineWritesReplaceUserData(ctx, tx, req.UserIDHash); err != nil {
+		if err := baselineWritesReplaceUserData(ctx, tx, req.UserIDHash, req.AppID); err != nil {
 			return SyncResult{}, nil, err
 		}
 	}

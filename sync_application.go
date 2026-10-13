@@ -245,7 +245,7 @@ func SyncApplication_ApplyWithinLimit(database *Database, context Context, reque
 		usedBefore = measured.Value
 	}
 	if request.FullSyncRequested {
-		result.Error = SyncWrites_ReplaceData(transaction, context, request.UserIDHash)
+		result.Error = SyncWrites_ReplaceData(transaction, context, request.UserIDHash, request.AppID)
 		if result.Error != nil {
 			return result
 		}

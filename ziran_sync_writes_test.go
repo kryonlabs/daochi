@@ -63,9 +63,9 @@ func writesCases(updated string, rounds []SessionRound) []writesCase {
 			return SyncWriteResult{applied, err}
 		}},
 		{"replace data", func(ctx context.Context, tx *sql.Tx, user string) SyncWriteResult {
-			return SyncWriteResult{Error: SyncWrites_ReplaceData(tx, ctx, user)}
+			return SyncWriteResult{Error: SyncWrites_ReplaceData(tx, ctx, user, "")}
 		}, func(ctx context.Context, tx *sql.Tx, user string) SyncWriteResult {
-			return SyncWriteResult{Error: baselineWritesReplaceUserData(ctx, tx, user)}
+			return SyncWriteResult{Error: baselineWritesReplaceUserData(ctx, tx, user, "")}
 		}},
 	}
 }
@@ -113,7 +113,7 @@ func writesSnapshot(t *testing.T, store *Store) map[string]any {
 }
 
 func TestZiranSyncWritesStateAgainstBaseline(t *testing.T) {
-	for _, stamp := range []string{"2025-01-01T00:00:00.000000000Z", lifecycleFixtureTime, "2027-01-01T00:00:00.000000000Z"} {
+	for _, stamp := range []string{"2025-01-01T00:00:00.000000000Z", lifecycleFixtureTime, "2026-06-01T00:00:00.000000000Z"} {
 		for _, rounds := range [][]SessionRound{nil, {}, {{RoundIndex: 3, Breaths: -2, HoldSeconds: 4}, {RoundIndex: 1, Breaths: 7}}} {
 			for _, test := range writesCases(stamp, rounds) {
 				t.Run(test.name+"/"+stamp, func(t *testing.T) {

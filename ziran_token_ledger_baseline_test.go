@@ -44,11 +44,6 @@ type baselineTokenReceiptPayload struct {
 	SourceRef    string `json:"source_ref"`
 }
 
-type baselineMoneroInvoiceRecord struct {
-	AccountID string
-	Invoice   MoneroInvoiceResponse
-}
-
 func (s *Store) baselineTokenAssets(ctx context.Context) ([]TokenAsset, error) {
 	rows, err := s.Database.QueryContext(ctx, `
 SELECT issuer_id,asset_id,display_name,decimals,status
@@ -57,7 +52,7 @@ ORDER BY issuer_id,asset_id`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	var out []TokenAsset
 	for rows.Next() {
 		var item TokenAsset
@@ -109,7 +104,7 @@ ORDER BY ledger_seq`, accountID, assetID, since)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	var out []baselineTokenReceipt
 	for rows.Next() {
 		item, err := baselineScanTokenReceipt(rows)
@@ -131,7 +126,7 @@ ORDER BY ledger_seq`, accountID, assetID, appID, since)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	var out []baselineTokenReceipt
 	for rows.Next() {
 		item, err := baselineScanTokenReceipt(rows)
@@ -180,7 +175,7 @@ func (s *Store) baselineCreditTokenPayment(ctx context.Context, signer ed25519.P
 	if err != nil {
 		return baselineTokenReceipt{}, false, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	receipt, created, err := baselineCreditTokenPaymentTx(ctx, tx, signer, provider, providerPaymentID, input)
 	if err != nil {
 		return baselineTokenReceipt{}, false, err
@@ -241,7 +236,7 @@ func (s *Store) baselineSpendTokens(ctx context.Context, signer ed25519.PrivateK
 	if err != nil {
 		return baselineTokenReceipt{}, 0, false, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 
 	requestHash := baselineTokenSpendRequestHash(input)
 	var existingReceiptID string
@@ -479,7 +474,7 @@ ORDER BY ledger_seq`, IssuerID, AssetID)
 	if err != nil {
 		return TokenCheckpoint{}, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	root := bytes.NewBuffer(nil)
 	var seq int64
 	for rows.Next() {

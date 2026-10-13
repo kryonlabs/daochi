@@ -124,7 +124,7 @@ func signedTransactionRows(t *testing.T, store *Store) []SignedTxEnvelope {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	var result []SignedTxEnvelope
 	for rows.Next() {
 		var tx SignedTxEnvelope

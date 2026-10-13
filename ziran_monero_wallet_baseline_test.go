@@ -156,7 +156,7 @@ func baselineMoneroRPC(ctx context.Context, cfg Config, method string, params ma
 	if err != nil {
 		return errPaymentUnavailable
 	}
-	defer res.Body.Close()
+	defer ignoreCleanupError(res.Body.Close)
 	response, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return fmt.Errorf("monero rpc status %d", res.StatusCode)

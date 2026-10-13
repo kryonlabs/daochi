@@ -55,7 +55,7 @@ func (s *Store) baselineSnapshotSet(ctx context.Context, userID, kind string, pa
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	applied, err := baselineSnapshotUpsert(ctx, tx, userID, SocialSnapshot{
 		Kind: kind,
 		JSON: json.RawMessage(payload),

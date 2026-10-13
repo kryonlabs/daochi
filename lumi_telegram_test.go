@@ -162,7 +162,7 @@ func TestLumiTelegramAccountLinkQueueAndInputOnly(t *testing.T) {
 			mu.Lock()
 			typing++
 			mu.Unlock()
-			fmt.Fprint(w, `{"ok":true}`)
+			_, _ = fmt.Fprint(w, `{"ok":true}`)
 			return
 		}
 		if r.URL.Path != "/botfixture-token/sendMessage" && r.URL.Path != "/botfixture-token/answerCallbackQuery" {
@@ -175,7 +175,7 @@ func TestLumiTelegramAccountLinkQueueAndInputOnly(t *testing.T) {
 		mu.Lock()
 		messages = append(messages, value)
 		mu.Unlock()
-		fmt.Fprint(w, `{"ok":true}`)
+		_, _ = fmt.Fprint(w, `{"ok":true}`)
 	}))
 	defer upstream.Close()
 	original := TelegramAPIBase

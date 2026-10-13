@@ -88,7 +88,7 @@ func TestTelegramBrowserFixture(t *testing.T) {
 				"user":      {fmt.Sprintf(`{"id":%d,"first_name":"Synthetic"}`, input.User)},
 				"query_id":  {fmt.Sprintf("browser-fixture-%d", sequence)},
 			}
-			json.NewEncoder(writer).Encode(map[string]any{
+			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"url":       fixture.owner.server.Cfg.LumiCanvasURL + "?r=" + issued.Info.EntryID,
 				"init_data": telegramInitFixture(fixture.owner.server.Cfg.LumiBotToken, fields),
 				"entry_id":  issued.Info.EntryID,
@@ -109,7 +109,7 @@ func TestTelegramBrowserFixture(t *testing.T) {
 				}
 				counts[table] = count
 			}
-			json.NewEncoder(writer).Encode(counts)
+			_ = json.NewEncoder(writer).Encode(counts)
 		case "/fixture/revoke":
 			if request.Method != "POST" {
 				http.Error(writer, "invalid fixture method", http.StatusMethodNotAllowed)
@@ -119,13 +119,13 @@ func TestTelegramBrowserFixture(t *testing.T) {
 				http.Error(writer, "fixture revoke unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			json.NewEncoder(writer).Encode(true)
+			_ = json.NewEncoder(writer).Encode(true)
 		case "/fixture/stop":
 			if request.Method != "POST" {
 				http.Error(writer, "invalid fixture method", http.StatusMethodNotAllowed)
 				return
 			}
-			json.NewEncoder(writer).Encode(true)
+			_ = json.NewEncoder(writer).Encode(true)
 			stopOnce.Do(func() { close(stopped) })
 		default:
 			http.NotFound(writer, request)

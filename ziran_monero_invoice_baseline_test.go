@@ -332,7 +332,7 @@ LIMIT ?1`, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	out := []baselineInvoiceMoneroInvoiceRecord{}
 	for rows.Next() {
 		var item baselineInvoiceMoneroInvoiceRecord
@@ -404,7 +404,7 @@ LIMIT ?2`, cutoff, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	out := []baselineInvoiceMoneroInvoiceRecord{}
 	for rows.Next() {
 		var item baselineInvoiceMoneroInvoiceRecord

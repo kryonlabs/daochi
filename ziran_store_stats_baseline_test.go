@@ -143,7 +143,7 @@ ORDER BY collection`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	appsByID := map[string]*AppStorageUsage{}
 	for _, matcher := range matchers {

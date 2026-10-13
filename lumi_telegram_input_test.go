@@ -19,7 +19,7 @@ func TestLumiTelegramAppHistoryNeverSends(t *testing.T) {
 	calls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		fmt.Fprint(w, `{"ok":true}`)
+		_, _ = fmt.Fprint(w, `{"ok":true}`)
 	}))
 	defer upstream.Close()
 	original := TelegramAPIBase

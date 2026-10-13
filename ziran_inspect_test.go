@@ -55,9 +55,10 @@ VALUES(?,?,?,?,?,?,?,?)`, userID, fmt.Sprintf("session-%02d", index), fmt.Sprint
 	for index := 0; index < 14; index++ {
 		var login any
 		var synced any
-		if index%3 == 1 {
+		switch index % 3 {
+		case 1:
 			login, synced = "", ""
-		} else if index%3 == 2 {
+		case 2:
 			login, synced = "2026-09-29", "2026-09-30"
 		}
 		if _, err := store.Database.Exec(`INSERT INTO server_clients(user_id_hash,client_id,last_seen_at,last_login_at,last_sync_at,protocol_version,last_seen_server_version,last_client_clock)
@@ -291,7 +292,7 @@ func TestZiranInspectWarningBoundariesAgainstBaseline(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer database.Close()
+			defer ignoreCleanupError(database.Close)
 			// LENGTH(zeroblob) supplies the boundary without allocating a 64 MiB fixture.
 			queries := []string{
 				fmt.Sprintf(`CREATE VIEW server_clients AS WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<%d)
@@ -364,7 +365,7 @@ func TestZiranInspectQueryFailuresAgainstBaseline(t *testing.T) {
 				t.Fatal(opened.Error)
 			}
 			database := opened.Value
-			defer database.Close()
+			defer ignoreCleanupError(database.Close)
 			if mode == "empty schema" || mode == "scan failure" {
 				_ = database.Close()
 				var err error
@@ -372,7 +373,7 @@ func TestZiranInspectQueryFailuresAgainstBaseline(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer database.Close()
+				defer ignoreCleanupError(database.Close)
 				database.SetMaxOpenConns(1)
 			}
 			if mode == "scan failure" {
@@ -443,7 +444,7 @@ func TestZiranInspectWriterCleanupAgainstBaseline(t *testing.T) {
 		t.Fatal(opened.Error)
 	}
 	database := opened.Value
-	defer database.Close()
+	defer ignoreCleanupError(database.Close)
 	sentinel := errors.New("inspection output failure")
 	for index, pair := range inspectFunctions(false) {
 		for _, panicking := range []bool{false, true} {

@@ -55,7 +55,7 @@ func TestChatAppearanceToolsAndBoundedContinuations(t *testing.T) {
 		if len(received.Tools) != 24 || len(received.Messages[3].Content) != 98304 {
 			t.Error("Appearance tools or results were truncated")
 		}
-		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Preview ready"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Preview ready"}}]}`))
 	}))
 	defer upstream.Close()
 	original := ChatEndpoint
@@ -113,7 +113,7 @@ func TestChatAccountAuthenticationToolsAndPersistentQuota(t *testing.T) {
 			t.Error("coaching instructions missing")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"report_feedback","arguments":"{\"title\":\"Lag\",\"message\":\"Lumi freezes\"}"}}]}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"report_feedback","arguments":"{\"title\":\"Lag\",\"message\":\"Lumi freezes\"}"}}]}}]}`))
 	}))
 	defer upstream.Close()
 	original := ChatEndpoint
@@ -154,7 +154,7 @@ func TestChatConcurrentCapAndInputValidation(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Hello"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Hello"}}]}`))
 	}))
 	defer upstream.Close()
 	original := ChatEndpoint
@@ -259,7 +259,7 @@ func TestChatCodingProviderUsesConfiguredEndpointAndBoundedThinking(t *testing.T
 		if payload.Model != "glm-5.3-flash" || payload.Thinking.Type != "enabled" || payload.MaxTokens != 2048 || payload.ReasoningEffort != "low" {
 			t.Errorf("unexpected coding request: %+v", payload)
 		}
-		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Hello"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Hello"}}]}`))
 	}))
 	defer upstream.Close()
 	server.Cfg.ChatAPIEndpoint = upstream.URL
@@ -381,7 +381,7 @@ func TestSpellingCorrectsTextAndSharesChatAllowance(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"\n I went **home**.\nIt was nice.  "}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"\n I went **home**.\nIt was nice.  "}}]}`))
 	}))
 	defer upstream.Close()
 	server.Cfg.ChatAPIEndpoint = upstream.URL
@@ -487,11 +487,11 @@ func TestHabitIconsChooseOfferedIconsAndShareChatAllowance(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		case answerWrongLength:
-			w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"[\"lotus\"]"}}]}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"[\"lotus\"]"}}]}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"\n` + "```json" + `\n[\"lotus\", \"\", \"telephone\"]\n` + "```" + `\n"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"\n` + "```json" + `\n[\"lotus\", \"\", \"telephone\"]\n` + "```" + `\n"}}]}`))
 	}))
 	defer upstream.Close()
 	server.Cfg.ChatAPIEndpoint = upstream.URL

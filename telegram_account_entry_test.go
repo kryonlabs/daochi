@@ -305,7 +305,7 @@ func TestTelegramAccountEntryOwnerBindAndExactConsumption(t *testing.T) {
 	if entryClaim(transaction, pending, time.Now().Unix()) {
 		t.Fatal("URL possession consumed unverified entry")
 	}
-	transaction.Rollback()
+	_ = transaction.Rollback()
 	entry := fixture.verify(t, info, 1234)
 	if entry.AccountID != "" {
 		t.Fatal("unlinked sender fabricated an account")
@@ -349,7 +349,7 @@ func TestTelegramAccountEntryOwnerBindAndExactConsumption(t *testing.T) {
 			t.Fatal(err)
 		}
 		accepted := entryClaim(transaction, bad, now)
-		transaction.Rollback()
+		_ = transaction.Rollback()
 		if accepted {
 			t.Fatal("entry consumption escaped exact verified identity or keys")
 		}
@@ -361,7 +361,7 @@ func TestTelegramAccountEntryOwnerBindAndExactConsumption(t *testing.T) {
 	if !entryClaim(transaction, bound, now) {
 		t.Fatal("exact bound entry failed consumption")
 	}
-	transaction.Rollback()
+	_ = transaction.Rollback()
 	transaction, err = fixture.owner.store.Database.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +376,7 @@ func TestTelegramAccountEntryOwnerBindAndExactConsumption(t *testing.T) {
 	if entryClaim(transaction, bound, now) {
 		t.Fatal("entry consumed twice")
 	}
-	transaction.Rollback()
+	_ = transaction.Rollback()
 }
 
 func TestTelegramAccountEntryBindRequiresExactV6OwnerAndDevice(t *testing.T) {
@@ -480,7 +480,7 @@ func TestTelegramAccountEntryFreshStatusAndKeyBoundCancel(t *testing.T) {
 	if entryClaim(transaction, entry, time.Now().Unix()) {
 		t.Fatal("cancelled entry consumed")
 	}
-	transaction.Rollback()
+	_ = transaction.Rollback()
 }
 
 func TestTelegramAccountEntryVerifyAndGlobalReplayRaces(t *testing.T) {
@@ -551,7 +551,7 @@ func TestTelegramAccountEntryConsumptionRacesAndBindingRecheck(t *testing.T) {
 	if entryClaim(transaction, entry, time.Now().Unix()) {
 		t.Fatal("disconnected chat retained entry authority")
 	}
-	transaction.Rollback()
+	_ = transaction.Rollback()
 	if _, err := fixture.owner.store.Database.Exec("INSERT INTO server_lumi_telegram(account_id,telegram_id,linked_at) VALUES(?,1234,1)", entry.AccountID); err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +646,7 @@ func TestTelegramAccountEntryRestartKeepsProofAndConsumption(t *testing.T) {
 	if entryClaim(transaction, entry, time.Now().Unix()) {
 		t.Fatal("consumed entry replayed after restart")
 	}
-	transaction.Rollback()
+	_ = transaction.Rollback()
 }
 
 func TestTelegramAccountEntryRejectsMalformedJSON(t *testing.T) {

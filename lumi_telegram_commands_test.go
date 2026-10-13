@@ -17,7 +17,7 @@ func TestLumiTelegramHelpUsageAndCommandQueue(t *testing.T) {
 	var messages []string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/botcommand-fixture-token/sendChatAction" {
-			fmt.Fprint(w, `{"ok":true}`)
+			_, _ = fmt.Fprint(w, `{"ok":true}`)
 			return
 		}
 		if r.URL.Path != "/botcommand-fixture-token/sendMessage" {
@@ -30,7 +30,7 @@ func TestLumiTelegramHelpUsageAndCommandQueue(t *testing.T) {
 			t.Error(err)
 		}
 		messages = append(messages, message.Text)
-		fmt.Fprint(w, `{"ok":true}`)
+		_, _ = fmt.Fprint(w, `{"ok":true}`)
 	}))
 	defer upstream.Close()
 	original := TelegramAPIBase

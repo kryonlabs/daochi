@@ -37,7 +37,7 @@ func invoiceRecordsFromBaseline(values []baselineInvoiceMoneroInvoiceRecord) []I
 	}
 	result := make([]InvoiceRecord, len(values))
 	for index, value := range values {
-		result[index] = InvoiceRecord{AccountID: value.AccountID, Invoice: value.Invoice}
+		result[index] = InvoiceRecord(value)
 	}
 	return result
 }

@@ -52,7 +52,7 @@ func TestZiranMeshWorkerLifecycleAgainstBaseline(t *testing.T) {
 					if mode == "transport failure" {
 						return nil, sentinel
 					}
-					var body io.ReadCloser = io.NopCloser(strings.NewReader(`{"records":[]}`))
+					body := io.NopCloser(strings.NewReader(`{"records":[]}`))
 					if mode == "response panic" {
 						body = &httpPortBody{panicValue: sentinel}
 					}
@@ -125,9 +125,9 @@ func TestZiranMeshWorkerNilContextAgainstBaseline(t *testing.T) {
 			os.Exit(0)
 		}()
 		if implementation == "generated" {
-			Mesh_Run(server.mesh(), nil)
+			Mesh_Run(server.mesh(), nil) //nolint:staticcheck // the test checks nil-context handling
 		} else {
-			server.baselineMeshRunNodeSync(nil)
+			server.baselineMeshRunNodeSync(nil) //nolint:staticcheck // the test checks nil-context handling
 		}
 		return
 	}

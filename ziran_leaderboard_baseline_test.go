@@ -65,7 +65,7 @@ LEFT JOIN server_sync_state ss ON ss.user_id_hash=vu.user_id_hash`, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	users := []baselineLeaderboardVisibleStatsUser{}
 	for rows.Next() {
 		var user baselineLeaderboardVisibleStatsUser
@@ -118,7 +118,7 @@ WHERE user_id_hash=?1 AND ?2=1 AND duration_seconds>0`, userID, activity)
 	if err != nil {
 		return 0, 0, "", err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	seen := map[int]bool{}
 	updatedAt := ""
 	for rows.Next() {

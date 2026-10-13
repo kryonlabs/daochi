@@ -687,7 +687,7 @@ func (s *Store) baselineSchemaMigrateMeditationLogPrimaryKey(ctx context.Context
 		var defaultValue sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		switch name {
@@ -748,7 +748,7 @@ func (s *Store) baselineSchemaAddColumnIfMissing(ctx context.Context, table, col
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	if rows.Next() {
 		return nil
 	}

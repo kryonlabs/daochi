@@ -266,7 +266,7 @@ func TestZiranHabitIdentifiersAndPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer transaction.Rollback()
+	defer ignoreCleanupError(transaction.Rollback)
 	for _, user := range []string{lifecycleAccounts[0], lifecycleAccounts[1], "missing"} {
 		for _, id := range []string{"", "\u2003legacy-habit\u00a0", "unmapped", strings.ToUpper(applicationHabitID)} {
 			got := HabitId_ForRead(transaction, t.Context(), user, id)

@@ -68,7 +68,9 @@ func TestPrivateBlobsPreserveBinaryBytesAndRejectUnauthorizedReplayCorruption(t 
 				request.URL.Path = "/api/v1/blobs/target/" + strings.Repeat("0", 64)
 			case "expired":
 				var tx SignedTxEnvelope
-				json.Unmarshal([]byte(request.Header.Get("X-Daochi-Tx")), &tx)
+				if err := json.Unmarshal([]byte(request.Header.Get("X-Daochi-Tx")), &tx); err != nil {
+					t.Fatal(err)
+				}
 				tx.ExpiresAt = 1
 				signDeviceTransaction(&tx, key)
 				value, _ := json.Marshal(tx)

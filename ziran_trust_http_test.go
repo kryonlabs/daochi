@@ -102,7 +102,7 @@ func TestZiranRemotePairingAgainstBaseline(t *testing.T) {
 				http.DefaultTransport = trustHTTPTransport(func(request *http.Request) (*http.Response, error) {
 					requests = append(requests, request.URL.String())
 					data, err := io.ReadAll(request.Body)
-					request.Body.Close()
+					_ = request.Body.Close()
 					if err != nil || !bytes.Equal(data, payload) || request.Method != "POST" || request.Header.Get("Content-Type") != "application/json" || request.GetBody == nil {
 						t.Fatalf("pairing request changed: %#v, body %q, error %v", request, data, err)
 					}

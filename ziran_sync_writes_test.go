@@ -75,7 +75,7 @@ func writesInTransaction(store *Store, ctx context.Context, user string, call wr
 	if err != nil {
 		return SyncWriteResult{Error: err}
 	}
-	defer transaction.Rollback()
+	defer ignoreCleanupError(transaction.Rollback)
 	result := call(ctx, transaction, user)
 	if result.Error == nil {
 		result.Error = transaction.Commit()

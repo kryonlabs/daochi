@@ -272,7 +272,7 @@ func (c statsConnection) Ping(context.Context) error {
 }
 
 func (c statsConnection) step(operation, query string, arguments []driver.NamedValue) error {
-	err := c.plan.lifecycleDriverPlan.step(operation, query, arguments)
+	err := c.plan.step(operation, query, arguments)
 	if c.plan.steps == c.plan.panicAt {
 		panic(c.plan.panicValue)
 	}

@@ -19,6 +19,9 @@ import (
 	"time"
 )
 
+// startupContextKey marks parent-context values startup must or must not inherit.
+type startupContextKey string
+
 func startupAwait[T any](t *testing.T, channel <-chan T) T {
 	t.Helper()
 	select {
@@ -63,7 +66,7 @@ func TestZiranStartupWorkerSelectionAndCancellationAgainstBaseline(t *testing.T)
 			for implementation := 0; implementation < 2; implementation++ {
 				t.Run(fmt.Sprintf("%t/%q/%d", enabled, wallet, implementation), func(t *testing.T) {
 					server := &Server{Cfg: Config{TokenDirectPurchasesEnabled: enabled, MoneroWalletRPCURL: wallet}}
-					ctx, cancel := context.WithCancel(context.WithValue(t.Context(), "startup", "identity"))
+					ctx, cancel := context.WithCancel(context.WithValue(t.Context(), startupContextKey("startup"), "identity"))
 					defer cancel()
 					started, canceled := make(chan string, 3), make(chan string, 3)
 					release := make(chan struct{})
@@ -171,7 +174,7 @@ func TestZiranStartupShutdownAgainstBaseline(t *testing.T) {
 	for _, mode := range []string{"success", "error", "callback panic", "logger panic"} {
 		for implementation := 0; implementation < 2; implementation++ {
 			t.Run(fmt.Sprintf("%s/%d", mode, implementation), func(t *testing.T) {
-				base, cancel := context.WithCancel(context.WithValue(t.Context(), "parent", "must not inherit"))
+				base, cancel := context.WithCancel(context.WithValue(t.Context(), startupContextKey("parent"), "must not inherit"))
 				defer cancel()
 				parent := &startupObservedContext{Context: base, observed: make(chan struct{})}
 				server := &HTTPServer{}
@@ -196,7 +199,7 @@ func TestZiranStartupShutdownAgainstBaseline(t *testing.T) {
 					observed = ctx
 					deadline, present := ctx.Deadline()
 					remaining := time.Until(deadline)
-					if value != server || ctx.Value("parent") != nil || !present || remaining < 14*time.Second || remaining > 15*time.Second || ctx.Err() != nil {
+					if value != server || ctx.Value(startupContextKey("parent")) != nil || !present || remaining < 14*time.Second || remaining > 15*time.Second || ctx.Err() != nil {
 						t.Error("shutdown changed HTTP identity, fresh context or deadline")
 					}
 					if mode == "callback panic" {

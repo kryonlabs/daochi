@@ -162,7 +162,7 @@ func TestTelegramAccountEntryProductionRoutesAndBotMenu(t *testing.T) {
 			t.Error("invalid synthetic menu")
 		}
 		menu, _ = value["reply_markup"].(map[string]any)
-		fmt.Fprint(writer, `{"ok":true}`)
+		_, _ = fmt.Fprint(writer, `{"ok":true}`)
 	}))
 	defer upstream.Close()
 	previous := TelegramAPIBase

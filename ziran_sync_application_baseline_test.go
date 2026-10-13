@@ -17,7 +17,7 @@ func (s *Store) baselineApplicationApplySyncDetailed(ctx context.Context, req Sy
 	if err != nil {
 		return SyncResult{}, nil, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 
 	if publicKey != nil {
 		if err := AccountState_Upsert(tx, ctx, req.UserIDHash, publicKey); err != nil {
@@ -399,7 +399,7 @@ func baselineApplicationIsCanonicalHabitID(id string) bool {
 				return false
 			}
 		default:
-			if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+			if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') && (ch < 'A' || ch > 'F') {
 				return false
 			}
 		}

@@ -55,7 +55,7 @@ func baselineCanonicalizeStoredTimestamps(db *sql.DB, ctx context.Context) error
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	rewritten := 0
 	for _, target := range baselineTimestampColumns {
 		count, err := baselineCanonicalizeColumn(ctx, tx, target.table, target.column)
@@ -91,7 +91,7 @@ func baselineCanonicalizeColumn(ctx context.Context, tx *sql.Tx, table, column s
 		var rowid int64
 		var value sql.NullString
 		if err := rows.Scan(&rowid, &value); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, err
 		}
 		if !value.Valid || value.String == "" {
@@ -106,10 +106,10 @@ func baselineCanonicalizeColumn(ctx context.Context, tx *sql.Tx, table, column s
 		}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return 0, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, item := range pending {
 		if _, err := tx.ExecContext(ctx,
 			fmt.Sprintf(`UPDATE %s SET %s=?2 WHERE rowid=?1`, table, column),

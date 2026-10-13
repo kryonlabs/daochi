@@ -100,7 +100,7 @@ func TestZiranMeshPullPaginationAndFailuresAgainstBaseline(t *testing.T) {
 					if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 						t.Fatal(err)
 					}
-					request.Body.Close()
+					_ = request.Body.Close()
 					requests = append(requests, input)
 					if mode == "transport" || (interrupted && len(requests) == 2) {
 						return nil, sentinel
@@ -207,7 +207,7 @@ VALUES(?1,?2,?1,?3,?4,'fixture')`, peer.name, server.Node.PublicKey, peer.addres
 				var requests []string
 				http.DefaultTransport = trustHTTPTransport(func(request *http.Request) (*http.Response, error) {
 					data, err := io.ReadAll(request.Body)
-					request.Body.Close()
+					_ = request.Body.Close()
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -15,7 +15,7 @@ func (s *Store) baselineUpsertSignedAppManifest(ctx context.Context, manifest Ap
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 
 	status := manifest.Status
 	if status == "" {
@@ -224,7 +224,7 @@ ORDER BY key_id`, appID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	var out []AppKey
 	for rows.Next() {
 		var key AppKey
@@ -246,7 +246,7 @@ ORDER BY asset_id,permission`, appID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	var out []TokenPolicy
 	for rows.Next() {
 		var policy TokenPolicy
@@ -333,7 +333,7 @@ func (s *Store) baselineUpsertApp(ctx context.Context, app AppRegistration) erro
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	if err := baselineUpsertAppTx(ctx, tx, app); err != nil {
 		return err
 	}
@@ -350,7 +350,7 @@ ORDER BY app_id`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	apps := []AppRegistration{}
 	for rows.Next() {
@@ -478,7 +478,7 @@ ORDER BY collection_prefix`, appID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []AppCollection{}
 	for rows.Next() {
@@ -501,7 +501,7 @@ ORDER BY capability`, appID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []string{}
 	for rows.Next() {

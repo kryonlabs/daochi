@@ -426,7 +426,7 @@ func baselineRequestHeaderAlias(r *http.Request, names ...string) string {
 }
 
 func baselineReadJSONBody(w http.ResponseWriter, r *http.Request, maxBody int64) ([]byte, error) {
-	defer r.Body.Close()
+	defer ignoreCleanupError(r.Body.Close)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
 		return nil, errors.New("request body too large")

@@ -38,13 +38,13 @@ func baselineWritesReplaceUserData(ctx context.Context, tx *sql.Tx, userID strin
 	for rows.Next() {
 		var collection string
 		if err := rows.Scan(&collection); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		collections = append(collections, collection)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return err
 	}
 	if err := rows.Close(); err != nil {

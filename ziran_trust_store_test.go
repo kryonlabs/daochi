@@ -113,7 +113,7 @@ func compareTrustState(t *testing.T, actual, expected *Store) {
 		if err := rows.Err(); err != nil {
 			t.Fatal(err)
 		}
-		rows.Close()
+		_ = rows.Close()
 	}
 }
 

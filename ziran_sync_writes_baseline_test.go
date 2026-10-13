@@ -52,7 +52,8 @@ func baselineWritesReplaceUserData(ctx context.Context, tx *sql.Tx, userID strin
 	}
 	for _, collection := range collections {
 		collectionOwner := baselineCollectionOwnerApp(collection)
-		if collectionOwner != owner && !(collectionOwner == "" && owner == "inbe") {
+		replaced := collectionOwner == owner || (collectionOwner == "" && owner == "inbe")
+		if !replaced {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2`, userID, collection); err != nil {

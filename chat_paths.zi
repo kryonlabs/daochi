@@ -47,7 +47,7 @@ Document1 :: #string JSON_1
                 },
                 "tools": {
                   "type": "array",
-                  "maxItems": 32,
+                  "maxItems": 64,
                   "items": {
                     "type": "object"
                   }

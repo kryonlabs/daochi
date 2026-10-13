@@ -84,6 +84,12 @@ Write :: (writer: *CapturedWriter, bytes: []u8) -> WriteResult #go_method "Write
     return WriteRaw(writer.writer, bytes)
 }
 
+// Lets http.ResponseController reach the connection, so that a slow chat
+// answer can move its own write deadline.
+Unwrap :: (writer: *CapturedWriter) -> http.ResponseWriter #go_method "Unwrap" {
+    return writer.writer
+}
+
 Hijack :: (writer: *CapturedWriter) -> socket.AcceptedSocket #go_method "Hijack" #go_results {
     hijacker := AsHijacker(cast(Any)writer.writer)
     if !hijacker.present {

@@ -24,6 +24,7 @@ type LinkEntry struct {
 	Request   string
 	Response  string
 	ExpiresAt Time
+	Closed    bool
 }
 
 type __type_2cbdc99ec304bdf6 = map[string]LinkEntry
@@ -165,6 +166,11 @@ func DeviceLink_Put(writer ResponseWriter, request *Request) {
 		value_10.ExpiresAt = value_11
 		entry = value_10
 	}
+	if entry.Closed {
+		Response_Error(writer, 409, "device link closed")
+		StdSyncGo_Unlock(&(device_links.Mu))
+		return
+	}
 	if input.Slot == "request" {
 		if entry.Request != "" {
 			Response_Error(writer, 409, "device link request already sent")
@@ -243,10 +249,25 @@ func DeviceLink_Close(writer ResponseWriter, request *Request) {
 	if !value_1 {
 		return
 	}
+	now := StdTimeGo_Now()
 	StdSyncGo_Lock(&(device_links.Mu))
 	var value_2 __type_2cbdc99ec304bdf6 = device_links.Entries
 	var value_3 string = input.ID
-	delete(value_2, value_3)
+	var value_4 LinkEntry = value_2[value_3]
+	entry := value_4
+	if StdTimeGo_After(now, entry.ExpiresAt) {
+		var value_5 __type_2cbdc99ec304bdf6 = device_links.Entries
+		var value_6 string = input.ID
+		delete(value_5, value_6)
+	} else {
+		var value_7 *__type_2cbdc99ec304bdf6 = &(device_links.Entries)
+		var value_8 string = input.ID
+		var value_9 LinkEntry = LinkEntry{ExpiresAt: entry.ExpiresAt, Closed: true}
+		if (*value_7) == nil {
+			(*value_7) = make(__type_2cbdc99ec304bdf6)
+		}
+		(*value_7)[value_8] = value_9
+	}
 	Response_JSON(writer, 200, LinkStatus{Ok: true})
 	StdSyncGo_Unlock(&(device_links.Mu))
 }

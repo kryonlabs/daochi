@@ -45,6 +45,9 @@ type __type_baef8676c03ac025 struct {
 }
 
 const MaxOutstanding = 8
+const MaxOutstandingChallenges = 65536
+
+var ErrChallengesBusy Error
 
 func Challenge_Prune(store *ChallengeStore, now Time) {
 	var value_0 __type_ad39223df1e08a9f = store.ByUser
@@ -138,25 +141,33 @@ func Challenge_Issue(store *ChallengeStore, userID string) IssuedChallenge {
 	StdSyncGo_Lock(&(store.Mu))
 	var value_0 *ChallengeStore = store
 	Challenge_Prune(value_0, StdTimeGo_Now())
+	var value_1 __type_ad39223df1e08a9f = store.ByUser
+	var value_2 int64 = int64(len(value_1))
+	if value_2 >= 65536 {
+		result.Error = ErrChallengesBusy
+		cleanup_return_0 := result
+		StdSyncGo_Unlock(&(store.Mu))
+		return cleanup_return_0
+	}
 	Challenge_Bound(store, userID)
 	var item Challenge = Challenge{}
 	item.User = userID
 	item.Nonce = nonce
-	var value_1 Time = StdTimeGo_Now()
-	var value_2 Time = StdTimeGo_Add(value_1, store.Ttl)
-	item.ExpiresAt = value_2
-	var value_3 *__type_ad39223df1e08a9f = &(store.ByUser)
-	var value_5 string = Challenge_Key(userID, nonce)
-	var value_4 string = value_5
-	var value_6 Challenge = item
-	if (*value_3) == nil {
-		(*value_3) = make(__type_ad39223df1e08a9f)
+	var value_3 Time = StdTimeGo_Now()
+	var value_4 Time = StdTimeGo_Add(value_3, store.Ttl)
+	item.ExpiresAt = value_4
+	var value_5 *__type_ad39223df1e08a9f = &(store.ByUser)
+	var value_7 string = Challenge_Key(userID, nonce)
+	var value_6 string = value_7
+	var value_8 Challenge = item
+	if (*value_5) == nil {
+		(*value_5) = make(__type_ad39223df1e08a9f)
 	}
-	(*value_3)[value_4] = value_6
+	(*value_5)[value_6] = value_8
 	result.Nonce = nonce
-	cleanup_return_0 := result
+	cleanup_return_1 := result
 	StdSyncGo_Unlock(&(store.Mu))
-	return cleanup_return_0
+	return cleanup_return_1
 }
 
 func Challenge_Outstanding(store *ChallengeStore, userID string) []Pending {
@@ -256,3 +267,23 @@ func Challenge_PeekBase64(store *ChallengeStore, userID string) ChallengePreview
 	result.Found = true
 	return result
 }
+
+func Challenge_GlobalInit00() {
+	ErrChallengesBusy = StdErrorsGo_New("too many outstanding challenges")
+}
+
+var Challenge_ziranInitState uint8
+
+func Challenge_ziranInit() {
+	if Challenge_ziranInitState == 2 {
+		return
+	}
+	if Challenge_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	Challenge_ziranInitState = 1
+	Challenge_GlobalInit00()
+	Challenge_ziranInitState = 2
+}
+
+func init() { Challenge_ziranInit() }

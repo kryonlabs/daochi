@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,5 +87,57 @@ func TestPrivateBlobsPreserveBinaryBytesAndRejectUnauthorizedReplayCorruption(t 
 				t.Fatalf("unsafe request accepted: %d", r.Code)
 			}
 		})
+	}
+}
+
+// Blobs count toward the account storage limit, and deleting the account
+// removes its blob files as well as its rows.
+func TestBlobsCountTowardStorageAndLeaveWithTheAccount(t *testing.T) {
+	server, user, key := registryHTTPFixture(t)
+	server.Verifier = testVerifier(&transactionVerifier{accept: true})
+	server.Cfg.DBPath = filepath.Join(t.TempDir(), "node.sqlite")
+	before := AccountStorage_Used(server.Store.Database, t.Context(), user)
+	if before.Error != nil {
+		t.Fatal(before.Error)
+	}
+	server.Cfg.AccountStorageLimitBytes = before.Value + 64
+	small := bytes.Repeat([]byte{0x01}, 40)
+	large := bytes.Repeat([]byte{0x02}, 40)
+	put := func(data []byte, nonce string) int {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		path := "/api/v1/blobs/target/" + Signing_SHA256Hex(data)
+		Server_HandleBlobHttpRoute(server, recorder, blobRequest(t, server, user, key, "PUT", path, data, nonce))
+		return recorder.Code
+	}
+	if code := put(small, "put-small"); code != http.StatusNoContent {
+		t.Fatalf("blob under the limit = %d", code)
+	}
+	used := AccountStorage_Used(server.Store.Database, t.Context(), user)
+	if used.Error != nil || used.Value != before.Value+int64(len(small)) {
+		t.Fatalf("blob bytes not counted: %#v", used)
+	}
+	if code := put(small, "put-small-again"); code != http.StatusNoContent {
+		t.Fatalf("storing the same blob again = %d", code)
+	}
+	if code := put(large, "put-large"); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("blob past the limit = %d", code)
+	}
+
+	folder := AccountStorage_BlobAccountFolder(server.Cfg.DBPath, user)
+	if _, err := os.Stat(folder); err != nil {
+		t.Fatalf("blob folder missing before deletion: %v", err)
+	}
+	if err := AccountState_Delete(server.Store.Database, t.Context(), user); err != nil {
+		t.Fatal(err)
+	}
+	if err := AccountStorage_RemoveBlobs(server.Cfg.DBPath, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Fatalf("blob folder survived account deletion: %v", err)
+	}
+	if err := AccountStorage_RemoveBlobs(server.Cfg.DBPath, "../../etc"); err == nil {
+		t.Fatal("blob removal accepted a path outside the account folders")
 	}
 }

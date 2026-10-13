@@ -57,7 +57,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/node/pairing/accept`
 - `POST /api/v1/node/pairing/complete`
 - `GET /api/v1/node/peers`
-- `POST /api/v1/link/put`, `POST /api/v1/link/get` and `POST /api/v1/link/close` relay one sealed request and response between two devices connecting by QR code; links expire after ten minutes
+- `POST /api/v1/link/put`, `POST /api/v1/link/get` and `POST /api/v1/link/close` relay one sealed request and response between two devices connecting by QR code; links expire after ten minutes, and a closed link stays closed until then
 - `POST /api/v1/namespaces`
 - `POST /api/v1/namespaces/claims`
 - `GET /api/v1/namespaces/resolve?space_id=<id>&name=<name>`
@@ -112,6 +112,8 @@ existing dashboards.
 The public API hostname should terminate TLS at a reverse proxy and forward to `DAOCHI_ADDR`, for example `127.0.0.1:8080`.
 Set `DAOCHI_TOKEN_SECRET_HEX` to at least 32 random bytes encoded as hex in production.
 `DAOCHI_ALLOW_EPHEMERAL_TOKEN_SECRET=1` is only for local development because it invalidates tokens on restart and is not a stable server secret.
+
+`POST /api/v1/sync` accepts up to 300 requests a minute per account across its devices; more return `429`. Blobs count toward `DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES` like records, and deleting an account removes its blob files.
 
 Bearer tokens are intentionally cacheable client-side credentials, not the user's durable login state. Clients should silently run the challenge/sign/login flow again when a token expires or receives a `401`, as long as the local account key still exists. Login responses include `server_time` as Unix seconds so clients can compensate for local clock skew when caching token expiry. Older clients may ignore it. Only an explicit user logout, account deletion, or local account reset should remove the account key.
 

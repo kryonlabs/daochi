@@ -331,6 +331,7 @@ func Server_Synchronization(server *Server) Synchronization {
 	result.Verify = value_5
 	result.ReplayError = errSignedTxReplay
 	result.MissingUser = ErrSyncUserNotFound
+	result.Limiter = server.Limiter
 	return result
 }
 
@@ -1284,7 +1285,10 @@ func Server_ziranInit() {
 	}
 	Server_ziranInitState = 1
 	Store_ziranInit()
+	Challenge_ziranInit()
 	Verifier_ziranInit()
+	AccountAccess_ziranInit()
+	AccountSignature_ziranInit()
 	OperationalHttp_ziranInit()
 	TokenHttp_ziranInit()
 	MoneroDeposits_ziranInit()

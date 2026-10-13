@@ -34,6 +34,9 @@ LinkEntry :: struct {
     Request: string
     Response: string
     ExpiresAt: clock.Time
+    // A closed link keeps its ID until it expires, so nobody who learns the
+    // ID can reopen it and put their own message in a freed slot.
+    Closed: bool
 }
 
 Links :: struct {
@@ -142,6 +145,10 @@ Put :: (writer: http.ResponseWriter, request: *http.Request) {
         }
         entry = LinkEntry.{ExpiresAt = clock.Add(now, Lifetime())}
     }
+    if entry.Closed {
+        response.Error(writer, 409, "device link closed")
+        return
+    }
     if input.slot == "request" {
         if entry.Request != "" {
             response.Error(writer, 409, "device link request already sent")
@@ -197,8 +204,14 @@ Close :: (writer: http.ResponseWriter, request: *http.Request) {
     if !ReadInput(writer, request, *input) {
         return
     }
+    now := clock.Now()
     Lock(*device_links.mu)
     defer Unlock(*device_links.mu)
-    MapDelete(device_links.entries, input.id)
+    entry := MapGet(device_links.entries, input.id)
+    if clock.After(now, entry.ExpiresAt) {
+        MapDelete(device_links.entries, input.id)
+    } else {
+        MapSet(device_links.entries, input.id, LinkEntry.{ExpiresAt = entry.ExpiresAt, Closed = true})
+    }
     response.JSON(writer, 200, LinkStatus.{ok = true})
 }

@@ -270,6 +270,7 @@ Synchronization :: (server: *Server) -> sync_http.Synchronization #go_method "sy
     result.verify = BindVerifier(Verify, server)
     result.replayError = errSignedTxReplay
     result.missingUser = storage.ErrSyncUserNotFound
+    result.limiter = server.limiter
     return result
 }
 

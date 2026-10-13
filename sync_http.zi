@@ -29,6 +29,9 @@ pages :: #import "record_sync";
 storage :: #import "account_storage";
 history :: #import "state_history";
 packages :: #import "package_http";
+request_rate :: #import "request_rate";
+limiting :: #import "rate_limit";
+clock :: #import "std/time_go";
 http :: #import "std/http_go";
 sql :: #import "std/sql_go";
 errors :: #import "std/errors_go";
@@ -46,6 +49,7 @@ Synchronization :: struct {
     verify: auth.VerifySignature
     replayError: Error
     missingUser: Error
+    limiter: *limiting.RateLimiter
 }
 
 #scope_file
@@ -79,6 +83,14 @@ LogAccountError :: (message: string, userKey: string, user: string, errorKey: st
 LogClientError :: (message: string, userKey: string, user: string, clientKey: string, client: string,
     errorKey: string, error: Error) #foreign logging "Error";
 LogPruned :: (message: string, userKey: string, user: string, countKey: string, count: s64) #foreign logging "Info";
+
+// Each sync hashes the whole account and may rewrite it, so one account
+// cannot send more than five a second on average across its devices.
+AllowSync :: (sync: Synchronization, user: string) -> bool {
+    parts: [2]string = .["sync:user:", user]
+    return request_rate.Allow(sync.limiter, sync.counters, Join(parts[:], ""), cast(isize)300,
+        cast(clock.Duration)60000000000)
+}
 
 Finish :: (completion: *SyncCompletion, sync: Synchronization, request: *http.Request) {
     if !completion.complete {
@@ -174,6 +186,10 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     }
     if authenticated.value != input.UserIDHash {
         response.Error(writer, cast(isize)401, "token user mismatch")
+        return
+    }
+    if !AllowSync(sync, input.UserIDHash) {
+        response.Error(writer, cast(isize)429, "rate limit exceeded")
         return
     }
     publicKey := requests.PublicKey(input)
@@ -499,6 +515,10 @@ EncryptedEnvelope :: (sync: Synchronization, writer: http.ResponseWriter, reques
     }
     if authenticated.value != user {
         http_auth.Respond(writer, sync.counters, auth.Failure(cast(isize)401, "token user mismatch"))
+        return false
+    }
+    if !AllowSync(sync, user) {
+        response.Error(writer, cast(isize)429, "rate limit exceeded")
         return false
     }
     clientNames: [2]string = .["X-Daochi-Client", "X-Ksync-Client"]

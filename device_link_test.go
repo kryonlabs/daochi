@@ -103,3 +103,28 @@ func TestDeviceLinkLimitsRequestsPerAddress(t *testing.T) {
 		t.Fatalf("another address status = %d, want 404", status)
 	}
 }
+
+// Closing a link frees its messages but keeps the ID until it expires, so
+// someone who learns the ID cannot reopen it with their own message.
+func TestClosedDeviceLinkCannotBeReopened(t *testing.T) {
+	remote := "198.51.100.11:4000"
+	id := "fedcba9876543210fedcba9876543210"
+	status, _ := deviceLinkCall(t, DeviceLink_Put, remote, `{"id":"`+id+`","slot":"request","data":"sealed-request"}`)
+	if status != http.StatusOK {
+		t.Fatalf("request status = %d", status)
+	}
+	status, _ = deviceLinkCall(t, DeviceLink_Close, remote, `{"id":"`+id+`"}`)
+	if status != http.StatusOK {
+		t.Fatalf("close status = %d", status)
+	}
+	for _, slot := range []string{"request", "response"} {
+		status, _ = deviceLinkCall(t, DeviceLink_Put, remote, `{"id":"`+id+`","slot":"`+slot+`","data":"forged"}`)
+		if status != http.StatusConflict {
+			t.Fatalf("%s after close = %d, want 409", slot, status)
+		}
+		status, _ = deviceLinkCall(t, DeviceLink_Get, remote, `{"id":"`+id+`","slot":"`+slot+`"}`)
+		if status != http.StatusNotFound {
+			t.Fatalf("read %s after close = %d, want 404", slot, status)
+		}
+	}
+}

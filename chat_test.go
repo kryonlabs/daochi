@@ -80,7 +80,7 @@ func TestChatAppearanceToolsAndBoundedContinuations(t *testing.T) {
 		t.Fatal("Oversize tool arguments were accepted")
 	}
 	request.Messages = request.Messages[:1]
-	request.Tools = append(request.Tools, make([]ChatTool, 33-len(request.Tools))...)
+	request.Tools = append(request.Tools, make([]ChatTool, ToolCountLimit+1-len(request.Tools))...)
 	if Chat_ValidRequest(request) {
 		t.Fatal("Oversize tool catalog was accepted")
 	}

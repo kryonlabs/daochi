@@ -5,6 +5,7 @@ import (
 	sql "database/sql"
 	json "encoding/json"
 	io "io"
+	http "net/http"
 	strings "strings"
 )
 
@@ -77,7 +78,9 @@ type HabitIconResponse struct {
 	Remaining int64    "json:\"remaining\""
 }
 
-type zir_a04daa0b76c35d74_StringReader = strings.Reader
+type zir_8b7c74b8aae6a72b_StringReader = strings.Reader
+
+type ResponseController = http.ResponseController
 
 type Thinking struct {
 	Type string "json:\"type\""
@@ -134,13 +137,17 @@ const IconNameLimit = 32
 const HabitCountLimit = 32
 const HabitNameLimit = 64
 const HabitDescriptionLimit = 256
+const ToolCountLimit = 64
+const ChatWait = 35000000000
+const SpellingWait = 60000000000
+const AnswerMargin = 15000000000
 
 var ChatHTTPClient *Client
 var SpellingHTTPClient *Client
 var ChatEndpoint string = "https://api.z.ai/api/paas/v4/chat/completions"
 
 func Chat_ValidRequest(request ChatRequest) bool {
-	var value_0 bool = int64(len(request.Messages)) == 0 || int64(len(request.Messages)) > 20 || int64(len(request.Tools)) > 32
+	var value_0 bool = int64(len(request.Messages)) == 0 || int64(len(request.Messages)) > 20 || int64(len(request.Tools)) > 64
 	if value_0 || int64(len([]uint8(request.Context))) > 8192 {
 		return false
 	}
@@ -344,6 +351,14 @@ func Chat_Budget(payload *ProviderRequest, output_tokens int, thinking_tokens in
 	}
 }
 
+func Chat_AnswerDeadline(now Time, wait int64) Time {
+	return StdTimeGo_Add(now, Duration((wait + 15000000000)))
+}
+
+func Chat_AllowSlowAnswer(writer ResponseWriter, wait int64) {
+	(*http.ResponseController).SetWriteDeadline(http.NewResponseController(writer), Chat_AnswerDeadline(StdTimeGo_Now(), wait))
+}
+
 func Chat_AskModel(service Chat, request *Request, client *Client, payload ProviderRequest) ModelResult {
 	var result ModelResult = ModelResult{}
 	result.Status = int(503)
@@ -356,7 +371,7 @@ func Chat_AskModel(service Chat, request *Request, client *Client, payload Provi
 	if endpoint == "" {
 		endpoint = ChatEndpoint
 	}
-	var value_0 *zir_a04daa0b76c35d74_StringReader = strings.NewReader(StdTextGo_FromBytes(encoded.Value))
+	var value_0 *zir_8b7c74b8aae6a72b_StringReader = strings.NewReader(StdTextGo_FromBytes(encoded.Value))
 	upstream := StdHttpGo_NewRequest(StdHttpGo_Context(request), "POST", endpoint, Reader(value_0))
 	if upstream.Error != nil {
 		return result
@@ -603,6 +618,7 @@ func Chat_Complete(service Chat, writer ResponseWriter, request *Request) {
 	payload.Messages = messages
 	payload.Tools = input.Tools
 	Chat_Budget(&(payload), int(512), int(1536))
+	Chat_AllowSlowAnswer(writer, 35000000000)
 	answered := Chat_AskModel(service, request, ChatHTTPClient, payload)
 	if answered.Status == int(500) {
 		Response_Error(writer, int(500), "chat request failed")
@@ -622,28 +638,28 @@ func Chat_Complete(service Chat, writer ResponseWriter, request *Request) {
 		if int64(0) < 0 || int64(int64(len(value_13))) < int64(0) || int64(int64(len(value_13))) > int64(len(value_13)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_43 := value_13[0:int64(len(value_13)):int64(len(value_13))]
-		loop_count_43 := int64(len(loop_view_43))
-		var loop_cursor_43 int64 = 0
-		for loop_cursor_43 < loop_count_43 {
-			loop_index_43 := loop_cursor_43
-			call := loop_view_43[loop_index_43]
+		loop_view_44 := value_13[0:int64(len(value_13)):int64(len(value_13))]
+		loop_count_44 := int64(len(loop_view_44))
+		var loop_cursor_44 int64 = 0
+		for loop_cursor_44 < loop_count_44 {
+			loop_index_44 := loop_cursor_44
+			call := loop_view_44[loop_index_44]
 			var found bool = false
 			{
 				value_14 := input.Tools[:]
 				if int64(0) < 0 || int64(int64(len(value_14))) < int64(0) || int64(int64(len(value_14))) > int64(len(value_14)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_45 := value_14[0:int64(len(value_14)):int64(len(value_14))]
-				loop_count_45 := int64(len(loop_view_45))
-				var loop_cursor_45 int64 = 0
-				for loop_cursor_45 < loop_count_45 {
-					loop_index_45 := loop_cursor_45
-					tool := loop_view_45[loop_index_45]
+				loop_view_46 := value_14[0:int64(len(value_14)):int64(len(value_14))]
+				loop_count_46 := int64(len(loop_view_46))
+				var loop_cursor_46 int64 = 0
+				for loop_cursor_46 < loop_count_46 {
+					loop_index_46 := loop_cursor_46
+					tool := loop_view_46[loop_index_46]
 					if tool.Function.Name == call.Function.Name {
 						found = true
 					}
-					loop_cursor_45++
+					loop_cursor_46++
 				}
 			}
 			arguments := strings.TrimSpace(call.Function.Arguments)
@@ -658,7 +674,7 @@ func Chat_Complete(service Chat, writer ResponseWriter, request *Request) {
 				Response_Error(writer, int(503), "invalid model tool")
 				return
 			}
-			loop_cursor_43++
+			loop_cursor_44++
 		}
 	}
 	message.Role = "assistant"
@@ -717,6 +733,7 @@ func Chat_Spelling(service Chat, writer ResponseWriter, request *Request) {
 	payload.Model = service.Configuration.ChatModel
 	payload.Messages = messages
 	Chat_Budget(&(payload), int(6144), int(2048))
+	Chat_AllowSlowAnswer(writer, 60000000000)
 	answered := Chat_AskModel(service, request, SpellingHTTPClient, payload)
 	if answered.Status != 0 {
 		Response_Error(writer, int(503), "online chat unavailable")
@@ -791,6 +808,7 @@ func Chat_HabitIcons(service Chat, writer ResponseWriter, request *Request) {
 	payload.Model = service.Configuration.ChatModel
 	payload.Messages = messages
 	Chat_Budget(&(payload), int(1024), int(2048))
+	Chat_AllowSlowAnswer(writer, 35000000000)
 	answered := Chat_AskModel(service, request, ChatHTTPClient, payload)
 	if answered.Status != 0 {
 		Response_Error(writer, int(503), "online chat unavailable")

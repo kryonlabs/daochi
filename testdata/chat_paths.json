@@ -31,7 +31,7 @@
                 },
                 "tools": {
                   "type": "array",
-                  "maxItems": 32,
+                  "maxItems": 64,
                   "items": {
                     "type": "object"
                   }

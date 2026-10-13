@@ -120,6 +120,14 @@ func (receiver *CapturedWriter) Write(argument1 []uint8) (int, Error) {
 	return result.Count, result.Error
 }
 
+func Middleware_Unwrap(writer *CapturedWriter) ResponseWriter {
+	return writer.Writer
+}
+
+func (receiver *CapturedWriter) Unwrap() ResponseWriter {
+	return Middleware_Unwrap(receiver)
+}
+
 func Middleware_Hijack(writer *CapturedWriter) AcceptedSocket {
 	hijacker := Middleware_AsHijacker(Any(writer.Writer))
 	if !hijacker.Present {

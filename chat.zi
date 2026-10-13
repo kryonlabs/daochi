@@ -18,6 +18,7 @@ native_json :: #system_library "go:encoding/json";
 native_io :: #system_library "go:io";
 native_strings :: #system_library "go:strings";
 native_sql :: #system_library "go:database/sql";
+native_http :: #system_library "go:net/http";
 builtin :: #system_library "go:builtin";
 
 Chat :: struct {
@@ -82,10 +83,16 @@ IconNameLimit :: 32
 HabitCountLimit :: 32
 HabitNameLimit :: 64
 HabitDescriptionLimit :: 256
-ChatHTTPClient: *http.Client = http.NewClient(cast(clock.Duration)35000000000);
-// A corrected entry is about as long as the entry, so it takes longer than a
-// short assistant reply.
-SpellingHTTPClient: *http.Client = http.NewClient(cast(clock.Duration)60000000000);
+// Inbe offers 32 app tools; the limit leaves room for the catalog to grow.
+ToolCountLimit :: 64
+// How long the node waits for the model, in nanoseconds. A corrected entry is
+// about as long as the entry, so it takes longer than a short assistant reply.
+ChatWait :: 35000000000
+SpellingWait :: 60000000000
+// Time left to send an answer that arrives at the end of the wait.
+AnswerMargin :: 15000000000
+ChatHTTPClient: *http.Client = http.NewClient(cast(clock.Duration)ChatWait);
+SpellingHTTPClient: *http.Client = http.NewClient(cast(clock.Duration)SpellingWait);
 ChatEndpoint: string = "https://api.z.ai/api/paas/v4/chat/completions";
 
 #scope_file
@@ -104,6 +111,9 @@ RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native_sq
 MakeMessages :: (count: isize) -> []ChatMessage #foreign builtin "make";
 MakeStrings :: (count: isize) -> []string #foreign builtin "make";
 MakeNumberedHabits :: (count: isize) -> []NumberedHabit #foreign builtin "make";
+ResponseController :: #type #foreign native_http "ResponseController";
+NewResponseController :: (writer: http.ResponseWriter) -> *ResponseController #foreign native_http;
+SetWriteDeadline :: (controller: *ResponseController, deadline: clock.Time) -> Error #foreign native_http "(*ResponseController).SetWriteDeadline";
 Thinking :: struct {
     type: string #go_tag "json:\"type\""
 }
@@ -149,7 +159,7 @@ HabitIconAnswer :: struct {
 
 ValidRequest :: (request: ChatRequest) -> bool {
     if request.messages.count == 0 || request.messages.count > 20 ||
-    request.tools.count > 32 || (cast([]u8)request.context).count > 8192 {
+    request.tools.count > ToolCountLimit || (cast([]u8)request.context).count > 8192 {
         return false
     }
     context := TrimSpace(text.FromBytes(cast([]u8)request.context))
@@ -291,6 +301,21 @@ Budget :: (payload: *ProviderRequest, output_tokens: isize, thinking_tokens: isi
         payload.thinking.type = "enabled"
         payload.reasoning_effort = "low"
     }
+}
+
+// The latest time an answer may still be written after waiting up to wait
+// nanoseconds for the model.
+AnswerDeadline :: (now: clock.Time, wait: s64) -> clock.Time {
+    return clock.Add(now, cast(clock.Duration)(wait + AnswerMargin))
+}
+
+// The server's 15 s write timeout would cut off an answer that the model
+// takes longer to give, so this response may be written until the model
+// wait ends, plus a margin. Only an authenticated request that has spent an
+// allowance unit gets the longer time; every other route keeps 15 s. A
+// writer that cannot move its deadline, such as a test recorder, keeps its own.
+AllowSlowAnswer :: (writer: http.ResponseWriter, wait: s64) {
+    unused SetWriteDeadline(NewResponseController(writer), AnswerDeadline(clock.Now(), wait))
 }
 
 AskModel :: (service: Chat, request: *http.Request, client: *http.Client,
@@ -455,6 +480,7 @@ Complete :: (service: Chat, writer: http.ResponseWriter, request: *http.Request)
     payload.tools = input.tools
     // Coaching answers need room for a few specific suggestions.
     Budget(*payload, cast(isize)512, cast(isize)1536)
+    AllowSlowAnswer(writer, ChatWait)
     answered := AskModel(service, request, ChatHTTPClient, payload)
     if answered.status == cast(isize)500 {
         response.Error(writer, cast(isize)500, "chat request failed")
@@ -525,6 +551,7 @@ Spelling :: (service: Chat, writer: http.ResponseWriter, request: *http.Request)
     payload.model = service.configuration.ChatModel
     payload.messages = messages
     Budget(*payload, cast(isize)6144, cast(isize)2048)
+    AllowSlowAnswer(writer, SpellingWait)
     answered := AskModel(service, request, SpellingHTTPClient, payload)
     if answered.status != 0 {
         response.Error(writer, cast(isize)503, "online chat unavailable")
@@ -577,6 +604,7 @@ HabitIcons :: (service: Chat, writer: http.ResponseWriter, request: *http.Reques
     payload.messages = messages
     // The answer is one short icon name per habit.
     Budget(*payload, cast(isize)1024, cast(isize)2048)
+    AllowSlowAnswer(writer, ChatWait)
     answered := AskModel(service, request, ChatHTTPClient, payload)
     if answered.status != 0 {
         response.Error(writer, cast(isize)503, "online chat unavailable")

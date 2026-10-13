@@ -1,0 +1,105 @@
+// A periodic job that deletes what the node no longer needs: each account's
+// daily chat counts after 30 days and once the account is gone, and Lumi's
+// handled Telegram updates, delivered or orphaned report copies and expired
+// link codes.
+#import "std/go_types"
+lumi :: #import "lumi_telegram";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+selection :: #import "std/select_go";
+errors :: #import "std/errors_go";
+go_time :: #system_library "go:time";
+go_slog :: #system_library "go:log/slog";
+go_sql :: #system_library "go:database/sql";
+
+// Chat allowances count requests per UTC day; those counts are kept this long.
+ChatUsageDays :: 30
+// How often the job runs, in nanoseconds: one hour.
+Interval :: 3600000000000
+
+#scope_file
+Day :: 86400000000000
+TableResult :: struct {
+    exists: bool
+    error: Error
+}
+StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+LogWarning :: (message: string, key: string, error: Error) #foreign go_slog "Warn";
+
+// Lumi creates its tables on first use, so a node that never used Lumi's
+// Telegram input has none.
+LumiTables :: (database: *sql.Database, context: ctx.Context) -> TableResult {
+    result: TableResult
+    exists: s64
+    destinations: [1]Any = .[*exists]
+    empty: [0]Any
+    row := sql.QueryRow(database, context,
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='server_lumi_updates')", empty[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    result.exists = exists != 0
+    return result
+}
+
+#scope_export
+Prune :: (database: *sql.Database, context: ctx.Context, now: clock.Time) -> Error {
+    tables := LumiTables(database, context)
+    if tables.error != null {
+        return tables.error
+    }
+    // The store has one connection, so the schema is ensured before the
+    // transaction takes it.
+    if tables.exists && !lumi.EnsureSchema(database, context) {
+        return errors.New("Lumi schema unavailable")
+    }
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    oldest := clock.Add(now, cast(clock.Duration)(0 - ChatUsageDays * Day))
+    kept: [1]Any = .[clock.Format(clock.UTC(oldest), "2006-01-02")]
+    usage := sql.ExecTx(transaction, context, "DELETE FROM server_chat_usage WHERE day<?1", kept[:])
+    if usage.error != null {
+        return usage.error
+    }
+    // Account deletion removes its counts; a request answered while the
+    // account was being deleted can still leave one behind. The node's own
+    // total is kept under the name "node".
+    empty: [0]Any
+    orphaned := sql.ExecTx(transaction, context,
+        "DELETE FROM server_chat_usage WHERE account_id<>'node' AND NOT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=server_chat_usage.account_id)", empty[:])
+    if orphaned.error != null {
+        return orphaned.error
+    }
+    if tables.exists {
+        error := lumi.Prune(transaction, context, clock.Unix(now))
+        if error != null {
+            return error
+        }
+    }
+    return sql.Commit(transaction)
+}
+
+// Prunes once at start and then at every interval until the context ends.
+Run :: (database: *sql.Database, context: ctx.Context, interval: clock.Duration) {
+    if cast(s64)interval <= 0 {
+        interval = cast(clock.Duration)Interval
+    }
+    ticker := clock.NewTicker(interval)
+    StopAtReturn(ticker)
+    cases: [2]selection.Case
+    cases[0] = selection.Receive(ctx.Done(context))
+    cases[1] = selection.Receive(clock.TickerChannel(ticker))
+    while true {
+        error := Prune(database, context, clock.Now())
+        if error != null && !errors.Is(error, ctx.Canceled()) {
+            LogWarning("data retention failed", "error", error)
+        }
+        if selection.Select(cases[:]).chosen == cast(isize)0 {
+            return
+        }
+    }
+}

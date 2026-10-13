@@ -9,6 +9,7 @@ inspection :: #import "inspect";
 invoices :: #import "monero_invoices";
 mesh :: #import "mesh";
 discovery :: #import "discovery";
+retention :: #import "retention";
 middleware :: #import "middleware";
 ctx :: #import "std/context_go";
 clock :: #import "std/time_go";
@@ -34,6 +35,7 @@ Workers :: struct {
     invoices: Worker
     mesh: Worker
     discovery: Worker
+    retention: Worker
 }
 VerifierFactory :: #type () -> verification.VerifierResult;
 Listen :: #type (server: *HTTPServer) -> Error;
@@ -137,6 +139,10 @@ RunDiscovery :: (server: *application.Server, context: ctx.Context) {
     discovery.Run(*server.cfg, *server.node, context, discovery.Register, discovery.Shutdown)
 }
 
+RunRetention :: (server: *application.Server, context: ctx.Context) {
+    retention.Run(server.store.database, context, cast(clock.Duration)retention.Interval)
+}
+
 #scope_export
 LocalHTTPURL :: (address: string) -> string {
     split := net.SplitHostPort(address)
@@ -157,6 +163,7 @@ NativeWorkers :: () -> Workers {
     result.invoices = RunInvoices
     result.mesh = RunMesh
     result.discovery = RunDiscovery
+    result.retention = RunRetention
     return result
 }
 
@@ -167,6 +174,7 @@ StartWorkers :: (server: *application.Server, context: ctx.Context, group: *Work
     }
     StartWorker(group, workers.mesh, server, context)
     StartWorker(group, workers.discovery, server, context)
+    StartWorker(group, workers.retention, server, context)
 }
 
 NewHTTPServer :: (address: string, handler: middleware.Handler) -> *HTTPServer {

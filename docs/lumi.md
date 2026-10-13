@@ -23,6 +23,10 @@ Daily allowances default to 20 model requests per account and 1,000 per node.
 `DAOCHI_CHAT_DAILY_LIMIT` and `DAOCHI_CHAT_GLOBAL_DAILY_LIMIT` override them.
 Each provider attempt or tool continuation consumes one unit; usage persists
 across restarts. Feedback delivery is independent of the chat allowance.
+The node keeps each day's counts for 30 days and deletes an account's counts
+with the account. A request may offer up to 64 app tools. The node waits up
+to 35 seconds for the model (60 for spelling) and holds the response open for
+that long plus 15 seconds, instead of its usual 15-second limit.
 
 `POST /api/v1/feedback` saves an account's report idempotently. The app's
 durable outbox retries delivery, including when online conversation is disabled.
@@ -60,6 +64,13 @@ App messages, responses and activity never mirror to the bot. The legacy
 `POST /api/v1/lumi/telegram/messages` endpoint validates and acknowledges older
 client uploads without any external delivery, including stale queued history.
 Direct bot linking, help and explicit authorization acknowledgements remain.
+
+An hourly job inside the node deletes what Lumi no longer needs. When the app
+acknowledges a Telegram action, the node removes its text at once and its ID a
+day later, which still recognises Telegram's retry of the same update. Expired
+link codes are deleted. The owner's copy of a report is deleted once the
+owner's app has received it, and at once when the reporting account is
+deleted.
 
 Commands addressed to another bot are ignored; addressed Lumi commands preserve
 their argument text. Empty required arguments receive usage instructions.

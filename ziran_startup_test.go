@@ -68,7 +68,7 @@ func TestZiranStartupWorkerSelectionAndCancellationAgainstBaseline(t *testing.T)
 					server := &Server{Cfg: Config{TokenDirectPurchasesEnabled: enabled, MoneroWalletRPCURL: wallet}}
 					ctx, cancel := context.WithCancel(context.WithValue(t.Context(), startupContextKey("startup"), "identity"))
 					defer cancel()
-					started, canceled := make(chan string, 3), make(chan string, 3)
+					started, canceled := make(chan string, 4), make(chan string, 4)
 					release := make(chan struct{})
 					callback := func(name string) Worker {
 						return func(value *Server, workerContext context.Context) {
@@ -81,14 +81,14 @@ func TestZiranStartupWorkerSelectionAndCancellationAgainstBaseline(t *testing.T)
 							<-release
 						}
 					}
-					workers := Workers{Invoices: callback("invoices"), Mesh: callback("mesh"), Discovery: callback("discovery")}
+					workers := Workers{Invoices: callback("invoices"), Mesh: callback("mesh"), Discovery: callback("discovery"), Retention: callback("retention")}
 					var group WorkerGroup
 					if implementation == 0 {
 						Startup_StartWorkers(server, ctx, &group, workers)
 					} else {
 						baselineStartWorkers(server, ctx, &group, workers)
 					}
-					expected := []string{"discovery", "mesh"}
+					expected := []string{"discovery", "mesh", "retention"}
 					if enabled || strings.TrimSpace(wallet) != "" {
 						expected = append(expected, "invoices")
 					}

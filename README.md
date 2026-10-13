@@ -446,4 +446,4 @@ SQLite tables mirror the app data:
 - `token_payment_intents`
 - `token_checkpoints`
 
-Deleting an account removes app sync, social, profile, and governance rows through foreign-key cascade. Token financial audit rows are retained as described above.
+Deleting an account removes app sync, social, profile, and governance rows through foreign-key cascade, and its daily chat counts. Token financial audit rows are retained as described above.

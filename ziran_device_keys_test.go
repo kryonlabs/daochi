@@ -196,6 +196,9 @@ func TestZiranDeviceStorageLifecycleAgainstBaseline(t *testing.T) {
 		}
 		compareDeviceQueries(t, actual, expected)
 	}
+	// A revoked key ID stays revoked, so prove the failed revocation left its
+	// nonce unused by registering a different key with it.
+	device.KeyID = "other-key"
 	if err := DeviceKeys_Register(actual.Database, t.Context(), device, "missing", errSignedTxReplay); err != nil {
 		t.Fatal("missing-device revocation consumed its nonce", err)
 	}
@@ -207,10 +210,10 @@ func TestZiranDeviceStorageLifecycleAgainstBaseline(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got, want := DeviceKeys_Touch(actual.Database, t.Context(), "account", "inbe", "key"), expected.baselineTouchDeviceKey(t.Context(), "account", "inbe", "key"); !sameIdentityError(got, want) {
+	if got, want := DeviceKeys_Touch(actual.Database, t.Context(), "account", "inbe", device.KeyID), expected.baselineTouchDeviceKey(t.Context(), "account", "inbe", device.KeyID); !sameIdentityError(got, want) {
 		t.Fatalf("device touch = %v, baseline = %v", got, want)
 	}
-	active := DeviceKeys_Active(actual.Database, t.Context(), "account", "inbe", "key")
+	active := DeviceKeys_Active(actual.Database, t.Context(), "account", "inbe", device.KeyID)
 	if active.Value.CreatedAt != "2000-01-01T00:00:00.000000000Z" || active.Value.LastUsedAt == active.Value.CreatedAt {
 		t.Fatal("touch changed creation time or did not update last use")
 	}

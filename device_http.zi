@@ -80,6 +80,10 @@ Route :: (devices: Devices, writer: http.ResponseWriter, request: *http.Request)
             response.Error(writer, cast(isize)409, "device registration replay")
             return
         }
+        if errors.Is(error, keys.ErrDeviceKeyRevoked) {
+            response.Error(writer, cast(isize)409, errors.Message(error))
+            return
+        }
         response.Error(writer, cast(isize)500, "device registration failed")
         return
     }

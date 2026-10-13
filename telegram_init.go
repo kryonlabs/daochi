@@ -281,3 +281,17 @@ func TelegramInit_ValidateWithKey(raw string, token string, now int64, productio
 func TelegramInit_Validate(raw string, token string, now int64) TelegramInitIdentity {
 	return TelegramInit_ValidateWithKey(raw, token, now, "e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d")
 }
+
+var TelegramInit_ziranInitState uint8
+
+func TelegramInit_ziranInit() {
+	if TelegramInit_ziranInitState == 2 {
+		return
+	}
+	if TelegramInit_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	TelegramInit_ziranInitState = 1
+	Authorization_ziranInit()
+	TelegramInit_ziranInitState = 2
+}

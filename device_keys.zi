@@ -16,6 +16,10 @@ go_hex :: #system_library "go:encoding/hex";
 go_time :: #system_library "go:time";
 builtin :: #system_library "go:builtin";
 
+// A revoked device key stays revoked: registering its ID again would
+// reactivate a lost or stolen device.
+ErrDeviceKeyRevoked: Error = errors.New("device key revoked");
+
 DeviceKey :: struct {
     AccountID: string #go_tag "json:\"account_id,omitempty\""
     AppID: string #go_tag "json:\"app_id\""
@@ -206,6 +210,13 @@ Register :: (database: *sql.Database, context: ctx.Context, device: DeviceKey, n
     if inserted.error != null {
         return inserted.error
     }
+    changed := sql.RowsAffected(inserted.value)
+    if changed.error != null {
+        return changed.error
+    }
+    if changed.value == 0 {
+        return ErrDeviceKeyRevoked
+    }
     return sql.Commit(transaction)
 }
 Revoke :: (database: *sql.Database, context: ctx.Context, accountID: string, request: DeviceRevocationRequest, replay: Error) -> Error {
@@ -285,8 +296,8 @@ VALUES(?1,?2,?3,?4,?5,?6,?6,'')
 ON CONFLICT(account_id,app_id,device_key_id) DO UPDATE SET
  client_id=excluded.client_id,
  public_key=excluded.public_key,
- last_used_at=excluded.last_used_at,
- revoked_at=''
+ last_used_at=excluded.last_used_at
+WHERE server_device_keys.revoked_at=''
 SQL_END;
 RevokeSQL :: #string SQL_END
 

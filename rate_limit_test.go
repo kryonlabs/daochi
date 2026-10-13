@@ -55,7 +55,7 @@ func RateLimitTest_ClientAddressForwardedForTrust(test *Test) {
 	var value_0 [7]AddressCase
 	var value_1 AddressCase = AddressCase{Name: "loopback trusts proxy header", Remote: "127.0.0.1:8080", Forwarded: "203.0.113.9", Want: "203.0.113.9"}
 	value_0[0] = value_1
-	var value_2 AddressCase = AddressCase{Name: "loopback uses first hop only", Remote: "127.0.0.1:8080", Forwarded: "203.0.113.9, 198.51.100.7", Want: "203.0.113.9"}
+	var value_2 AddressCase = AddressCase{Name: "loopback uses the hop its proxy added", Remote: "127.0.0.1:8080", Forwarded: "203.0.113.9, 198.51.100.7", Want: "198.51.100.7"}
 	value_0[1] = value_2
 	var value_3 AddressCase = AddressCase{Name: "loopback ignores garbage header", Remote: "127.0.0.1:8080", Forwarded: "not-an-ip", Want: "127.0.0.1"}
 	value_0[2] = value_3

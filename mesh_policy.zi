@@ -97,6 +97,17 @@ AllowsOperation :: (approved: NodeSyncPolicy, requested: NodeSyncPolicy, operati
     if !Contains(approved.Accounts, requested.Accounts) && approved.Accounts.count > 0 {
         return false
     }
+    // Likewise an omitted app, collection or trust-space list would otherwise
+    // mean "everything" to the exporter and widen the paired scope.
+    if approved.Apps.count > 0 && requested.Apps.count == 0 {
+        return false
+    }
+    if approved.Collections.count > 0 && requested.Collections.count == 0 {
+        return false
+    }
+    if approved.Spaces.count > 0 && requested.Spaces.count == 0 {
+        return false
+    }
     return Contains(approved.Apps, requested.Apps) &&
         Contains(approved.Collections, requested.Collections) &&
         Contains(approved.Spaces, requested.Spaces) && Contains(approved.Data, requested.Data)

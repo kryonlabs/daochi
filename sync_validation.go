@@ -83,3 +83,17 @@ func SyncValidation_Validate(database *Database, context Context, request SyncRe
 	}
 	return nil
 }
+
+var SyncValidation_ziranInitState uint8
+
+func SyncValidation_ziranInit() {
+	if SyncValidation_ziranInitState == 2 {
+		return
+	}
+	if SyncValidation_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	SyncValidation_ziranInitState = 1
+	AppStore_ziranInit()
+	SyncValidation_ziranInitState = 2
+}

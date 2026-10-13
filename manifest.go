@@ -29,6 +29,7 @@ type TokenPolicy struct {
 
 type AppManifest struct {
 	ManifestVersion    int              "json:\"manifest_version\""
+	ManifestSequence   int64            "json:\"manifest_sequence,omitempty\""
 	AppID              string           "json:\"app_id\""
 	DisplayName        string           "json:\"display_name\""
 	Description        string           "json:\"description,omitempty\""
@@ -237,6 +238,9 @@ func Manifest_DefaultString(value string, fallback string) string {
 func Manifest_Validate(manifest AppManifest, now int64) string {
 	if manifest.ManifestVersion != int(1) {
 		return "unsupported manifest_version"
+	}
+	if manifest.ManifestSequence < 0 {
+		return "invalid manifest_sequence"
 	}
 	var value_0 bool = Identity_ValidNamespace(manifest.AppID)
 	if !value_0 {

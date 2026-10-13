@@ -88,6 +88,25 @@ WriteMaps :: (metrics: *ServerMetrics, writer: http.ResponseWriter) {
 }
 
 #scope_export
+// Every distinct label is a metric series kept for the life of the process,
+// so a path no rule below normalizes is labelled by the route pattern that
+// served it, or "unmatched".
+RouteLabel :: (path: string, pattern: string) -> string {
+    route := Route(path)
+    if route != path {
+        return route
+    }
+    patternPath := pattern
+    parts := Split(pattern, " ")
+    if parts.count == 2 {
+        patternPath = parts[1]
+    }
+    if patternPath == "" {
+        return "unmatched"
+    }
+    return patternPath
+}
+
 Route :: (path: string) -> string {
     if path == "" {
         return "/"

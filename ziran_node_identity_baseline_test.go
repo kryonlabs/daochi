@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -67,7 +68,12 @@ func baselineLoadOrCreateNodeIdentityKey(path string) (ed25519.PrivateKey, error
 		if len(decoded) != ed25519.PrivateKeySize {
 			return nil, fmt.Errorf("%s has invalid key length", path)
 		}
-		return ed25519.PrivateKey(decoded), nil
+		// Since the 2026-10-13 security fix the public half must match the seed.
+		derived := ed25519.NewKeyFromSeed(decoded[:ed25519.SeedSize])
+		if !bytes.Equal(derived, decoded) {
+			return nil, fmt.Errorf("%s public key does not match its seed", path)
+		}
+		return derived, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}

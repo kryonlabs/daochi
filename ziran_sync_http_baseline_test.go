@@ -14,11 +14,14 @@ import (
 func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Request) {
 	s.Metrics.SyncRequests.Add(1)
 	syncOK := false
+	// Since the 2026-10-13 security fix a signed transaction stays spent once
+	// its writes commit, so a later failure cannot re-arm a replay.
+	committed := false
 	var signedTx *SignedTxEnvelope
 	defer func() {
 		if !syncOK {
 			s.Metrics.SyncFailures.Add(1)
-			if signedTx != nil {
+			if signedTx != nil && !committed {
 				SignedTx_Forget(s.Store.Database, r.Context(), *signedTx)
 			}
 		}
@@ -137,6 +140,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 				Response_Error(w, http.StatusInternalServerError, "sync failed")
 				return
 			}
+			committed = true
 		}
 	} else {
 		result, acceptedOps, err = s.Store.ApplySyncDetailed(r.Context(), req, publicKey)
@@ -145,6 +149,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			Response_Error(w, http.StatusInternalServerError, "sync failed")
 			return
 		}
+		committed = true
 	}
 	if fullSnapshotRequired && SyncRequest_HasLocalChanges(req) {
 		result, acceptedOps, err = s.Store.ApplySyncDetailed(r.Context(), req, publicKey)
@@ -153,6 +158,7 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 			Response_Error(w, http.StatusInternalServerError, "sync failed")
 			return
 		}
+		committed = true
 	}
 	storedBytes := AccountStorage_Used(s.Store.Database, r.Context(), req.UserIDHash)
 	if storedBytes.Error != nil {

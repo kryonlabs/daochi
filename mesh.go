@@ -37,6 +37,9 @@ func Mesh_RetainNetworkScope(Value NetworkScope) NetworkScope {
 	return Value
 }
 
+const MaxPagesPerPull = 64
+const MaxMeshResponseBytes = 268435456
+
 func Mesh_Run(mesh Mesh, context Context) {
 	if int64(mesh.Configuration.NodeSyncInterval) <= 0 {
 		return
@@ -363,7 +366,9 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 		return loaded.Error
 	}
 	currentCursor := loaded.Value
-	for true {
+	var pages int = 0
+	for pages < int(64) {
+		pages++
 		var request NodeMeshExportRequest = NodeMeshExportRequest{}
 		request.Cursor = currentCursor
 		request.Limit = MeshCursor_BatchLimit(int(0), mesh.Configuration.NodeSyncBatchLimit)
@@ -387,17 +392,17 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 			if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
 				panic("slice range out of bounds")
 			}
-			loop_view_36 := value_2[0:int64(len(value_2)):int64(len(value_2))]
-			loop_count_36 := int64(len(loop_view_36))
-			var loop_cursor_36 int64 = 0
-			for loop_cursor_36 < loop_count_36 {
-				loop_index_36 := loop_cursor_36
-				app := loop_view_36[loop_index_36]
+			loop_view_38 := value_2[0:int64(len(value_2)):int64(len(value_2))]
+			loop_count_38 := int64(len(loop_view_38))
+			var loop_cursor_38 int64 = 0
+			for loop_cursor_38 < loop_count_38 {
+				loop_index_38 := loop_cursor_38
+				app := loop_view_38[loop_index_38]
 				var value_3 bool = AppNetwork_Allowed(scope, app.Manifest)
 				if !value_3 {
 					return StdErrorsGo_New("app manifest forbids this node network scope")
 				}
-				loop_cursor_36++
+				loop_cursor_38++
 			}
 		}
 		importedApps := MeshApps_Import(mesh.Database, context, mesh.Configuration.NodeRegistryPublicKey, sync, exported.Apps, mesh.ConvertError)
@@ -421,16 +426,16 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 				if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_57 := value_4[0:int64(len(value_4)):int64(len(value_4))]
-				loop_count_57 := int64(len(loop_view_57))
-				var loop_cursor_57 int64 = 0
-				for loop_cursor_57 < loop_count_57 {
-					loop_index_57 := loop_cursor_57
-					record := loop_view_57[loop_index_57]
+				loop_view_59 := value_4[0:int64(len(value_4)):int64(len(value_4))]
+				loop_count_59 := int64(len(loop_view_59))
+				var loop_cursor_59 int64 = 0
+				for loop_cursor_59 < loop_count_59 {
+					loop_index_59 := loop_cursor_59
+					record := loop_view_59[loop_index_59]
 					if record.MeshVersion > lastSequence {
 						lastSequence = record.MeshVersion
 					}
-					loop_cursor_57++
+					loop_cursor_59++
 				}
 			}
 			{
@@ -438,16 +443,16 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 				if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
 					panic("slice range out of bounds")
 				}
-				loop_view_62 := value_5[0:int64(len(value_5)):int64(len(value_5))]
-				loop_count_62 := int64(len(loop_view_62))
-				var loop_cursor_62 int64 = 0
-				for loop_cursor_62 < loop_count_62 {
-					loop_index_62 := loop_cursor_62
-					deletion := loop_view_62[loop_index_62]
+				loop_view_64 := value_5[0:int64(len(value_5)):int64(len(value_5))]
+				loop_count_64 := int64(len(loop_view_64))
+				var loop_cursor_64 int64 = 0
+				for loop_cursor_64 < loop_count_64 {
+					loop_index_64 := loop_cursor_64
+					deletion := loop_view_64[loop_index_64]
 					if deletion.MeshVersion > lastSequence {
 						lastSequence = deletion.MeshVersion
 					}
-					loop_cursor_62++
+					loop_cursor_64++
 				}
 			}
 			var value MeshCursor = MeshCursor{}
@@ -464,6 +469,9 @@ func Mesh_PullPeer(mesh Mesh, context Context, peer NodePeer) Error {
 		}
 		if !exported.Truncated || exported.NextCursor == "" {
 			return nil
+		}
+		if exported.NextCursor == currentCursor {
+			return StdErrorsGo_New("mesh peer cursor did not advance")
 		}
 		currentCursor = exported.NextCursor
 	}
@@ -503,7 +511,8 @@ func Mesh_PostJSON(mesh Mesh, context Context, peerNodeID string, target string,
 		data := StdIoGo_ReadAll(StdIoGo_LimitReader(Reader(body), 2048))
 		return fmt.Errorf("node mesh request failed: %s %s", StdHttpGo_Status(result.Value), strings.TrimSpace(StdTextGo_FromBytes(data.Value)))
 	}
-	return StdJsonGo_Decode(StdJsonGo_NewDecoder(Reader(body)), reply)
+	limited := StdIoGo_LimitReader(Reader(body), 268435456)
+	return StdJsonGo_Decode(StdJsonGo_NewDecoder(limited), reply)
 }
 
 func Mesh_NetworkScope(mesh Mesh) NetworkScope {
@@ -511,4 +520,18 @@ func Mesh_NetworkScope(mesh Mesh) NetworkScope {
 	scope.LANOnly = mesh.Configuration.NodeLANOnly
 	scope.Networks = mesh.Configuration.NodeLANNetworks
 	return Mesh_RetainNetworkScope(scope)
+}
+
+var Mesh_ziranInitState uint8
+
+func Mesh_ziranInit() {
+	if Mesh_ziranInitState == 2 {
+		return
+	}
+	if Mesh_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	Mesh_ziranInitState = 1
+	MeshApps_ziranInit()
+	Mesh_ziranInitState = 2
 }

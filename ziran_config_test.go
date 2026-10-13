@@ -231,7 +231,9 @@ func baselineEnvBytesHex(key string, fallback []byte) []byte {
 		if err != nil {
 			// A malformed secret must abort startup, not silently fall
 			// back (e.g. to an ephemeral token secret).
-			log.Fatalf("invalid %s: not valid hex: %q", key, value)
+			// Since the 2026-10-13 security fix the value, possibly a secret,
+			// is not printed.
+			log.Fatalf("invalid %s: not valid hex", key)
 		}
 		return decoded
 	}

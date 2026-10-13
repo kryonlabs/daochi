@@ -8,8 +8,9 @@ import (
 	"testing"
 )
 
-// This keeps the baseline's Go policy as a regression oracle while production
-// address selection runs through the Ziran module and native HTTP/IP bindings.
+// Since the 2026-10-13 security fix a loopback peer is a proxy: Cloudflare's
+// CF-Connecting-IP wins, then the last X-Forwarded-For entry, which the proxy
+// itself appended. The client-chosen first entry never selects the bucket.
 func baselineClientAddress(request *http.Request) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err != nil {
@@ -17,10 +18,15 @@ func baselineClientAddress(request *http.Request) string {
 	}
 	host = strings.TrimSpace(host)
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		header := request.Header.Get("X-Forwarded-For")
-		first := strings.TrimSpace(strings.Split(header, ",")[0])
-		if forwarded := net.ParseIP(first); forwarded != nil {
-			return forwarded.String()
+		if cloudflare := net.ParseIP(strings.TrimSpace(request.Header.Get("CF-Connecting-IP"))); cloudflare != nil {
+			return cloudflare.String()
+		}
+		if values := request.Header.Values("X-Forwarded-For"); len(values) > 0 {
+			parts := strings.Split(values[len(values)-1], ",")
+			last := strings.TrimSpace(parts[len(parts)-1])
+			if forwarded := net.ParseIP(last); forwarded != nil {
+				return forwarded.String()
+			}
 		}
 	}
 	if host == "" {
@@ -58,8 +64,41 @@ func TestZiranClientAddressBaselinePolicy(t *testing.T) {
 		t.Fatalf("nil headers changed behavior: %q", got)
 	}
 	request.Header = http.Header{"X-Forwarded-For": {"203.0.113.9", "198.51.100.7"}}
-	if got := ClientAddress_FromRequest(request); got != "203.0.113.9" {
-		t.Fatalf("multiple header lines changed first-hop selection: %q", got)
+	if got := ClientAddress_FromRequest(request); got != "198.51.100.7" {
+		t.Fatalf("multiple header lines did not select the proxy's hop: %q", got)
+	}
+}
+
+// A client cannot choose its rate-limit bucket by sending its own forwarding
+// headers through Cloudflare or a reverse proxy.
+func TestClientAddressIgnoresClientChosenForwarding(t *testing.T) {
+	tests := []struct {
+		name       string
+		remote     string
+		cloudflare string
+		forwarded  string
+		want       string
+	}{
+		{"Cloudflare address wins", "127.0.0.1:8080", "203.0.113.9", "198.51.100.1, 192.0.2.10", "203.0.113.9"},
+		{"spoofed first hop ignored", "127.0.0.1:8080", "", "198.51.100.1, 203.0.113.9", "203.0.113.9"},
+		{"invalid Cloudflare address", "127.0.0.1:8080", "not-an-ip", "203.0.113.9", "203.0.113.9"},
+		{"IPv6 Cloudflare address", "[::1]:8080", "2001:DB8::1", "", "2001:db8::1"},
+		{"remote peer ignores both", "203.0.113.50:5555", "198.51.100.1", "198.51.100.2", "203.0.113.50"},
+		{"no forwarding", "127.0.0.1:8080", "", "", "127.0.0.1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := &http.Request{RemoteAddr: test.remote, Header: make(http.Header)}
+			if test.cloudflare != "" {
+				request.Header.Set("CF-Connecting-IP", test.cloudflare)
+			}
+			if test.forwarded != "" {
+				request.Header.Set("X-Forwarded-For", test.forwarded)
+			}
+			if got := ClientAddress_FromRequest(request); got != test.want {
+				t.Fatalf("address = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
@@ -72,14 +111,15 @@ func TestZiranForwardedAddressArbitraryBytes(t *testing.T) {
 		}
 		header := string(data)
 		if i%3 == 0 {
-			header = "\u20032001:DB8::1\u00a0," + header
+			header = header + ",\u20032001:DB8::1\u00a0"
 		}
-		first := strings.TrimSpace(strings.Split(header, ",")[0])
+		parts := strings.Split(header, ",")
+		last := strings.TrimSpace(parts[len(parts)-1])
 		want := ""
-		if parsed := net.ParseIP(first); parsed != nil {
+		if parsed := net.ParseIP(last); parsed != nil {
 			want = parsed.String()
 		}
-		if got := ClientAddress_FirstForwardedFor(header); got != want {
+		if got := ClientAddress_LastForwardedFor([]string{header}); got != want {
 			t.Fatalf("forwarded address(%q) = %q, want %q", header, got, want)
 		}
 	}

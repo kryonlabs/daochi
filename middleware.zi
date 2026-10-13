@@ -48,6 +48,7 @@ Fragment :: (value: *url.URL) -> string #go_field #foreign go_url "(*URL).Fragme
 User :: (value: *url.URL) -> *UserInfo #go_field #foreign go_url "(*URL).User";
 Hostname :: (value: *url.URL) -> string #foreign go_url "(*URL).Hostname";
 Since :: (start: clock.Time) -> clock.Duration #foreign go_time;
+RequestPattern :: (request: *http.Request) -> string #go_field #foreign go_http "(*Request).Pattern";
 
 Finish :: (writer: *CapturedWriter, counters: **metrics.ServerMetrics,
     request: *http.Request, start: clock.Time) {
@@ -55,8 +56,8 @@ Finish :: (writer: *CapturedWriter, counters: **metrics.ServerMetrics,
     if status == 0 {
         status = 200
     }
-    metrics.RecordHTTP(<<counters, http.Method(request),
-        url.Path(http.RequestURL(request)), status, Since(start))
+    route := metrics.RouteLabel(url.Path(http.RequestURL(request)), RequestPattern(request))
+    metrics.RecordHTTP(<<counters, http.Method(request), route, status, Since(start))
 }
 
 #scope_export

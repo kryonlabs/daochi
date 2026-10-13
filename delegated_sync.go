@@ -310,7 +310,10 @@ func DelegatedSync_ziranInit() {
 		panic("cyclic module startup")
 	}
 	DelegatedSync_ziranInitState = 1
+	Authorization_ziranInit()
 	AuthorizationHttp_ziranInit()
+	Session_ziranInit()
+	SyncValidation_ziranInit()
 	AccountStorage_ziranInit()
 	DelegatedSync_ziranInitState = 2
 }

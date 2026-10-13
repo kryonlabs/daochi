@@ -30,6 +30,9 @@ TokenPolicy :: struct {
 
 AppManifest :: struct {
     ManifestVersion: isize #go_tag "json:\"manifest_version\""
+    // A signed manifest stays valid after a newer one is approved. Each
+    // approval raises this number so an older approval cannot be replayed.
+    ManifestSequence: s64 #go_tag "json:\"manifest_sequence,omitempty\""
     AppID: string #go_tag "json:\"app_id\""
     DisplayName: string #go_tag "json:\"display_name\""
     Description: string #go_tag "json:\"description,omitempty\""
@@ -213,6 +216,9 @@ DefaultString :: (value: string, fallback: string) -> string {
 Validate :: (manifest: AppManifest, now: s64) -> string {
     if manifest.ManifestVersion != cast(isize)1 {
         return "unsupported manifest_version"
+    }
+    if manifest.ManifestSequence < 0 {
+        return "invalid manifest_sequence"
     }
     if !ValidNamespace(manifest.AppID) {
         return "invalid app_id"

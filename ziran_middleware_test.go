@@ -229,9 +229,11 @@ func TestZiranMiddlewareOriginBaseline(t *testing.T) {
 
 func TestZiranMiddlewareConcurrentRequests(t *testing.T) {
 	counters := &ServerMetrics{}
-	handler := Middleware_New(&counters, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	routes := http.NewServeMux()
+	routes.HandleFunc("GET /api/v1/sync", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}))
+	})
+	handler := Middleware_New(&counters, routes)
 	var workers sync.WaitGroup
 	for worker := 0; worker < 16; worker++ {
 		workers.Add(1)

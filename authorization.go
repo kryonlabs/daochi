@@ -438,3 +438,17 @@ func Authorization_ActiveGrant(transaction *Transaction, context Context, grantI
 	}
 	return result
 }
+
+var Authorization_ziranInitState uint8
+
+func Authorization_ziranInit() {
+	if Authorization_ziranInitState == 2 {
+		return
+	}
+	if Authorization_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	Authorization_ziranInitState = 1
+	AppStore_ziranInit()
+	Authorization_ziranInitState = 2
+}

@@ -126,8 +126,15 @@
       return escapeHTML(plain(value));
     }
 
+    // Peer URLs come from other nodes, so only web links may become hrefs;
+    // a javascript: or data: URL would run in this page when clicked.
+    function webURL(value) {
+      const url = plain(value);
+      return /^https?:\/\//i.test(url) ? url : "";
+    }
+
     function normalizeURL(value) {
-      return plain(value).replace(/\/+$/, "");
+      return webURL(value).replace(/\/+$/, "");
     }
 
     function join(items) {
@@ -199,7 +206,7 @@
     }
 
     function link(url, label) {
-      const href = plain(url);
+      const href = webURL(url);
       if (!href) return "";
       return `<a href="${attr(href)}">${text(label)}</a>`;
     }

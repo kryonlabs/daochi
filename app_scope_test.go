@@ -143,3 +143,19 @@ func AppScopeTest_SignedTransactionContextIsNotCallerDefined(test *Test) {
 func TestSignedTransactionContextIsNotCallerDefined(export_arg_0 *testing.T) {
 	AppScopeTest_SignedTransactionContextIsNotCallerDefined(export_arg_0)
 }
+
+var AppScopeTest_ziranInitState uint8
+
+func AppScopeTest_ziranInit() {
+	if AppScopeTest_ziranInitState == 2 {
+		return
+	}
+	if AppScopeTest_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	AppScopeTest_ziranInitState = 1
+	AppHttp_ziranInit()
+	AppRegistration_ziranInit()
+	SignedTx_ziranInit()
+	AppScopeTest_ziranInitState = 2
+}

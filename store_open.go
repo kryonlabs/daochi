@@ -80,5 +80,6 @@ func StoreOpen_ziranInit() {
 	}
 	StoreOpen_ziranInitState = 1
 	StoreSchema_ziranInit()
+	AppStore_ziranInit()
 	StoreOpen_ziranInitState = 2
 }

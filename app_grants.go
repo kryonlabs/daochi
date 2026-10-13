@@ -86,6 +86,12 @@ func AppGrants_QueryRecordRows(Database *Database, Context Context, Query string
 	return result
 }
 
+func AppGrants_QueryPrefixRows(Database *Database, Context Context, Query string, UserID string, Pattern string, Prefix string) zir_50e70671aa22635f_RowsResult {
+	var result zir_50e70671aa22635f_RowsResult
+	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query, UserID, Pattern, Prefix)
+	return result
+}
+
 const GrantInsertSQL = "INSERT INTO server_app_grants(id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status)\nVALUES(?1,?2,?3,?4,?5,?6,'active')\n"
 const GrantByIDSQL = "SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status,created_at,updated_at,revoked_at\nFROM server_app_grants WHERE user_id_hash=?1 AND id=?2\n"
 const GrantListSQL = "SELECT id,user_id_hash,source_app_id,target_app_id,collection_prefix,permission,status,created_at,updated_at,revoked_at\nFROM server_app_grants WHERE user_id_hash=?1 ORDER BY updated_at DESC,id\n"
@@ -95,7 +101,7 @@ const RevokeAuditSQL = "INSERT INTO server_app_grant_audit(grant_id,user_id_hash
 const AuthorizedScopeSQL = "SELECT EXISTS(\n SELECT 1 FROM server_app_grants\n WHERE user_id_hash=?1 AND source_app_id=?2 AND target_app_id=?3\n   AND collection_prefix=?4 AND permission='read' AND status='active'\n)\n"
 const VisibilitySQL = "SELECT visibility FROM server_app_collections WHERE app_id=?1 AND collection_prefix=?2"
 const ExactRecordsSQL = "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 ORDER BY collection,id\n"
-const PrefixRecordsSQL = "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\\' ORDER BY collection,id\n"
+const PrefixRecordsSQL = "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\\'\n  AND substr(collection,1,length(?3))=?3 ORDER BY collection,id\n"
 
 func AppGrants_AuditJSON(request AppGrantRequest) string {
 	encoded := StdJsonGo_Marshal(request)
@@ -293,13 +299,14 @@ func AppGrants_Visibility(database *Database, context Context, appID string, pre
 
 func AppGrants_Records(database *Database, context Context, userID string, prefix string) GrantedRecordsResult {
 	var result GrantedRecordsResult = GrantedRecordsResult{}
-	query := "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 ORDER BY collection,id\n"
-	pattern := prefix
+	var queried zir_50e70671aa22635f_RowsResult = zir_50e70671aa22635f_RowsResult{}
 	if strings.HasSuffix(prefix, ".*") {
-		query = "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\\' ORDER BY collection,id\n"
-		pattern = Scope_LikePatternForCollectionPrefix(prefix)
+		var value_0 string = "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\\'\n  AND substr(collection,1,length(?3))=?3 ORDER BY collection,id\n"
+		queried = AppGrants_QueryPrefixRows(database, context, value_0, userID, Scope_LikePatternForCollectionPrefix(prefix), strings.TrimSuffix(prefix, "*"))
+	} else {
+		var value_1 string = "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 ORDER BY collection,id\n"
+		queried = AppGrants_QueryRecordRows(database, context, value_1, userID, prefix)
 	}
-	queried := AppGrants_QueryRecordRows(database, context, query, userID, pattern)
 	result.Error = queried.Error
 	if queried.Error != nil {
 		return result
@@ -318,4 +325,18 @@ func AppGrants_Records(database *Database, context Context, userID string, prefi
 	result.Value = values
 	result.Error = StdSqlGo_RowsError(rows)
 	return result
+}
+
+var AppGrants_ziranInitState uint8
+
+func AppGrants_ziranInit() {
+	if AppGrants_ziranInitState == 2 {
+		return
+	}
+	if AppGrants_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	AppGrants_ziranInitState = 1
+	AppStore_ziranInit()
+	AppGrants_ziranInitState = 2
 }

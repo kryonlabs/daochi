@@ -383,3 +383,17 @@ func AppRegistration_PolicyString(value TokenPolicy) string {
 	_ = parts
 	return strings.Join(parts[0:2:2], ":")
 }
+
+var AppRegistration_ziranInitState uint8
+
+func AppRegistration_ziranInit() {
+	if AppRegistration_ziranInitState == 2 {
+		return
+	}
+	if AppRegistration_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	AppRegistration_ziranInitState = 1
+	SignedTx_ziranInit()
+	AppRegistration_ziranInitState = 2
+}

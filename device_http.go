@@ -71,6 +71,10 @@ func DeviceHttp_Route(devices Devices, writer ResponseWriter, request *Request) 
 			Response_Error(writer, int(409), "device registration replay")
 			return
 		}
+		if StdErrorsGo_Is(error, ErrDeviceKeyRevoked) {
+			Response_Error(writer, int(409), StdErrorsGo_Message(error))
+			return
+		}
 		Response_Error(writer, int(500), "device registration failed")
 		return
 	}
@@ -108,4 +112,20 @@ func DeviceHttp_Revoke(devices Devices, writer ResponseWriter, request *Request,
 	var value DeviceRevocationResponse = DeviceRevocationResponse{}
 	value.Status = "revoked"
 	Response_JSON(writer, int(200), value)
+}
+
+var DeviceHttp_ziranInitState uint8
+
+func DeviceHttp_ziranInit() {
+	if DeviceHttp_ziranInitState == 2 {
+		return
+	}
+	if DeviceHttp_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	DeviceHttp_ziranInitState = 1
+	DeviceKeys_ziranInit()
+	DeviceKeys_ziranInit()
+	DeviceKeys_ziranInit()
+	DeviceHttp_ziranInitState = 2
 }

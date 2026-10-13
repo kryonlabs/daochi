@@ -149,12 +149,9 @@ func MoneroInvoices_Settle(monero Monero, context Context, accountID string, inv
 		return result
 	}
 	if inspected.Value.ConfirmedAtomic >= invoice.AtomicAmount {
-		credited := TokenLedger_CreditPayment(monero.Database, context, issuer.Value, "monero", inspected.Value.PaymentID, MoneroInvoices_CreditEvent(accountID, invoice, inspected.Value), monero.IssuerUnavailable)
+		var value_0 TokenEventInput = MoneroInvoices_CreditEvent(accountID, invoice, inspected.Value)
+		credited := MoneroInvoiceStore_CreditPaid(monero.Database, context, issuer.Value, accountID, invoice.ID, inspected.Value.PaymentID, value_0, false, monero.IssuerUnavailable)
 		result.Error = credited.Error
-		if result.Error != nil {
-			return result
-		}
-		result.Error = MoneroInvoiceStore_MarkPendingPaid(monero.Database, context, accountID, invoice.ID, credited.Value.ReceiptID, inspected.Value.PaymentID)
 		if result.Error != nil {
 			return result
 		}
@@ -240,15 +237,10 @@ func MoneroInvoices_SweepExpired(monero Monero, context Context, limit int) Erro
 				continue
 			}
 			if inspected.Value.ConfirmedAtomic >= item.Invoice.AtomicAmount {
-				credited := TokenLedger_CreditPayment(monero.Database, context, issuer.Value, "monero", inspected.Value.PaymentID, MoneroInvoices_CreditEvent(item.AccountID, item.Invoice, inspected.Value), monero.IssuerUnavailable)
+				var value_1 TokenEventInput = MoneroInvoices_CreditEvent(item.AccountID, item.Invoice, inspected.Value)
+				credited := MoneroInvoiceStore_CreditPaid(monero.Database, context, issuer.Value, item.AccountID, item.Invoice.ID, inspected.Value.PaymentID, value_1, true, monero.IssuerUnavailable)
 				if credited.Error != nil {
 					slog.Warn("expired monero invoice credit failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", credited.Error)
-					loop_cursor_14++
-					continue
-				}
-				settled := MoneroInvoiceStore_SettleExpired(monero.Database, context, item.AccountID, item.Invoice.ID, credited.Value.ReceiptID, inspected.Value.PaymentID)
-				if settled != nil {
-					slog.Warn("expired monero invoice settle failed", "invoice", LogSafety_LogText(item.Invoice.ID), "error", settled)
 					loop_cursor_14++
 					continue
 				}
@@ -294,4 +286,21 @@ func MoneroInvoices_Run(monero Monero, context Context, interval Duration) {
 			return
 		}
 	}
+}
+
+var MoneroInvoices_ziranInitState uint8
+
+func MoneroInvoices_ziranInit() {
+	if MoneroInvoices_ziranInitState == 2 {
+		return
+	}
+	if MoneroInvoices_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	MoneroInvoices_ziranInitState = 1
+	MoneroDeposits_ziranInit()
+	TokenPolicy_ziranInit()
+	AppStore_ziranInit()
+	SignedTx_ziranInit()
+	MoneroInvoices_ziranInitState = 2
 }

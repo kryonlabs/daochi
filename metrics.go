@@ -91,6 +91,22 @@ func Metrics_WriteMaps(metrics *ServerMetrics, writer ResponseWriter) {
 	Metrics_WriteSingleLabelMap(writer, "ksync_websocket_rejected_by_reason_total", "counter", "reason", metrics.WebSocketRejects)
 }
 
+func Metrics_RouteLabel(path string, pattern string) string {
+	route := Metrics_Route(path)
+	if route != path {
+		return route
+	}
+	patternPath := pattern
+	parts := strings.Split(pattern, " ")
+	if int64(len(parts)) == 2 {
+		patternPath = parts[1]
+	}
+	if patternPath == "" {
+		return "unmatched"
+	}
+	return patternPath
+}
+
 func Metrics_Route(path string) string {
 	if path == "" {
 		return "/"

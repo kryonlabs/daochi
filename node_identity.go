@@ -180,11 +180,20 @@ func NodeIdentity_LoadOrCreateKey(rawPath string) zir_e94080a3b50d4b7c_PrivateKe
 			result.Error = StdErrorsGo_New(NodeIdentity_Concat(path, " has invalid key length"))
 			return result
 		}
-		result.Value = PrivateKey(decoded.Value)
+		value_0 := decoded.Value[:]
+		if int64(0) < 0 || int64(32) < int64(0) || int64(32) > int64(len(value_0)) {
+			panic("slice range out of bounds")
+		}
+		derived := StdEd25519Go_NewKeyFromSeed(value_0[0:32:32])
+		if hex.EncodeToString([]uint8(derived)) != hex.EncodeToString(decoded.Value) {
+			result.Error = StdErrorsGo_New(NodeIdentity_Concat(path, " public key does not match its seed"))
+			return result
+		}
+		result.Value = derived
 		return result
 	}
-	var value_0 bool = StdErrorsGo_Is(read.Error, StdFileGo_NotExist())
-	if !value_0 {
+	var value_1 bool = StdErrorsGo_Is(read.Error, StdFileGo_NotExist())
+	if !value_1 {
 		result.Error = read.Error
 		return result
 	}

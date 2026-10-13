@@ -63,6 +63,19 @@ Allow :: (access: AccountAccess, prefix: string, subject: string, limit: isize,
     return rate.Allow(access.limiter, access.counters, Join(parts[:], ""), limit, window)
 }
 
+// A per-account bucket shared by everyone lets a stranger use up a victim's
+// challenge and login quota. Keying it by account and address keeps the
+// per-account limit without that lockout; an invalid ID gets one bucket so
+// it cannot store an arbitrarily long key.
+UserBucket :: (user: string, request: *http.Request) -> string {
+    subject := user
+    if !identity.ValidUserID(subject) {
+        subject = "invalid"
+    }
+    parts: [3]string = .[subject, "|", address.FromRequest(request)]
+    return Join(parts[:], "")
+}
+
 RequestSignature :: (access: AccountAccess, request: *http.Request, user: string,
     publicKey: string, body: []u8) -> signature.AccountSignatureResult {
     signed := requests.SignatureHeader(request)
@@ -86,7 +99,7 @@ Challenge :: (access: AccountAccess, writer: http.ResponseWriter, request: *http
     }
     window := cast(clock.Duration)60000000000
     if !Allow(access, "challenge:ip:", address.FromRequest(request), cast(isize)60, window) ||
-        !Allow(access, "challenge:user:", user, cast(isize)20, window) {
+        !Allow(access, "challenge:user:", UserBucket(user, request), cast(isize)20, window) {
         response.Error(writer, cast(isize)429, "rate limit exceeded")
         return
     }
@@ -121,7 +134,7 @@ Login :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Req
     }
     window := cast(clock.Duration)60000000000
     if !Allow(access, "login:ip:", address.FromRequest(request), cast(isize)40, window) ||
-        !Allow(access, "login:user:", value.UserIDHash, cast(isize)20, window) {
+        !Allow(access, "login:user:", UserBucket(value.UserIDHash, request), cast(isize)20, window) {
         response.Error(writer, cast(isize)429, "rate limit exceeded")
         return
     }

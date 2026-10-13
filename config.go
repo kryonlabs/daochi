@@ -193,7 +193,7 @@ func Config_EnvBytesHex(key string, fallback []uint8) []uint8 {
 	if value != "" {
 		decoded := Config_DecodeString(value)
 		if decoded.Error != nil {
-			log.Fatalf("invalid %s: not valid hex: %q", key, value)
+			log.Fatalf("invalid %s: not valid hex", key)
 		}
 		return decoded.Value
 	}

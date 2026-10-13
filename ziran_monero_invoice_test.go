@@ -377,11 +377,17 @@ func TestZiranMoneroInvoiceSettlementMatchesBaseline(t *testing.T) {
 				}
 				balances[index] = balance.Value
 			}
+			if mode == "failed mark" {
+				// Since the 2026-10-13 fix the claim and the credit share one
+				// transaction: a failed claim credits nothing and the invoice
+				// stays pending, so a later settlement can retry it.
+				if balances[0] != 0 || failures[0] == "" {
+					t.Fatalf("failed invoice claim credited %d tokens (error %q)", balances[0], failures[0])
+				}
+				return
+			}
 			if !reflect.DeepEqual(invoices[0], invoices[1]) || failures[0] != failures[1] || balances[0] != balances[1] {
 				t.Fatalf("invoice settlement changed: %#v/%#v, %v/%v, %v", invoices[0], invoices[1], failures[0], failures[1], balances)
-			}
-			if mode == "failed mark" && (balances[0] != 10 || failures[0] == "") {
-				t.Fatal("invoice mark failure must preserve the separately committed credit")
 			}
 		})
 	}

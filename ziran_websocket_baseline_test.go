@@ -171,11 +171,11 @@ func (s *Server) baselineAuthenticateWebSocket(r *http.Request) (string, error) 
 		return "", authError{status: http.StatusUnauthorized, message: "websocket query tokens are not accepted"}
 	}
 	if token := baselineBearerTokenFromWebSocketProtocol(r.Header.Get("Sec-WebSocket-Protocol")); token != "" {
-		verified := Token_VerifyAuthToken(s.Cfg.TokenSecret, token, time.Now().Unix())
-		if verified.Error != "" {
-			return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
-		}
-		return verified.Value, nil
+		// Since the 2026-10-13 security fix a subprotocol token gets the same
+		// account checks as an Authorization header.
+		header := r.Clone(r.Context())
+		header.Header.Set("Authorization", "Bearer "+token)
+		return s.baselineAuthenticateToken(header)
 	}
 	return s.baselineAuthenticateToken(r)
 }

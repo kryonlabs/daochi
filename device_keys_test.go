@@ -6,8 +6,10 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -121,5 +123,29 @@ WHERE user_id_hash=?1 AND client_id=?2`, identity.UserID, "legacy-client-1", old
 	}
 	if required || epoch != 0 {
 		t.Fatalf("expired legacy client policy required=%v epoch=%d", required, epoch)
+	}
+}
+
+// Registering a revoked device key ID again must not bring a lost or stolen
+// device back.
+func TestRevokedDeviceKeyCannotBeRegisteredAgain(t *testing.T) {
+	server, store, _ := testServer(t)
+	identity := newTestIdentity(t, server.Routes(), 0x75)
+	device := DeviceKey{AccountID: identity.UserID, AppID: "inbe", KeyID: "device-key", ClientID: "phone",
+		PublicKey: strings.Repeat("ab", 32)}
+	if err := DeviceKeys_Register(store.Database, t.Context(), device, "nonce-1", errSignedTxReplay); err != nil {
+		t.Fatal(err)
+	}
+	revocation := DeviceRevocationRequest{AppID: "inbe", KeyID: "device-key", Nonce: "nonce-2"}
+	if err := DeviceKeys_Revoke(store.Database, t.Context(), identity.UserID, revocation, errSignedTxReplay); err != nil {
+		t.Fatal(err)
+	}
+	err := DeviceKeys_Register(store.Database, t.Context(), device, "nonce-3", errSignedTxReplay)
+	if !errors.Is(err, ErrDeviceKeyRevoked) {
+		t.Fatalf("re-registering a revoked key = %v; expected %v", err, ErrDeviceKeyRevoked)
+	}
+	active := DeviceKeys_Active(store.Database, t.Context(), identity.UserID, "inbe", "device-key")
+	if active.Error != nil || active.Found {
+		t.Fatalf("revoked key is active again: %#v", active)
 	}
 }

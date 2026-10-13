@@ -51,6 +51,9 @@ Synchronization :: struct {
 #scope_file
 SyncCompletion :: struct {
     complete: bool
+    // Writes were committed: a failure after this point must keep the signed
+    // transaction spent, or a captured request could be replayed.
+    committed: bool
     signed: bool
     transaction: SignedTxEnvelope
 }
@@ -80,7 +83,7 @@ LogPruned :: (message: string, userKey: string, user: string, countKey: string, 
 Finish :: (completion: *SyncCompletion, sync: Synchronization, request: *http.Request) {
     if !completion.complete {
         atomic.Add(*sync.counters.syncFailures, cast(u64)1)
-        if completion.signed {
+        if completion.signed && !completion.committed {
             signed.Forget(sync.database, http.Context(request), completion.transaction)
         }
     }
@@ -208,7 +211,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     if pageInput.value.EncryptedRecordsOnly {
         completion.complete = pages.Handle(sync.database, sync.counters, sync.notifications,
             sync.missingUser, writer, request, input, pageInput.value, publicKey.value,
-            sync.configuration.AccountStorageLimitBytes)
+            sync.configuration.AccountStorageLimitBytes, *completion.committed)
         return
     }
     base := hash.State(sync.database, context, input.UserIDHash)
@@ -272,6 +275,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
             StorageFailure(writer, "apply sync", input.UserIDHash, applied.error, "sync failed")
             return
         }
+        completion.committed = true
         result = applied.value
         accepted = applied.accepted
     }
@@ -286,6 +290,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
             StorageFailure(writer, "apply stale sync uploads", input.UserIDHash, applied.error, "sync failed")
             return
         }
+        completion.committed = true
         result = applied.value
         accepted = applied.accepted
     }

@@ -181,7 +181,12 @@ func HttpAuth_AuthenticateToken(database *Database, request *Request, secret []u
 		result.Authentication = Authentication_Failure(int(401), "bearer token required")
 		return result
 	}
-	verified := Token_VerifyAuthToken(secret, strings.TrimSpace(bearer.Value), StdTimeGo_Unix(StdTimeGo_Now()))
+	return HttpAuth_AuthenticateBearer(database, request, strings.TrimSpace(bearer.Value), secret)
+}
+
+func HttpAuth_AuthenticateBearer(database *Database, request *Request, bearer string, secret []uint8) UserAuthenticationResult {
+	var result UserAuthenticationResult = UserAuthenticationResult{}
+	verified := Token_VerifyAuthToken(secret, bearer, StdTimeGo_Unix(StdTimeGo_Now()))
 	if verified.Error != "" {
 		result.Authentication = Authentication_Failure(int(401), "invalid bearer token")
 		return result

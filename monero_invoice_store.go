@@ -25,6 +25,7 @@ type InvoicesResult struct {
 	Error Error
 }
 
+const ReceiptSQL = "UPDATE token_payment_intents SET receipt_id=?3 WHERE account_id=?1 AND id=?2 AND provider='monero'"
 const InvoiceSQL = "SELECT id,app_id,status,product_id,asset_id,token_units,provider_amount,provider_address,provider_ref,provider_payment_id,expires_at,receipt_id\nFROM token_payment_intents\nWHERE account_id=?1 AND id=?2 AND provider='monero'\n"
 const PendingSQL = "SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,\n    provider_address,provider_ref,provider_payment_id,expires_at,receipt_id\nFROM token_payment_intents\nWHERE provider='monero' AND status='pending'\nORDER BY created_at\nLIMIT ?1\n"
 const ExpiredSQL = "SELECT account_id,id,app_id,status,product_id,asset_id,token_units,provider_amount,\n    provider_address,provider_ref,provider_payment_id,expires_at,receipt_id\nFROM token_payment_intents\nWHERE provider='monero' AND status='expired' AND receipt_id='' AND expires_at>=?1\nORDER BY created_at\nLIMIT ?2\n"
@@ -252,4 +253,64 @@ func MoneroInvoiceStore_MarkExpired(database *Database, context Context, account
 func MoneroInvoiceStore_SettleExpired(database *Database, context Context, accountID string, id string, receiptID string, paymentRef string) Error {
 	var value_0 string = "UPDATE token_payment_intents\nSET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP\nWHERE account_id=?1 AND id=?2 AND provider='monero' AND status='expired' AND receipt_id=''\n"
 	return MoneroInvoiceStore_MarkPaid(database, context, value_0, accountID, id, receiptID, paymentRef, "expired invoice no longer unsettled")
+}
+
+func MoneroInvoiceStore_CreditPaid(database *Database, context Context, signer PrivateKey, accountID string, id string, paymentRef string, event TokenEventInput, expired bool, unavailable Error) CreditResult {
+	var result CreditResult = CreditResult{}
+	begun := StdSqlGo_Begin(database, context, nil)
+	result.Error = begun.Error
+	if result.Error != nil {
+		return result
+	}
+	transaction := begun.Value
+	defer (*sql.Tx).Rollback(transaction)
+	query := "UPDATE token_payment_intents\nSET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP\nWHERE account_id=?1 AND id=?2 AND provider='monero' AND status='pending'\n"
+	unchanged := "invoice not pending"
+	if expired {
+		query = "UPDATE token_payment_intents\nSET status='paid', receipt_id=?3, provider_payment_id=?4, updated_at=CURRENT_TIMESTAMP\nWHERE account_id=?1 AND id=?2 AND provider='monero' AND status='expired' AND receipt_id=''\n"
+		unchanged = "expired invoice no longer unsettled"
+	}
+	var value_0 [4]Any
+	value_0[0] = accountID
+	value_0[1] = id
+	value_0[2] = ""
+	value_0[3] = paymentRef
+	claim := value_0
+	_ = claim
+	claimed := StdSqlGo_ExecTx(transaction, context, query, claim[0:4:4])
+	result.Error = claimed.Error
+	if result.Error != nil {
+		return result
+	}
+	changed := StdSqlGo_RowsAffected(claimed.Value)
+	result.Error = changed.Error
+	if result.Error != nil {
+		return result
+	}
+	if changed.Value == 0 {
+		result.Error = StdErrorsGo_New(unchanged)
+		return result
+	}
+	credited := TokenLedger_CreditPaymentTx(transaction, context, signer, "monero", paymentRef, event, unavailable)
+	if credited.Error != nil {
+		result.Error = credited.Error
+		return result
+	}
+	var value_1 [3]Any
+	value_1[0] = accountID
+	value_1[1] = id
+	value_1[2] = credited.Value.ReceiptID
+	receipt := value_1
+	_ = receipt
+	var value_2 string = "UPDATE token_payment_intents SET receipt_id=?3 WHERE account_id=?1 AND id=?2 AND provider='monero'"
+	written := StdSqlGo_ExecTx(transaction, context, value_2, receipt[0:3:3])
+	result.Error = written.Error
+	if result.Error != nil {
+		return result
+	}
+	result.Error = StdSqlGo_Commit(transaction)
+	if result.Error != nil {
+		return result
+	}
+	return credited
 }

@@ -134,11 +134,23 @@ Import :: (database: *sql.Database, context: ctx.Context, registryKey: keys.Publ
             continue
         }
         if current.found && value.Manifest.ManifestVersion == current.value.Version {
-            if verified.hash != current.value.Hash {
+            if verified.hash == current.value.Hash {
+                continue
+            }
+            // A newer approval replaces ours; an older one is a stale or
+            // replayed copy that must not undo a suspension or revocation.
+            installed := apps.InstalledSequence(database, context, value.Manifest.AppID)
+            result.error = installed.error
+            if result.error != null {
+                return result
+            }
+            if value.Manifest.ManifestSequence < installed.value {
+                continue
+            }
+            if value.Manifest.ManifestSequence == installed.value {
                 result.error = ConflictError("conflicting app manifest %q at version %d", value.Manifest.AppID, current.value.Version)
                 return result
             }
-            continue
         }
         result.error = apps.UpsertSignedManifest(database, context, value.Manifest,
             verified.value, verified.hash, value.ManifestSignature, value.ApprovalSignature)

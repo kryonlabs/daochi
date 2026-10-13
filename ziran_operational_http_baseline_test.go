@@ -71,7 +71,9 @@ func (s *Server) baselineOpsHandleReady(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if err := s.Store.Health(r.Context()); err != nil {
-		checks["database"] = err.Error()
+		// Since the 2026-10-13 security fix the details are logged, not served.
+		slog.Error("database readiness check failed", "error", err)
+		checks["database"] = "unavailable"
 		status = http.StatusServiceUnavailable
 	}
 	Response_JSON(w, status, map[string]any{

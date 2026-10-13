@@ -173,3 +173,32 @@ func TestMoneroDepositScanBookmarkAdvances(t *testing.T) {
 		t.Fatalf("rescan min_height=%d, want >= 5000 (bookmark used)", maxSeen)
 	}
 }
+
+// Two settlements of one invoice can see different transaction sets, such as
+// the payment alone and then the payment plus a later dust transfer, and so
+// build different payment references. Only the first may credit the invoice.
+func TestMoneroInvoiceCreditedOnceAcrossPaymentSets(t *testing.T) {
+	server, store, wallet, handler, identity := moneroReconcileTestServer(t)
+	invoice := createTestMoneroInvoice(t, handler, identity.Token, []byte(`{"app_id":"inbe","product_id":"waozi_tokens_small"}`))
+	pending := MoneroInvoiceStore_Invoice(store.Database, context.Background(), identity.UserID, invoice.ID)
+	if pending.Error != nil || !pending.Found || pending.Value.Status != "pending" {
+		t.Fatalf("pending invoice = %#v", pending)
+	}
+	payment := moneroTransfer{TxID: "tx-full", Amount: invoice.AtomicAmount, Confirmations: 10, Major: 0, Minor: invoice.AddressIndex}
+	dust := moneroTransfer{TxID: "tx-dust", Amount: 1, Confirmations: 10, Major: 0, Minor: invoice.AddressIndex}
+
+	wallet.setTransfer(payment)
+	first := MoneroInvoices_Settle(server.monero(), context.Background(), identity.UserID, pending.Value)
+	if first.Error != nil || first.Value.Status != "paid" {
+		t.Fatalf("first settlement = %#v", first)
+	}
+	wallet.setTransfer(payment, dust)
+	second := MoneroInvoices_Settle(server.monero(), context.Background(), identity.UserID, pending.Value)
+	if second.Error == nil {
+		t.Fatal("second settlement of a paid invoice succeeded")
+	}
+	balance := TokenLedger_Balance(store.Database, context.Background(), identity.UserID, AssetID)
+	if balance.Error != nil || balance.Value != 5000000 {
+		t.Fatalf("balance = %d err=%v; one invoice must credit once", balance.Value, balance.Error)
+	}
+}

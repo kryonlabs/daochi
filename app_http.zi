@@ -4,6 +4,7 @@
 config :: #import "config";
 auth :: #import "authentication";
 http_auth :: #import "http_auth";
+constant_time :: #import "std/constant_time";
 http_body :: #import "http_body";
 response :: #import "response";
 http :: #import "std/http_go";
@@ -135,7 +136,7 @@ AuthenticateAdmin :: (writer: http.ResponseWriter, request: *http.Request, expec
         return false
     }
     names: [2]string = .["X-Daochi-Admin", "X-Ksync-Admin"]
-    if http_auth.HeaderAlias(request, names[:]) != expected {
+    if !constant_time.ConstantTimeTextEqual(http_auth.HeaderAlias(request, names[:]), expected) {
         response.Error(writer, cast(isize)401, "admin token required")
         return false
     }
@@ -264,6 +265,10 @@ RegisterSigned :: (registry: Registry, writer: http.ResponseWriter, request: *ht
     context := http.Context(request)
     error := apps.UpsertSignedManifest(registry.database, context, value.Manifest,
         verified.value, verified.hash, value.ManifestSignature, value.ApprovalSignature)
+    if errors.Is(error, apps.ErrManifestOutdated) {
+        response.Error(writer, cast(isize)409, errors.Message(error))
+        return
+    }
     if error != null {
         LogSubjectError("register signed app manifest", "app", logs.LogText(value.Manifest.AppID), "error", error)
         response.Error(writer, cast(isize)500, "app registration failed")

@@ -372,9 +372,11 @@ Daochi records app-scoped token events, but it does not yet move value between s
 
 Nodes can accept self-contained, app-owned manifests through `POST /api/v1/apps/register-signed`. The request body contains:
 
-- `manifest`, including `manifest_version`, `app_id`, display metadata, Ed25519 app keys, collection prefixes, capabilities, and optional token policies;
+- `manifest`, including `manifest_version`, an optional `manifest_sequence`, `app_id`, display metadata, Ed25519 app keys, collection prefixes, capabilities, and optional token policies;
 - `manifest_signature`, an Ed25519 signature from one active app key over `daochi-app-manifest-v1\n<canonical manifest json>`;
 - `approval_signature`, an Ed25519 signature from the node registry key over `daochi-app-approval-v1\n<app_id>\n<manifest_hash>\n`.
+
+An approved manifest stays signed after a newer one replaces it, and anyone may submit it. Give each approval a higher `manifest_sequence` (it sits right after `manifest_version` in the canonical JSON): a node then refuses, with `409`, any manifest whose sequence is lower than the installed one, so an old approval cannot undo a later suspension or key revocation. Mesh peers skip such stale copies. Manifests without the field keep their previous behaviour and hash. A revoked device key ID also stays revoked; registering it again returns `409`.
 
 Each node decides which registry approval key it trusts through `DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX` or `DAOCHI_NODE_REGISTRY_PUBLIC_KEY_HEX_FILE`. That keeps registration cross-platform: CLI, TUI, web, mobile, and desktop apps all submit the same signed JSON manifest, and no platform-specific package name is the root of authority.
 
@@ -412,6 +414,8 @@ server {
 ```
 
 Use your normal ACME flow for TLS certificates.
+
+Per-address rate limits trust forwarding headers only from a loopback peer. Behind Cloudflare, `CF-Connecting-IP` names the client; otherwise Daochi uses the last `X-Forwarded-For` entry, the one your proxy appended. The first entry is whatever the client sent and is never used. A proxy that does not append `$remote_addr` (or set `CF-Connecting-IP`) puts every client in one bucket.
 
 ## Data Model
 

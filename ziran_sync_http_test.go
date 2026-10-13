@@ -525,8 +525,10 @@ func TestZiranSyncHTTPAgainstBaseline(t *testing.T) {
 				if mode == "response panic" && (actual.failures != 0 || (version == 6 && actual.replayCount != 1)) {
 					t.Fatal("structured sync marked a completed request failed or forgot its replay entry")
 				}
-				if version == 6 && (mode == "client failure" || mode == "log panic") && actual.replayCount != 0 {
-					t.Fatal("failed signed sync kept its replay entry")
+				// These fail after the sync's writes committed, so the signed
+				// transaction stays spent and cannot be replayed.
+				if version == 6 && (mode == "client failure" || mode == "log panic") && actual.replayCount != 1 {
+					t.Fatal("signed sync that committed its writes forgot its replay entry")
 				}
 			})
 		}

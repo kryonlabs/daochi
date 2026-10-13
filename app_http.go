@@ -28,9 +28,9 @@ type StatusResponse struct {
 	Status string "json:\"status\""
 }
 
-type zir_21605951d81ff535_ReplayCleanup func(*Database, Context, SignedTxEnvelope, *bool)
+type zir_3e5b565c4c825a76_ReplayCleanup func(*Database, Context, SignedTxEnvelope, *bool)
 
-func AppHttp_CleanupAtReturn(Callback zir_21605951d81ff535_ReplayCleanup, Database *Database, Context Context, Transaction SignedTxEnvelope, Completed *bool) {
+func AppHttp_CleanupAtReturn(Callback zir_3e5b565c4c825a76_ReplayCleanup, Database *Database, Context Context, Transaction SignedTxEnvelope, Completed *bool) {
 	Callback(Database, Context, Transaction, Completed)
 }
 
@@ -118,7 +118,8 @@ func AppHttp_AuthenticateAdmin(writer ResponseWriter, request *Request, expected
 	value_0[1] = "X-Ksync-Admin"
 	names := value_0
 	_ = names
-	if HttpAuth_HeaderAlias(request, names[0:2:2]) != expected {
+	var value_1 bool = StdConstantTime_ConstantTimeTextEqual(HttpAuth_HeaderAlias(request, names[0:2:2]), expected)
+	if !value_1 {
 		Response_Error(writer, int(401), "admin token required")
 		return false
 	}
@@ -248,6 +249,10 @@ func AppHttp_RegisterSigned(registry Registry, writer ResponseWriter, request *R
 	}
 	context := StdHttpGo_Context(request)
 	error := AppStore_UpsertSignedManifest(registry.Database, context, value.Manifest, verified.Value, verified.Hash, value.ManifestSignature, value.ApprovalSignature)
+	if StdErrorsGo_Is(error, ErrManifestOutdated) {
+		Response_Error(writer, int(409), StdErrorsGo_Message(error))
+		return
+	}
 	if error != nil {
 		slog.Error("register signed app manifest", "app", LogSafety_LogText(value.Manifest.AppID), "error", error)
 		Response_Error(writer, int(500), "app registration failed")
@@ -324,7 +329,7 @@ func AppHttp_GrantSigned(registry Registry, writer ResponseWriter, request *Requ
 		return
 	}
 	completed := false
-	var value_4 zir_21605951d81ff535_ReplayCleanup = func(value_0 *Database, value_1 Context, value_2 SignedTxEnvelope, value_3 *bool) {
+	var value_4 zir_3e5b565c4c825a76_ReplayCleanup = func(value_0 *Database, value_1 Context, value_2 SignedTxEnvelope, value_3 *bool) {
 		AppHttp_ForgetOnFailure(value_0, value_1, value_2, value_3)
 	}
 	defer AppHttp_CleanupAtReturn(value_4, registry.Database, context, value.Tx, &(completed))
@@ -399,7 +404,7 @@ func AppHttp_Records(registry Registry, writer ResponseWriter, request *Request)
 		return
 	}
 	completed := false
-	var value_9 zir_21605951d81ff535_ReplayCleanup = func(value_5 *Database, value_6 Context, value_7 SignedTxEnvelope, value_8 *bool) {
+	var value_9 zir_3e5b565c4c825a76_ReplayCleanup = func(value_5 *Database, value_6 Context, value_7 SignedTxEnvelope, value_8 *bool) {
 		AppHttp_ForgetOnFailure(value_5, value_6, value_7, value_8)
 	}
 	defer AppHttp_CleanupAtReturn(value_9, registry.Database, context, header.Value, &(completed))
@@ -425,4 +430,21 @@ func AppHttp_Records(registry Registry, writer ResponseWriter, request *Request)
 	var value AppRecordsResponse = AppRecordsResponse{}
 	value.Records = records.Value
 	Response_JSON(writer, int(200), value)
+}
+
+var AppHttp_ziranInitState uint8
+
+func AppHttp_ziranInit() {
+	if AppHttp_ziranInitState == 2 {
+		return
+	}
+	if AppHttp_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	AppHttp_ziranInitState = 1
+	AppStore_ziranInit()
+	AppGrants_ziranInit()
+	AppRegistration_ziranInit()
+	SignedTx_ziranInit()
+	AppHttp_ziranInitState = 2
 }

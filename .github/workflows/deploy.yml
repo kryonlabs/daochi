@@ -88,7 +88,11 @@ jobs:
             cp /opt/daochi/daochi \"/var/lib/daochi/backups/daochi.pre-upgrade.$STAMP\"
             sqlite3 /var/lib/daochi/daochi.db \".backup '/var/lib/daochi/backups/daochi.db.$STAMP'\"
             test -s \"/var/lib/daochi/backups/daochi.db.$STAMP\"
-            find /var/lib/daochi/backups -type f \( -name 'daochi.pre-upgrade.*' -o -name 'daochi.db.*' \) -mtime +30 -delete
+            # A daily timer deletes backups older than 30 days, also between deploys.
+            install -m 644 /opt/daochi-src/deploy/daochi-backup-prune.service /opt/daochi-src/deploy/daochi-backup-prune.timer /etc/systemd/system/
+            systemctl daemon-reload
+            systemctl enable --now daochi-backup-prune.timer
+            systemctl start daochi-backup-prune.service
             cp /opt/daochi-src/daochi /opt/daochi/daochi.new
             mv /opt/daochi/daochi.new /opt/daochi/daochi
             if [ -n '$mesh_token' ]; then

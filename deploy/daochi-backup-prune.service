@@ -1,0 +1,7 @@
+[Unit]
+Description=Delete Daochi deploy backups older than 30 days
+ConditionPathIsDirectory=/var/lib/daochi/backups
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find /var/lib/daochi/backups -type f ( -name daochi.pre-upgrade.* -o -name daochi.db.* ) -mtime +30 -delete

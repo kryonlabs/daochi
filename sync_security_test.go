@@ -220,7 +220,9 @@ func TestMeshImportCannotFreezeRecords(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer tx.Rollback()
+		defer func() {
+			_ = tx.Rollback()
+		}()
 		result := apply(tx)
 		if result.Error != nil {
 			t.Fatal(result.Error)

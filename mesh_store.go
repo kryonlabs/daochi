@@ -25,27 +25,27 @@ type MeshImportResult struct {
 	Error Error
 }
 
-type zir_e7d2f561bad7f91e_TransactionResult struct {
+type zir_08cd86695c54281f_TransactionResult struct {
 	Value *Transaction
 	Error Error
 }
 
-type zir_6be7d93d8f1ad09a_ExecResult struct {
+type zir_8ce26a453096ff9b_ExecResult struct {
 	Value Result
 	Error Error
 }
 
-type zir_effcbd19635da816_RowsResult struct {
+type zir_10f74e2104d9d717_RowsResult struct {
 	Value *Rows
 	Error Error
 }
 
-type zir_7411a0f537a07f92_HexResult struct {
+type zir_950c31fcd91cae93_HexResult struct {
 	Value []uint8
 	Error Error
 }
 
-type zir_d77f65f269cc9b2e_NullInteger = sql.NullInt64
+type zir_f879f6fa0b48ca2f_NullInteger = sql.NullInt64
 
 type MeshChange struct {
 	Sequence int64
@@ -58,67 +58,67 @@ type __type_6c762ccf1d5d7b6c struct {
 	Value    bool
 }
 
-func MeshStore_IntegerValue(Value zir_d77f65f269cc9b2e_NullInteger) int64 {
+func MeshStore_IntegerValue(Value zir_f879f6fa0b48ca2f_NullInteger) int64 {
 	return Value.Int64
 }
 
-func MeshStore_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_e7d2f561bad7f91e_TransactionResult {
-	var result zir_e7d2f561bad7f91e_TransactionResult
+func MeshStore_Begin(Database *Database, Context Context, Options *TransactionOptions) zir_08cd86695c54281f_TransactionResult {
+	var result zir_08cd86695c54281f_TransactionResult
 	result.Value, result.Error = (*sql.DB).BeginTx(Database, Context, Options)
 	return result
 }
 
-func MeshStore_QueryExport(Database *Database, Context Context, Query string, Sequence int64) zir_effcbd19635da816_RowsResult {
-	var result zir_effcbd19635da816_RowsResult
+func MeshStore_QueryExport(Database *Database, Context Context, Query string, Sequence int64) zir_10f74e2104d9d717_RowsResult {
+	var result zir_10f74e2104d9d717_RowsResult
 	result.Value, result.Error = (*sql.DB).QueryContext(Database, Context, Query, Sequence)
 	return result
 }
 
-func MeshStore_DeleteRecord(Transaction *Transaction, Context Context, Query string, UserID string, Collection string, Id string, Deleted string) zir_6be7d93d8f1ad09a_ExecResult {
-	var result zir_6be7d93d8f1ad09a_ExecResult
-	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID, Collection, Id, Deleted)
+func MeshStore_DeleteRecord(Transaction *Transaction, Context Context, Query string, UserID string, Collection string, Id string, Deleted string, Latest string) zir_8ce26a453096ff9b_ExecResult {
+	var result zir_8ce26a453096ff9b_ExecResult
+	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID, Collection, Id, Deleted, Latest)
 	return result
 }
 
-func MeshStore_WriteRecord(Transaction *Transaction, Context Context, Query string, UserID string, Collection string, Id string, KeyID string, Nonce string, Ciphertext string, Updated string, Deleted int64, Hash string, Schema int, Parent string, Version int64) zir_6be7d93d8f1ad09a_ExecResult {
-	var result zir_6be7d93d8f1ad09a_ExecResult
-	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID, Collection, Id, KeyID, Nonce, Ciphertext, Updated, Deleted, Hash, Schema, Parent, Version)
+func MeshStore_WriteRecord(Transaction *Transaction, Context Context, Query string, UserID string, Collection string, Id string, KeyID string, Nonce string, Ciphertext string, Updated string, Deleted int64, Hash string, Schema int, Parent string, Version int64, Latest string) zir_8ce26a453096ff9b_ExecResult {
+	var result zir_8ce26a453096ff9b_ExecResult
+	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID, Collection, Id, KeyID, Nonce, Ciphertext, Updated, Deleted, Hash, Schema, Parent, Version, Latest)
 	return result
 }
 
-func MeshStore_WriteUser(Transaction *Transaction, Context Context, Query string, UserID string, PublicKey []uint8, Created string, Seen string) zir_6be7d93d8f1ad09a_ExecResult {
-	var result zir_6be7d93d8f1ad09a_ExecResult
+func MeshStore_WriteUser(Transaction *Transaction, Context Context, Query string, UserID string, PublicKey []uint8, Created string, Seen string) zir_8ce26a453096ff9b_ExecResult {
+	var result zir_8ce26a453096ff9b_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID, PublicKey, Created, Seen)
 	return result
 }
 
-func MeshStore_EnsureSync(Transaction *Transaction, Context Context, Query string, UserID string) zir_6be7d93d8f1ad09a_ExecResult {
-	var result zir_6be7d93d8f1ad09a_ExecResult
+func MeshStore_EnsureSync(Transaction *Transaction, Context Context, Query string, UserID string) zir_8ce26a453096ff9b_ExecResult {
+	var result zir_8ce26a453096ff9b_ExecResult
 	result.Value, result.Error = (*sql.Tx).ExecContext(Transaction, Context, Query, UserID)
 	return result
 }
 
-func MeshStore_WriteCursor(Database *Database, Context Context, Query string, PeerKey string, Value string) zir_6be7d93d8f1ad09a_ExecResult {
-	var result zir_6be7d93d8f1ad09a_ExecResult
+func MeshStore_WriteCursor(Database *Database, Context Context, Query string, PeerKey string, Value string) zir_8ce26a453096ff9b_ExecResult {
+	var result zir_8ce26a453096ff9b_ExecResult
 	result.Value, result.Error = (*sql.DB).ExecContext(Database, Context, Query, PeerKey, Value)
 	return result
 }
 
-func MeshStore_DecodeHex(Value string) zir_7411a0f537a07f92_HexResult {
-	var result zir_7411a0f537a07f92_HexResult
+func MeshStore_DecodeHex(Value string) zir_950c31fcd91cae93_HexResult {
+	var result zir_950c31fcd91cae93_HexResult
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }
 
 const ExportSQL = "SELECT e.seq,e.op,e.user_id_hash,e.collection,e.record_id,e.deleted_at,\n       r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,\n       r.content_hash,r.schema_version,r.parent_id,u.public_key,u.created_at,u.last_seen_at\nFROM server_mesh_changes e\nLEFT JOIN server_encrypted_records r\n  ON e.op!='delete' AND r.user_id_hash=e.user_id_hash AND r.collection=e.collection AND r.id=e.record_id\nLEFT JOIN server_users u ON u.user_id_hash=e.user_id_hash\nWHERE e.seq>?1\nORDER BY e.seq\n"
 const TombstoneSQL = "SELECT EXISTS(SELECT 1 FROM server_account_tombstones WHERE user_id_hash=?1)"
-const DeleteSQL = "DELETE FROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4\n"
+const DeleteSQL = "DELETE FROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND (updated_at<=?4 OR updated_at>?5)\n"
 const CursorSQL = "SELECT cursor FROM node_sync_cursors WHERE peer_key=?1"
 const SaveCursorSQL = "INSERT INTO node_sync_cursors(peer_key,cursor,updated_at)\nVALUES(?1,?2,CURRENT_TIMESTAMP)\nON CONFLICT(peer_key) DO UPDATE SET\n    cursor=excluded.cursor,\n    updated_at=CURRENT_TIMESTAMP\n"
 const UserSQL = "INSERT INTO server_users(user_id_hash,public_key,created_at,last_seen_at)\nVALUES(?1,?2,?3,?4)\nON CONFLICT(user_id_hash) DO UPDATE SET\n    last_seen_at=max(server_users.last_seen_at,excluded.last_seen_at)\n"
 const SyncSQL = "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)"
-const zir_d_28ea49bd2b2be067 = "SELECT key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3\n"
-const RecordUpsertSQL = "INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n    key_id=excluded.key_id,\n    nonce=excluded.nonce,\n    ciphertext=excluded.ciphertext,\n    updated_at=excluded.updated_at,\n    deleted_at=excluded.deleted_at,\n    content_hash=excluded.content_hash,\n    schema_version=excluded.schema_version,\n    parent_id=excluded.parent_id,\n    server_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at\n"
+const zir_d_c85e78dca34627c6 = "SELECT key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3\n"
+const RecordUpsertSQL = "INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n    key_id=excluded.key_id,\n    nonce=excluded.nonce,\n    ciphertext=excluded.ciphertext,\n    updated_at=excluded.updated_at,\n    deleted_at=excluded.deleted_at,\n    content_hash=excluded.content_hash,\n    schema_version=excluded.schema_version,\n    parent_id=excluded.parent_id,\n    server_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13\n"
 
 func MeshStore_OrderedChanges(records []MeshEncryptedRecord, deletions []MeshEncryptedRecordDeletion) []MeshChange {
 	count := int64(len(records)) + int64(len(deletions))
@@ -245,9 +245,9 @@ func MeshStore_ExportEncryptedRecords(database *Database, context Context, meshP
 		var nonce NullString = *new(NullString)
 		var ciphertext NullString = *new(NullString)
 		var updated NullString = *new(NullString)
-		var recordDeleted zir_d77f65f269cc9b2e_NullInteger = *new(zir_d77f65f269cc9b2e_NullInteger)
+		var recordDeleted zir_f879f6fa0b48ca2f_NullInteger = *new(zir_f879f6fa0b48ca2f_NullInteger)
 		var hash NullString = *new(NullString)
-		var schema zir_d77f65f269cc9b2e_NullInteger = *new(zir_d77f65f269cc9b2e_NullInteger)
+		var schema zir_f879f6fa0b48ca2f_NullInteger = *new(zir_f879f6fa0b48ca2f_NullInteger)
 		var parent NullString = *new(NullString)
 		var publicKey []uint8 = nil
 		var created NullString = *new(NullString)
@@ -451,8 +451,10 @@ func MeshStore_ApplyDeletion(transaction *Transaction, context Context, deletion
 		result.Error = StdErrorsGo_New("invalid mesh deletion target")
 		return result
 	}
-	deleted := Timestamp_NormalizeTime(deletion.DeletedAt, "")
-	written := MeshStore_DeleteRecord(transaction, context, "DELETE FROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND updated_at<=?4\n", deletion.UserIDHash, deletion.Collection, deletion.ID, deleted)
+	now := StdTimeGo_Now()
+	deleted := Timestamp_NormalizeWriteTime(deletion.DeletedAt, now)
+	var value_3 string = "DELETE FROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND (updated_at<=?4 OR updated_at>?5)\n"
+	written := MeshStore_DeleteRecord(transaction, context, value_3, deletion.UserIDHash, deletion.Collection, deletion.ID, deleted, Timestamp_WriteTimeLimit(now))
 	result.Error = written.Error
 	if result.Error != nil {
 		return result
@@ -507,7 +509,8 @@ func MeshStore_UpsertUser(transaction *Transaction, context Context, item MeshEn
 
 func MeshStore_UpsertRecord(transaction *Transaction, context Context, userID string, item EncryptedRecord) MeshImportResult {
 	var result MeshImportResult = MeshImportResult{}
-	updated := Timestamp_NormalizeTime(item.UpdatedAt, "")
+	now := StdTimeGo_Now()
+	updated := Timestamp_NormalizeWriteTime(item.UpdatedAt, now)
 	var existing EncryptedRecord = EncryptedRecord{}
 	var value_0 string = "SELECT key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records\nWHERE user_id_hash=?1 AND collection=?2 AND id=?3\n"
 	row := (*sql.Tx).QueryRowContext(transaction, context, value_0, userID, item.Collection, item.ID)
@@ -524,17 +527,22 @@ func MeshStore_UpsertRecord(transaction *Transaction, context Context, userID st
 	}
 	if error == nil {
 		existingUpdated := Timestamp_NormalizeTime(existing.UpdatedAt, "")
-		var value_4 bool = strings.Compare(updated, existingUpdated) < int(0)
-		var value_5 bool = value_4
-		if !value_5 {
-			var value_6 bool = updated == existingUpdated
-			if value_6 {
-				var value_7 bool = strings.Compare(EncryptedRecord_ContentKey(item), EncryptedRecord_ContentKey(existing)) <= int(0)
+		frozen := strings.Compare(existingUpdated, Timestamp_WriteTimeLimit(now)) > int(0)
+		var value_4 bool = !frozen
+		if value_4 {
+			var value_5 bool = strings.Compare(updated, existingUpdated) < int(0)
+			var value_6 bool = value_5
+			if !value_6 {
+				var value_7 bool = updated == existingUpdated
+				if value_7 {
+					var value_8 bool = strings.Compare(EncryptedRecord_ContentKey(item), EncryptedRecord_ContentKey(existing)) <= int(0)
+					value_7 = value_8
+				}
 				value_6 = value_7
 			}
-			value_5 = value_6
+			value_4 = value_6
 		}
-		if value_5 {
+		if value_4 {
 			return result
 		}
 	}
@@ -543,8 +551,8 @@ func MeshStore_UpsertRecord(transaction *Transaction, context Context, userID st
 	if result.Error != nil {
 		return result
 	}
-	var value_8 string = "INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n    key_id=excluded.key_id,\n    nonce=excluded.nonce,\n    ciphertext=excluded.ciphertext,\n    updated_at=excluded.updated_at,\n    deleted_at=excluded.deleted_at,\n    content_hash=excluded.content_hash,\n    schema_version=excluded.schema_version,\n    parent_id=excluded.parent_id,\n    server_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at\n"
-	written := MeshStore_WriteRecord(transaction, context, value_8, userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext, updated, int64(item.DeletedAt), item.ContentHash, int(item.SchemaVersion), item.ParentID, int64(version.Value))
+	var value_9 string = "INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n    key_id=excluded.key_id,\n    nonce=excluded.nonce,\n    ciphertext=excluded.ciphertext,\n    updated_at=excluded.updated_at,\n    deleted_at=excluded.deleted_at,\n    content_hash=excluded.content_hash,\n    schema_version=excluded.schema_version,\n    parent_id=excluded.parent_id,\n    server_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13\n"
+	written := MeshStore_WriteRecord(transaction, context, value_9, userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext, updated, int64(item.DeletedAt), item.ContentHash, int(item.SchemaVersion), item.ParentID, int64(version.Value), Timestamp_WriteTimeLimit(now))
 	result.Error = written.Error
 	if result.Error == nil {
 		result.Value = AccountState_Affected(written.Value)

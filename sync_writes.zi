@@ -4,26 +4,90 @@ sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 state :: #import "account_state";
 timestamp :: #import "timestamp";
+clock :: #import "std/time_go";
+scope :: #import "scope";
+native :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
 
+#scope_file
+CollectionNamesResult :: struct {
+    value: []string
+    error: Error
+}
+AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+AppendString :: (values: []string, value: string) -> []string #foreign builtin "append";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+
+ReadCollections :: (rows: *sql.Rows) -> CollectionNamesResult {
+    result: CollectionNamesResult
+    CloseRowsAtReturn(rows)
+    values := AllocateStrings(cast(isize)0)
+    while sql.Next(rows) {
+        value: string
+        destinations: [1]Any = .[*value]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendString(values, value)
+    }
+    result.error = sql.RowsError(rows)
+    if result.error == null {
+        result.value = values
+    }
+    return result
+}
+
+#scope_export
 SyncWriteResult :: struct {
     applied: isize
     error: Error
 }
 
-ReplaceData :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> Error {
-    queries: [8]string = .[
-        "DELETE FROM server_session_rounds WHERE user_id_hash=?1",
-        "DELETE FROM server_sessions WHERE user_id_hash=?1",
-        "DELETE FROM server_habit_days WHERE user_id_hash=?1",
-        "DELETE FROM server_habits WHERE user_id_hash=?1",
-        "DELETE FROM server_meditation_logs WHERE user_id_hash=?1",
-        "DELETE FROM server_social_snapshots WHERE user_id_hash=?1",
-        "DELETE FROM server_encrypted_records WHERE user_id_hash=?1",
-        "DELETE FROM server_encrypted_payloads WHERE user_id_hash=?1",
-    ]
+// A full re-sync replaces only the calling app's data. Released Inbe clients
+// send no app_id; Inbe owns the typed tables, the whole-sync envelopes and the
+// account-wide records. Any other app clears only its own collections.
+ReplaceData :: (transaction: *sql.Transaction, context: ctx.Context, userID: string, appID: string) -> Error {
+    owner := appID
+    if owner == "" {
+        owner = "inbe"
+    }
     arguments: [1]Any = .[userID]
-    for query: queries {
-        removed := sql.ExecTx(transaction, context, query, arguments[:])
+    if owner == "inbe" {
+        queries: [7]string = .[
+            "DELETE FROM server_session_rounds WHERE user_id_hash=?1",
+            "DELETE FROM server_sessions WHERE user_id_hash=?1",
+            "DELETE FROM server_habit_days WHERE user_id_hash=?1",
+            "DELETE FROM server_habits WHERE user_id_hash=?1",
+            "DELETE FROM server_meditation_logs WHERE user_id_hash=?1",
+            "DELETE FROM server_social_snapshots WHERE user_id_hash=?1",
+            "DELETE FROM server_encrypted_payloads WHERE user_id_hash=?1",
+        ]
+        for query: queries {
+            removed := sql.ExecTx(transaction, context, query, arguments[:])
+            if removed.error != null {
+                return removed.error
+            }
+        }
+    }
+    queried := sql.QueryTx(transaction, context,
+        "SELECT DISTINCT collection FROM server_encrypted_records WHERE user_id_hash=?1", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    collections := ReadCollections(queried.value)
+    if collections.error != null {
+        return collections.error
+    }
+    for collection: collections.value {
+        collectionOwner := scope.CollectionOwnerApp(collection)
+        replaced := collectionOwner == owner || (collectionOwner == "" && owner == "inbe")
+        if !replaced {
+            continue
+        }
+        values: [2]Any = .[userID, collection]
+        removed := sql.ExecTx(transaction, context,
+            "DELETE FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2", values[:])
         if removed.error != null {
             return removed.error
         }
@@ -83,13 +147,14 @@ UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: st
     if result.error != null {
         return result
     }
-    arguments: [12]Any = .[
+    now := clock.Now()
+    arguments: [13]Any = .[
         userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
-        timestamp.NormalizeTime(item.UpdatedAt, ""), item.DeletedAt, item.ContentHash,
-        item.SchemaVersion, item.ParentID, version.value,
+        timestamp.NormalizeWriteTime(item.UpdatedAt, now), item.DeletedAt, item.ContentHash,
+        item.SchemaVersion, item.ParentID, version.value, timestamp.WriteTimeLimit(now),
     ]
     written := sql.ExecTx(transaction, context,
-        "\nINSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n\tkey_id=excluded.key_id,\n\tnonce=excluded.nonce,\n\tciphertext=excluded.ciphertext,\n\tupdated_at=excluded.updated_at,\n\tdeleted_at=excluded.deleted_at,\n\tcontent_hash=excluded.content_hash,\n\tschema_version=excluded.schema_version,\n\tparent_id=excluded.parent_id,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at", arguments[:])
+        "\nINSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n\tkey_id=excluded.key_id,\n\tnonce=excluded.nonce,\n\tciphertext=excluded.ciphertext,\n\tupdated_at=excluded.updated_at,\n\tdeleted_at=excluded.deleted_at,\n\tcontent_hash=excluded.content_hash,\n\tschema_version=excluded.schema_version,\n\tparent_id=excluded.parent_id,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13", arguments[:])
     result.error = written.error
     if result.error == null {
         result.applied = state.Affected(written.value)

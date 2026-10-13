@@ -43,17 +43,21 @@ func SyncValidation_Validate(database *Database, context Context, request SyncRe
 	if request.ProtocolVersion >= int(6) && request.AppID == "" {
 		return StdErrorsGo_New("app_id required")
 	}
+	requestApp := request.AppID
+	if requestApp == "" {
+		requestApp = "inbe"
+	}
 	{
 		value_4 := request.EncryptedRecords[:]
 		if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_30 := value_4[0:int64(len(value_4)):int64(len(value_4))]
-		loop_count_30 := int64(len(loop_view_30))
-		var loop_cursor_30 int64 = 0
-		for loop_cursor_30 < loop_count_30 {
-			loop_index_30 := loop_cursor_30
-			record := loop_view_30[loop_index_30]
+		loop_view_34 := value_4[0:int64(len(value_4)):int64(len(value_4))]
+		loop_count_34 := int64(len(loop_view_34))
+		var loop_cursor_34 int64 = 0
+		for loop_cursor_34 < loop_count_34 {
+			loop_index_34 := loop_cursor_34
+			record := loop_view_34[loop_index_34]
 			var value_5 bool = EncryptedRecord_ValidForProtocol(record, request.ProtocolVersion)
 			if !value_5 {
 				return StdErrorsGo_New("invalid encrypted record")
@@ -70,7 +74,11 @@ func SyncValidation_Validate(database *Database, context Context, request SyncRe
 					slog.Warn("sync request used unregistered app collection", "app_id", LogSafety_LogText(request.AppID), "collection", LogSafety_LogText(record.Collection), "mode", "compat")
 				}
 			}
-			loop_cursor_30++
+			owner := Scope_CollectionOwnerApp(record.Collection)
+			if owner != "" && owner != requestApp {
+				return StdErrorsGo_New("encrypted record collection belongs to another app")
+			}
+			loop_cursor_34++
 		}
 	}
 	return nil

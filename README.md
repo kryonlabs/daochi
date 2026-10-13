@@ -29,7 +29,7 @@ Protocol clients may also sync `encrypted_records`: opaque per-account private r
 
 Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Daochi-Since-Version`. Existing typed clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
 
-Daochi keeps an app registry so data ownership is app-neutral and no product behavior is hard-coded into the service. Inbe is the sole built-in registration because its released sync formats are a compatibility contract. Every other app installs and maintains its own signed manifest, keys, collection scopes, and token policy. Registered apps can send `app_id` in v5 compatibility mode only when their manifest explicitly allows that protocol. Older shipped Inbe clients without `app_id` continue to sync during the compatibility window. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections declared by that app.
+Daochi keeps an app registry so data ownership is app-neutral and no product behavior is hard-coded into the service. Inbe is the sole built-in registration because its released sync formats are a compatibility contract. Every other app installs and maintains its own signed manifest, keys, collection scopes, and token policy. Registered apps can send `app_id` in v5 compatibility mode only when their manifest explicitly allows that protocol. Older shipped Inbe clients without `app_id` continue to sync during the compatibility window. A sync request may write only its own app's collections, and a request without `app_id` counts as Inbe, so a bearer token alone cannot reach another app's records. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections declared by that app.
 
 Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01** for legacy clients covered by app policy. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid. App manifests declare their own compatibility windows through `compatibility_until` and `legacy_protocols`.
 
@@ -317,7 +317,7 @@ the primary address before deploying the view-only archive.
 
 Each node has a persistent Ed25519 identity. By default it is stored beside the database as a mode-`0600` key; production deployments should set `DAOCHI_NODE_IDENTITY_KEY_FILE` explicitly or supply `DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX_FILE`. `DAOCHI_LAN_DISCOVERY=1` advertises `_daochi._tcp.local` with mDNS. Discovery only finds candidates: it never grants trust or starts replication.
 
-Pairing is operator-controlled. Create a short-lived, signed invite with `POST /api/v1/node/pairing/invites`, transfer its JSON as text or a QR payload, and accept it on the other node with `POST /api/v1/node/pairing/accept`. Acceptance automatically posts a signed completion to the inviter, so one invite establishes reciprocal trust while storing directional policy from each node's perspective. The invite is single-use and fixes the peer identity, addresses, direction, apps, collections, trust spaces, and data classes. Paired requests are signed, time-bounded, and replay-protected. If `DAOCHI_ADMIN_TOKEN` is configured, pairing and namespace writes require `X-Daochi-Admin`; without it they are limited to loopback callers. Both nodes need reachable `DAOCHI_BASE_URL` values during pairing.
+Pairing is operator-controlled. Create a short-lived, signed invite with `POST /api/v1/node/pairing/invites`, transfer its JSON as text or a QR payload, and accept it on the other node with `POST /api/v1/node/pairing/accept`. Acceptance automatically posts a signed completion to the inviter, so one invite establishes reciprocal trust while storing directional policy from each node's perspective. The invite is single-use and fixes the peer identity, addresses, direction, apps, collections, trust spaces, and data classes. Paired requests are signed, time-bounded, and replay-protected. If `DAOCHI_ADMIN_TOKEN` is configured, pairing and namespace writes require `X-Daochi-Admin`; without it they are limited to direct loopback callers. A request that carries a forwarding header (`X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP` and similar), names a non-local `Host`, or comes from a cross-site browser `Origin` is refused, so a node behind a reverse proxy must set `DAOCHI_ADMIN_TOKEN` to pair. Both nodes need reachable `DAOCHI_BASE_URL` values during pairing.
 
 `DAOCHI_KNOWN_NODES` remains the convenient public-node/bootstrap path. It is a comma-separated peer list whose entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`. A peer can add `sync=<pull|push|bidirectional|none>`, `apps=inbe`, `collections=private.inbe.v1.*`, `spaces=<space-id>`, and `data=app_registry+encrypted_records+names`. The node worker tries configured and paired peers with pull permission. `DAOCHI_NODE_SYNC_INTERVAL_SECONDS` controls polling and `DAOCHI_NODE_SYNC_BATCH_LIMIT` caps record pages.
 
@@ -331,7 +331,16 @@ least as new as the stored record. Older peers that do not know the field
 ignore it, so mixed-version meshes keep working. Account deletion and full
 client re-syncs (`full_sync_requested`) propagate as per-record tombstones,
 and applying an imported delete re-logs it locally, letting a deletion travel
-multiple hops.
+multiple hops. A full re-sync replaces only the calling app's data: Inbe
+(including requests without `app_id`) clears the typed tables, envelopes,
+account-wide records and its own collections, and any other app clears only
+its own collections.
+
+Records resolve by their `updated_at`, last writer wins. A client or peer may
+date a record or deletion at most five minutes ahead of the receiving node's
+clock; a later time is stored as that limit, so it cannot block later edits.
+A stored record dated beyond the limit, written before it existed, yields to
+the next edit.
 
 Generate a token secret once and keep it stable across restarts and every deployed instance:
 

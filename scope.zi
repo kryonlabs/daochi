@@ -57,6 +57,21 @@ ValidCollectionPrefixWildcardBase :: (value: string) -> bool {
     return false
 }
 
+// The app whose data a collection holds: the app segment of a namespaced
+// collection, Inbe for its released v4 names, or "" for account-wide and older
+// names that no app scope claims.
+CollectionOwnerApp :: (collection: string) -> string {
+    value: string = TrimSpace(collection)
+    if ValidLegacyEncryptedCollection(value) {
+        return "inbe"
+    }
+    parts: []string = Split(value, ".")
+    if parts.count >= 3 && ValidAppVisibility(parts[0]) {
+        return parts[1]
+    }
+    return ""
+}
+
 AppOwnsDeclaredScope :: (appID: string, collection: AppCollection) -> bool {
     // These collections predate namespaced app scopes in released clients.
     if appID == "inbe" && ValidLegacyEncryptedCollection(collection.CollectionPrefix) {

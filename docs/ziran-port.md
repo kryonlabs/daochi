@@ -191,6 +191,9 @@ administrative token checks, local-operator access and failure responses/metrics
 Administrative access retains current/legacy header precedence and exact token
 bytes. Local-operator access uses only the direct remote IP, accepts IPv4/IPv6
 loopback without a configured token and requires the token when configured.
+Without a token, a loopback request must also carry no forwarding header, name
+a loopback `Host` and have no cross-site `Origin`, because a same-host reverse
+proxy makes every internet request arrive from loopback.
 Spoofed forwarding headers never grant administrative access. Baseline comparisons
 cover Unicode/byte strings, malformed remote addresses, header precedence and
 exact rejection status/body. Existing Go consumers use these generated helpers

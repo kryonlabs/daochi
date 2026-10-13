@@ -15,15 +15,96 @@ type UserAuthenticationResult struct {
 	Authentication AuthenticationResult
 }
 
-type zir_f901dcc00a51e15e_PrefixResult struct {
+type zir_19fc6dc7abce105f_PrefixResult struct {
 	Value string
 	Found bool
 }
 
-func HttpAuth_CutPrefix(Value string, Prefix string) zir_f901dcc00a51e15e_PrefixResult {
-	var result zir_f901dcc00a51e15e_PrefixResult
+func HttpAuth_CutPrefix(Value string, Prefix string) zir_19fc6dc7abce105f_PrefixResult {
+	var result zir_19fc6dc7abce105f_PrefixResult
 	result.Value, result.Found = strings.CutPrefix(Value, Prefix)
 	return result
+}
+
+func HttpAuth_RequestHost(Request *Request) string {
+	return Request.Host
+}
+
+func HttpAuth_LoopbackHost(value string) bool {
+	split := StdNetGo_SplitHostPort(value)
+	host := split.Host
+	if split.Error != nil {
+		host = strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")
+	}
+	if strings.ToLower(host) == "localhost" {
+		return true
+	}
+	ip := StdNetGo_ParseIP(host)
+	var value_0 bool = StdNetGo_ValidIP(ip)
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = StdNetGo_IsLoopback(ip)
+		value_1 = value_2
+	}
+	return value_1
+}
+
+func HttpAuth_LoopbackOrigin(origin string) bool {
+	plain := HttpAuth_CutPrefix(origin, "http://")
+	if plain.Found {
+		return HttpAuth_LoopbackHost(plain.Value)
+	}
+	secure := HttpAuth_CutPrefix(origin, "https://")
+	if secure.Found {
+		return HttpAuth_LoopbackHost(secure.Value)
+	}
+	return false
+}
+
+func HttpAuth_DirectLocalRequest(request *Request) bool {
+	address := StdHttpGo_RemoteAddress(request)
+	split := StdNetGo_SplitHostPort(address)
+	host := split.Host
+	if split.Error != nil {
+		host = address
+	}
+	ip := StdNetGo_ParseIP(host)
+	var value_0 bool = StdNetGo_ValidIP(ip)
+	var value_1 bool = !value_0
+	if !value_1 {
+		var value_2 bool = StdNetGo_IsLoopback(ip)
+		value_1 = !value_2
+	}
+	if value_1 {
+		return false
+	}
+	var value_3 [8]string
+	value_3[0] = "X-Forwarded-For"
+	value_3[1] = "X-Forwarded-Host"
+	value_3[2] = "X-Forwarded-Proto"
+	value_3[3] = "X-Real-IP"
+	value_3[4] = "Forwarded"
+	value_3[5] = "CF-Connecting-IP"
+	value_3[6] = "True-Client-IP"
+	value_3[7] = "Via"
+	proxyHeaders := value_3
+	headers := StdHttpGo_Headers(request)
+	for _, name := range proxyHeaders {
+		if StdHttpGo_HeaderValue(headers, name) != "" {
+			return false
+		}
+	}
+	var value_4 bool = HttpAuth_LoopbackHost(HttpAuth_RequestHost(request))
+	if !value_4 {
+		return false
+	}
+	origin := strings.TrimSpace(StdHttpGo_HeaderValue(headers, "Origin"))
+	var value_5 bool = origin == ""
+	if !value_5 {
+		var value_6 bool = HttpAuth_LoopbackOrigin(origin)
+		value_5 = value_6
+	}
+	return value_5
 }
 
 func HttpAuth_HeaderAlias(request *Request, names []string) string {
@@ -79,20 +160,8 @@ func HttpAuth_RequireLocalOperator(writer ResponseWriter, request *Request, admi
 	if adminToken != "" {
 		return HttpAuth_RequireAdmin(writer, request, adminToken)
 	}
-	address := StdHttpGo_RemoteAddress(request)
-	split := StdNetGo_SplitHostPort(address)
-	host := split.Host
-	if split.Error != nil {
-		host = address
-	}
-	ip := StdNetGo_ParseIP(host)
-	var value_0 bool = StdNetGo_ValidIP(ip)
-	var value_1 bool = !value_0
-	if !value_1 {
-		var value_2 bool = StdNetGo_IsLoopback(ip)
-		value_1 = !value_2
-	}
-	if value_1 {
+	var value_0 bool = HttpAuth_DirectLocalRequest(request)
+	if !value_0 {
 		Response_Error(writer, int(403), "administration requires loopback access or DAOCHI_ADMIN_TOKEN")
 		return false
 	}

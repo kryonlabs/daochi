@@ -14,6 +14,7 @@ metrics :: #import "metrics";
 net :: #import "std/net_go";
 constant_time :: #import "std/constant_time";
 go_strings :: #system_library "go:strings";
+go_http :: #system_library "go:net/http";
 
 UserHeaderResult :: struct {
     value: string
@@ -32,6 +33,65 @@ PrefixResult :: struct {
 TrimSpace :: (value: string) -> string #foreign go_strings;
 ToLower :: (value: string) -> string #foreign go_strings;
 CutPrefix :: (value: string, prefix: string) -> PrefixResult #go_results #foreign go_strings "CutPrefix";
+TrimPrefix :: (value: string, prefix: string) -> string #foreign go_strings "TrimPrefix";
+TrimSuffix :: (value: string, suffix: string) -> string #foreign go_strings "TrimSuffix";
+RequestHost :: (request: *http.Request) -> string #go_field #foreign go_http "(*Request).Host";
+
+LoopbackHost :: (value: string) -> bool {
+    split := net.SplitHostPort(value)
+    host := split.host
+    if split.error != null {
+        host = TrimSuffix(TrimPrefix(value, "["), "]")
+    }
+    if ToLower(host) == "localhost" {
+        return true
+    }
+    ip := net.ParseIP(host)
+    return net.ValidIP(ip) && net.IsLoopback(ip)
+}
+
+LoopbackOrigin :: (origin: string) -> bool {
+    plain := CutPrefix(origin, "http://")
+    if plain.found {
+        return LoopbackHost(plain.value)
+    }
+    secure := CutPrefix(origin, "https://")
+    if secure.found {
+        return LoopbackHost(secure.value)
+    }
+    return false
+}
+
+// A loopback connection is the operator only when it came straight to this
+// process: no proxy hop, a local Host (which defeats DNS rebinding), and no
+// cross-site browser Origin.
+DirectLocalRequest :: (request: *http.Request) -> bool {
+    address := http.RemoteAddress(request)
+    split := net.SplitHostPort(address)
+    host := split.host
+    if split.error != null {
+        host = address
+    }
+    ip := net.ParseIP(host)
+    if !net.ValidIP(ip) || !net.IsLoopback(ip) {
+        return false
+    }
+    // A reverse proxy on the same host makes every internet request arrive
+    // from loopback, so a forwarding header means this is not the operator.
+    proxyHeaders: [8]string = .["X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto",
+        "X-Real-IP", "Forwarded", "CF-Connecting-IP", "True-Client-IP", "Via"]
+    headers := http.Headers(request)
+    for name: proxyHeaders {
+        if http.HeaderValue(headers, name) != "" {
+            return false
+        }
+    }
+    if !LoopbackHost(RequestHost(request)) {
+        return false
+    }
+    origin := TrimSpace(http.HeaderValue(headers, "Origin"))
+    return origin == "" || LoopbackOrigin(origin)
+}
 
 #scope_export
 HeaderAlias :: (request: *http.Request, names: []string) -> string {
@@ -78,14 +138,7 @@ RequireLocalOperator :: (writer: http.ResponseWriter, request: *http.Request, ad
     if adminToken != "" {
         return RequireAdmin(writer, request, adminToken)
     }
-    address := http.RemoteAddress(request)
-    split := net.SplitHostPort(address)
-    host := split.host
-    if split.error != null {
-        host = address
-    }
-    ip := net.ParseIP(host)
-    if !net.ValidIP(ip) || !net.IsLoopback(ip) {
+    if !DirectLocalRequest(request) {
         response.Error(writer, cast(isize)403,
             "administration requires loopback access or DAOCHI_ADMIN_TOKEN")
         return false

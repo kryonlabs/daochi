@@ -61,10 +61,11 @@ func TestZiranStartupProcessHelper(t *testing.T) {
 		cfg := Config_Load()
 		factory := func() VerifierResult {
 			fmt.Println("factory called")
-			var err error = errors.New("provider failure")
-			if mode == "verifier unavailable" {
+			err := errors.New("provider failure")
+			switch mode {
+			case "verifier unavailable":
 				err = ErrVerifierUnavailable
-			} else if mode == "verifier wrapped unavailable" {
+			case "verifier wrapped unavailable":
 				err = fmt.Errorf("provider wrapper: %w", ErrVerifierUnavailable)
 			}
 			return VerifierResult{Error: err}
@@ -136,11 +137,12 @@ func TestZiranStartupCLIAndFatalErrorsAgainstBaseline(t *testing.T) {
 			var outputs [2][]byte
 			for implementation := range outputs {
 				keyPath := filepath.Join(root, "node.key")
-				if mode == "inspect create key" || mode == "inspect argument timing" {
+				switch mode {
+				case "inspect create key", "inspect argument timing":
 					if err := os.Remove(keyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 						t.Fatal(err)
 					}
-				} else if mode == "invalid key file" {
+				case "invalid key file":
 					if err := os.WriteFile(keyPath, []byte("not hexadecimal"), 0600); err != nil {
 						t.Fatal(err)
 					}

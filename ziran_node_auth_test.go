@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -20,28 +19,6 @@ import (
 )
 
 const baselineNodeAuthenticationWindow = 5 * time.Minute
-
-func baselineRandomHex(bytes int) string {
-	data := make([]byte, bytes)
-	if _, err := rand.Read(data); err != nil {
-		panic(err)
-	}
-	return hex.EncodeToString(data)
-}
-
-func baselineSignNodeRequest(nodeID string, privateKey ed25519.PrivateKey, req *http.Request, body []byte) {
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	nonce := baselineRandomHex(16)
-	message := []byte(baselineNodeMessage("daochi-node-request-v1", nodeID, timestamp, nonce,
-		req.Method, req.URL.EscapedPath(), body))
-	signature := ed25519.Sign(privateKey, message)
-
-	req.Header.Set("X-Daochi-Node-ID", nodeID)
-	req.Header.Set("X-Daochi-Node-Time", timestamp)
-	req.Header.Set("X-Daochi-Node-Nonce", nonce)
-	req.Header.Set("X-Daochi-Node-Signature",
-		base64.RawURLEncoding.EncodeToString(signature))
-}
 
 func baselineVerifyNodeRequest(database *sql.DB, ctx context.Context, req *http.Request, body []byte) error {
 	nodeID := strings.TrimSpace(req.Header.Get("X-Daochi-Node-ID"))

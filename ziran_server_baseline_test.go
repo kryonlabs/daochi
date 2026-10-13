@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"sync"
-	"time"
 )
 
 // Original Server construction, dependency getters and routes at 665d300.
@@ -149,20 +148,6 @@ func (s *baselineServer) mesh() Mesh {
 		Identity:      &s.node,
 		ConvertError:  baselineAuthenticationError,
 	}
-}
-
-func (s *baselineServer) authenticateToken(r *http.Request) (string, error) {
-	result := HttpAuth_AuthenticateToken(s.store.Database, r, s.cfg.TokenSecret)
-	return result.Value, baselineAuthenticationError(result.Authentication)
-}
-
-func (s *baselineServer) bearerUser(w http.ResponseWriter, r *http.Request) (string, bool) {
-	result := HttpAuth_BearerUser(s.store.Database, r, s.cfg.TokenSecret)
-	if result.Authentication.Error != nil || result.Authentication.Status != 0 {
-		HttpAuth_Respond(w, s.metrics, result.Authentication)
-		return "", false
-	}
-	return result.Value, true
 }
 
 func (s *baselineServer) Routes() http.Handler {
@@ -343,11 +328,6 @@ func (s *baselineServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	OperationalHttp_Metrics(s.operations(), w, r)
 }
 
-func (s *baselineServer) nodeUsage(ctx context.Context) (NodeUsage, error) {
-	result := OperationalHttp_Usage(s.operations(), ctx)
-	return result.Value, result.Error
-}
-
 func (s *baselineServer) handleSyncDiagnostics(w http.ResponseWriter, r *http.Request) {
 	OperationalHttp_Diagnostics(s.operations(), w, r)
 }
@@ -386,17 +366,8 @@ func (s *baselineServer) handleDeleteAccountWithKey(w http.ResponseWriter, r *ht
 	AccountAccess_DeleteWithKey(s.access(), w, r)
 }
 
-func (s *baselineServer) authenticateSignature(ctx context.Context, userID, publicKeyText, signatureText, signatureContext, method, path string, signedPayload []byte) ([]byte, error) {
-	result := AccountSignature_Authenticate(s.store.Database, s.challenges, s.access().Verify, ctx, userID, publicKeyText, signatureText, signatureContext, method, path, signedPayload)
-	return result.Value, baselineAuthenticationError(result.Authentication)
-}
-
 func (s *baselineServer) withCommonHeaders(next http.Handler) http.Handler {
 	return Middleware_New(&s.metrics, next)
-}
-
-func (s *baselineServer) allowRequest(r *http.Request, key string, limit int, window time.Duration) bool {
-	return RequestRate_Allow(s.limiter, s.metrics, key, limit, window)
 }
 
 func (s *baselineServer) syncSocket() SyncSocket {

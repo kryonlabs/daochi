@@ -49,7 +49,7 @@ func (s *Store) baselineCreateAppGrant(ctx context.Context, userID string, req A
 	if err != nil {
 		return AppGrant{}, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	if err := baselineTouchUser(ctx, tx, userID); err != nil {
 		return AppGrant{}, err
 	}
@@ -90,7 +90,7 @@ ORDER BY updated_at DESC,id`, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []AppGrant{}
 	for rows.Next() {
@@ -110,7 +110,7 @@ func (s *Store) baselineRevokeAppGrant(ctx context.Context, userID, id string) e
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	res, err := tx.ExecContext(ctx, `
 UPDATE server_app_grants
 SET status='revoked', revoked_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
@@ -199,7 +199,7 @@ ORDER BY collection,id`
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []EncryptedRecord{}
 	for rows.Next() {

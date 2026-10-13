@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -15,7 +14,7 @@ func (s *Store) baselineSocialRegisterUser(ctx context.Context, userID string, p
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_account_tombstones WHERE user_id_hash=?1`, userID); err != nil {
 		return err
 	}
@@ -23,21 +22,6 @@ func (s *Store) baselineSocialRegisterUser(ctx context.Context, userID string, p
 		return err
 	}
 	return tx.Commit()
-}
-
-func (s *Store) baselineSocialAccountAlias(ctx context.Context, userID string) (string, error) {
-	var alias sql.NullString
-	err := s.Database.QueryRowContext(ctx, `SELECT alias FROM server_users WHERE user_id_hash=?1`, userID).Scan(&alias)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if !alias.Valid {
-		return "", nil
-	}
-	return alias.String, nil
 }
 
 func (s *Store) baselineSocialSetAccountAlias(ctx context.Context, userID, alias string) error {
@@ -52,18 +36,6 @@ WHERE user_id_hash=?1`, userID, alias, Timestamp_CanonicalNow())
 		return ErrSyncUserNotFound
 	}
 	return nil
-}
-
-func (s *Store) baselineSocialAccountProfileIcon(ctx context.Context, userID string) (int, error) {
-	var profileIcon int
-	err := s.Database.QueryRowContext(ctx, `SELECT profile_icon FROM server_users WHERE user_id_hash=?1`, userID).Scan(&profileIcon)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ProfileIconNone, nil
-	}
-	if err != nil {
-		return ProfileIconNone, err
-	}
-	return profileIcon, nil
 }
 
 func (s *Store) baselineSocialSetAccountProfileIcon(ctx context.Context, userID string, profileIcon int) error {
@@ -82,9 +54,7 @@ WHERE user_id_hash=?1`, userID, profileIcon, Timestamp_CanonicalNow())
 
 func (s *Store) baselineSocialResolveAccountRef(ctx context.Context, ref string) (string, bool, error) {
 	ref = strings.TrimSpace(ref)
-	if strings.HasPrefix(ref, "@") {
-		ref = strings.TrimPrefix(ref, "@")
-	}
+	ref = strings.TrimPrefix(ref, "@")
 	if Identity_ValidUserID(strings.ToLower(ref)) {
 		userID := strings.ToLower(ref)
 		var exists int
@@ -177,7 +147,7 @@ ORDER BY fr.updated_at DESC`, userID)
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer ignoreCleanupError(rows.Close)
 		items := []FriendRequest{}
 		for rows.Next() {
 			req, err := baselineSocialScanFriendRequest(rows)
@@ -201,7 +171,7 @@ func (s *Store) baselineSocialAcceptFriendRequest(ctx context.Context, userID, i
 	if err != nil {
 		return FriendRequest{}, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	var req FriendRequest
 	row := tx.QueryRowContext(ctx, `
 SELECT fr.id,fr.requester_user_id_hash,COALESCE(ru.alias,''),fr.target_user_id_hash,COALESCE(tu.alias,''),fr.status,fr.created_at,fr.updated_at
@@ -269,7 +239,7 @@ ORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	items := []Friend{}
 	for rows.Next() {
 		var item Friend
@@ -281,40 +251,13 @@ ORDER BY COALESCE(u.alias,u.user_id_hash),u.user_id_hash`, userID)
 	return items, rows.Err()
 }
 
-// baselineSocialAuthoritativeSocial returns the current social state from the friendship
-// tables. server_social_snapshots is only a cache populated by the standalone
-// social endpoints, so it must not decide what a newly restored client sees.
-func (s *Store) baselineSocialAuthoritativeSocial(ctx context.Context, userID string) ([]SocialSnapshot, error) {
-	friends, err := s.baselineSocialListFriends(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	incoming, outgoing, err := s.baselineSocialListFriendRequests(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	friendsJSON, err := json.Marshal(FriendsResponse{Friends: friends})
-	if err != nil {
-		return nil, err
-	}
-	requestsJSON, err := json.Marshal(FriendRequestsResponse{Incoming: incoming, Outgoing: outgoing})
-	if err != nil {
-		return nil, err
-	}
-	now := Timestamp_CanonicalNow()
-	return []SocialSnapshot{
-		{Kind: "friends.list", JSON: friendsJSON, UpdatedAt: now},
-		{Kind: "friends.requests", JSON: requestsJSON, UpdatedAt: now},
-	}, nil
-}
-
 func (s *Store) baselineSocialRemoveFriend(ctx context.Context, userID, friendID string) error {
 	a, b := baselineSocialFriendPair(userID, friendID)
 	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_friendships WHERE user_id_a=?1 AND user_id_b=?2`, a, b); err != nil {
 		return err
 	}
@@ -332,7 +275,7 @@ func (s *Store) baselineSocialUpsertProfileStats(ctx context.Context, userID, ap
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	now := time.Now().UTC().Format(time.RFC3339)
 	applied := 0
 	for _, metric := range metrics {

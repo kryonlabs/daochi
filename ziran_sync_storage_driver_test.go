@@ -75,7 +75,7 @@ type lifecycleRows struct {
 type lifecycleResult struct{ plan *lifecycleDriverPlan }
 
 func (driver lifecycleDriver) Open(string) (driver.Conn, error) {
-	return lifecycleConnection{driver.plan}, nil
+	return lifecycleConnection(driver), nil
 }
 
 func (lifecycleConnection) Prepare(string) (driver.Stmt, error) {
@@ -92,14 +92,14 @@ func (connection lifecycleConnection) BeginTx(_ context.Context, _ driver.TxOpti
 	if err := connection.plan.step("begin", "", nil); err != nil {
 		return nil, err
 	}
-	return lifecycleTransaction{connection.plan}, nil
+	return lifecycleTransaction(connection), nil
 }
 
 func (connection lifecycleConnection) ExecContext(_ context.Context, query string, arguments []driver.NamedValue) (driver.Result, error) {
 	if err := connection.plan.step("exec", query, arguments); err != nil {
 		return nil, err
 	}
-	return lifecycleResult{connection.plan}, nil
+	return lifecycleResult(connection), nil
 }
 
 func (connection lifecycleConnection) QueryContext(_ context.Context, query string, arguments []driver.NamedValue) (driver.Rows, error) {

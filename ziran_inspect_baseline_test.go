@@ -36,7 +36,7 @@ func baselineRunInspect(ctx context.Context, args []string, opts InspectOptions)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer ignoreCleanupError(db.Close)
 
 	switch rest[0] {
 	case "summary":
@@ -83,13 +83,13 @@ func baselineInspectSummary(ctx context.Context, db *sql.DB, out io.Writer) erro
 		"server_encrypted_payloads",
 		"server_sync_audit",
 	}
-	fmt.Fprintln(out, "Daochi data summary")
+	_, _ = fmt.Fprintln(out, "Daochi data summary")
 	for _, table := range tables {
 		n, err := baselineInspectCount(ctx, db, table, "")
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%-24s %d\n", table, n)
+		_, _ = fmt.Fprintf(out, "%-24s %d\n", table, n)
 	}
 	return nil
 }
@@ -102,15 +102,15 @@ ORDER BY last_seen_at DESC`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
-	fmt.Fprintln(out, "Users")
+	_, _ = fmt.Fprintln(out, "Users")
 	for rows.Next() {
 		var userID, publicKey, createdAt, lastSeenAt string
 		if err := rows.Scan(&userID, &publicKey, &createdAt, &lastSeenAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s  key=%s  created=%s  last_seen=%s\n",
+		_, _ = fmt.Fprintf(out, "%s  key=%s  created=%s  last_seen=%s\n",
 			baselineRedactID(userID, full), baselineRedactID(strings.ToLower(publicKey), full),
 			createdAt, lastSeenAt)
 	}
@@ -135,16 +135,16 @@ WHERE user_id_hash=?1`, userID).Scan(&publicKey, &createdAt, &lastSeenAt)
 		return err
 	}
 
-	fmt.Fprintf(out, "User %s\n", baselineRedactID(userID, full))
-	fmt.Fprintf(out, "public_key=%s\n", baselineRedactID(strings.ToLower(publicKey), full))
-	fmt.Fprintf(out, "created=%s\nlast_seen=%s\n", createdAt, lastSeenAt)
+	_, _ = fmt.Fprintf(out, "User %s\n", baselineRedactID(userID, full))
+	_, _ = fmt.Fprintf(out, "public_key=%s\n", baselineRedactID(strings.ToLower(publicKey), full))
+	_, _ = fmt.Fprintf(out, "created=%s\nlast_seen=%s\n", createdAt, lastSeenAt)
 
 	for _, table := range []string{"server_habits", "server_habit_days", "server_sessions", "server_session_rounds", "server_meditation_logs", "server_encrypted_records"} {
 		n, err := baselineInspectCount(ctx, db, table, "WHERE user_id_hash=?1", userID)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%-24s %d\n", table, n)
+		_, _ = fmt.Fprintf(out, "%-24s %d\n", table, n)
 	}
 	if err := baselineInspectUserHabits(ctx, db, out, userID); err != nil {
 		return err
@@ -181,9 +181,9 @@ SELECT compacted_through_version
 FROM server_sync_compaction
 WHERE user_id_hash=?1`, userID).Scan(&compactedThrough)
 
-	fmt.Fprintf(out, "Daochi doctor %s\n", baselineRedactID(userID, full))
-	fmt.Fprintf(out, "status=ok server_version=%d compacted_through=%d\n", version, compactedThrough)
-	fmt.Fprintf(out, "created=%s last_seen=%s\n", createdAt, lastSeenAt)
+	_, _ = fmt.Fprintf(out, "Daochi doctor %s\n", baselineRedactID(userID, full))
+	_, _ = fmt.Fprintf(out, "status=ok server_version=%d compacted_through=%d\n", version, compactedThrough)
+	_, _ = fmt.Fprintf(out, "created=%s last_seen=%s\n", createdAt, lastSeenAt)
 
 	for _, table := range []string{
 		"server_habits",
@@ -200,7 +200,7 @@ WHERE user_id_hash=?1`, userID).Scan(&compactedThrough)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%-28s %d\n", table, n)
+		_, _ = fmt.Fprintf(out, "%-28s %d\n", table, n)
 	}
 	if err := baselineInspectDoctorWarnings(ctx, db, out, userID); err != nil {
 		return err
@@ -253,13 +253,13 @@ WHERE full_snapshot_required!=0`, userID).Scan(&fullSnapshots); err != nil {
 	if fullSnapshots >= 3 {
 		warnings = append(warnings, fmt.Sprintf("%d recent syncs required full snapshots", fullSnapshots))
 	}
-	fmt.Fprintln(out, "\nWarnings")
+	_, _ = fmt.Fprintln(out, "\nWarnings")
 	if len(warnings) == 0 {
-		fmt.Fprintln(out, "- none")
+		_, _ = fmt.Fprintln(out, "- none")
 		return nil
 	}
 	for _, warning := range warnings {
-		fmt.Fprintf(out, "- %s\n", warning)
+		_, _ = fmt.Fprintf(out, "- %s\n", warning)
 	}
 	return nil
 }
@@ -274,9 +274,9 @@ LIMIT 12`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
-	fmt.Fprintln(out, "\nClients")
+	_, _ = fmt.Fprintln(out, "\nClients")
 	for rows.Next() {
 		var clientID string
 		var loginAt, syncAt sql.NullString
@@ -289,7 +289,7 @@ LIMIT 12`, userID)
 		if protocol > 0 && protocol < 5 {
 			status = "legacy"
 		}
-		fmt.Fprintf(out, "%s protocol=%d status=%s last_login=%s last_sync=%s seen=%d clock=%d\n",
+		_, _ = fmt.Fprintf(out, "%s protocol=%d status=%s last_login=%s last_sync=%s seen=%d clock=%d\n",
 			clientID, protocol, status, baselineNullText(loginAt), baselineNullText(syncAt), seenVersion, clientClock)
 	}
 	return rows.Err()
@@ -306,9 +306,9 @@ LIMIT 8`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
-	fmt.Fprintln(out, "\nRecent sync audit")
+	_, _ = fmt.Fprintln(out, "\nRecent sync audit")
 	for rows.Next() {
 		var clientID, snapshotReason, createdAt string
 		var protocol, remoteOps, fullSnapshot, encryptedPayload int
@@ -317,7 +317,7 @@ LIMIT 8`, userID)
 			&snapshotReason, &encryptedPayload, &encryptedBytes, &createdAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s protocol=%d version=%d remote_ops=%d full_snapshot=%t reason=%s encrypted_payload=%t bytes=%d at=%s\n",
+		_, _ = fmt.Fprintf(out, "%s protocol=%d version=%d remote_ops=%d full_snapshot=%t reason=%s encrypted_payload=%t bytes=%d at=%s\n",
 			clientID, protocol, version, remoteOps, fullSnapshot != 0, baselineEmptyText(snapshotReason, "-"),
 			encryptedPayload != 0, encryptedBytes, createdAt)
 	}
@@ -334,16 +334,16 @@ LIMIT 50`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
-	fmt.Fprintln(out, "\nHabits")
+	_, _ = fmt.Fprintln(out, "\nHabits")
 	for rows.Next() {
 		var id, name, updatedAt string
 		var syncMode, syncActivity, deletedAt int
 		if err := rows.Scan(&id, &name, &syncMode, &syncActivity, &deletedAt, &updatedAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s  %q  sync=%d/%d  deleted=%d  updated=%s\n",
+		_, _ = fmt.Fprintf(out, "%s  %q  sync=%d/%d  deleted=%d  updated=%s\n",
 			id, name, syncMode, syncActivity, deletedAt, updatedAt)
 	}
 	return rows.Err()
@@ -359,16 +359,16 @@ LIMIT 25`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
-	fmt.Fprintln(out, "\nRecent sessions")
+	_, _ = fmt.Fprintln(out, "\nRecent sessions")
 	for rows.Next() {
 		var id, startedAt, topic, updatedAt string
 		var localDate, activity, deletedAt int
 		if err := rows.Scan(&id, &startedAt, &localDate, &topic, &activity, &deletedAt, &updatedAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s  started=%s  local_date=%d  topic=%s  activity=%d  deleted=%d  updated=%s\n",
+		_, _ = fmt.Fprintf(out, "%s  started=%s  local_date=%d  topic=%s  activity=%d  deleted=%d  updated=%s\n",
 			id, startedAt, localDate, topic, activity, deletedAt, updatedAt)
 	}
 	return rows.Err()

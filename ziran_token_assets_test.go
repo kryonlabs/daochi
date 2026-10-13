@@ -78,7 +78,7 @@ func TestZiranTokenAssetSeedReturnsNativeErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer ignoreCleanupError(database.Close)
 	if err := TokenAssets_Seed(database, context.Background()); err == nil ||
 		!strings.Contains(err.Error(), "no such table: token_assets") {
 		t.Fatalf("missing schema error: %v", err)

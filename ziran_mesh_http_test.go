@@ -208,7 +208,7 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 						local = local.WithContext(cancelled)
 					}
 					if mode == "closed" {
-						server.Store.Database.Close()
+						_ = server.Store.Database.Close()
 					}
 					writer := httptest.NewRecorder()
 					var destination http.ResponseWriter = writer
@@ -296,7 +296,7 @@ func TestZiranMeshPostJSONAgainstBaseline(t *testing.T) {
 					var body *httpPortBody
 					http.DefaultTransport = trustHTTPTransport(func(request *http.Request) (*http.Response, error) {
 						data, err := io.ReadAll(request.Body)
-						request.Body.Close()
+						_ = request.Body.Close()
 						if err != nil {
 							t.Fatal(err)
 						}

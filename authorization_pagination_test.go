@@ -19,7 +19,7 @@ func authorizationPaginationRecord(t *testing.T, fixture *authorizationFixture, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer transaction.Rollback()
+	defer ignoreCleanupError(transaction.Rollback)
 	written := SyncWrites_UpsertRecord(transaction, t.Context(), fixture.owner.UserID, record)
 	if written.Error != nil {
 		t.Fatal(written.Error)

@@ -32,7 +32,7 @@ ORDER BY app_id`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	registrations := make([]SignedAppRegistrationRequest, 0, len(allowedApps))
 	for rows.Next() {

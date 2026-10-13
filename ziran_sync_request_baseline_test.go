@@ -13,7 +13,7 @@ import (
 // These fixtures preserve the handwritten request boundary at be7f3a0.
 // They remain independent regression oracles for the canonical Ziran module.
 func baselineBoundaryReadJSON(w http.ResponseWriter, r *http.Request, maxBody int64) JSONResult {
-	defer r.Body.Close()
+	defer ignoreCleanupError(r.Body.Close)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
 		return JSONResult{Error: errors.New("request body too large")}

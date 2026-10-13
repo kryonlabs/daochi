@@ -15,6 +15,9 @@ import (
 	"testing"
 )
 
+// docsContextKey marks the request context a docs handler must pass through.
+type docsContextKey struct{}
+
 func TestZiranDocsSpecAgainstBaseline(t *testing.T) {
 	actual, original := Docs_Spec(), baselineOpenAPISpec()
 	if !reflect.DeepEqual(actual, original) {
@@ -170,7 +173,7 @@ func TestZiranDocsHandlerAgainstBaseline(t *testing.T) {
 							panic(sentinel)
 						}
 					}}))
-					contextValue := context.WithValue(context.Background(), struct{}{}, "request identity")
+					contextValue := context.WithValue(context.Background(), docsContextKey{}, "request identity")
 					request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(contextValue)
 					if mode == "unknown path" {
 						request.URL.Path = "/missing"

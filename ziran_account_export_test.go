@@ -40,7 +40,7 @@ func TestZiranAccountExportAgainstBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer ignoreCleanupError(database.Close)
 	database.SetMaxOpenConns(1)
 	store := &Store{Database: database}
 	for _, user := range []string{account, strings.Repeat("b", 64), "missing", "", "' OR 1=1 --"} {
@@ -156,7 +156,7 @@ type accountExportRows struct {
 var accountExportDriverSequence atomic.Uint64
 
 func (d accountExportDriver) Open(string) (driver.Conn, error) {
-	return accountExportConnection{d.plan}, nil
+	return accountExportConnection(d), nil
 }
 func (accountExportConnection) Prepare(string) (driver.Stmt, error) {
 	return nil, errors.New("unexpected prepare")
@@ -249,7 +249,7 @@ func TestZiranAccountExportRowsCloseDuringPanic(t *testing.T) {
 			if generated {
 				AccountExport_QueryRows(store.Database, context.Background(), "fixture", "account", nil)
 			} else {
-				store.baselineQueryAccountRows(context.Background(), "fixture", "account", nil)
+				_, _ = store.baselineQueryAccountRows(context.Background(), "fixture", "account", nil)
 			}
 		}()
 		if plan.closed.Load() != 1 {

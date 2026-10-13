@@ -23,7 +23,7 @@ type viewsDriverRows struct {
 }
 
 func (driver viewsDriver) Open(string) (driver.Conn, error) {
-	return viewsConnection{lifecycleConnection{driver.plan}}, nil
+	return viewsConnection{lifecycleConnection(driver)}, nil
 }
 
 func (connection viewsConnection) QueryContext(ctx context.Context, query string, arguments []driver.NamedValue) (driver.Rows, error) {

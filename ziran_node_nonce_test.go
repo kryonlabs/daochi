@@ -16,7 +16,7 @@ func baselineConsumeNodeNonce(database *sql.DB, context context.Context, nodeID,
 	if err != nil {
 		return err
 	}
-	defer transaction.Rollback()
+	defer ignoreCleanupError(transaction.Rollback)
 	if _, err := transaction.ExecContext(context,
 		"DELETE FROM node_request_nonces WHERE expires_at<?1", time.Now().Unix()); err != nil {
 		return err
@@ -60,7 +60,7 @@ func nodeNonceSnapshot(t *testing.T, database *sql.DB) []nodeNonceRow {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	var result []nodeNonceRow
 	for rows.Next() {
 		var row nodeNonceRow

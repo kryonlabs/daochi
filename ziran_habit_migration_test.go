@@ -105,7 +105,7 @@ func migrationInTransaction(t *testing.T, store *Store, call func(*sql.Tx) Migra
 	if err != nil {
 		return MigrationResult{Error: err}
 	}
-	defer transaction.Rollback()
+	defer ignoreCleanupError(transaction.Rollback)
 	result := call(transaction)
 	if result.Error == nil {
 		result.Error = transaction.Commit()
@@ -155,7 +155,7 @@ type migrationDriver struct{ plan *lifecycleDriverPlan }
 type migrationConnection struct{ lifecycleConnection }
 
 func (driver migrationDriver) Open(string) (driver.Conn, error) {
-	return migrationConnection{lifecycleConnection{driver.plan}}, nil
+	return migrationConnection{lifecycleConnection(driver)}, nil
 }
 
 func (connection migrationConnection) QueryContext(ctx context.Context, query string, arguments []driver.NamedValue) (driver.Rows, error) {

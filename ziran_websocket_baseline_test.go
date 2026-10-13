@@ -125,7 +125,7 @@ func (s *Server) baselineHandleSyncWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.Metrics.WebSocketAccepted.Add(1)
-	defer conn.Close()
+	defer ignoreCleanupError(conn.Close)
 
 	events := hub.subscribe(userID)
 	defer hub.unsubscribe(userID, events)
@@ -214,11 +214,11 @@ func baselineAcceptWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, 
 	}
 	response += "\r\n"
 	if _, err := rw.WriteString(response); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, err
 	}
 	if err := rw.Flush(); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, err
 	}
 	return conn, rw, nil
@@ -290,10 +290,6 @@ func baselineWriteWebSocketFrame(conn net.Conn, opcode byte, payload []byte) err
 	return err
 }
 
-func baselineReadWebSocketFrame(r *bufio.Reader) (byte, []byte, error) {
-	return baselineReadWebSocketFrameMasked(r, false)
-}
-
 func baselineReadClientWebSocketFrame(r *bufio.Reader) (byte, []byte, error) {
 	return baselineReadWebSocketFrameMasked(r, true)
 }
@@ -316,13 +312,14 @@ func baselineReadWebSocketFrameMasked(r *bufio.Reader, requireMask bool) (byte, 
 		return 0, nil, errors.New("websocket client frame not masked")
 	}
 	length := uint64(first[1] & 0x7f)
-	if length == 126 {
+	switch length {
+	case 126:
 		var ext [2]byte
 		if _, err := io.ReadFull(r, ext[:]); err != nil {
 			return 0, nil, err
 		}
 		length = uint64(binary.BigEndian.Uint16(ext[:]))
-	} else if length == 127 {
+	case 127:
 		var ext [8]byte
 		if _, err := io.ReadFull(r, ext[:]); err != nil {
 			return 0, nil, err

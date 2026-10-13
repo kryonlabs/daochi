@@ -95,7 +95,7 @@ func (m *BaselineServerMetrics) recordWebSocketReject(reason string) {
 
 func (m *BaselineServerMetrics) writePrometheus(w http.ResponseWriter, usage NodeUsage, storage NodeStorageUsage, buildVersion string) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	fmt.Fprintf(w, "# TYPE daochi_build_info gauge\ndaochi_build_info{version=%q} 1\n", buildVersion)
+	_, _ = fmt.Fprintf(w, "# TYPE daochi_build_info gauge\ndaochi_build_info{version=%q} 1\n", buildVersion)
 	baselineWriteScalarMetric(w, "daochi_sync_requests_total", "counter", m.syncRequests.Load())
 	baselineWriteScalarMetric(w, "daochi_sync_failures_total", "counter", m.syncFailures.Load())
 	baselineWriteScalarMetric(w, "daochi_sync_full_snapshots_total", "counter", m.syncFullSnapshots.Load())
@@ -143,18 +143,18 @@ func baselineNonNegativeInt64(value int64) int64 {
 }
 
 func baselineWriteAppStorageMetrics(w http.ResponseWriter, name, typ string, apps []AppStorageUsage) {
-	fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
+	_, _ = fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
 	for _, app := range apps {
-		fmt.Fprintf(w, `%s{app_id="%s"} %d`+"\n",
+		_, _ = fmt.Fprintf(w, `%s{app_id="%s"} %d`+"\n",
 			name, baselineEscapeMetricLabel(app.AppID), baselineNonNegativeInt64(app.LogicalBytes))
 	}
 }
 
 func baselineWriteCollectionStorageMetrics(w http.ResponseWriter, name, typ string, apps []AppStorageUsage) {
-	fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
+	_, _ = fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
 	for _, app := range apps {
 		for _, collection := range app.Collections {
-			fmt.Fprintf(w, `%s{app_id="%s",collection="%s"} %d`+"\n",
+			_, _ = fmt.Fprintf(w, `%s{app_id="%s",collection="%s"} %d`+"\n",
 				name, baselineEscapeMetricLabel(app.AppID), baselineEscapeMetricLabel(collection.Collection),
 				baselineNonNegativeInt64(collection.LogicalBytes))
 		}
@@ -178,35 +178,35 @@ func (m *BaselineServerMetrics) writeMapMetrics(w http.ResponseWriter) {
 }
 
 func baselineWriteScalarMetric(w http.ResponseWriter, name, typ string, value uint64) {
-	fmt.Fprintf(w, "# TYPE %s %s\n%s %d\n", name, typ, name, value)
+	_, _ = fmt.Fprintf(w, "# TYPE %s %s\n%s %d\n", name, typ, name, value)
 }
 
 func baselineWriteLabelMap(w http.ResponseWriter, name, typ, labels string, values map[string]uint64) {
-	fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
+	_, _ = fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
 	keys := baselineSortedMetricKeys(values)
 	names := strings.Split(labels, ",")
 	for _, key := range keys {
 		parts := strings.Split(key, "|")
-		fmt.Fprintf(w, "%s{", name)
+		_, _ = fmt.Fprintf(w, "%s{", name)
 		for i, label := range names {
 			if i > 0 {
-				fmt.Fprint(w, ",")
+				_, _ = fmt.Fprint(w, ",")
 			}
 			value := ""
 			if i < len(parts) {
 				value = parts[i]
 			}
-			fmt.Fprintf(w, `%s="%s"`, label, baselineEscapeMetricLabel(value))
+			_, _ = fmt.Fprintf(w, `%s="%s"`, label, baselineEscapeMetricLabel(value))
 		}
-		fmt.Fprintf(w, "} %d\n", values[key])
+		_, _ = fmt.Fprintf(w, "} %d\n", values[key])
 	}
 }
 
 func baselineWriteSingleLabelMap(w http.ResponseWriter, name, typ, label string, values map[string]uint64) {
-	fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
+	_, _ = fmt.Fprintf(w, "# TYPE %s %s\n", name, typ)
 	keys := baselineSortedMetricKeys(values)
 	for _, key := range keys {
-		fmt.Fprintf(w, `%s{%s="%s"} %d`+"\n", name, label, baselineEscapeMetricLabel(key), values[key])
+		_, _ = fmt.Fprintf(w, `%s{%s="%s"} %d`+"\n", name, label, baselineEscapeMetricLabel(key), values[key])
 	}
 }
 

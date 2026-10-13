@@ -15,7 +15,7 @@ func (s *Store) baselineMigrationCleanupOrphanHabitDays(ctx context.Context, use
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	changed, err := baselineMigrationCleanupOrphanHabitDays(ctx, tx, userID)
 	if err != nil {
 		return err
@@ -69,16 +69,16 @@ func (s *Store) baselineMigrationAutoMigrateAllAccounts(ctx context.Context) err
 	for rows.Next() {
 		var userID string
 		if err := rows.Scan(&userID); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		users = append(users, userID)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return err
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, userID := range users {
 		if err := s.baselineMigrationAutoMigrateAccount(ctx, userID); err != nil {
 			return err
@@ -92,7 +92,7 @@ func (s *Store) baselineMigrationAutoMigrateAccount(ctx context.Context, userID 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	changed, err := baselineMigrationMigrateAllHabitIDsToCanonicalUUIDs(ctx, tx, userID)
 	if err != nil {
 		return err
@@ -127,16 +127,16 @@ ORDER BY sort_order,id`, userID)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return false, err
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return false, err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	changed := false
 	for _, oldID := range ids {
@@ -182,16 +182,16 @@ ORDER BY server_version,op_id`, userID)
 	for rows.Next() {
 		var item opRow
 		if err := rows.Scan(&item.opID, &item.entityID, &item.payload); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return false, err
 		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return false, err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	changed := false
 	for _, item := range items {
@@ -304,7 +304,7 @@ ORDER BY hd.habit_id`, userID)
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	type legacyHabit struct {
 		id            string

@@ -130,7 +130,7 @@ func (s *Store) baselineQueryAccountRows(ctx context.Context, query string, user
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	columns, err := rows.Columns()
 	if err != nil {

@@ -54,7 +54,7 @@ ORDER BY server_version,client_id,seq,op_id`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	ops := []SyncOp{}
 	for rows.Next() {
@@ -128,7 +128,7 @@ ORDER BY sort_order,id`, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []Habit{}
 	for rows.Next() {
@@ -155,7 +155,7 @@ ORDER BY hd.local_date DESC,h.sort_order,hd.habit_id`, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []CleanHabitDay{}
 	for rows.Next() {
@@ -184,7 +184,7 @@ func (s *Store) baselineViewsCleanSessions(ctx context.Context, userID string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []Session{}
 	for rows.Next() {
@@ -200,7 +200,7 @@ func (s *Store) baselineViewsCleanSessions(ctx context.Context, userID string) (
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	for i := range items {
 		rounds, err := s.baselineViewsSnapshotSessionRounds(ctx, userID, items[i].ID)
@@ -221,7 +221,7 @@ ORDER BY completed_at DESC,id`, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []MeditationLog{}
 	for rows.Next() {
@@ -232,10 +232,6 @@ ORDER BY completed_at DESC,id`, userID)
 		items = append(items, item)
 	}
 	return items, rows.Err()
-}
-
-func (s *Store) baselineViewsCleanSocialCache(ctx context.Context, userID string) ([]SocialSnapshot, error) {
-	return s.baselineViewsSnapshotSocialCache(ctx, userID, 0)
 }
 
 func (s *Store) baselineViewsStateHash(ctx context.Context, userID string) (string, error) {
@@ -271,7 +267,7 @@ ORDER BY id`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	for rows.Next() {
 		var id, name, updatedAt string
@@ -281,7 +277,7 @@ ORDER BY id`, userID)
 			&counterEnabled, &sortOrder, &deletedAt, &updatedAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "habit\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+		_, _ = fmt.Fprintf(h, "habit\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
 			id, name, colorR, colorG, colorB, syncMode, syncActivity, counterEnabled,
 			sortOrder, deletedAt, updatedAt)
 	}
@@ -297,7 +293,7 @@ ORDER BY habit_id,local_date`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	for rows.Next() {
 		var habitID, updatedAt string
@@ -305,7 +301,7 @@ ORDER BY habit_id,local_date`, userID)
 		if err := rows.Scan(&habitID, &localDate, &completed, &count, &updatedAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "habit_day\t%s\t%d\t%d\t%d\t%s\n",
+		_, _ = fmt.Fprintf(h, "habit_day\t%s\t%d\t%d\t%d\t%s\n",
 			habitID, localDate, completed, count, updatedAt)
 	}
 	return rows.Err()
@@ -322,7 +318,7 @@ func (s *Store) baselineViewsHashSessions(ctx context.Context, h interface{ Writ
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	for rows.Next() {
 		var id, startedAt, topic, source, roundsHash, note, tags, updatedAt string
@@ -333,7 +329,7 @@ func (s *Store) baselineViewsHashSessions(ctx context.Context, h interface{ Writ
 			&deletedAt, &updatedAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "session\t%s\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%d\t%s\n",
+		_, _ = fmt.Fprintf(h, "session\t%s\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%d\t%s\n",
 			id, startedAt, localDate, topic, activity, source, roundsHash,
 			moodBefore, moodAfter, energy, stress, note, tags, deletedAt, updatedAt)
 		sessionIDs = append(sessionIDs, id)
@@ -361,14 +357,14 @@ ORDER BY round_index`, userID, sessionID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	for rows.Next() {
 		var roundIndex, breaths, holdSeconds int
 		if err := rows.Scan(&roundIndex, &breaths, &holdSeconds); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "round\t%s\t%d\t%d\t%d\n", sessionID, roundIndex, breaths, holdSeconds)
+		_, _ = fmt.Fprintf(h, "round\t%s\t%d\t%d\t%d\n", sessionID, roundIndex, breaths, holdSeconds)
 	}
 	return rows.Err()
 }
@@ -382,7 +378,7 @@ ORDER BY id`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	for rows.Next() {
 		var id, sessionID, completedAt string
@@ -390,7 +386,7 @@ ORDER BY id`, userID)
 		if err := rows.Scan(&id, &sessionID, &durationSeconds, &completedAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "meditation_log\t%s\t%s\t%d\t%s\n", id, sessionID, durationSeconds, completedAt)
+		_, _ = fmt.Fprintf(h, "meditation_log\t%s\t%s\t%d\t%s\n", id, sessionID, durationSeconds, completedAt)
 	}
 	return rows.Err()
 }
@@ -404,14 +400,14 @@ ORDER BY kind`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	for rows.Next() {
 		var kind, payload, updatedAt string
 		if err := rows.Scan(&kind, &payload, &updatedAt); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "social_cache\t%s\t%s\t%s\n", kind, payload, updatedAt)
+		_, _ = fmt.Fprintf(h, "social_cache\t%s\t%s\t%s\n", kind, payload, updatedAt)
 	}
 	return rows.Err()
 }
@@ -425,7 +421,7 @@ ORDER BY collection,id`, userID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	for rows.Next() {
 		var collection, id, keyID, nonce, ciphertext, updatedAt, contentHash, parentID string
@@ -435,7 +431,7 @@ ORDER BY collection,id`, userID)
 			&deletedAt, &contentHash, &schemaVersion, &parentID); err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "encrypted_record\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
+		_, _ = fmt.Fprintf(h, "encrypted_record\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
 			collection, id, keyID, nonce, ciphertext, updatedAt, deletedAt,
 			contentHash, schemaVersion, parentID)
 	}
@@ -471,7 +467,7 @@ ORDER BY server_version,sort_order,id`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []Habit{}
 	for rows.Next() {
@@ -496,7 +492,7 @@ ORDER BY server_version,habit_id,local_date`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []HabitDay{}
 	for rows.Next() {
@@ -524,7 +520,7 @@ func (s *Store) baselineViewsSnapshotSessions(ctx context.Context, userID string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []Session{}
 	for rows.Next() {
@@ -540,7 +536,7 @@ func (s *Store) baselineViewsSnapshotSessions(ctx context.Context, userID string
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	for i := range items {
 		rounds, err := s.baselineViewsSnapshotSessionRounds(ctx, userID, items[i].ID)
@@ -561,7 +557,7 @@ ORDER BY round_index`, userID, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []SessionRound{}
 	for rows.Next() {
@@ -583,7 +579,7 @@ ORDER BY server_version,completed_at,id`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []MeditationLog{}
 	for rows.Next() {
@@ -605,7 +601,7 @@ ORDER BY server_version,kind`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []SocialSnapshot{}
 	for rows.Next() {
@@ -632,7 +628,7 @@ ORDER BY server_version,collection,id`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []EncryptedRecord{}
 	for rows.Next() {

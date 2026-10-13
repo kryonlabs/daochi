@@ -125,7 +125,7 @@ func (s *Store) baselineRegisterDeviceKey(ctx context.Context, device DeviceKey,
 	if err != nil {
 		return err
 	}
-	defer transaction.Rollback()
+	defer ignoreCleanupError(transaction.Rollback)
 	if err := baselineRecordDeviceNonce(ctx, transaction, device.AccountID, nonce); err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (s *Store) baselineRevokeDeviceKey(ctx context.Context, accountID string, r
 	if err != nil {
 		return err
 	}
-	defer transaction.Rollback()
+	defer ignoreCleanupError(transaction.Rollback)
 	if err := baselineRecordDeviceNonce(ctx, transaction, accountID, request.Nonce); err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ FROM server_device_keys WHERE account_id=?1 ORDER BY app_id,device_key_id`, acco
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	var devices []DeviceKey
 	for rows.Next() {
 		var device DeviceKey

@@ -193,7 +193,7 @@ func baselineTrustCompleteRemote(
 			continue
 		}
 		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 2048))
-		response.Body.Close()
+		_ = response.Body.Close()
 		if readErr != nil {
 			lastError = readErr
 			continue

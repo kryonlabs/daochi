@@ -78,8 +78,8 @@ func TestZiranMiddlewareBaseline(t *testing.T) {
 			marker := &struct{ mode string }{mode}
 			sentinel := errors.New("middleware native error")
 			connection, peer := net.Pipe()
-			defer connection.Close()
-			defer peer.Close()
+			defer ignoreCleanupError(connection.Close)
+			defer ignoreCleanupError(peer.Close)
 			buffer := bufio.NewReadWriter(bufio.NewReader(strings.NewReader("")), bufio.NewWriter(peer))
 			type observation struct {
 				status   int

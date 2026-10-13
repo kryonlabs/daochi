@@ -178,13 +178,6 @@ func baselineNodePolicyAllowsPull(policy *NodeSyncPolicy) bool {
 	}
 }
 
-func baselineEffectiveNodeSyncPolicy(policy *NodeSyncPolicy) NodeSyncPolicy {
-	if policy == nil {
-		return NodeSyncPolicy{}
-	}
-	return *policy
-}
-
 // baselineExportMeshEncryptedRecords walks the change log in seq order and emits
 // both record upserts and deletion tombstones. Upsert entries whose
 // record row is gone (deleted later in the log) are skipped; their
@@ -214,7 +207,7 @@ ORDER BY e.seq`, cursor.Seq)
 	if err != nil {
 		return nil, nil, "", false, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	limit = baselineMeshBatchLimit(limit, limit)
 	records := make([]baselineMeshEncryptedRecord, 0, limit)
@@ -295,10 +288,6 @@ ORDER BY e.seq`, cursor.Seq)
 	return records, deletions, nextCursor, true, nil
 }
 
-func (s *Store) baselineImportMeshEncryptedRecords(ctx context.Context, policy NodeSyncPolicy, records []baselineMeshEncryptedRecord) (int, error) {
-	return s.baselineImportMeshEncryptedBatch(ctx, policy, records, nil)
-}
-
 // baselineImportMeshEncryptedBatch applies upserts and deletions together,
 // ordered by their change-log seq so a delete-then-recreate sequence in
 // one batch converges to the recreated record.
@@ -328,7 +317,7 @@ func (s *Store) baselineImportMeshEncryptedBatch(ctx context.Context, policy Nod
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 
 	tombstonedUsers := map[string]bool{}
 	userTombstoned := func(userID string) (bool, error) {
@@ -595,7 +584,7 @@ ORDER BY a.app_id,c.collection_prefix`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	var matchers []baselineAppCollectionMatcher
 	for rows.Next() {

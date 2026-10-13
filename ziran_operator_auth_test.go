@@ -83,9 +83,10 @@ func TestZiranLocalOperatorAuthenticationAgainstBaseline(t *testing.T) {
 				if mode != "no token" {
 					server.Cfg.AdminToken = "operator-secret"
 					allowed = mode == "correct token"
-					if mode == "correct token" {
+					switch mode {
+					case "correct token":
 						request.Header.Set("X-Daochi-Admin", "operator-secret")
-					} else if mode == "wrong token" {
+					case "wrong token":
 						request.Header.Set("X-Daochi-Admin", "wrong-secret")
 					}
 					if !allowed {

@@ -321,7 +321,7 @@ func (s *Server) baselineMeshPostNodeMeshJSON(ctx context.Context, peerNodeID, t
 	if err != nil {
 		return err
 	}
-	defer httpResp.Body.Close()
+	defer ignoreCleanupError(httpResp.Body.Close)
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(httpResp.Body, 2048))
 		return fmt.Errorf("node mesh request failed: %s %s", httpResp.Status, strings.TrimSpace(string(data)))

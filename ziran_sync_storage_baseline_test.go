@@ -53,7 +53,7 @@ func (s *Store) baselineLifecycleStoreEncryptedPayload(ctx context.Context, user
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	if err := AccountState_Touch(tx, ctx, userID, ErrSyncUserNotFound); err != nil {
 		return 0, err
 	}
@@ -91,7 +91,7 @@ ORDER BY server_version,id` + limitClause
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	payloads := []EncryptedPayload{}
 	for rows.Next() {
@@ -127,7 +127,7 @@ LIMIT ?2`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	payloads := []EncryptedPayload{}
 	for rows.Next() {
@@ -165,7 +165,7 @@ func (s *Store) baselineLifecyclePruneEncryptedPayloads(ctx context.Context, use
 	if err != nil {
 		return result, err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	if maxAge > 0 {
 		cutoff := time.Now().UTC().Add(-maxAge).Format(CanonicalTimestampLayout)
 		res, err := tx.ExecContext(ctx, `
@@ -244,7 +244,7 @@ LIMIT ?2`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []SyncAuditEntry{}
 	for rows.Next() {
@@ -286,7 +286,7 @@ func (s *Store) baselineLifecycleCompactSyncOps(ctx context.Context, userID stri
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 
 	currentVersion, err := baselineLifecycleCurrentUserVersionTx(ctx, tx, userID)
 	if err != nil {
@@ -336,7 +336,7 @@ func (s *Store) baselineLifecycleDeleteAccount(ctx context.Context, userID strin
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO server_account_tombstones(user_id_hash,deleted_at)
 VALUES(?1,CURRENT_TIMESTAMP)
@@ -363,7 +363,7 @@ ORDER BY server_version,client_id,seq,op_id`, userID, sinceVersion)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	items := []SyncLog{}
 	for rows.Next() {
@@ -406,7 +406,7 @@ ORDER BY last_seen_at DESC,client_id`, userID, minProtocol)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	clients := []string{}
 	for rows.Next() {

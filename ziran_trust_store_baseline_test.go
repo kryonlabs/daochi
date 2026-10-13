@@ -217,7 +217,7 @@ func baselineWithTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) err
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ignoreCleanupError(tx.Rollback)
 	if err := fn(tx); err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ ORDER BY display_name,node_id`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 
 	peers := []TrustedNodePeer{}
 	for rows.Next() {
@@ -404,12 +404,12 @@ ORDER BY name`, spaceID)
 			var servicesJSON string
 			if err := rows.Scan(&claim.SpaceID, &claim.Name, &claim.NodeID,
 				&claim.Sequence, &claim.ExpiresAt, &servicesJSON, &claim.Signature); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, nil, err
 			}
 			claim.Version = 1
 			if err := json.Unmarshal([]byte(servicesJSON), &claim.Services); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, nil, err
 			}
 			names = append(names, claim)

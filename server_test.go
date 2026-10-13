@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -2975,7 +2976,7 @@ CREATE TABLE server_meditation_logs (
 		var defaultValue sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			t.Fatal(err)
 		}
 		if name == "user_id_hash" {
@@ -3387,7 +3388,7 @@ func TestSyncWebSocketRejectsQueryToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer ignoreCleanupError(conn.Close)
 	_, err = conn.Write([]byte("GET /api/v1/sync/ws?token=" + identity.Token + " HTTP/1.1\r\n" +
 		"Host: " + u.Host + "\r\n" +
 		"Upgrade: websocket\r\n" +
@@ -3739,21 +3740,6 @@ func postEncryptedEnvelope(t *testing.T, target http.Handler, identity testIdent
 	return payload
 }
 
-func ukuJSONRequest(t *testing.T, target any, method, path, userID, token string, body []byte) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(method, path, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	if userID != "" {
-		req.Header.Set("X-Ksync-User", userID)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	res := httptest.NewRecorder()
-	target.(http.Handler).ServeHTTP(res, req)
-	return res
-}
-
 func tokenJSONRequest(t *testing.T, target any, method, path, token string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader io.Reader
@@ -3971,14 +3957,6 @@ func createFriendRequest(t *testing.T, target any, requester testIdentity, targe
 	return payload.Request
 }
 
-func putStats(t *testing.T, target any, identity testIdentity, body string) {
-	t.Helper()
-	res := friendJSONRequest(t, target, http.MethodPut, "/api/v1/profile/stats", identity, []byte(body))
-	if res.Code != http.StatusOK {
-		t.Fatalf("put stats status = %d body=%s", res.Code, res.Body.String())
-	}
-}
-
 func newTestRequest(t *testing.T, method, baseURL, path string, body io.Reader) *http.Request {
 	t.Helper()
 	if baseURL == "" {
@@ -4002,9 +3980,9 @@ func serveTestRequest(t *testing.T, target any, req *http.Request) *httptest.Res
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer httpRes.Body.Close()
+		defer ignoreCleanupError(httpRes.Body.Close)
 		res.Code = httpRes.StatusCode
-		res.HeaderMap = httpRes.Header
+		maps.Copy(res.Header(), httpRes.Header)
 		if _, err := io.Copy(res.Body, httpRes.Body); err != nil {
 			t.Fatal(err)
 		}
@@ -4098,22 +4076,22 @@ func openSyncWebSocketRaw(t *testing.T, baseURL, extraHeaders string) (*bufio.Re
 		"Sec-WebSocket-Version: 13\r\n" +
 		extraHeaders + "\r\n"))
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatal(err)
 	}
 	status, err := reader.ReadString('\n')
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatal(err)
 	}
 	if !strings.Contains(status, " 101 ") {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatalf("websocket status = %q", strings.TrimSpace(status))
 	}
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 			t.Fatal(err)
 		}
 		if line == "\r\n" {
@@ -4181,7 +4159,7 @@ func testTableHasColumn(t *testing.T, store *Store, table, column string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer ignoreCleanupError(rows.Close)
 	for rows.Next() {
 		var cid int
 		var name, typ string

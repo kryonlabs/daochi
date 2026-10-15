@@ -11,22 +11,61 @@ policy :: #import "token_policy";
 http :: #import "std/http_go";
 clock :: #import "std/time_go";
 errors :: #import "std/errors_go";
+builtin :: #system_library "go:builtin";
 
+// One size on sale, with its Dew and fixed XMR prices.
+StorageOffer :: struct {
+    size: string #go_tag "json:\"size\""
+    limit_bytes: s64 #go_tag "json:\"limit_bytes\""
+    monthly_units: s64 #go_tag "json:\"monthly_units\""
+    yearly_units: s64 #go_tag "json:\"yearly_units\""
+    monthly_xmr_atomic_units: s64 #go_tag "json:\"monthly_xmr_atomic_units\""
+    yearly_xmr_atomic_units: s64 #go_tag "json:\"yearly_xmr_atomic_units\""
+}
+// The top-level prices are the 1 GB plan's, for apps that predate sizes.
 StorageStatus :: struct {
     account_id: string #go_tag "json:\"account_id\""
     asset_id: string #go_tag "json:\"asset_id\""
     enabled: bool #go_tag "json:\"enabled\""
     plan: plans.Plan #go_tag "json:\"plan\""
     used_bytes: s64 #go_tag "json:\"used_bytes\""
+    free_bytes: s64 #go_tag "json:\"free_bytes\""
     monthly_units: s64 #go_tag "json:\"monthly_units\""
     yearly_units: s64 #go_tag "json:\"yearly_units\""
     units_per_dew: s64 #go_tag "json:\"units_per_dew\""
     monthly_xmr_atomic_units: s64 #go_tag "json:\"monthly_xmr_atomic_units\""
     yearly_xmr_atomic_units: s64 #go_tag "json:\"yearly_xmr_atomic_units\""
+    plans: []StorageOffer #go_tag "json:\"plans\""
 }
+// A missing size is the 1 GB plan, as apps that predate sizes ask for it.
 StorageUpgrade :: struct {
     period: string #go_tag "json:\"period\""
+    size: string #go_tag "json:\"size\""
     request_id: string #go_tag "json:\"request_id\""
+}
+
+#scope_file
+MakeOffers :: (count: isize) -> []StorageOffer #foreign builtin "make";
+AppendOffer :: (values: []StorageOffer, value: StorageOffer) -> []StorageOffer #foreign builtin "append";
+
+// XMR prices stay zero when the node has no valid funding ratio.
+Offers :: (atomic: s64, units: s64) -> []StorageOffer {
+    result := MakeOffers(cast(isize)0)
+    for size: plans.Sizes {
+        offer: StorageOffer
+        offer.size = size
+        offer.limit_bytes = plans.SizeBytes(size)
+        offer.monthly_units = plans.Price(size, "monthly")
+        offer.yearly_units = plans.Price(size, "yearly")
+        monthly := plans.MoneroPrice(size, "monthly", atomic, units)
+        yearly := plans.MoneroPrice(size, "yearly", atomic, units)
+        if monthly.error == null && yearly.error == null {
+            offer.monthly_xmr_atomic_units = monthly.value
+            offer.yearly_xmr_atomic_units = yearly.value
+        }
+        result = AppendOffer(result, offer)
+    }
+    return result
 }
 
 #scope_export
@@ -37,11 +76,9 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         return
     }
     http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
-    monthly := plans.MoneroPrice("monthly", accounts.configuration.MoneroRateAtomicAmount,
-        accounts.configuration.MoneroRateTokenUnits)
-    yearly := plans.MoneroPrice("yearly", accounts.configuration.MoneroRateAtomicAmount,
-        accounts.configuration.MoneroRateTokenUnits)
-    available := accounts.configuration.StoragePlansEnabled && monthly.error == null && yearly.error == null &&
+    atomic := accounts.configuration.MoneroRateAtomicAmount
+    units := accounts.configuration.MoneroRateTokenUnits
+    available := accounts.configuration.StoragePlansEnabled && plans.Priced(atomic, units) &&
     policy.IssuerStatus(<<accounts.configuration) == "ok"
     if http.Method(request) == "POST" {
         if !available {
@@ -50,14 +87,18 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         }
         read := body.ReadJSON(writer, request, 1024)
         command: StorageUpgrade
-        if read.error != null || strict.Decode(read.value, *command) != null ||
-        plans.Price(command.period) == 0 || !identity.ValidClientID(command.request_id) {
+        decoded := read.error == null && strict.Decode(read.value, *command) == null
+        if decoded && command.size == "" {
+            command.size = "1gb"
+        }
+        if !decoded || plans.Price(command.size, command.period) == 0 ||
+        !identity.ValidClientID(command.request_id) {
             response.Error(writer, 400, "invalid storage upgrade")
             return
         }
         purchased := plans.Purchase(accounts.database, http.Context(request),
             accounts.configuration.WaoziIssuerPrivateKey, user.value,
-            command.period, command.request_id, clock.Unix(clock.Now()))
+            command.size, command.period, command.request_id, clock.Unix(clock.Now()))
         if purchased.error != null {
             if errors.Message(purchased.error) == "insufficient balance" {
                 response.Error(writer, 402, "not enough Dew")
@@ -83,12 +124,14 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
     value.enabled = available
     value.plan = plan
     value.used_bytes = usage.value
-    value.monthly_units = plans.Price("monthly")
-    value.yearly_units = plans.Price("yearly")
+    value.free_bytes = plans.FreeBytes
     value.units_per_dew = plans.UnitsPerDew
-    if monthly.error == null && yearly.error == null {
-        value.monthly_xmr_atomic_units = monthly.value
-        value.yearly_xmr_atomic_units = yearly.value
-    }
+    value.plans = Offers(atomic, units)
+    // The 1 GB plan comes first.
+    standard := value.plans[0]
+    value.monthly_units = standard.monthly_units
+    value.yearly_units = standard.yearly_units
+    value.monthly_xmr_atomic_units = standard.monthly_xmr_atomic_units
+    value.yearly_xmr_atomic_units = standard.yearly_xmr_atomic_units
     response.JSON(writer, 200, value)
 }

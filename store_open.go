@@ -23,6 +23,10 @@ func StoreOpen_Initialize(database *Database, context Context) Error {
 	if error != nil {
 		return error
 	}
+	error = StoreSchema_StorageSizes(database, context)
+	if error != nil {
+		return error
+	}
 	error = TrustStore_EnsureSchema(database, context)
 	if error != nil {
 		return error

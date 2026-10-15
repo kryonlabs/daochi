@@ -16,12 +16,15 @@ go_time :: #system_library "go:time";
 
 FreeBytes :: 10485760
 PaidBytes :: 1073741824
+LargeBytes :: 5368709120
+Sizes: [2]string = .["1gb", "5gb"];
 UnitsPerDew :: 1000000
 // The latest UTC second representable with a four-digit calendar year.
 MaximumExpiry :: 253402300799
 
 Plan :: struct {
     period: string #go_tag "json:\"period\""
+    size: string #go_tag "json:\"size\""
     expires_at: s64 #go_tag "json:\"expires_at\""
     limit_bytes: s64 #go_tag "json:\"limit_bytes\""
     balance: s64 #go_tag "json:\"balance\""
@@ -36,9 +39,9 @@ Day :: (value: clock.Time) -> isize #foreign go_time "Time.Day";
 ReadTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string) -> Plan {
     result: Plan
     arguments: [1]Any = .[user]
-    destinations: [2]Any = .[*result.period, *result.expires_at]
+    destinations: [3]Any = .[*result.period, *result.size, *result.expires_at]
     result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
-        "SELECT period,expires_at FROM server_storage_plans WHERE user_id=?1", arguments[:]), destinations[:])
+        "SELECT period,size,expires_at FROM server_storage_plans WHERE user_id=?1", arguments[:]), destinations[:])
     if errors.Is(result.error, sql.NoRows()) {
         result.error = null
     }
@@ -50,7 +53,7 @@ SnapshotTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string
     if result.error != null {
         return result
     }
-    result.limit_bytes = ifx result.expires_at > now then PaidBytes else FreeBytes
+    result.limit_bytes = ActiveBytes(result, now)
     balance := ledger.BalanceTx(transaction, context, user, receipts.AssetID)
     result.balance = balance.value
     result.error = balance.error
@@ -62,32 +65,62 @@ SchemaSQL :: () -> string {
     return #string SQL
 CREATE TABLE IF NOT EXISTS server_storage_plans (
  user_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
- period TEXT NOT NULL CHECK(period IN ('monthly','yearly')), expires_at INTEGER NOT NULL
+ period TEXT NOT NULL CHECK(period IN ('monthly','yearly')), expires_at INTEGER NOT NULL,
+ size TEXT NOT NULL DEFAULT '1gb'
 );
 CREATE TABLE IF NOT EXISTS server_storage_purchases (
  user_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
  request_id TEXT NOT NULL, period TEXT NOT NULL, expires_at INTEGER NOT NULL,
- receipt_id TEXT NOT NULL, PRIMARY KEY(user_id,request_id)
+ receipt_id TEXT NOT NULL, size TEXT NOT NULL DEFAULT '1gb', PRIMARY KEY(user_id,request_id)
 );
 SQL;
 }
 
-// Twenty times the launch prices, so moving from 5 to 100 Dew per XMR keeps
-// each storage period's XMR price.
-Price :: (period: string) -> s64 {
+// The sizes a plan can buy. Zero for an unknown size.
+SizeBytes :: (size: string) -> s64 {
+    if size == "1gb" {
+        return PaidBytes
+    }
+    if size == "5gb" {
+        return LargeBytes
+    }
+    return 0
+}
+
+// An unexpired plan's allowance. Rows from before sizes existed are 1 GB.
+ActiveBytes :: (plan: Plan, now: s64) -> s64 {
+    if plan.expires_at <= now {
+        return FreeBytes
+    }
+    bytes := SizeBytes(plan.size)
+    if bytes == 0 {
+        return PaidBytes
+    }
+    return bytes
+}
+
+// At 1000 Dew per XMR: 1 GB costs 0.2 XMR a month or 2 XMR a year, and 5 GB
+// three times that.
+Price :: (size: string, period: string) -> s64 {
+    monthly: s64 = 0
+    if size == "1gb" {
+        monthly = 200 * UnitsPerDew
+    } else if size == "5gb" {
+        monthly = 600 * UnitsPerDew
+    }
     if period == "monthly" {
-        return 20 * UnitsPerDew
+        return monthly
     }
     if period == "yearly" {
-        return 200 * UnitsPerDew
+        return monthly * 10
     }
     return 0
 }
 
 // The fixed node ratio quotes storage directly in Monero, without fiat prices.
 // Round up to the smallest atomic amount that funds the complete purchase.
-MoneroPrice :: (period: string, atomic: s64, units: s64) -> wallet.TokenUnitsResult {
-    price := Price(period)
+MoneroPrice :: (size: string, period: string, atomic: s64, units: s64) -> wallet.TokenUnitsResult {
+    price := Price(size, period)
     result := wallet.TokenUnits(price, units, atomic)
     if result.error != null {
         return result
@@ -119,9 +152,7 @@ ConfigurationError :: (value: configuration.Config) -> Error {
     if policy.IssuerStatus(value) != "ok" {
         return errors.New("storage billing requires the Dew issuer private key")
     }
-    monthly := MoneroPrice("monthly", value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
-    yearly := MoneroPrice("yearly", value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
-    if monthly.error != null || yearly.error != null {
+    if !Priced(value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits) {
         return errors.New("storage billing requires valid fixed XMR prices")
     }
     if !value.TokenDirectPurchasesEnabled || value.MoneroWalletRPCURL == "" {
@@ -131,6 +162,29 @@ ConfigurationError :: (value: configuration.Config) -> Error {
         return errors.New("storage billing requires an explicit Monero network")
     }
     return null
+}
+
+// Whether every size and period has an XMR price at the node's ratio.
+Priced :: (atomic: s64, units: s64) -> bool {
+    for size: Sizes {
+        monthly := MoneroPrice(size, "monthly", atomic, units)
+        yearly := MoneroPrice(size, "yearly", atomic, units)
+        if monthly.error != null || yearly.error != null {
+            return false
+        }
+    }
+    return true
+}
+
+// Remaining paid time moved to another size keeps its Dew value at the monthly
+// prices: floor(remaining × old / new), computed without overflowing.
+ConvertedSeconds :: (remaining: s64, from: string, to: string) -> s64 {
+    source := Price(from, "monthly")
+    target := Price(to, "monthly")
+    if remaining <= 0 || source == 0 || target == 0 {
+        return 0
+    }
+    return remaining / target * source + remaining % target * source / target
 }
 
 // Clamp to the last day of the target month, including February and leap years.
@@ -153,12 +207,9 @@ LimitTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string,
     if !enabled {
         return result
     }
-    result.value = FreeBytes
     plan := ReadTx(transaction, context, user)
     result.error = plan.error
-    if plan.error == null && plan.expires_at > now {
-        result.value = PaidBytes
-    }
+    result.value = ActiveBytes(plan, now)
     return result
 }
 
@@ -174,11 +225,11 @@ Read :: (database: *sql.Database, context: ctx.Context, user: string, now: s64) 
 }
 
 Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
-    user: string, period: string, key: string, now: s64) -> Plan {
+    user: string, size: string, period: string, key: string, now: s64) -> Plan {
     result: Plan
-    price := Price(period)
+    price := Price(size, period)
     if price == 0 {
-        result.error = errors.New("invalid storage period")
+        result.error = errors.New("invalid storage plan")
         return result
     }
     opened := sql.Begin(database, context, null)
@@ -189,12 +240,12 @@ Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKe
     transaction := opened.value
     RollbackAtReturn(transaction)
     arguments: [2]Any = .[user, key]
-    destinations: [2]Any = .[*result.period, *result.expires_at]
+    destinations: [3]Any = .[*result.period, *result.size, *result.expires_at]
     previous := sql.ScanRow(sql.QueryRowTx(transaction, context,
-        "SELECT period,expires_at FROM server_storage_purchases WHERE user_id=?1 AND request_id=?2",
+        "SELECT period,size,expires_at FROM server_storage_purchases WHERE user_id=?1 AND request_id=?2",
         arguments[:]), destinations[:])
     if previous == null {
-        if result.period != period {
+        if result.period != period || result.size != size {
             result.error = errors.New("storage request id reused")
             return result
         }
@@ -208,9 +259,19 @@ Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKe
     if result.error != null {
         return result
     }
+    // The same size extends the current plan; another size starts now with the
+    // remaining time converted to it.
     start := now
-    if result.expires_at > start {
-        start = result.expires_at
+    if result.expires_at > now {
+        current := result.size
+        if SizeBytes(current) == 0 {
+            current = "1gb"
+        }
+        if current == size {
+            start = result.expires_at
+        } else {
+            start = now + ConvertedSeconds(result.expires_at - now, current, size)
+        }
     }
     expiry := PeriodEnd(start, period)
     if expiry <= start || expiry > MaximumExpiry {
@@ -231,20 +292,21 @@ Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKe
         return result
     }
     result.period = period
+    result.size = size
     result.expires_at = expiry
-    result.limit_bytes = PaidBytes
+    result.limit_bytes = SizeBytes(size)
     result.balance = debit.balance
-    planArguments: [3]Any = .[user, period, result.expires_at]
+    planArguments: [4]Any = .[user, period, result.expires_at, size]
     saved := sql.ExecTx(transaction, context,
-        "INSERT INTO server_storage_plans(user_id,period,expires_at) VALUES(?1,?2,?3) ON CONFLICT(user_id) DO UPDATE SET period=excluded.period,expires_at=excluded.expires_at",
+        "INSERT INTO server_storage_plans(user_id,period,expires_at,size) VALUES(?1,?2,?3,?4) ON CONFLICT(user_id) DO UPDATE SET period=excluded.period,expires_at=excluded.expires_at,size=excluded.size",
         planArguments[:])
     result.error = saved.error
     if result.error != null {
         return result
     }
-    purchaseArguments: [5]Any = .[user, key, period, result.expires_at, debit.value.ReceiptID]
+    purchaseArguments: [6]Any = .[user, key, period, result.expires_at, debit.value.ReceiptID, size]
     saved = sql.ExecTx(transaction, context,
-        "INSERT INTO server_storage_purchases(user_id,request_id,period,expires_at,receipt_id) VALUES(?1,?2,?3,?4,?5)",
+        "INSERT INTO server_storage_purchases(user_id,request_id,period,expires_at,receipt_id,size) VALUES(?1,?2,?3,?4,?5,?6)",
         purchaseArguments[:])
     result.error = saved.error
     if result.error == null {

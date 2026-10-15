@@ -10,6 +10,7 @@ import (
 // #import protocol
 type Plan struct {
 	Period     string "json:\"period\""
+	Size       string "json:\"size\""
 	ExpiresAt  int64  "json:\"expires_at\""
 	LimitBytes int64  "json:\"limit_bytes\""
 	Balance    int64  "json:\"balance\""
@@ -18,8 +19,11 @@ type Plan struct {
 
 const FreeBytes = 10485760
 const PaidBytes = 1073741824
+const LargeBytes = 5368709120
 const UnitsPerDew = 1000000
 const MaximumExpiry = 253402300799
+
+var Sizes [2]string = [2]string{"1gb", "5gb"}
 
 func StoragePlan_ReadTx(transaction *Transaction, context Context, user string) Plan {
 	var result Plan = Plan{}
@@ -27,13 +31,14 @@ func StoragePlan_ReadTx(transaction *Transaction, context Context, user string) 
 	value_0[0] = user
 	arguments := value_0
 	_ = arguments
-	var value_1 [2]Any
+	var value_1 [3]Any
 	value_1[0] = &(result.Period)
-	value_1[1] = &(result.ExpiresAt)
+	value_1[1] = &(result.Size)
+	value_1[2] = &(result.ExpiresAt)
 	destinations := value_1
 	_ = destinations
-	var value_2 *Row = StdSqlGo_QueryRowTx(transaction, context, "SELECT period,expires_at FROM server_storage_plans WHERE user_id=?1", arguments[0:1:1])
-	var value_3 Error = StdSqlGo_ScanRow(value_2, destinations[0:2:2])
+	var value_2 *Row = StdSqlGo_QueryRowTx(transaction, context, "SELECT period,size,expires_at FROM server_storage_plans WHERE user_id=?1", arguments[0:1:1])
+	var value_3 Error = StdSqlGo_ScanRow(value_2, destinations[0:3:3])
 	result.Error = value_3
 	var value_4 Error = result.Error
 	if StdErrorsGo_Is(value_4, StdSqlGo_NoRows()) {
@@ -47,13 +52,7 @@ func StoragePlan_SnapshotTx(transaction *Transaction, context Context, user stri
 	if result.Error != nil {
 		return result
 	}
-	var value_0 int64 = 0
-	if result.ExpiresAt > now {
-		value_0 = 1073741824
-	} else {
-		value_0 = 10485760
-	}
-	result.LimitBytes = value_0
+	result.LimitBytes = StoragePlan_ActiveBytes(result, now)
 	balance := TokenLedger_BalanceTx(transaction, context, user, "waozi:token")
 	result.Balance = balance.Value
 	result.Error = balance.Error
@@ -61,21 +60,48 @@ func StoragePlan_SnapshotTx(transaction *Transaction, context Context, user stri
 }
 
 func StoragePlan_SchemaSQL() string {
-	return "CREATE TABLE IF NOT EXISTS server_storage_plans (\n user_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,\n period TEXT NOT NULL CHECK(period IN ('monthly','yearly')), expires_at INTEGER NOT NULL\n);\nCREATE TABLE IF NOT EXISTS server_storage_purchases (\n user_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,\n request_id TEXT NOT NULL, period TEXT NOT NULL, expires_at INTEGER NOT NULL,\n receipt_id TEXT NOT NULL, PRIMARY KEY(user_id,request_id)\n);\n"
+	return "CREATE TABLE IF NOT EXISTS server_storage_plans (\n user_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,\n period TEXT NOT NULL CHECK(period IN ('monthly','yearly')), expires_at INTEGER NOT NULL,\n size TEXT NOT NULL DEFAULT '1gb'\n);\nCREATE TABLE IF NOT EXISTS server_storage_purchases (\n user_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,\n request_id TEXT NOT NULL, period TEXT NOT NULL, expires_at INTEGER NOT NULL,\n receipt_id TEXT NOT NULL, size TEXT NOT NULL DEFAULT '1gb', PRIMARY KEY(user_id,request_id)\n);\n"
 }
 
-func StoragePlan_Price(period string) int64 {
-	if period == "monthly" {
-		return 20000000
+func StoragePlan_SizeBytes(size string) int64 {
+	if size == "1gb" {
+		return 1073741824
 	}
-	if period == "yearly" {
-		return 200000000
+	if size == "5gb" {
+		return 5368709120
 	}
 	return 0
 }
 
-func StoragePlan_MoneroPrice(period string, atomic int64, units int64) TokenUnitsResult {
-	price := StoragePlan_Price(period)
+func StoragePlan_ActiveBytes(plan Plan, now int64) int64 {
+	if plan.ExpiresAt <= now {
+		return 10485760
+	}
+	bytes := StoragePlan_SizeBytes(plan.Size)
+	if bytes == 0 {
+		return 1073741824
+	}
+	return bytes
+}
+
+func StoragePlan_Price(size string, period string) int64 {
+	var monthly int64 = 0
+	if size == "1gb" {
+		monthly = 200000000
+	} else if size == "5gb" {
+		monthly = 600000000
+	}
+	if period == "monthly" {
+		return monthly
+	}
+	if period == "yearly" {
+		return monthly * 10
+	}
+	return 0
+}
+
+func StoragePlan_MoneroPrice(size string, period string, atomic int64, units int64) TokenUnitsResult {
+	price := StoragePlan_Price(size, period)
 	result := MoneroWallet_TokenUnits(price, units, atomic)
 	if result.Error != nil {
 		return result
@@ -107,9 +133,8 @@ func StoragePlan_ConfigurationError(value Config) Error {
 	if TokenPolicy_IssuerStatus(value) != "ok" {
 		return StdErrorsGo_New("storage billing requires the Dew issuer private key")
 	}
-	monthly := StoragePlan_MoneroPrice("monthly", value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
-	yearly := StoragePlan_MoneroPrice("yearly", value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
-	if monthly.Error != nil || yearly.Error != nil {
+	var value_0 bool = StoragePlan_Priced(value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
+	if !value_0 {
 		return StdErrorsGo_New("storage billing requires valid fixed XMR prices")
 	}
 	if !value.TokenDirectPurchasesEnabled || value.MoneroWalletRPCURL == "" {
@@ -119,6 +144,27 @@ func StoragePlan_ConfigurationError(value Config) Error {
 		return StdErrorsGo_New("storage billing requires an explicit Monero network")
 	}
 	return nil
+}
+
+func StoragePlan_Priced(atomic int64, units int64) bool {
+	for it_index := int64(0); it_index < 2; it_index++ {
+		size := Sizes[it_index]
+		monthly := StoragePlan_MoneroPrice(size, "monthly", atomic, units)
+		yearly := StoragePlan_MoneroPrice(size, "yearly", atomic, units)
+		if monthly.Error != nil || yearly.Error != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func StoragePlan_ConvertedSeconds(remaining int64, from string, to string) int64 {
+	source := StoragePlan_Price(from, "monthly")
+	target := StoragePlan_Price(to, "monthly")
+	if remaining <= 0 || source == 0 || target == 0 {
+		return 0
+	}
+	return ((remaining / target) * source) + (((remaining % target) * source) / target)
 }
 
 func StoragePlan_PeriodEnd(start int64, period string) int64 {
@@ -145,12 +191,9 @@ func StoragePlan_LimitTx(transaction *Transaction, context Context, user string,
 	if !enabled {
 		return result
 	}
-	result.Value = 10485760
 	plan := StoragePlan_ReadTx(transaction, context, user)
 	result.Error = plan.Error
-	if plan.Error == nil && plan.ExpiresAt > now {
-		result.Value = 1073741824
-	}
+	result.Value = StoragePlan_ActiveBytes(plan, now)
 	return result
 }
 
@@ -165,11 +208,11 @@ func StoragePlan_Read(database *Database, context Context, user string, now int6
 	return StoragePlan_SnapshotTx(opened.Value, context, user, now)
 }
 
-func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey, user string, period string, key string, now int64) Plan {
+func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey, user string, size string, period string, key string, now int64) Plan {
 	var result Plan = Plan{}
-	price := StoragePlan_Price(period)
+	price := StoragePlan_Price(size, period)
 	if price == 0 {
-		var value_0 Error = StdErrorsGo_New("invalid storage period")
+		var value_0 Error = StdErrorsGo_New("invalid storage plan")
 		result.Error = value_0
 		return result
 	}
@@ -185,15 +228,16 @@ func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey
 	value_1[1] = key
 	arguments := value_1
 	_ = arguments
-	var value_2 [2]Any
+	var value_2 [3]Any
 	value_2[0] = &(result.Period)
-	value_2[1] = &(result.ExpiresAt)
+	value_2[1] = &(result.Size)
+	value_2[2] = &(result.ExpiresAt)
 	destinations := value_2
 	_ = destinations
-	var value_3 *Row = StdSqlGo_QueryRowTx(transaction, context, "SELECT period,expires_at FROM server_storage_purchases WHERE user_id=?1 AND request_id=?2", arguments[0:2:2])
-	previous := StdSqlGo_ScanRow(value_3, destinations[0:2:2])
+	var value_3 *Row = StdSqlGo_QueryRowTx(transaction, context, "SELECT period,size,expires_at FROM server_storage_purchases WHERE user_id=?1 AND request_id=?2", arguments[0:2:2])
+	previous := StdSqlGo_ScanRow(value_3, destinations[0:3:3])
 	if previous == nil {
-		if result.Period != period {
+		if result.Period != period || result.Size != size {
 			var value_4 Error = StdErrorsGo_New("storage request id reused")
 			result.Error = value_4
 			return result
@@ -210,8 +254,16 @@ func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey
 		return result
 	}
 	start := now
-	if result.ExpiresAt > start {
-		start = result.ExpiresAt
+	if result.ExpiresAt > now {
+		current := result.Size
+		if StoragePlan_SizeBytes(current) == 0 {
+			current = "1gb"
+		}
+		if current == size {
+			start = result.ExpiresAt
+		} else {
+			start = now + StoragePlan_ConvertedSeconds(result.ExpiresAt-now, current, size)
+		}
 	}
 	expiry := StoragePlan_PeriodEnd(start, period)
 	if expiry <= start || expiry > 253402300799 {
@@ -232,35 +284,39 @@ func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey
 		return result
 	}
 	result.Period = period
+	result.Size = size
 	result.ExpiresAt = expiry
-	result.LimitBytes = 1073741824
+	var value_7 int64 = StoragePlan_SizeBytes(size)
+	result.LimitBytes = value_7
 	result.Balance = debit.Balance
-	var value_7 [3]Any
-	value_7[0] = user
-	value_7[1] = period
-	value_7[2] = result.ExpiresAt
-	planArguments := value_7
+	var value_8 [4]Any
+	value_8[0] = user
+	value_8[1] = period
+	value_8[2] = result.ExpiresAt
+	value_8[3] = size
+	planArguments := value_8
 	_ = planArguments
-	var value_8 string = "INSERT INTO server_storage_plans(user_id,period,expires_at) VALUES(?1,?2,?3) ON CONFLICT(user_id) DO UPDATE SET period=excluded.period,expires_at=excluded.expires_at"
-	saved := StdSqlGo_ExecTx(transaction, context, value_8, planArguments[0:3:3])
+	var value_9 string = "INSERT INTO server_storage_plans(user_id,period,expires_at,size) VALUES(?1,?2,?3,?4) ON CONFLICT(user_id) DO UPDATE SET period=excluded.period,expires_at=excluded.expires_at,size=excluded.size"
+	saved := StdSqlGo_ExecTx(transaction, context, value_9, planArguments[0:4:4])
 	result.Error = saved.Error
 	if result.Error != nil {
 		return result
 	}
-	var value_9 [5]Any
-	value_9[0] = user
-	value_9[1] = key
-	value_9[2] = period
-	value_9[3] = result.ExpiresAt
-	value_9[4] = debit.Value.ReceiptID
-	purchaseArguments := value_9
+	var value_10 [6]Any
+	value_10[0] = user
+	value_10[1] = key
+	value_10[2] = period
+	value_10[3] = result.ExpiresAt
+	value_10[4] = debit.Value.ReceiptID
+	value_10[5] = size
+	purchaseArguments := value_10
 	_ = purchaseArguments
-	var value_10 string = "INSERT INTO server_storage_purchases(user_id,request_id,period,expires_at,receipt_id) VALUES(?1,?2,?3,?4,?5)"
-	saved = StdSqlGo_ExecTx(transaction, context, value_10, purchaseArguments[0:5:5])
+	var value_11 string = "INSERT INTO server_storage_purchases(user_id,request_id,period,expires_at,receipt_id,size) VALUES(?1,?2,?3,?4,?5,?6)"
+	saved = StdSqlGo_ExecTx(transaction, context, value_11, purchaseArguments[0:6:6])
 	result.Error = saved.Error
 	if result.Error == nil {
-		var value_11 Error = StdSqlGo_Commit(transaction)
-		result.Error = value_11
+		var value_12 Error = StdSqlGo_Commit(transaction)
+		result.Error = value_12
 	}
 	return result
 }

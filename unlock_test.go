@@ -68,11 +68,11 @@ func postUnlock(t *testing.T, handler http.Handler, token, body string, status i
 func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 	_, store, handler, private := unlockFixture(t)
 	owner := newTestIdentity(t, handler, 0x81)
-	creditDew(t, store, private, owner.UserID, "unlock-fixture", 3*UnitsPerDew)
+	creditDew(t, store, private, owner.UserID, "unlock-fixture", 30*UnitsPerDew)
 	ctx := context.Background()
 	first := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
-	if !first.Unlocked || first.Product != TaiChi || first.PriceUnits != 1000000 ||
-		first.Balance != 2000000 || first.ReceiptID == "" {
+	if !first.Unlocked || first.Product != TaiChi || first.PriceUnits != 10000000 ||
+		first.Balance != 20000000 || first.ReceiptID == "" {
 		t.Fatalf("first unlock: %+v", first)
 	}
 	again := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
@@ -80,7 +80,7 @@ func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 		t.Fatalf("repeat unlock: %+v, want %+v", again, first)
 	}
 	balance := TokenLedger_Balance(store.Database, ctx, owner.UserID, AssetID)
-	if balance.Error != nil || balance.Value != 2*UnitsPerDew {
+	if balance.Error != nil || balance.Value != 20*UnitsPerDew {
 		t.Fatalf("balance after unlocks: %+v", balance)
 	}
 	var debits int
@@ -89,7 +89,7 @@ func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 		t.Fatalf("unlock debits: %d, %v", debits, err)
 	}
 	receipt := TokenLedger_ByID(store.Database, ctx, first.ReceiptID)
-	if receipt.Error != nil || !receipt.Found || receipt.Value.AmountDelta != -1000000 || receipt.Value.AppID != "inbe" ||
+	if receipt.Error != nil || !receipt.Found || receipt.Value.AmountDelta != -10000000 || receipt.Value.AppID != "inbe" ||
 		!TokenReceipt_ValidSignature(private.Public().(ed25519.PublicKey), receipt.Value) {
 		t.Fatalf("unlock receipt: %+v", receipt)
 	}
@@ -98,7 +98,7 @@ func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
-	if restored.ReceiptID != first.ReceiptID || restored.Balance != 2*UnitsPerDew {
+	if restored.ReceiptID != first.ReceiptID || restored.Balance != 20*UnitsPerDew {
 		t.Fatalf("restored unlock: %+v", restored)
 	}
 }
@@ -106,7 +106,7 @@ func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 func TestUnlockRejectsUnaffordableUnknownAndMalformedRequests(t *testing.T) {
 	_, store, handler, private := unlockFixture(t)
 	owner := newTestIdentity(t, handler, 0x82)
-	creditDew(t, store, private, owner.UserID, "short-fixture", 999999)
+	creditDew(t, store, private, owner.UserID, "short-fixture", 9999999)
 	postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 402)
 	postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.unknown"}`, 404)
 	postUnlock(t, handler, "", `{"product":"inbe.practice.taichi"}`, 401)
@@ -124,7 +124,7 @@ func TestUnlockRejectsUnaffordableUnknownAndMalformedRequests(t *testing.T) {
 		postUnlock(t, handler, owner.Token, body, 400)
 	}
 	balance := TokenLedger_Balance(store.Database, context.Background(), owner.UserID, AssetID)
-	if balance.Error != nil || balance.Value != 999999 {
+	if balance.Error != nil || balance.Value != 9999999 {
 		t.Fatalf("refused unlocks changed the balance: %+v", balance)
 	}
 	if owned := Unlock_Owned(store.Database, context.Background(), owner.UserID, TaiChi); owned.Error != nil || owned.Value {
@@ -158,15 +158,15 @@ func TestUnlockTrialPrice(t *testing.T) {
 		price      int64
 		shown      int64
 	}{
-		{now + 3600, 100000, now + 3600},
-		{now - 1, 1000000, 0},
-		{0, 1000000, 0},
+		{now + 3600, 1000000, now + 3600},
+		{now - 1, 10000000, 0},
+		{0, 10000000, 0},
 	} {
 		server.Cfg.UnlockTrialUntil = tc.trialUntil
 		owner := newTestIdentity(t, handler, byte(0x90+index))
 		unlocks, products := read(owner.Token)
 		want := map[string]any{"product": TaiChi, "price_units": float64(tc.price),
-			"regular_price_units": float64(1000000), "trial_until": float64(tc.shown)}
+			"regular_price_units": float64(10000000), "trial_until": float64(tc.shown)}
 		if len(unlocks) != 0 || !equalJSONMaps(products[0], want) {
 			t.Fatalf("trial until %d: %v %v", tc.trialUntil, unlocks, products)
 		}
@@ -181,9 +181,9 @@ func TestUnlockTrialPrice(t *testing.T) {
 			!equalJSONMaps(prices.Products[0], want) || strings.Contains(public.Body.String(), "receipt") {
 			t.Fatalf("public prices: %d %s", public.Code, public.Body.String())
 		}
-		creditDew(t, store, private, owner.UserID, "trial-fixture-"+owner.UserID[:8], UnitsPerDew)
+		creditDew(t, store, private, owner.UserID, "trial-fixture-"+owner.UserID[:8], 10*UnitsPerDew)
 		unlocked := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
-		if unlocked.PriceUnits != tc.price || unlocked.Balance != UnitsPerDew-tc.price {
+		if unlocked.PriceUnits != tc.price || unlocked.Balance != 10*UnitsPerDew-tc.price {
 			t.Fatalf("trial until %d charged: %+v", tc.trialUntil, unlocked)
 		}
 		unlocks, _ = read(owner.Token)
@@ -192,7 +192,7 @@ func TestUnlockTrialPrice(t *testing.T) {
 			t.Fatalf("listed unlocks: %v", unlocks)
 		}
 	}
-	if Unlock_Price(TaiChi, 99, 100) != 100000 || Unlock_Price(TaiChi, 100, 100) != 1000000 {
+	if Unlock_Price(TaiChi, 99, 100) != 1000000 || Unlock_Price(TaiChi, 100, 100) != 10000000 {
 		t.Fatal("trial ends at trial_until")
 	}
 }
@@ -279,7 +279,7 @@ func TestGatedPackNeedsAGrantForItsProduct(t *testing.T) {
 	requestGrant(t, handler, owner.Token, "inbe.practice.unknown", 403)
 	requestGrant(t, handler, "", TaiChi, 401)
 	requestGrant(t, handler, owner.Token, "tai chi", 400)
-	creditDew(t, store, private, owner.UserID, "pack-fixture", UnitsPerDew)
+	creditDew(t, store, private, owner.UserID, "pack-fixture", 10*UnitsPerDew)
 	postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
 	issued := requestGrant(t, handler, owner.Token, TaiChi, 200)
 	now := time.Now().Unix()
@@ -389,8 +389,8 @@ func TestRescaleDewIsIdempotent(t *testing.T) {
 	rich := newTestIdentity(t, handler, 0x85)
 	spent := newTestIdentity(t, handler, 0x86)
 	empty := newTestIdentity(t, handler, 0x87)
-	creditDew(t, store, private, rich.UserID, "rescale-rich", 5*UnitsPerDew)
-	creditDew(t, store, private, spent.UserID, "rescale-spent", UnitsPerDew)
+	creditDew(t, store, private, rich.UserID, "rescale-rich", 14*UnitsPerDew)
+	creditDew(t, store, private, spent.UserID, "rescale-spent", 10*UnitsPerDew)
 	postUnlock(t, handler, rich.Token, `{"product":"inbe.practice.taichi"}`, 200)
 	postUnlock(t, handler, spent.Token, `{"product":"inbe.practice.taichi"}`, 200)
 	for _, statement := range []string{

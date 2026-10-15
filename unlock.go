@@ -61,7 +61,7 @@ func Unlock_Find(product string) Offer {
 	if product == "inbe.practice.taichi" {
 		result.Product = "inbe.practice.taichi"
 		result.AppId = "inbe"
-		result.Units = 1000000
+		result.Units = 10000000
 	}
 	return result
 }

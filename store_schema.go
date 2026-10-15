@@ -30,6 +30,8 @@ const MeditationUpgrade = "\nPRAGMA foreign_keys=OFF;\nBEGIN;\nCREATE TABLE IF N
 const MeditationRollback = "ROLLBACK; PRAGMA foreign_keys=ON;"
 const MeshOperationColumn = "ALTER TABLE server_mesh_changes ADD COLUMN op TEXT NOT NULL DEFAULT 'upsert'"
 const MeshDeletionColumn = "ALTER TABLE server_mesh_changes ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''"
+const StoragePlanSize = "ALTER TABLE server_storage_plans ADD COLUMN size TEXT NOT NULL DEFAULT '1gb'"
+const StoragePurchaseSize = "ALTER TABLE server_storage_purchases ADD COLUMN size TEXT NOT NULL DEFAULT '1gb'"
 const ColumnLookup = "SELECT 1 FROM pragma_table_info(?1) WHERE name=?2"
 const SocialExists = "\nSELECT EXISTS(\n\tSELECT 1 FROM sqlite_master\n\tWHERE type='table' AND name='server_social_cache'\n)"
 const SocialUpgrade = "\nINSERT OR REPLACE INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)\nSELECT user_id_hash,kind,json,updated_at,server_version\nFROM server_social_cache;\nDROP TABLE server_social_cache;"
@@ -107,6 +109,14 @@ func StoreSchema_MeshColumns(database *Database, context Context) Error {
 		return error
 	}
 	return StoreSchema_AddColumn(database, context, "server_mesh_changes", "deleted_at", "ALTER TABLE server_mesh_changes ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''")
+}
+
+func StoreSchema_StorageSizes(database *Database, context Context) Error {
+	error := StoreSchema_AddColumn(database, context, "server_storage_plans", "size", "ALTER TABLE server_storage_plans ADD COLUMN size TEXT NOT NULL DEFAULT '1gb'")
+	if error != nil {
+		return error
+	}
+	return StoreSchema_AddColumn(database, context, "server_storage_purchases", "size", "ALTER TABLE server_storage_purchases ADD COLUMN size TEXT NOT NULL DEFAULT '1gb'")
 }
 
 func StoreSchema_MeditationKey(database *Database, context Context) Error {

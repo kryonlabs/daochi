@@ -288,21 +288,25 @@ Inbe calls this account credit **Dew**. Its existing asset ID stays
 `waozi:token`, with 1,000,000 integer ledger units per Dew. Storage prices
 are fixed in **XMR**, with no dollar peg, exchange-rate feed, or fiat conversion.
 Choose how much Dew one XMR buys and express that ratio in integer units
-(1 XMR = 1,000,000,000,000 atomic units). For 100 Dew per XMR, set
+(1 XMR = 1,000,000,000,000 atomic units). For 1000 Dew per XMR, set
 `MONERO_RATE_ATOMIC_AMOUNT=1000000000000` and
-`MONERO_RATE_TOKEN_UNITS=100000000`. One month of storage costs 20 Dew
-(0.2 XMR at that ratio) and one year costs 200 Dew. The app shows
-the node's XMR prices before purchase. Confirmed deposits retain their
+`MONERO_RATE_TOKEN_UNITS=1000000000`. One month of 1 GB storage costs 200 Dew
+(0.2 XMR at that ratio) and one year costs 2000 Dew. The app shows
+the node's Dew prices before purchase. Confirmed deposits retain their
 snapshotted fixed ratio, and existing Dew balances remain intact.
 
 Set `DAOCHI_STORAGE_PLANS_ENABLED=true` on a node offering prepaid storage.
 A valid fixed Monero ratio is required before upgrades can be purchased.
-The free allowance is 10 MiB. A monthly purchase costs 20 Dew and a yearly
-purchase costs 200 Dew; both grant 1 GiB total storage. Purchases extend an
-existing paid period or start immediately, with calendar month/year expiry.
-They do not renew automatically. `GET /api/v1/storage/plan` returns the
-authenticated account's balance and allowance. `POST` to the same endpoint
-accepts `period` (`monthly` or `yearly`) and a persistent `request_id`.
+The free allowance is 10 MiB. Two sizes are sold: 1 GiB costs 200 Dew a month
+or 2000 Dew a year, and 5 GiB costs 600 Dew a month or 6000 Dew a year.
+Buying the current size extends an existing paid period or starts
+immediately, with calendar month/year expiry. Buying the other size starts
+now, and the unexpired time carries over converted by the monthly prices
+(three days of 1 GiB become one day of 5 GiB). Plans do not renew
+automatically. `GET /api/v1/storage/plan` returns the authenticated account's
+balance, allowance and the plans with their Dew and XMR prices. `POST` to the
+same endpoint accepts `period` (`monthly` or `yearly`), `size` (`1gb` or
+`5gb`; `1gb` when missing) and a persistent `request_id`.
 The signed ledger debit and paid allowance commit together; retry the same
 request ID after an uncertain result to avoid a second charge.
 
@@ -314,7 +318,7 @@ The Inbe Play build has no Dew purchase or storage-upgrade UI.
 
 Unlocks are priced by the node, never by the client. `GET /api/v1/unlocks`
 lists the account's unlocks and each product's current and regular price;
-`POST` with `{"product":"inbe.practice.taichi"}` debits the price once (1 Dew)
+`POST` with `{"product":"inbe.practice.taichi"}` debits the price once (10 Dew)
 and records the unlock in the same transaction. Setting
 `DAOCHI_UNLOCK_TRIAL_UNTIL` to a Unix time sells every unlock at 90% off until
 then. `POST /api/v1/unlocks/grant` returns a one-hour download grant, signed by

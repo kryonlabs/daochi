@@ -27,6 +27,10 @@ Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
     if error != null {
         return error
     }
+    error = schema.StorageSizes(database, context)
+    if error != null {
+        return error
+    }
     error = trust.EnsureSchema(database, context)
     if error != null {
         return error

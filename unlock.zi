@@ -70,7 +70,7 @@ Find :: (product: string) -> Offer {
     if product == TaiChi {
         result.product = TaiChi
         result.app_id = "inbe"
-        result.units = plans.UnitsPerDew
+        result.units = 10 * plans.UnitsPerDew
     }
     return result
 }

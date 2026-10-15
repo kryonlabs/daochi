@@ -2,22 +2,61 @@
 package main
 
 // #import std_go_types
-type StorageStatus struct {
-	AccountId             string "json:\"account_id\""
-	AssetId               string "json:\"asset_id\""
-	Enabled               bool   "json:\"enabled\""
-	Plan                  Plan   "json:\"plan\""
-	UsedBytes             int64  "json:\"used_bytes\""
+type StorageOffer struct {
+	Size                  string "json:\"size\""
+	LimitBytes            int64  "json:\"limit_bytes\""
 	MonthlyUnits          int64  "json:\"monthly_units\""
 	YearlyUnits           int64  "json:\"yearly_units\""
-	UnitsPerDew           int64  "json:\"units_per_dew\""
 	MonthlyXmrAtomicUnits int64  "json:\"monthly_xmr_atomic_units\""
 	YearlyXmrAtomicUnits  int64  "json:\"yearly_xmr_atomic_units\""
 }
 
+type StorageStatus struct {
+	AccountId             string         "json:\"account_id\""
+	AssetId               string         "json:\"asset_id\""
+	Enabled               bool           "json:\"enabled\""
+	Plan                  Plan           "json:\"plan\""
+	UsedBytes             int64          "json:\"used_bytes\""
+	FreeBytes             int64          "json:\"free_bytes\""
+	MonthlyUnits          int64          "json:\"monthly_units\""
+	YearlyUnits           int64          "json:\"yearly_units\""
+	UnitsPerDew           int64          "json:\"units_per_dew\""
+	MonthlyXmrAtomicUnits int64          "json:\"monthly_xmr_atomic_units\""
+	YearlyXmrAtomicUnits  int64          "json:\"yearly_xmr_atomic_units\""
+	Plans                 []StorageOffer "json:\"plans\""
+}
+
 type StorageUpgrade struct {
 	Period    string "json:\"period\""
+	Size      string "json:\"size\""
 	RequestId string "json:\"request_id\""
+}
+
+func StoragePlanHttp_Offers(atomic int64, units int64) []StorageOffer {
+	result := make([]StorageOffer, int(int(0)))
+	{
+		loop_view_1 := Sizes[0:2:2]
+		loop_count_1 := int64(len(loop_view_1))
+		var loop_cursor_1 int64 = 0
+		for loop_cursor_1 < loop_count_1 {
+			loop_index_1 := loop_cursor_1
+			size := loop_view_1[loop_index_1]
+			var offer StorageOffer = StorageOffer{}
+			offer.Size = size
+			offer.LimitBytes = StoragePlan_SizeBytes(size)
+			offer.MonthlyUnits = StoragePlan_Price(size, "monthly")
+			offer.YearlyUnits = StoragePlan_Price(size, "yearly")
+			monthly := StoragePlan_MoneroPrice(size, "monthly", atomic, units)
+			yearly := StoragePlan_MoneroPrice(size, "yearly", atomic, units)
+			if monthly.Error == nil && yearly.Error == nil {
+				offer.MonthlyXmrAtomicUnits = monthly.Value
+				offer.YearlyXmrAtomicUnits = yearly.Value
+			}
+			result = append(result, offer)
+			loop_cursor_1++
+		}
+	}
+	return result
 }
 
 func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *Request) {
@@ -27,15 +66,21 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 		return
 	}
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "private, no-store")
-	monthly := StoragePlan_MoneroPrice("monthly", accounts.Configuration.MoneroRateAtomicAmount, accounts.Configuration.MoneroRateTokenUnits)
-	yearly := StoragePlan_MoneroPrice("yearly", accounts.Configuration.MoneroRateAtomicAmount, accounts.Configuration.MoneroRateTokenUnits)
-	var value_0 bool = accounts.Configuration.StoragePlansEnabled && monthly.Error == nil && yearly.Error == nil
+	atomic := accounts.Configuration.MoneroRateAtomicAmount
+	units := accounts.Configuration.MoneroRateTokenUnits
+	var value_0 bool = accounts.Configuration.StoragePlansEnabled
 	var value_1 bool = value_0
 	if value_1 {
-		var value_2 bool = TokenPolicy_IssuerStatus(*(accounts.Configuration)) == "ok"
+		var value_2 bool = StoragePlan_Priced(atomic, units)
 		value_1 = value_2
 	}
-	available := value_1
+	var value_3 bool = value_1
+	var value_4 bool = value_3
+	if value_4 {
+		var value_5 bool = TokenPolicy_IssuerStatus(*(accounts.Configuration)) == "ok"
+		value_4 = value_5
+	}
+	available := value_4
 	if StdHttpGo_Method(request) == "POST" {
 		if !available {
 			Response_Error(writer, 503, "storage upgrades unavailable")
@@ -43,33 +88,36 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 		}
 		read := HttpBody_ReadJSON(writer, request, 1024)
 		var command StorageUpgrade = StorageUpgrade{}
-		var value_3 bool = read.Error != nil
-		var value_4 bool = value_3
-		if !value_4 {
-			var value_5 Error = StrictJson_Decode(read.Value, &(command))
-			value_4 = (value_5 != nil)
-		}
-		var value_6 bool = value_4
+		var value_6 bool = read.Error == nil
 		var value_7 bool = value_6
-		if !value_7 {
-			var value_8 bool = StoragePlan_Price(command.Period) == 0
-			value_7 = value_8
+		if value_7 {
+			var value_8 Error = StrictJson_Decode(read.Value, &(command))
+			value_7 = (value_8 == nil)
 		}
-		var value_9 bool = value_7
-		var value_10 bool = value_9
-		if !value_10 {
-			var value_11 bool = Identity_ValidClientID(command.RequestId)
-			value_10 = !value_11
+		decoded := value_7
+		if decoded && command.Size == "" {
+			command.Size = "1gb"
 		}
-		if value_10 {
+		var value_9 bool = !decoded
+		if !value_9 {
+			var value_10 bool = StoragePlan_Price(command.Size, command.Period) == 0
+			value_9 = value_10
+		}
+		var value_11 bool = value_9
+		if !value_11 {
+			var value_12 bool = Identity_ValidClientID(command.RequestId)
+			value_11 = !value_12
+		}
+		if value_11 {
 			Response_Error(writer, 400, "invalid storage upgrade")
 			return
 		}
-		var value_12 Context = StdHttpGo_Context(request)
-		var value_13 PrivateKey = accounts.Configuration.WaoziIssuerPrivateKey
-		var value_14 string = command.Period
-		var value_15 string = command.RequestId
-		purchased := StoragePlan_Purchase(accounts.Database, value_12, value_13, user.Value, value_14, value_15, StdTimeGo_Unix(StdTimeGo_Now()))
+		var value_13 Context = StdHttpGo_Context(request)
+		var value_14 PrivateKey = accounts.Configuration.WaoziIssuerPrivateKey
+		var value_15 string = command.Size
+		var value_16 string = command.Period
+		var value_17 string = command.RequestId
+		purchased := StoragePlan_Purchase(accounts.Database, value_13, value_14, user.Value, value_15, value_16, value_17, StdTimeGo_Unix(StdTimeGo_Now()))
 		if purchased.Error != nil {
 			if StdErrorsGo_Message(purchased.Error) == "insufficient balance" {
 				Response_Error(writer, 402, "not enough Dew")
@@ -95,13 +143,14 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 	value.Enabled = available
 	value.Plan = plan
 	value.UsedBytes = usage.Value
-	value.MonthlyUnits = StoragePlan_Price("monthly")
-	value.YearlyUnits = StoragePlan_Price("yearly")
+	value.FreeBytes = 10485760
 	value.UnitsPerDew = 1000000
-	if monthly.Error == nil && yearly.Error == nil {
-		value.MonthlyXmrAtomicUnits = monthly.Value
-		value.YearlyXmrAtomicUnits = yearly.Value
-	}
+	value.Plans = StoragePlanHttp_Offers(atomic, units)
+	standard := value.Plans[0]
+	value.MonthlyUnits = standard.MonthlyUnits
+	value.YearlyUnits = standard.YearlyUnits
+	value.MonthlyXmrAtomicUnits = standard.MonthlyXmrAtomicUnits
+	value.YearlyXmrAtomicUnits = standard.YearlyXmrAtomicUnits
 	Response_JSON(writer, 200, value)
 }
 

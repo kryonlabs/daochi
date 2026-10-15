@@ -29,7 +29,7 @@ func storageAccountFixture(t *testing.T) (*Server, *Store, http.Handler, testIde
 	owner := newTestIdentity(t, handler, 0x75)
 	credit := TokenLedger_CreditPayment(store.Database, context.Background(), private,
 		"monero", "production-storage-fixture", TokenEventInput{
-			AccountID: owner.UserID, AppID: "inbe", EventType: "credit", AmountDelta: 60 * UnitsPerDew,
+			AccountID: owner.UserID, AppID: "inbe", EventType: "credit", AmountDelta: 600 * UnitsPerDew,
 			SourceType: "monero", SourceRef: "production-storage-fixture",
 		}, errTokenIssuerReadOnly)
 	if credit.Error != nil {
@@ -101,6 +101,9 @@ func TestStorageRejectsAmbiguousCommandsAndReadOnlyIssuer(t *testing.T) {
 		`{"Period":"monthly","request_id":"wrong-case-period"}`,
 		`{"period":"monthly","request_id":"unknown-field","amount":1}`,
 		`{"period":"monthly","request_id":"two-values"} {}`,
+		`{"period":"monthly","size":"1gb","size":"5gb","request_id":"duplicate-size"}`,
+		`{"period":"monthly","Size":"5gb","request_id":"wrong-case-size"}`,
+		`{"period":"monthly","size":5,"request_id":"numeric-size"}`,
 	} {
 		result := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/storage/plan", owner.Token, []byte(body))
 		if result.Code != 400 {
@@ -126,12 +129,12 @@ func TestStorageRejectsExpiryOverflowBeforeDebit(t *testing.T) {
 	server, store, _, owner := storageAccountFixture(t)
 	now := time.Date(9999, 12, 15, 0, 0, 0, 0, time.UTC).Unix()
 	plan := StoragePlan_Purchase(store.Database, context.Background(), server.Cfg.WaoziIssuerPrivateKey,
-		owner.UserID, "monthly", "expiry-overflow", now)
+		owner.UserID, "1gb", "monthly", "expiry-overflow", now)
 	if plan.Error == nil || plan.Error.Error() != "storage expiry out of range" {
 		t.Fatalf("expiry: %+v", plan)
 	}
 	read := StoragePlan_Read(store.Database, context.Background(), owner.UserID, now)
-	if read.Error != nil || read.Balance != 60*UnitsPerDew || read.ExpiresAt != 0 {
+	if read.Error != nil || read.Balance != 600*UnitsPerDew || read.ExpiresAt != 0 {
 		t.Fatalf("charged overflow: %+v", read)
 	}
 }

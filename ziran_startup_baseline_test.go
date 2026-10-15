@@ -145,6 +145,12 @@ func baselineStartWorkers(server *Server, ctx context.Context, group *WorkerGrou
 		defer group.Done()
 		workers.Retention(server, ctx)
 	}()
+	// Added with the display exchange rate.
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		workers.Rates(server, ctx)
+	}()
 }
 
 func baselineShutdownOnCancel(server *HTTPServer, ctx context.Context, shutdown Shutdown) {

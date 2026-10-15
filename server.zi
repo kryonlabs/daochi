@@ -18,6 +18,7 @@ operations :: #import "operational_http";
 tokens :: #import "token_http";
 storage_plans :: #import "storage_plan_http";
 unlocks :: #import "unlock_http";
+exchange_rates :: #import "exchange_rate";
 monero :: #import "monero_deposits";
 invoices :: #import "monero_invoices";
 google :: #import "google_play_http";
@@ -376,6 +377,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/unlocks", server, HandleUnlocks)
     Route(mux, "POST /api/v1/unlocks/grant", server, HandleUnlockGrant)
     Route(mux, "GET /api/v1/unlocks/products", server, HandleUnlockPrices)
+    Route(mux, "GET /api/v1/rates", server, HandleExchangeRate)
     Route(mux, "GET /api/v1/tokens/balance", server, HandleTokenHttpBalance)
     Route(mux, "GET /api/v1/tokens/ledger", server, HandleTokenHttpLedger)
     Route(mux, "POST /api/v1/tokens/spend", server, HandleTokenHttpSpend)
@@ -833,4 +835,8 @@ HandleUnlockGrant :: (server: *Server, writer: http.ResponseWriter, request: *ht
 
 HandleUnlockPrices :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     unlocks.Prices(Accounts(server), writer, request)
+}
+
+HandleExchangeRate :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    exchange_rates.Handle(server.cfg, writer, request)
 }

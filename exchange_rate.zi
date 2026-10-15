@@ -1,0 +1,389 @@
+// XMR/USD for display only. It never sets a price, a charge or a Dew credit;
+// those come from the node's fixed Dew per XMR ratio. Several keyless public
+// sources are read, a source more than 10% from the median is dropped, and
+// the median of at least two agreeing sources is kept and persisted.
+#import "std/go_types"
+config :: #import "config";
+response :: #import "response";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+json :: #import "std/json_go";
+clock :: #import "std/time_go";
+selection :: #import "std/select_go";
+locks :: #import "std/sync_go";
+errors :: #import "std/errors_go";
+go_io :: #system_library "go:io";
+go_math :: #system_library "go:math";
+go_slog :: #system_library "go:log/slog";
+go_strings :: #system_library "go:strings";
+go_time :: #system_library "go:time";
+go_format :: #system_library "go:fmt";
+go_context :: #system_library "go:context";
+numbers :: #system_library "go:strconv";
+builtin :: #system_library "go:builtin";
+
+// Ten minutes between refreshes; a rate older than two hours is not shown.
+RefreshInterval :: 600000000000
+FreshSeconds :: 7200
+// One to one hundred thousand US dollars per XMR.
+MinimumCents :: 100
+MaximumCents :: 10000000
+Pair :: "XMR/USD"
+
+RatePrice :: struct {
+    value: float64
+    error: Error
+}
+RateParser :: #type (body: []u8) -> RatePrice;
+RateSource :: struct {
+    name: string
+    url: string
+    parse: RateParser
+}
+RateQuote :: struct {
+    name: string
+    cents: s64
+}
+RateQuoteResult :: struct {
+    value: RateQuote
+    error: Error
+}
+XmrRate :: struct {
+    cents: s64
+    updated_at: s64
+    sources: []string
+}
+RateReply :: struct {
+    xmr_usd_cents: s64 #go_tag "json:\"xmr_usd_cents\""
+    updated_at: s64 #go_tag "json:\"updated_at\""
+    sources: []string #go_tag "json:\"sources\""
+    xmr_atomic_units: s64 #go_tag "json:\"xmr_atomic_units\""
+    token_units: s64 #go_tag "json:\"token_units\""
+}
+
+#scope_file
+CoinGeckoQuote :: struct {
+    usd: float64 #go_tag "json:\"usd\""
+}
+CoinGeckoReply :: struct {
+    monero: CoinGeckoQuote #go_tag "json:\"monero\""
+}
+KrakenTicker :: struct {
+    // The last trade: [price, volume].
+    c: []string #go_tag "json:\"c\""
+}
+KrakenResult :: struct {
+    pair: KrakenTicker #go_tag "json:\"XXMRZUSD\""
+}
+KrakenReply :: struct {
+    error: []string #go_tag "json:\"error\""
+    result: KrakenResult #go_tag "json:\"result\""
+}
+PaprikaQuote :: struct {
+    price: float64 #go_tag "json:\"price\""
+}
+PaprikaQuotes :: struct {
+    usd: PaprikaQuote #go_tag "json:\"USD\""
+}
+PaprikaReply :: struct {
+    quotes: PaprikaQuotes #go_tag "json:\"quotes\""
+}
+FloatResult :: struct {
+    value: float64
+    error: Error
+}
+guard: locks.Mutex;
+latest: XmrRate;
+CloseAtReturn :: (body: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
+StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
+LogWarning :: (message: string, key: string, error: Error) #foreign go_slog "Warn";
+ContextErrorRaw :: (value: ctx.Context) -> Error #foreign go_context "Context.Err";
+
+// A parameter named context would shadow Go's package in the call.
+Stopped :: (value: ctx.Context) -> Error {
+    return ContextErrorRaw(value)
+}
+LogSourceWarning :: (message: string, sourceKey: string, source: string, key: string, error: Error) #foreign go_slog "Warn";
+ParseFloatRaw :: (value: string, bits: isize) -> FloatResult #go_results #foreign numbers "ParseFloat";
+Round :: (value: float64) -> float64 #foreign go_math;
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+MakeStrings :: (count: isize) -> []string #foreign builtin "make";
+MakeIntegers :: (count: isize) -> []s64 #foreign builtin "make";
+MakeSources :: (count: isize) -> []RateSource #foreign builtin "make";
+AppendQuote :: (values: []RateQuote, value: RateQuote) -> []RateQuote #foreign builtin "append";
+AppendString :: (values: []string, value: string) -> []string #foreign builtin "append";
+StatusError :: (format: string, status: isize) -> Error #foreign go_format "Errorf";
+
+// The middle value, or the mean of the two middle values, of sorted integers.
+Median :: (values: []s64) -> s64 {
+    count := cast(isize)values.count
+    if count % 2 == 1 {
+        return values[count / 2]
+    }
+    return (values[count / 2 - 1] + values[count / 2]) / 2
+}
+
+Sorted :: (quotes: []RateQuote) -> []s64 {
+    values := MakeIntegers(cast(isize)quotes.count)
+    for index: cast(isize)0..cast(isize)quotes.count - 1 {
+        value := quotes[index].cents
+        cursor := index
+        while cursor > 0 && values[cursor - 1] > value {
+            values[cursor] = values[cursor - 1]
+            cursor -= 1
+        }
+        values[cursor] = value
+    }
+    return values
+}
+
+#scope_export
+ParseCoinGecko :: (body: []u8) -> RatePrice {
+    result: RatePrice
+    reply: CoinGeckoReply
+    result.error = json.Unmarshal(body, *reply)
+    result.value = reply.monero.usd
+    return result
+}
+
+ParseKraken :: (body: []u8) -> RatePrice {
+    result: RatePrice
+    reply: KrakenReply
+    result.error = json.Unmarshal(body, *reply)
+    if result.error != null {
+        return result
+    }
+    if reply.error.count > 0 || reply.result.pair.c.count < 1 {
+        result.error = errors.New("kraken ticker unavailable")
+        return result
+    }
+    parsed := ParseFloatRaw(reply.result.pair.c[0], cast(isize)64)
+    result.value = parsed.value
+    result.error = parsed.error
+    return result
+}
+
+ParsePaprika :: (body: []u8) -> RatePrice {
+    result: RatePrice
+    reply: PaprikaReply
+    result.error = json.Unmarshal(body, *reply)
+    result.value = reply.quotes.usd.price
+    return result
+}
+
+// Three independent keyless sources: two aggregators and one exchange.
+Sources :: () -> []RateSource {
+    values := MakeSources(cast(isize)3)
+    values[0] = RateSource.{.name = "coingecko",
+        .url = "https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd",
+        .parse = ParseCoinGecko}
+    values[1] = RateSource.{.name = "kraken",
+        .url = "https://api.kraken.com/0/public/Ticker?pair=XMRUSD", .parse = ParseKraken}
+    values[2] = RateSource.{.name = "coinpaprika",
+        .url = "https://api.coinpaprika.com/v1/tickers/xmr-monero?quotes=USD", .parse = ParsePaprika}
+    return values
+}
+
+SchemaSQL :: () -> string {
+    return #string SQL
+CREATE TABLE IF NOT EXISTS exchange_rates (
+ pair TEXT PRIMARY KEY, usd_cents INTEGER NOT NULL CHECK(usd_cents > 0),
+ updated_at INTEGER NOT NULL, sources TEXT NOT NULL
+);
+SQL;
+}
+
+// The median of the quotes within 10% of the median of all of them, with the
+// names that agreed. No rate unless at least two sources agree.
+Combine :: (quotes: []RateQuote) -> XmrRate {
+    result: XmrRate
+    result.sources = MakeStrings(cast(isize)0)
+    if quotes.count < 2 {
+        return result
+    }
+    median := Median(Sorted(quotes))
+    kept: []RateQuote
+    for quote: quotes {
+        difference := quote.cents - median
+        if difference < 0 {
+            difference = -difference
+        }
+        if difference * 10 <= median {
+            kept = AppendQuote(kept, quote)
+        }
+    }
+    if kept.count < 2 {
+        return result
+    }
+    result.cents = Median(Sorted(kept))
+    for quote: kept {
+        result.sources = AppendString(result.sources, quote.name)
+    }
+    return result
+}
+
+Fetch :: (context: ctx.Context, client: *http.Client, source: RateSource) -> RateQuoteResult {
+    result: RateQuoteResult
+    body: io.Reader
+    request := http.NewRequest(context, "GET", source.url, body)
+    result.error = request.error
+    if result.error != null {
+        return result
+    }
+    http.SetHeader(http.Headers(request.value), "Accept", "application/json")
+    http.SetHeader(http.Headers(request.value), "User-Agent", "daochi-rates/1")
+    reply := http.Do(client, request.value)
+    result.error = reply.error
+    if result.error != null {
+        return result
+    }
+    stream := http.ResponseBody(reply.value)
+    CloseAtReturn(stream)
+    bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 65536))
+    result.error = bytes.error
+    if result.error != null {
+        return result
+    }
+    status := http.StatusCode(reply.value)
+    if status < 200 || status >= 300 {
+        result.error = StatusError("rate source status %d", status)
+        return result
+    }
+    price := source.parse(bytes.value)
+    result.error = price.error
+    if result.error != null {
+        return result
+    }
+    // NaN fails both comparisons.
+    if !(price.value >= 1.0 && price.value <= 100000.0) {
+        result.error = errors.New("rate out of range")
+        return result
+    }
+    result.value.name = source.name
+    result.value.cents = cast(s64)Round(price.value * 100.0)
+    return result
+}
+
+Remember :: (rate: XmrRate) {
+    locks.Lock(*guard)
+    latest = rate
+    locks.Unlock(*guard)
+}
+
+// The kept rate while it is fresh; otherwise no rate and no sources.
+Current :: (now: s64) -> XmrRate {
+    locks.Lock(*guard)
+    rate := latest
+    locks.Unlock(*guard)
+    if rate.cents < MinimumCents || rate.cents > MaximumCents ||
+    now - rate.updated_at > FreshSeconds || rate.updated_at - now > 300 {
+        empty: XmrRate
+        empty.sources = MakeStrings(cast(isize)0)
+        return empty
+    }
+    return rate
+}
+
+Save :: (database: *sql.Database, context: ctx.Context, rate: XmrRate) -> Error {
+    arguments: [4]Any = .[Pair, rate.cents, rate.updated_at, Join(rate.sources, ",")]
+    written := sql.Exec(database, context,
+        "INSERT INTO exchange_rates(pair,usd_cents,updated_at,sources) VALUES(?1,?2,?3,?4) ON CONFLICT(pair) DO UPDATE SET usd_cents=excluded.usd_cents,updated_at=excluded.updated_at,sources=excluded.sources",
+        arguments[:])
+    return written.error
+}
+
+// Replace the kept rate with the stored one, or with none.
+Load :: (database: *sql.Database, context: ctx.Context) -> Error {
+    rate: XmrRate
+    names: string
+    arguments: [1]Any = .[Pair]
+    destinations: [3]Any = .[*rate.cents, *rate.updated_at, *names]
+    error := sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT usd_cents,updated_at,sources FROM exchange_rates WHERE pair=?1", arguments[:]), destinations[:])
+    if errors.Is(error, sql.NoRows()) {
+        empty: XmrRate
+        Remember(empty)
+        return null
+    }
+    if error != null {
+        return error
+    }
+    rate.sources = Split(names, ",")
+    Remember(rate)
+    return null
+}
+
+Refresh :: (context: ctx.Context, database: *sql.Database, sources: []RateSource, now: s64) -> Error {
+    client := http.NewClient(cast(clock.Duration)10000000000)
+    quotes: []RateQuote
+    for source: sources {
+        quote := Fetch(context, client, source)
+        // Shutting down is not a source failure.
+        stopped := Stopped(context)
+        if stopped != null {
+            return stopped
+        }
+        if quote.error != null {
+            LogSourceWarning("exchange rate source failed", "source", source.name, "error", quote.error)
+            continue
+        }
+        quotes = AppendQuote(quotes, quote.value)
+    }
+    rate := Combine(quotes)
+    if rate.cents == 0 {
+        return errors.New("no two exchange rate sources agree")
+    }
+    rate.updated_at = now
+    error := Save(database, context, rate)
+    if error != null {
+        return error
+    }
+    Remember(rate)
+    return null
+}
+
+Run :: (database: *sql.Database, context: ctx.Context, sources: []RateSource, interval: clock.Duration) {
+    if cast(s64)interval <= 0 {
+        interval = cast(clock.Duration)RefreshInterval
+    }
+    loaded := Load(database, context)
+    // Shutting down is not a failure worth a log line.
+    if Stopped(context) != null {
+        return
+    }
+    if loaded != null {
+        LogWarning("exchange rate load failed", "error", loaded)
+    }
+    ticker := clock.NewTicker(interval)
+    StopAtReturn(ticker)
+    cases: [2]selection.Case
+    cases[0] = selection.Receive(ctx.Done(context))
+    cases[1] = selection.Receive(clock.TickerChannel(ticker))
+    while true {
+        error := Refresh(context, database, sources, clock.Unix(clock.Now()))
+        if error != null && Stopped(context) == null {
+            LogWarning("exchange rate refresh failed", "error", error)
+        }
+        if selection.Select(cases[:]).chosen == cast(isize)0 {
+            return
+        }
+    }
+}
+
+// Public and display only: the Dew ratio beside it is what prices use.
+Handle :: (configuration: config.Config, writer: http.ResponseWriter, request: *http.Request) {
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "public, max-age=300")
+    rate := Current(clock.Unix(clock.Now()))
+    reply: RateReply
+    reply.xmr_usd_cents = rate.cents
+    reply.updated_at = rate.updated_at
+    reply.sources = rate.sources
+    if configuration.MoneroRateAtomicAmount > 0 && configuration.MoneroRateTokenUnits > 0 {
+        reply.xmr_atomic_units = configuration.MoneroRateAtomicAmount
+        reply.token_units = configuration.MoneroRateTokenUnits
+    }
+    response.JSON(writer, 200, reply)
+}

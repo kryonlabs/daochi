@@ -65,6 +65,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/node/mesh/import`
 - `GET /api/v1/tokens/assets`
 - `GET /api/v1/tokens/products`
+- `GET /api/v1/rates` (public XMR/USD display rate and the Dew funding ratio)
 - `GET /api/v1/tokens/issuer`
 - `GET /api/v1/tokens/balance?app_id=<optional-app-id>`
 - `GET /api/v1/tokens/ledger?since=<optional-seq>&app_id=<optional-app-id>`
@@ -326,6 +327,17 @@ the Dew issuer, for a product the account has unlocked. A package artifact
 with a `<sha256>.zib.product` file beside it naming a product is gated: it is
 served, uncached, only at `/api/v2/packages/<app>/<sha256>.zib/<grant>` with an
 unexpired grant for that product.
+
+`GET /api/v1/rates` is public and lets an app show what Dew and XMR amounts
+are worth in US dollars. It returns `xmr_usd_cents` (US cents per XMR),
+`updated_at`, the agreeing `sources`, and the node's fixed funding ratio
+`xmr_atomic_units` per `token_units` (0 when `MONERO_RATE_*` is unset). Every
+ten minutes the node reads CoinGecko, Kraken and CoinPaprika, drops a source
+more than 10% from the median, and keeps the median of at least two that
+agree; the last rate is stored, so a restart serves it at once. Without a rate
+newer than two hours, `xmr_usd_cents` and `updated_at` are 0 and `sources` is
+empty. The USD rate is display only: it never sets a price, a charge or a
+Dew credit, which all follow the fixed funding ratio.
 
 When the node's Dew per XMR ratio changes, stop the service and run
 `daochi rescale-dew FACTOR` once with the node's environment. Every positive

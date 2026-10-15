@@ -2,7 +2,7 @@
 config :: #import "config";
 plans :: #import "storage_plan";
 rescales :: #import "token_rescale";
-gifts :: #import "token_gift";
+rewards :: #import "token_reward";
 checkpoints :: #import "token_checkpoint";
 policy :: #import "token_policy";
 tokens :: #import "token";
@@ -105,7 +105,7 @@ ServerClosed :: () -> Error #go_field #foreign go_http "ErrServerClosed";
 PrintRescale :: (format: string, status: string, factor: s64, accounts: s64, before: s64, after: s64,
     intents: s64, deposits: s64) #foreign go_format "Printf";
 PrintCheckpoint :: (format: string, sequence: s64, root: string) #foreign go_format "Printf";
-PrintGift :: (format: string, gift: string, units: s64, accounts: s64, credited: s64) #foreign go_format "Printf";
+PrintReward :: (format: string, reward: string, status: string, dew: s64, account: string, balance: s64) #foreign go_format "Printf";
 Minute :: 60000000000;
 Second :: 1000000000;
 
@@ -296,17 +296,17 @@ RescaleDew :: (configuration: config.Config, arguments: []string) -> Error {
     return null
 }
 
-// Run with the service stopped. The same NAME again credits nobody twice.
-GiftDew :: (configuration: config.Config, arguments: []string) -> Error {
-    usage := errors.New("usage: daochi gift-dew NAME DEW")
-    if arguments.count != 2 {
+// Run with the service stopped. The same REWARD never credits an account twice.
+RewardDew :: (configuration: config.Config, arguments: []string) -> Error {
+    usage := errors.New("usage: daochi reward-dew REWARD ACCOUNT DEW")
+    if arguments.count != 3 {
         return usage
     }
-    dew := tokens.ParseInteger(arguments[1])
+    dew := tokens.ParseInteger(arguments[2])
     if !dew.is_ok || dew.value <= 0 || dew.value > 1000000 {
         return usage
     }
-    issuer := policy.Issuer(configuration, errors.New("gifts need the Dew issuer private key"))
+    issuer := policy.Issuer(configuration, errors.New("rewards need the Dew issuer private key"))
     if issuer.error != null {
         return issuer.error
     }
@@ -317,12 +317,17 @@ GiftDew :: (configuration: config.Config, arguments: []string) -> Error {
     store := opened.value
     CloseAtReturn(CloseStore, store)
     context := ctx.Background()
-    result := gifts.Give(store.database, context, issuer.value, arguments[0], dew.value * plans.UnitsPerDew)
+    result := rewards.Give(store.database, context, issuer.value, arguments[0], arguments[1],
+        dew.value * plans.UnitsPerDew)
     if result.error != null {
         return result.error
     }
-    PrintGift("Dew gift %s: %d units each, %d accounts hold it, %d credited now\n",
-        arguments[0], result.units, result.accounts, result.credited)
+    status := "credited"
+    if !result.credited {
+        status = "already credited"
+    }
+    PrintReward("Dew reward %s %s: %d Dew to account %s, balance now %d units\n",
+        arguments[0], status, dew.value, result.account, result.balance)
     checkpoint := checkpoints.Create(store.database, context, issuer.value,
         errors.New("Dew issuer unavailable"))
     if checkpoint.error != null {
@@ -343,10 +348,10 @@ RunPrepared :: (configuration: config.Config, arguments: []string, createVerifie
         }
         return
     }
-    if arguments.count > 1 && arguments[1] == "gift-dew" {
-        error := GiftDew(configuration, arguments[2:])
+    if arguments.count > 1 && arguments[1] == "reward-dew" {
+        error := RewardDew(configuration, arguments[2:])
         if error != null {
-            FatalError("gift-dew: %v", error)
+            FatalError("reward-dew: %v", error)
         }
         return
     }

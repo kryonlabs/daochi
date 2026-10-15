@@ -38,7 +38,7 @@ type Signal = os.Signal
 
 type Logger = log.Logger
 
-type zir_cd0367c0a5ef381f_CancelCallback func(CancelFunc)
+type zir_6e1348a6ee9474dc_CancelCallback func(CancelFunc)
 
 type CloseCallback func(*Store)
 
@@ -77,7 +77,7 @@ func Startup_NotifyContext(Parent Context, Interrupt Signal, Terminate Signal) C
 	return result
 }
 
-func Startup_CancelAtReturn(Callback zir_cd0367c0a5ef381f_CancelCallback, Cancel CancelFunc) {
+func Startup_CancelAtReturn(Callback zir_6e1348a6ee9474dc_CancelCallback, Cancel CancelFunc) {
 	Callback(Cancel)
 }
 
@@ -137,7 +137,7 @@ func Startup_ServerClosed() Error {
 	return http.ErrServerClosed
 }
 
-const zir_d_bbb71e8aee79adac = 60000000000
+const zir_d_f9acac9d045841ee = 60000000000
 const Second = 1000000000
 
 func Startup_CloseStore(store *Store) {
@@ -337,6 +337,40 @@ func Startup_RescaleDew(configuration Config, arguments []string) Error {
 	return nil
 }
 
+func Startup_GiftDew(configuration Config, arguments []string) Error {
+	usage := StdErrorsGo_New("usage: daochi gift-dew NAME DEW")
+	if int64(len(arguments)) != 2 {
+		return usage
+	}
+	dew := Token_ParseInteger(arguments[1])
+	if !dew.IsOk || dew.Value <= 0 || dew.Value > 1000000 {
+		return usage
+	}
+	issuer := TokenPolicy_Issuer(configuration, StdErrorsGo_New("gifts need the Dew issuer private key"))
+	if issuer.Error != nil {
+		return issuer.Error
+	}
+	opened := Store_Open(configuration.DBPath)
+	if opened.Error != nil {
+		return opened.Error
+	}
+	store := opened.Value
+	defer Startup_CloseAtReturn(func(value_0 *Store) { Startup_CloseStore(value_0) }, store)
+	context := StdContextGo_Background()
+	result := TokenGift_Give(store.Database, context, issuer.Value, arguments[0], dew.Value*1000000)
+	if result.Error != nil {
+		return result.Error
+	}
+	fmt.Printf("Dew gift %s: %d units each, %d accounts hold it, %d credited now\n", arguments[0], int64(result.Units), int64(result.Accounts), int64(result.Credited))
+	var value_1 *Database = store.Database
+	checkpoint := TokenCheckpoint_Create(value_1, context, issuer.Value, StdErrorsGo_New("Dew issuer unavailable"))
+	if checkpoint.Error != nil {
+		return checkpoint.Error
+	}
+	fmt.Printf("Dew checkpoint at ledger sequence %d, root %s\n", int64(checkpoint.Value.LedgerSeq), checkpoint.Value.LedgerRoot)
+	return nil
+}
+
 func Startup_RunPrepared(configuration Config, arguments []string, createVerifier VerifierFactory, signer SignPrivateKey) {
 	if int64(len(arguments)) > 1 && arguments[1] == "inspect" {
 		var options InspectOptions = InspectOptions{}
@@ -349,6 +383,17 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 		_ = error
 		if error != nil {
 			log.Fatalf("inspect: %v", error)
+		}
+		return
+	}
+	if int64(len(arguments)) > 1 && arguments[1] == "gift-dew" {
+		if int64(2) < 0 || int64(int64(len(arguments))) < int64(2) || int64(int64(len(arguments))) > int64(len(arguments)) {
+			panic("slice range out of bounds")
+		}
+		error := Startup_GiftDew(configuration, arguments[2:int64(len(arguments)):int64(len(arguments))])
+		_ = error
+		if error != nil {
+			log.Fatalf("gift-dew: %v", error)
 		}
 		return
 	}
@@ -372,9 +417,9 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 		log.Fatalf("open store: %v", opened.Error)
 	}
 	store := opened.Value
-	defer Startup_CloseAtReturn(func(value_3 *Store) { Startup_CloseStore(value_3) }, store)
-	var value_4 VerifierFactory = createVerifier
-	verifier := value_4()
+	defer Startup_CloseAtReturn(func(value_4 *Store) { Startup_CloseStore(value_4) }, store)
+	var value_5 VerifierFactory = createVerifier
+	verifier := value_5()
 	if verifier.Error != nil {
 		if StdErrorsGo_Is(verifier.Error, ErrVerifierUnavailable) {
 			log.Fatal("ML-DSA-44 verifier unavailable: build with CGO_ENABLED=1 and liboqs installed")
@@ -383,12 +428,12 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 	}
 	server := Server_New(configuration, store, verifier.Value, signer)
 	runtime := Startup_NotifyContext(StdContextGo_Background(), Startup_Interrupt(), Startup_Terminate())
-	defer Startup_CancelAtReturn(func(value_5 CancelFunc) { StdContextGo_Cancel(value_5) }, runtime.Cancel)
+	defer Startup_CancelAtReturn(func(value_6 CancelFunc) { StdContextGo_Cancel(value_6) }, runtime.Cancel)
 	var group WorkerGroup = *new(WorkerGroup)
 	Startup_StartWorkers(server, runtime.Value, &(group), Startup_NativeWorkers())
 	http := Startup_NewHTTPServer(configuration.Addr, Server_Routes(server))
-	var value_7 Listen = func(value_6 *HTTPServer) Error { return Startup_ListenNative(value_6) }
-	Startup_Serve(http, configuration, runtime.Value, runtime.Cancel, &(group), value_7, func(value_8 *HTTPServer, value_9 Context) Error { return Startup_ShutdownNative(value_8, value_9) })
+	var value_8 Listen = func(value_7 *HTTPServer) Error { return Startup_ListenNative(value_7) }
+	Startup_Serve(http, configuration, runtime.Value, runtime.Cancel, &(group), value_8, func(value_9 *HTTPServer, value_10 Context) Error { return Startup_ShutdownNative(value_9, value_10) })
 }
 
 func Startup_Run(configuration Config, arguments []string, createVerifier VerifierFactory, signer SignPrivateKey) {

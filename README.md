@@ -345,6 +345,14 @@ balance gains `(FACTOR-1)×balance` as a signed credit, so no ledger row is
 rewritten; uncredited Monero invoices and deposits are scaled in the same
 transaction, and a new checkpoint is signed. Running it again changes nothing.
 
+To reward one person with Dew, for example as thanks for a past donation, stop
+the service and run `daochi reward-dew REWARD ACCOUNT DEW` with the node's
+environment. ACCOUNT is the person's alias (`@name`) or account ID. The Dew is
+a signed credit with `REWARD:account` as its payment ID, and a new checkpoint
+is signed. The same REWARD never credits that account twice, and reusing it
+with a different amount is refused. There is no command that credits every
+account.
+
 The background reconciler runs whenever `MONERO_WALLET_RPC_URL` is configured,
 even with `DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED` unset, so confirmed deposits
 keep settling while purchase creation is disabled. The deposit scan keeps a

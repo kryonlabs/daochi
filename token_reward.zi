@@ -1,0 +1,69 @@
+// A Dew reward to one account, such as thanks for a past donation. The account
+// is credited through the signed payment-credit path with REWARD:account as
+// the payment ID, so the same reward never credits that account twice.
+#import "std/go_types"
+#import "protocol"
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+identity :: #import "identity";
+accounts :: #import "account_lookup";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
+errors :: #import "std/errors_go";
+go_strings :: #system_library "go:strings";
+
+RewardProvider :: "reward-v1";
+
+RewardResult :: struct {
+    // The rewarded account, its balance afterwards, and whether this run
+    // credited it (false when the reward was already given).
+    account: string
+    units: s64
+    balance: s64
+    credited: bool
+    error: Error
+}
+
+#scope_file
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+
+#scope_export
+// Reward one account, named by alias or account ID, with Dew units.
+Give :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, reward: string,
+    reference: string, units: s64) -> RewardResult {
+    result: RewardResult
+    result.units = units
+    if !identity.ValidNamespace(reward) || units <= 0 {
+        result.error = errors.New("invalid reward")
+        return result
+    }
+    found := accounts.Resolve(database, context, reference)
+    result.error = found.error
+    if result.error != null {
+        return result
+    }
+    if !found.found {
+        result.error = errors.New("unknown account")
+        return result
+    }
+    result.account = found.value
+    event: receipts.TokenEventInput
+    event.AccountID = result.account
+    event.EventType = "credit"
+    event.AmountDelta = units
+    event.SourceType = "reward"
+    event.SourceRef = reward
+    paymentParts: [3]string = .[reward, ":", result.account]
+    credited := ledger.CreditPayment(database, context, signer, RewardProvider,
+        Join(paymentParts[:], ""), event, errors.New("Dew issuer unavailable"))
+    result.error = credited.error
+    if result.error != null {
+        return result
+    }
+    result.credited = credited.created
+    balance := ledger.Balance(database, context, result.account, receipts.AssetID)
+    result.error = balance.error
+    result.balance = balance.value
+    return result
+}

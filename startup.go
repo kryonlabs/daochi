@@ -345,16 +345,16 @@ func Startup_RescaleDew(configuration Config, arguments []string) Error {
 	return nil
 }
 
-func Startup_GiftDew(configuration Config, arguments []string) Error {
-	usage := StdErrorsGo_New("usage: daochi gift-dew NAME DEW")
-	if int64(len(arguments)) != 2 {
+func Startup_RewardDew(configuration Config, arguments []string) Error {
+	usage := StdErrorsGo_New("usage: daochi reward-dew REWARD ACCOUNT DEW")
+	if int64(len(arguments)) != 3 {
 		return usage
 	}
-	dew := Token_ParseInteger(arguments[1])
+	dew := Token_ParseInteger(arguments[2])
 	if !dew.IsOk || dew.Value <= 0 || dew.Value > 1000000 {
 		return usage
 	}
-	issuer := TokenPolicy_Issuer(configuration, StdErrorsGo_New("gifts need the Dew issuer private key"))
+	issuer := TokenPolicy_Issuer(configuration, StdErrorsGo_New("rewards need the Dew issuer private key"))
 	if issuer.Error != nil {
 		return issuer.Error
 	}
@@ -365,11 +365,15 @@ func Startup_GiftDew(configuration Config, arguments []string) Error {
 	store := opened.Value
 	defer Startup_CloseAtReturn(func(value_0 *Store) { Startup_CloseStore(value_0) }, store)
 	context := StdContextGo_Background()
-	result := TokenGift_Give(store.Database, context, issuer.Value, arguments[0], dew.Value*1000000)
+	result := TokenReward_Give(store.Database, context, issuer.Value, arguments[0], arguments[1], dew.Value*1000000)
 	if result.Error != nil {
 		return result.Error
 	}
-	fmt.Printf("Dew gift %s: %d units each, %d accounts hold it, %d credited now\n", arguments[0], int64(result.Units), int64(result.Accounts), int64(result.Credited))
+	status := "credited"
+	if !result.Credited {
+		status = "already credited"
+	}
+	fmt.Printf("Dew reward %s %s: %d Dew to account %s, balance now %d units\n", arguments[0], status, int64(dew.Value), result.Account, int64(result.Balance))
 	var value_1 *Database = store.Database
 	checkpoint := TokenCheckpoint_Create(value_1, context, issuer.Value, StdErrorsGo_New("Dew issuer unavailable"))
 	if checkpoint.Error != nil {
@@ -394,14 +398,14 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 		}
 		return
 	}
-	if int64(len(arguments)) > 1 && arguments[1] == "gift-dew" {
+	if int64(len(arguments)) > 1 && arguments[1] == "reward-dew" {
 		if int64(2) < 0 || int64(int64(len(arguments))) < int64(2) || int64(int64(len(arguments))) > int64(len(arguments)) {
 			panic("slice range out of bounds")
 		}
-		error := Startup_GiftDew(configuration, arguments[2:int64(len(arguments)):int64(len(arguments))])
+		error := Startup_RewardDew(configuration, arguments[2:int64(len(arguments)):int64(len(arguments))])
 		_ = error
 		if error != nil {
-			log.Fatalf("gift-dew: %v", error)
+			log.Fatalf("reward-dew: %v", error)
 		}
 		return
 	}

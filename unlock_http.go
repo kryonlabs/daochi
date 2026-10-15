@@ -65,6 +65,14 @@ func UnlockHttp_Handle(accounts Accounts, writer ResponseWriter, request *Reques
 	Response_JSON(writer, 200, listed)
 }
 
+func UnlockHttp_Prices(accounts Accounts, writer ResponseWriter, request *Request) {
+	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "no-store")
+	var reply UnlockPrices = UnlockPrices{}
+	var value_0 int64 = StdTimeGo_Unix(StdTimeGo_Now())
+	reply.Products = Unlock_Products(value_0, accounts.Configuration.UnlockTrialUntil)
+	Response_JSON(writer, 200, reply)
+}
+
 func UnlockHttp_Grant(accounts Accounts, writer ResponseWriter, request *Request) {
 	user := HttpAuth_BearerUser(accounts.Database, request, accounts.Configuration.TokenSecret)
 	if user.Authentication.Error != nil || user.Authentication.Status != 0 {

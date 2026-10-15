@@ -100,5 +100,16 @@
         }
       }
     }
+  },
+  "/api/v1/unlocks/products": {
+    "get": {
+      "summary": "List the node's unlock prices",
+      "description": "Public. Returns products [{product,price_units,regular_price_units,trial_until}] as in GET /api/v1/unlocks, so an app can show a trial offer before the person signs in.",
+      "responses": {
+        "200": {
+          "description": "Current prices; no-store"
+        }
+      }
+    }
   }
 }

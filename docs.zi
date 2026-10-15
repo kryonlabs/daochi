@@ -2124,6 +2124,7 @@ Paths :: () -> Map(string, Any) {
     unlocks := unlock_paths.Paths()
     MapSet(result, "/api/v1/unlocks", MapGet(unlocks, "/api/v1/unlocks"))
     MapSet(result, "/api/v1/unlocks/grant", MapGet(unlocks, "/api/v1/unlocks/grant"))
+    MapSet(result, "/api/v1/unlocks/products", MapGet(unlocks, "/api/v1/unlocks/products"))
     lists := shared_list_paths.Paths()
     MapSet(result, "/api/v1/lists", MapGet(lists, "/api/v1/lists"))
     packages := package_paths.Paths()

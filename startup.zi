@@ -2,6 +2,7 @@
 config :: #import "config";
 plans :: #import "storage_plan";
 rescales :: #import "token_rescale";
+gifts :: #import "token_gift";
 checkpoints :: #import "token_checkpoint";
 policy :: #import "token_policy";
 tokens :: #import "token";
@@ -102,6 +103,7 @@ ServerClosed :: () -> Error #go_field #foreign go_http "ErrServerClosed";
 PrintRescale :: (format: string, status: string, factor: s64, accounts: s64, before: s64, after: s64,
     intents: s64, deposits: s64) #foreign go_format "Printf";
 PrintCheckpoint :: (format: string, sequence: s64, root: string) #foreign go_format "Printf";
+PrintGift :: (format: string, gift: string, units: s64, accounts: s64, credited: s64) #foreign go_format "Printf";
 Minute :: 60000000000;
 Second :: 1000000000;
 
@@ -285,6 +287,42 @@ RescaleDew :: (configuration: config.Config, arguments: []string) -> Error {
     return null
 }
 
+// Run with the service stopped. The same NAME again credits nobody twice.
+GiftDew :: (configuration: config.Config, arguments: []string) -> Error {
+    usage := errors.New("usage: daochi gift-dew NAME DEW")
+    if arguments.count != 2 {
+        return usage
+    }
+    dew := tokens.ParseInteger(arguments[1])
+    if !dew.is_ok || dew.value <= 0 || dew.value > 1000000 {
+        return usage
+    }
+    issuer := policy.Issuer(configuration, errors.New("gifts need the Dew issuer private key"))
+    if issuer.error != null {
+        return issuer.error
+    }
+    opened := storage.Open(configuration.DBPath)
+    if opened.error != null {
+        return opened.error
+    }
+    store := opened.value
+    CloseAtReturn(CloseStore, store)
+    context := ctx.Background()
+    result := gifts.Give(store.database, context, issuer.value, arguments[0], dew.value * plans.UnitsPerDew)
+    if result.error != null {
+        return result.error
+    }
+    PrintGift("Dew gift %s: %d units each, %d accounts hold it, %d credited now\n",
+        arguments[0], result.units, result.accounts, result.credited)
+    checkpoint := checkpoints.Create(store.database, context, issuer.value,
+        errors.New("Dew issuer unavailable"))
+    if checkpoint.error != null {
+        return checkpoint.error
+    }
+    PrintCheckpoint("Dew checkpoint at ledger sequence %d, root %s\n",
+        checkpoint.value.LedgerSeq, checkpoint.value.LedgerRoot)
+    return null
+}
 RunPrepared :: (configuration: config.Config, arguments: []string, createVerifier: VerifierFactory,
     signer: access.SignPrivateKey) {
     if arguments.count > 1 && arguments[1] == "inspect" {
@@ -293,6 +331,13 @@ RunPrepared :: (configuration: config.Config, arguments: []string, createVerifie
         error := inspection.Run(ctx.Background(), arguments[2:], options)
         if error != null {
             FatalError("inspect: %v", error)
+        }
+        return
+    }
+    if arguments.count > 1 && arguments[1] == "gift-dew" {
+        error := GiftDew(configuration, arguments[2:])
+        if error != null {
+            FatalError("gift-dew: %v", error)
         }
         return
     }

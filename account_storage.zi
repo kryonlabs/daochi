@@ -37,6 +37,12 @@ SELECT
 + (SELECT COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)
    FROM server_encrypted_payloads WHERE user_id_hash=?1)
 + (SELECT COALESCE(SUM(size),0) FROM server_blobs WHERE user_id_hash=?1)
++ (SELECT COALESCE(SUM(LENGTH(id)+LENGTH(title)+LENGTH(items)),0)
+   FROM server_shared_lists WHERE owner=?1)
++ (SELECT COALESCE(SUM(LENGTH(i.id)+LENGTH(i.target)+LENGTH(i.status)),0)
+   FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id WHERE l.owner=?1)
++ (SELECT COALESCE(SUM(LENGTH(request_id)+LENGTH(body)),0)
+   FROM server_list_commands WHERE user_id=?1)
 SQL_END;
 BlobStoredSQL :: "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3)";
 BlobRecordSQL :: "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)";

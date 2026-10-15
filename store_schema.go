@@ -182,18 +182,20 @@ func StoreSchema_Ensure(database *Database, context Context) Error {
 	if pragmas.Error != nil {
 		return pragmas.Error
 	}
-	var value_1 [4]string
+	var value_1 [5]string
 	var value_2 string = strings.Join(Tables[0:9:9], "")
 	value_1[0] = value_2
 	var value_3 string = TelegramAccountEntry_SchemaSQL()
 	value_1[1] = value_3
 	var value_4 string = StateHistory_SchemaSQL()
 	value_1[2] = value_4
+	var value_5 string = SharedLists_SchemaSQL()
+	value_1[3] = value_5
 	var value_6 string = StoragePlan_SchemaSQL()
-	value_1[3] = value_6
+	value_1[4] = value_6
 	definitions := value_1
 	_ = definitions
-	var value_7 string = strings.Join(definitions[0:4:4], "")
+	var value_7 string = strings.Join(definitions[0:5:5], "")
 	var value_8 []Any
 	if int64(0) < 0 || int64(int64(len(value_8))) < int64(0) || int64(int64(len(value_8))) > int64(len(value_8)) {
 		panic("slice range out of bounds")
@@ -278,5 +280,6 @@ func StoreSchema_ziranInit() {
 	}
 	StoreSchema_ziranInitState = 1
 	TelegramAccountEntry_ziranInit()
+	SharedLists_ziranInit()
 	StoreSchema_ziranInitState = 2
 }

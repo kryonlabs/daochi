@@ -757,6 +757,12 @@ func Server_Routes(server *Server) Handler {
 		Server_HandleSocialHttpFriends(value_351, value_352, value_353)
 	}
 	Server_Route(mux, "GET /api/v1/friends", server, value_354)
+	Server_Route(mux, "GET /api/v1/lists", server, func(value_355 *Server, value_356 ResponseWriter, value_357 *Request) {
+		Server_HandleLists(value_355, value_356, value_357)
+	})
+	Server_Route(mux, "POST /api/v1/lists", server, func(value_358 *Server, value_359 ResponseWriter, value_360 *Request) {
+		Server_HandleLists(value_358, value_359, value_360)
+	})
 	var value_364 ServerHandler = func(value_361 *Server, value_362 ResponseWriter, value_363 *Request) {
 		Server_HandleSocialHttpRemoveFriend(value_361, value_362, value_363)
 	}
@@ -1000,6 +1006,10 @@ func Server_HandleAppHttpRecords(server *Server, writer ResponseWriter, request 
 
 func Server_HandleSocialHttpFriends(server *Server, writer ResponseWriter, request *Request) {
 	SocialHttp_Friends(Server_Social(server), writer, request)
+}
+
+func Server_HandleLists(server *Server, writer ResponseWriter, request *Request) {
+	SharedLists_Handle(Server_Accounts(server), writer, request)
 }
 
 func Server_HandleSocialHttpRemoveFriend(server *Server, writer ResponseWriter, request *Request) {
@@ -1307,6 +1317,7 @@ func Server_ziranInit() {
 	MoneroDeposits_ziranInit()
 	MoneroInvoices_ziranInit()
 	GooglePlayHttp_ziranInit()
+	SharedLists_ziranInit()
 	AppHttp_ziranInit()
 	BundleHttp_ziranInit()
 	BlobHttp_ziranInit()

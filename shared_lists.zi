@@ -1,0 +1,442 @@
+// Explicit, accepted collaboration. Private encrypted records never enter this
+// store; an owner deliberately sends only the list selected for sharing.
+#import "std/go_types"
+accounts :: #import "account_http";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+identity :: #import "identity";
+signing :: #import "signing";
+quota :: #import "account_storage";
+plans :: #import "storage_plan";
+config :: #import "config";
+clock :: #import "std/time_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+http :: #import "std/http_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+Item :: struct {
+    id: string #go_tag "json:\"id\""
+    title: string #go_tag "json:\"title\""
+    comment: string #go_tag "json:\"comment\""
+    done: s32 #go_tag "json:\"done\""
+}
+List :: struct {
+    id: string #go_tag "json:\"id\""
+    owner: string #go_tag "json:\"owner\""
+    alias: string #go_tag "json:\"alias\""
+    title: string #go_tag "json:\"title\""
+    revision: s64 #go_tag "json:\"revision\""
+    deleted: s32 #go_tag "json:\"deleted\""
+    items: []Item #go_tag "json:\"items\""
+}
+Invitation :: struct {
+    id: string #go_tag "json:\"id\""
+    list_id: string #go_tag "json:\"list_id\""
+    title: string #go_tag "json:\"title\""
+    owner: string #go_tag "json:\"owner\""
+    alias: string #go_tag "json:\"alias\""
+    target: string #go_tag "json:\"target\""
+    target_alias: string #go_tag "json:\"target_alias\""
+    status: string #go_tag "json:\"status\""
+}
+Snapshot :: struct {
+    lists: []List #go_tag "json:\"lists\""
+    invitations: []Invitation #go_tag "json:\"invitations\""
+    error: Error #go_tag "json:\"-\""
+}
+Command :: struct {
+    request_id: string #go_tag "json:\"request_id\""
+    action: string #go_tag "json:\"action\""
+    target: string #go_tag "json:\"target\""
+    invitation_id: string #go_tag "json:\"invitation_id\""
+    list: List #go_tag "json:\"list\""
+}
+Outcome :: struct {
+    status: isize
+    error: Error
+}
+
+#scope_file
+MakeLists :: (count: isize) -> []List #foreign builtin "make";
+AppendList :: (values: []List, value: List) -> []List #foreign builtin "append";
+MakeInvitations :: (count: isize) -> []Invitation #foreign builtin "make";
+AppendInvitation :: (values: []Invitation, value: Invitation) -> []Invitation #foreign builtin "append";
+AppendMember :: (values: []string, value: string) -> []string #foreign builtin "append";
+TrimSpace :: (value: string) -> string #foreign strings;
+
+Failure :: (status: isize, message: string) -> Outcome {
+    return Outcome.{status = status, error = errors.New(message)}
+}
+
+ValidList :: (list: List) -> bool {
+    if !identity.ValidResourceID(list.id) || list.id.count > 36 || TrimSpace(list.title) == "" ||
+    list.title.count > 127 || list.items.count > 256 {
+        return false
+    }
+    for index: cast(s64)0..list.items.count - 1 {
+        item := list.items[index]
+        if !identity.ValidResourceID(item.id) || item.id.count > 36 || TrimSpace(item.title) == "" ||
+        item.title.count > 127 || item.comment.count > 511 ||
+        (item.done != 0 && item.done != 1) {
+            return false
+        }
+        for previous: cast(s64)0..index - 1 {
+            if list.items[previous].id == item.id {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+Friends :: (transaction: *sql.Transaction, context: ctx.Context,
+    first: string, second: string) -> bool {
+    arguments: [2]Any = .[first, second]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT EXISTS(SELECT 1 FROM server_friendships WHERE (user_id_a=?1 AND user_id_b=?2) OR (user_id_a=?2 AND user_id_b=?1))", arguments[:])
+    found: bool
+    destinations: [1]Any = .[*found]
+    return sql.ScanRow(row, destinations[:]) == null && found
+}
+
+HasCapacity :: (transaction: *sql.Transaction, context: ctx.Context,
+    user: string, listID: string, itemCount: s64) -> bool {
+    arguments: [2]Any = .[user, listID]
+    lists: s64
+    items: s64
+    destinations: [2]Any = .[*lists, *items]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*),COALESCE(SUM(json_array_length(l.items)),0) FROM server_shared_lists l WHERE l.deleted=0 AND l.id<>?2 AND (l.owner=?1 OR EXISTS(SELECT 1 FROM server_list_invitations i WHERE i.list_id=l.id AND i.target=?1 AND i.status='accepted'))", arguments[:])
+    return sql.ScanRow(row, destinations[:]) == null && lists < 32 && items + itemCount <= 256
+}
+
+Execute :: (transaction: *sql.Transaction, context: ctx.Context,
+    user: string, command: Command) -> Outcome {
+    arguments: [6]Any
+    arguments[0] = command.list.id
+    arguments[1] = user
+    if command.action == "accept" || command.action == "decline" {
+        arguments[0] = command.invitation_id
+        owner: string
+        target: string
+        status: string
+        listID: string
+        destinations: [4]Any = .[*owner, *target, *status, *listID]
+        row := sql.QueryRowTx(transaction, context,
+            "SELECT l.owner,i.target,i.status,l.id FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id WHERE i.id=?1 AND l.deleted=0", arguments[0:1])
+        if sql.ScanRow(row, destinations[:]) != null || target != user {
+            return Failure(cast(isize)404, "invitation not found")
+        }
+        wanted := "declined"
+        if command.action == "accept" {
+            wanted = "accepted"
+            if !Friends(transaction, context, owner, user) {
+                return Failure(cast(isize)403, "sender is no longer a friend")
+            }
+            arguments[0] = listID
+            items: s64
+            size: [1]Any = .[*items]
+            sizeRow := sql.QueryRowTx(transaction, context,
+                "SELECT json_array_length(items) FROM server_shared_lists WHERE id=?1", arguments[0:1])
+            if sql.ScanRow(sizeRow, size[:]) != null || !HasCapacity(transaction, context, user, listID, items) {
+                return Failure(cast(isize)409, "shared list limit reached")
+            }
+            arguments[0] = command.invitation_id
+        }
+        if status == wanted {
+            return Outcome.{}
+        }
+        if status != "pending" {
+            return Failure(cast(isize)409, "invitation already answered")
+        }
+        arguments[1] = wanted
+        changed := sql.ExecTx(transaction, context,
+            "UPDATE server_list_invitations SET status=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND status='pending'", arguments[0:2])
+        return Outcome.{error = changed.error}
+    }
+    owner: string
+    revision: s64
+    title: string
+    destinations: [3]Any = .[*owner, *revision, *title]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT owner,revision,title FROM server_shared_lists WHERE id=?1 AND deleted=0", arguments[0:1])
+    lookupError := sql.ScanRow(row, destinations[:])
+    if command.action == "invite" {
+        if !identity.ValidUserID(command.target) || user == command.target ||
+        !ValidList(command.list) || !Friends(transaction, context, user, command.target) {
+            return Failure(cast(isize)403, "only existing friends may be invited")
+        }
+        if errors.Is(lookupError, sql.NoRows()) {
+            if !HasCapacity(transaction, context, user, command.list.id, command.list.items.count) {
+                return Failure(cast(isize)409, "shared list limit reached")
+            }
+            payload := json.Marshal(command.list.items)
+            if payload.error != null {
+                return Outcome.{error = payload.error}
+            }
+            arguments[2] = command.list.title
+            arguments[3] = text.FromBytes(payload.value)
+            created := sql.ExecTx(transaction, context,
+                "INSERT INTO server_shared_lists(id,owner,title,items,revision,deleted) VALUES(?1,?2,?3,?4,1,0)", arguments[0:4])
+            if created.error != null {
+                return Failure(cast(isize)409, "list cannot be shared")
+            }
+            owner = user
+        } else if lookupError != null {
+            return Outcome.{error = lookupError}
+        }
+        if owner != user {
+            return Failure(cast(isize)403, "only the owner may invite")
+        }
+        arguments[1] = command.target
+        arguments[2] = command.request_id
+        changed := sql.ExecTx(transaction, context,
+            "INSERT INTO server_list_invitations(id,list_id,target,status) VALUES(?3,?1,?2,'pending') ON CONFLICT(list_id,target) DO UPDATE SET id=excluded.id,status='pending',updated_at=CURRENT_TIMESTAMP WHERE server_list_invitations.status='declined'", arguments[0:3])
+        return Outcome.{error = changed.error}
+    }
+    if lookupError != null {
+        return Failure(cast(isize)404, "shared list not found")
+    }
+    if owner != user {
+        allowed: bool
+        membership := sql.QueryRowTx(transaction, context,
+            "SELECT EXISTS(SELECT 1 FROM server_list_invitations WHERE list_id=?1 AND target=?2 AND status='accepted')", arguments[0:2])
+        access: [1]Any = .[*allowed]
+        if sql.ScanRow(membership, access[:]) != null || !allowed || !Friends(transaction, context, owner, user) {
+            return Failure(cast(isize)404, "shared list not found")
+        }
+    }
+    if command.action == "delete" {
+        if owner != user {
+            return Failure(cast(isize)403, "only the owner may delete")
+        }
+        changed := sql.ExecTx(transaction, context,
+            "UPDATE server_shared_lists SET deleted=1,items='[]',revision=revision+1 WHERE id=?1", arguments[0:1])
+        return Outcome.{error = changed.error}
+    }
+    if command.action != "save" || !ValidList(command.list) {
+        return Failure(cast(isize)400, "invalid list change")
+    }
+    if command.list.revision != revision {
+        return Failure(cast(isize)409, "list changed; refresh before saving")
+    }
+    if !HasCapacity(transaction, context, owner, command.list.id, command.list.items.count) ||
+    !HasCapacity(transaction, context, user, command.list.id, command.list.items.count) {
+        return Failure(cast(isize)409, "shared list limit reached")
+    }
+    members := sql.QueryTx(transaction, context,
+        "SELECT target FROM server_list_invitations WHERE list_id=?1 AND status='accepted'", arguments[0:1])
+    if members.error != null {
+        return Outcome.{error = members.error}
+    }
+    memberIDs: []string
+    while sql.Next(members.value) {
+        member: string
+        destination: [1]Any = .[*member]
+        error := sql.ScanRows(members.value, destination[:])
+        if error != null {
+            sql.CloseRows(members.value)
+            return Outcome.{error = error}
+        }
+        memberIDs = AppendMember(memberIDs, member)
+    }
+    memberError := sql.RowsError(members.value)
+    sql.CloseRows(members.value)
+    if memberError != null {
+        return Outcome.{error = memberError}
+    }
+    for member: memberIDs {
+        if !HasCapacity(transaction, context, member, command.list.id, command.list.items.count) {
+            return Failure(cast(isize)409, "shared list limit reached")
+        }
+    }
+    if owner != user && command.list.title != title {
+        return Failure(cast(isize)403, "only the owner may rename")
+    }
+    payload := json.Marshal(command.list.items)
+    if payload.error != null {
+        return Outcome.{error = payload.error}
+    }
+    arguments[1] = command.list.title
+    arguments[2] = text.FromBytes(payload.value)
+    changed := sql.ExecTx(transaction, context,
+        "UPDATE server_shared_lists SET title=?2,items=?3,revision=revision+1 WHERE id=?1", arguments[0:3])
+    return Outcome.{error = changed.error}
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL
+CREATE TABLE IF NOT EXISTS server_shared_lists (
+ id TEXT PRIMARY KEY, owner TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ title TEXT NOT NULL, items TEXT NOT NULL, revision INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS server_list_invitations (
+ id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES server_shared_lists(id) ON DELETE CASCADE,
+ target TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined')),
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(list_id,target)
+);
+CREATE INDEX IF NOT EXISTS server_list_invitations_target ON server_list_invitations(target,status);
+CREATE TABLE IF NOT EXISTS server_list_commands (
+ user_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ request_id TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(user_id,request_id)
+);
+SQL;
+}
+
+Read :: (database: *sql.Database, context: ctx.Context, user: string) -> Snapshot {
+    result: Snapshot
+    result.lists = MakeLists(cast(isize)0)
+    result.invitations = MakeInvitations(cast(isize)0)
+    arguments: [1]Any = .[user]
+    queried := sql.Query(database, context,
+        "SELECT l.id,l.owner,COALESCE(u.alias,''),l.title,l.revision,CASE WHEN l.deleted=0 THEN l.items ELSE '[]' END,l.deleted FROM server_shared_lists l JOIN server_users u ON u.user_id_hash=l.owner WHERE l.owner=?1 OR (l.deleted=0 AND EXISTS(SELECT 1 FROM server_list_invitations i WHERE i.list_id=l.id AND i.target=?1 AND i.status='accepted') AND EXISTS(SELECT 1 FROM server_friendships f WHERE (f.user_id_a=?1 AND f.user_id_b=l.owner) OR (f.user_id_b=?1 AND f.user_id_a=l.owner))) ORDER BY l.id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    while sql.Next(queried.value) {
+        list: List
+        payload: string
+        destinations: [7]Any = .[*list.id, *list.owner, *list.alias, *list.title, *list.revision, *payload, *list.deleted]
+        result.error = sql.ScanRows(queried.value, destinations[:])
+        if result.error == null {
+            result.error = json.Unmarshal(text.ToBytes(payload), *list.items)
+        }
+        if result.error != null {
+            sql.CloseRows(queried.value)
+            return result
+        }
+        result.lists = AppendList(result.lists, list)
+    }
+    result.error = sql.RowsError(queried.value)
+    sql.CloseRows(queried.value)
+    if result.error != null {
+        return result
+    }
+    queried = sql.Query(database, context,
+        "SELECT i.id,l.id,l.title,l.owner,COALESCE(u.alias,''),i.target,COALESCE(t.alias,''),i.status FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id JOIN server_users u ON u.user_id_hash=l.owner JOIN server_users t ON t.user_id_hash=i.target WHERE l.deleted=0 AND (l.owner=?1 OR (i.target=?1 AND i.status='pending')) ORDER BY i.updated_at DESC,i.id", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    defer sql.CloseRows(queried.value)
+    while sql.Next(queried.value) {
+        invitation: Invitation
+        destinations: [8]Any = .[*invitation.id, *invitation.list_id, *invitation.title,
+        *invitation.owner, *invitation.alias, *invitation.target, *invitation.target_alias, *invitation.status]
+        result.error = sql.ScanRows(queried.value, destinations[:])
+        if result.error != null {
+            return result
+        }
+        result.invitations = AppendInvitation(result.invitations, invitation)
+    }
+    result.error = sql.RowsError(queried.value)
+    return result
+}
+
+Apply :: (database: *sql.Database, context: ctx.Context, user: string,
+    command: Command, configuration: config.Config) -> Outcome {
+    if !identity.ValidResourceID(command.request_id) || command.request_id.count > 36 {
+        return Failure(cast(isize)400, "request_id required")
+    }
+    encoded := json.Marshal(command)
+    if encoded.error != null {
+        return Outcome.{error = encoded.error}
+    }
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return Outcome.{error = opened.error}
+    }
+    defer sql.Rollback(opened.value)
+    digest := signing.SHA256Hex(encoded.value)
+    arguments: [3]Any = .[user, command.request_id, digest]
+    previous: string
+    destinations: [1]Any = .[*previous]
+    row := sql.QueryRowTx(opened.value, context,
+        "SELECT body FROM server_list_commands WHERE user_id=?1 AND request_id=?2", arguments[0:2])
+    previousError := sql.ScanRow(row, destinations[:])
+    if previousError == null {
+        if previous != digest {
+            return Failure(cast(isize)409, "request_id already used")
+        }
+        return Outcome.{}
+    }
+    if !errors.Is(previousError, sql.NoRows()) {
+        return Outcome.{error = previousError}
+    }
+    charged := user
+    listArguments: [1]Any = .[command.list.id]
+    ownerRow := sql.QueryRowTx(opened.value, context,
+        "SELECT owner FROM server_shared_lists WHERE id=?1", listArguments[:])
+    ownerDestination: [1]Any = .[*charged]
+    ownerError := sql.ScanRow(ownerRow, ownerDestination[:])
+    if ownerError != null && !errors.Is(ownerError, sql.NoRows()) {
+        return Outcome.{error = ownerError}
+    }
+    beforeOwner := quota.UsedTx(opened.value, context, charged)
+    beforeActor := quota.UsedTx(opened.value, context, user)
+    limitOwner := plans.LimitTx(opened.value, context, charged,
+        configuration.AccountStorageLimitBytes, configuration.StoragePlansEnabled, clock.Unix(clock.Now()))
+    limitActor := plans.LimitTx(opened.value, context, user,
+        configuration.AccountStorageLimitBytes, configuration.StoragePlansEnabled, clock.Unix(clock.Now()))
+    if beforeOwner.error != null || beforeActor.error != null || limitOwner.error != null || limitActor.error != null {
+        return Failure(cast(isize)500, "storage limit unavailable")
+    }
+    result := Execute(opened.value, context, user, command)
+    if result.error != null {
+        return result
+    }
+    receipt := sql.ExecTx(opened.value, context,
+        "INSERT INTO server_list_commands(user_id,request_id,body) VALUES(?1,?2,?3)", arguments[:])
+    if receipt.error != null {
+        return Outcome.{error = receipt.error}
+    }
+    afterOwner := quota.UsedTx(opened.value, context, charged)
+    afterActor := quota.UsedTx(opened.value, context, user)
+    if afterOwner.error != null || afterActor.error != null {
+        return Failure(cast(isize)500, "storage usage unavailable")
+    }
+    if quota.Exceeds(beforeOwner.value, afterOwner.value, limitOwner.value) ||
+    quota.Exceeds(beforeActor.value, afterActor.value, limitActor.value) {
+        return Failure(cast(isize)413, "account storage limit reached")
+    }
+    return Outcome.{error = sql.Commit(opened.value)}
+}
+
+Handle :: (account: accounts.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(account.database, request, account.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        auth.Respond(writer, account.counters, user.authentication)
+        return
+    }
+    if http.Method(request) == "POST" {
+        read := body.ReadJSON(writer, request, 262144)
+        command: Command
+        if read.error != null || json.Unmarshal(read.value, *command) != null {
+            response.Error(writer, cast(isize)400, "invalid list command")
+            return
+        }
+        outcome := Apply(account.database, http.Context(request), user.value, command, account.configuration.*)
+        if outcome.error != null {
+            if outcome.status == cast(isize)0 {
+                outcome.status = cast(isize)500
+            }
+            response.Error(writer, outcome.status, "list change failed")
+            return
+        }
+    }
+    snapshot := Read(account.database, http.Context(request), user.value)
+    if snapshot.error != null {
+        response.Error(writer, cast(isize)500, "list refresh failed")
+        return
+    }
+    response.JSON(writer, cast(isize)200, snapshot)
+}

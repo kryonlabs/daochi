@@ -285,12 +285,17 @@ the same payment flow. Rate values are snapshotted when a transfer is first
 observed. Existing product invoices remain available during migration.
 
 Inbe calls this account credit **Dew**. Its existing asset ID stays
-`waozi:token`, with 1,000,000 integer ledger units per Dew. One Dew represents
-US$1 of storage credit. The node operator maintains the Monero conversion
-quote through the two rate settings above; confirmed deposits retain their
-snapshotted quote.
+`waozi:token`, with 1,000,000 integer ledger units per Dew. Storage prices
+are fixed in **XMR**, with no dollar peg, exchange-rate feed, or fiat conversion.
+Choose the fixed XMR price for one month and express it in atomic units
+(1 XMR = 1,000,000,000,000 atomic units). Set `MONERO_RATE_ATOMIC_AMOUNT`
+to that amount and `MONERO_RATE_TOKEN_UNITS=1000000`. One Dew then funds one
+month; 10 Dew funds one year at ten times the monthly XMR price. The app shows
+the node's XMR prices before purchase. Confirmed deposits retain their
+snapshotted fixed ratio, and existing Dew balances remain intact.
 
 Set `DAOCHI_STORAGE_PLANS_ENABLED=true` on a node offering prepaid storage.
+A valid fixed Monero ratio is required before upgrades can be purchased.
 The free allowance is 10 MiB. A monthly purchase costs 1 Dew and a yearly
 purchase costs 10 Dew; both grant 1 GiB total storage. Purchases extend an
 existing paid period or start immediately, with calendar month/year expiry.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -19,6 +20,8 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 	server.Cfg.WaoziIssuerPublicKey = public
 	server.Cfg.WaoziIssuerPrivateKey = private
 	server.Cfg.StoragePlansEnabled = true
+	server.Cfg.MoneroRateAtomicAmount = 1000000000
+	server.Cfg.MoneroRateTokenUnits = UnitsPerDew
 	handler := server.Routes()
 	owner := newTestIdentity(t, handler, 0x73)
 	other := newTestIdentity(t, handler, 0x74)
@@ -42,7 +45,11 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 		}
 		return result
 	}
-	if got := read(owner.Token)["plan"].(map[string]any); got["balance"] != float64(12000000) || got["limit_bytes"] != float64(FreeBytes) {
+	status := read(owner.Token)
+	if status["monthly_xmr_atomic_units"] != float64(1000000000) || status["yearly_xmr_atomic_units"] != float64(10000000000) {
+		t.Fatalf("fixed XMR prices: %v", status)
+	}
+	if got := status["plan"].(map[string]any); got["balance"] != float64(12000000) || got["limit_bytes"] != float64(FreeBytes) {
 		t.Fatalf("free plan: %v", got)
 	}
 	if got := read(other.Token)["plan"].(map[string]any)["balance"]; got != float64(0) {
@@ -101,6 +108,8 @@ func TestStoragePlanRejectsInvalidUnaffordableAndRollsBack(t *testing.T) {
 	}
 	server.Cfg.WaoziIssuerPrivateKey = private
 	server.Cfg.StoragePlansEnabled = true
+	server.Cfg.MoneroRateAtomicAmount = 1000000000
+	server.Cfg.MoneroRateTokenUnits = UnitsPerDew
 	handler := server.Routes()
 	owner := newTestIdentity(t, handler, 0x76)
 	for _, tc := range []struct {
@@ -160,5 +169,57 @@ func TestStoragePlansConfigIsOptIn(t *testing.T) {
 	t.Setenv("DAOCHI_STORAGE_PLANS_ENABLED", "true")
 	if !Config_Load().StoragePlansEnabled {
 		t.Fatal("configured storage plans disabled")
+	}
+}
+
+func TestStorageMoneroPrices(t *testing.T) {
+	for _, tc := range []struct {
+		period        string
+		atomic, units int64
+		want          int64
+	}{
+		{"monthly", 1000000000, UnitsPerDew, 1000000000},
+		{"yearly", 1000000000, UnitsPerDew, 10000000000},
+		{"monthly", 7, 3, 2333334},
+		{"monthly", 1, 2000000, 1},
+		{"monthly", math.MaxInt64, UnitsPerDew, math.MaxInt64},
+	} {
+		got := StoragePlan_MoneroPrice(tc.period, tc.atomic, tc.units)
+		if got.Error != nil || got.Value != tc.want {
+			t.Fatalf("%+v: %+v", tc, got)
+		}
+	}
+	for _, tc := range []struct {
+		period        string
+		atomic, units int64
+	}{
+		{"monthly", 0, UnitsPerDew},
+		{"monthly", 1, 0},
+		{"weekly", 1, UnitsPerDew},
+		{"yearly", math.MaxInt64, UnitsPerDew},
+	} {
+		if got := StoragePlan_MoneroPrice(tc.period, tc.atomic, tc.units); got.Error == nil {
+			t.Fatalf("accepted invalid XMR price: %+v", tc)
+		}
+	}
+}
+
+func TestStorageUpgradeNeedsConfiguredXMRPrice(t *testing.T) {
+	server, _, _ := testServer(t)
+	server.Cfg.StoragePlansEnabled = true
+	handler := server.Routes()
+	owner := newTestIdentity(t, handler, 0x77)
+	res := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/storage/plan", owner.Token, nil)
+	var status map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if res.Code != 200 || status["enabled"] != false || status["monthly_xmr_atomic_units"] != float64(0) {
+		t.Fatalf("unconfigured XMR pricing: %d %v", res.Code, status)
+	}
+	res = tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/storage/plan", owner.Token,
+		[]byte(`{"period":"monthly","request_id":"missing-xmr-price"}`))
+	if res.Code != 503 {
+		t.Fatalf("purchase without XMR price: %d %s", res.Code, res.Body.String())
 	}
 }

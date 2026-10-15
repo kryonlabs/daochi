@@ -3,14 +3,16 @@ package main
 
 // #import std_go_types
 type StorageStatus struct {
-	AccountId    string "json:\"account_id\""
-	AssetId      string "json:\"asset_id\""
-	Enabled      bool   "json:\"enabled\""
-	Plan         Plan   "json:\"plan\""
-	UsedBytes    int64  "json:\"used_bytes\""
-	MonthlyUnits int64  "json:\"monthly_units\""
-	YearlyUnits  int64  "json:\"yearly_units\""
-	UnitsPerDew  int64  "json:\"units_per_dew\""
+	AccountId             string "json:\"account_id\""
+	AssetId               string "json:\"asset_id\""
+	Enabled               bool   "json:\"enabled\""
+	Plan                  Plan   "json:\"plan\""
+	UsedBytes             int64  "json:\"used_bytes\""
+	MonthlyUnits          int64  "json:\"monthly_units\""
+	YearlyUnits           int64  "json:\"yearly_units\""
+	UnitsPerDew           int64  "json:\"units_per_dew\""
+	MonthlyXmrAtomicUnits int64  "json:\"monthly_xmr_atomic_units\""
+	YearlyXmrAtomicUnits  int64  "json:\"yearly_xmr_atomic_units\""
 }
 
 type StorageUpgrade struct {
@@ -25,8 +27,11 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 		return
 	}
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "private, no-store")
+	monthly := StoragePlan_MoneroPrice("monthly", accounts.Configuration.MoneroRateAtomicAmount, accounts.Configuration.MoneroRateTokenUnits)
+	yearly := StoragePlan_MoneroPrice("yearly", accounts.Configuration.MoneroRateAtomicAmount, accounts.Configuration.MoneroRateTokenUnits)
+	available := accounts.Configuration.StoragePlansEnabled && monthly.Error == nil && yearly.Error == nil
 	if StdHttpGo_Method(request) == "POST" {
-		if !accounts.Configuration.StoragePlansEnabled {
+		if !available {
 			Response_Error(writer, 503, "storage upgrades unavailable")
 			return
 		}
@@ -79,12 +84,16 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 	var value StorageStatus = StorageStatus{}
 	value.AccountId = user.Value
 	value.AssetId = "waozi:token"
-	value.Enabled = accounts.Configuration.StoragePlansEnabled
+	value.Enabled = available
 	value.Plan = plan
 	value.UsedBytes = usage.Value
 	value.MonthlyUnits = StoragePlan_Price("monthly")
 	value.YearlyUnits = StoragePlan_Price("yearly")
 	value.UnitsPerDew = 1000000
+	if monthly.Error == nil && yearly.Error == nil {
+		value.MonthlyXmrAtomicUnits = monthly.Value
+		value.YearlyXmrAtomicUnits = yearly.Value
+	}
 	Response_JSON(writer, 200, value)
 }
 

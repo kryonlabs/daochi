@@ -2,6 +2,8 @@
 // An app that cannot run the latest release names the newest host and module
 // interfaces it has and gets the newest archived release built for them. A
 // staged release reaches only the devices whose bucket is below its share.
+// An artifact with a `<sha>.zib.product` file next to it is gated: it is
+// served only at `<sha>.zib/<grant>` with an unexpired grant for that product.
 #import "std/go_types"
 http :: #import "std/http_go";
 url :: #import "std/url_go";
@@ -16,6 +18,7 @@ signing :: #import "signing";
 response :: #import "response";
 registry :: #import "app_http";
 release :: #import "package_release";
+grants :: #import "pack_grant";
 strings :: #system_library "go:strings";
 strconv :: #system_library "go:strconv";
 hex :: #system_library "go:encoding/hex";
@@ -171,9 +174,17 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
     request: *http.Request) {
     path := TrimPrefix(url.Path(http.RequestURL(request)), "/api/v2/packages/")
     parts := Split(path, "/")
-    if parts.count != 2 || !identity.ValidNamespace(parts[0]) {
+    if (parts.count != 2 && parts.count != 3) || !identity.ValidNamespace(parts[0]) {
         response.Error(writer, 404, "package not found")
         return
+    }
+    grant := ""
+    if parts.count == 3 {
+        grant = parts[2]
+        if parts[1] == "latest" || grant == "" {
+            response.Error(writer, 404, "package not found")
+            return
+        }
     }
     appID := parts[0]
     app := store.ByID(context.database, http.Context(request), appID)
@@ -243,14 +254,25 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         response.Error(writer, 404, "package not found")
         return
     }
+    // A grant on an artifact that is not gated changes nothing.
+    gate := grants.Gate(Join(root, parts[1]))
+    if gate.gated && !grants.Valid(context.configuration.WaoziIssuerPublicKey, grant,
+        gate.product, clock.Unix(clock.Now())) {
+        response.Error(writer, 403, "package grant required")
+        return
+    }
     bundle := files.ReadFile(Join(root, parts[1]))
     if bundle.error != null || bundle.value.count != expected ||
     signing.SHA256Hex(bundle.value) != hash {
         response.Error(writer, 503, "portable release bytes do not match")
         return
     }
+    caching := "public, max-age=31536000, immutable"
+    if gate.gated {
+        caching = "private, no-store"
+    }
     http.SetHeader(http.ResponseHeaders(writer), "Content-Type", "application/octet-stream")
-    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "public, max-age=31536000, immutable")
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", caching)
     http.SetHeader(http.ResponseHeaders(writer), "ETag", Join("\"", Join(hash, "\"")))
     unused Write(writer, bundle.value)
 }

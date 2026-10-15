@@ -10,17 +10,17 @@ import (
 )
 
 // #import std_go_types
-type zir_36836ada4d48137e_Decoded struct {
+type zir_9d9d51abad2885b9_Decoded struct {
 	Value []uint8
 	Error Error
 }
 
-type zir_ba984eb6218aeafa_WriteResult struct {
+type zir_3205c4f6d276bb25_WriteResult struct {
 	Count int
 	Error Error
 }
 
-type Number struct {
+type zir_b61aa8d2a6b992a1_Number struct {
 	Value int64
 	Error Error
 }
@@ -42,20 +42,20 @@ type Rollout struct {
 	Until    int64 "json:\"until\""
 }
 
-func PackageHttp_ParseNumber(Value string, Base int, Bits int) Number {
-	var result Number
+func PackageHttp_ParseNumber(Value string, Base int, Bits int) zir_b61aa8d2a6b992a1_Number {
+	var result zir_b61aa8d2a6b992a1_Number
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }
 
-func PackageHttp_Decode(Value string) zir_36836ada4d48137e_Decoded {
-	var result zir_36836ada4d48137e_Decoded
+func PackageHttp_Decode(Value string) zir_9d9d51abad2885b9_Decoded {
+	var result zir_9d9d51abad2885b9_Decoded
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }
 
-func PackageHttp_Write(Writer ResponseWriter, Bytes []uint8) zir_ba984eb6218aeafa_WriteResult {
-	var result zir_ba984eb6218aeafa_WriteResult
+func PackageHttp_Write(Writer ResponseWriter, Bytes []uint8) zir_3205c4f6d276bb25_WriteResult {
+	var result zir_3205c4f6d276bb25_WriteResult
 	result.Count, result.Error = (http.ResponseWriter).Write(Writer, Bytes)
 	return result
 }
@@ -199,7 +199,7 @@ func PackageHttp_LatestSequence(dbPath string, appID string) int64 {
 func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request) {
 	path := strings.TrimPrefix(StdUrlGo_Path(StdHttpGo_RequestURL(request)), "/api/v2/packages/")
 	parts := strings.Split(path, "/")
-	var value_0 bool = int64(len(parts)) != 2
+	var value_0 bool = int64(len(parts)) != 2 && int64(len(parts)) != 3
 	if !value_0 {
 		var value_1 bool = Identity_ValidNamespace(parts[0])
 		value_0 = !value_1
@@ -207,6 +207,14 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 	if value_0 {
 		Response_Error(writer, 404, "package not found")
 		return
+	}
+	grant := ""
+	if int64(len(parts)) == 3 {
+		grant = parts[2]
+		if parts[1] == "latest" || grant == "" {
+			Response_Error(writer, 404, "package not found")
+			return
+		}
 	}
 	appID := parts[0]
 	app := AppStore_ByID(context.Database, StdHttpGo_Context(request), appID)
@@ -303,35 +311,50 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		if int64(0) < 0 || int64(int64(len(value_19))) < int64(0) || int64(int64(len(value_19))) > int64(len(value_19)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_61 := value_19[0:int64(len(value_19)):int64(len(value_19))]
-		loop_count_61 := int64(len(loop_view_61))
-		var loop_cursor_61 int64 = 0
-		for loop_cursor_61 < loop_count_61 {
-			loop_index_61 := loop_cursor_61
-			artifact := loop_view_61[loop_index_61]
+		loop_view_69 := value_19[0:int64(len(value_19)):int64(len(value_19))]
+		loop_count_69 := int64(len(loop_view_69))
+		var loop_cursor_69 int64 = 0
+		for loop_cursor_69 < loop_count_69 {
+			loop_index_69 := loop_cursor_69
+			artifact := loop_view_69[loop_index_69]
 			if artifact.SHA256 == hash {
 				expected = artifact.Size
 			}
-			loop_cursor_61++
+			loop_cursor_69++
 		}
 	}
 	if expected == 0 {
 		Response_Error(writer, 404, "package not found")
 		return
 	}
-	bundle := StdFileGo_ReadFile(fmt.Sprint(root, parts[1]))
-	var value_20 bool = bundle.Error != nil || int64(len(bundle.Value)) != expected
-	var value_21 bool = value_20
-	if !value_21 {
-		var value_22 bool = Signing_SHA256Hex(bundle.Value) != hash
-		value_21 = value_22
+	gate := PackGrant_Gate(fmt.Sprint(root, parts[1]))
+	var value_20 bool = gate.Gated
+	if value_20 {
+		var value_21 PublicKey = context.Configuration.WaoziIssuerPublicKey
+		var value_22 bool = PackGrant_Valid(value_21, grant, gate.Product, StdTimeGo_Unix(StdTimeGo_Now()))
+		value_20 = !value_22
 	}
-	if value_21 {
+	if value_20 {
+		Response_Error(writer, 403, "package grant required")
+		return
+	}
+	bundle := StdFileGo_ReadFile(fmt.Sprint(root, parts[1]))
+	var value_23 bool = bundle.Error != nil || int64(len(bundle.Value)) != expected
+	var value_24 bool = value_23
+	if !value_24 {
+		var value_25 bool = Signing_SHA256Hex(bundle.Value) != hash
+		value_24 = value_25
+	}
+	if value_24 {
 		Response_Error(writer, 503, "portable release bytes do not match")
 		return
 	}
+	caching := "public, max-age=31536000, immutable"
+	if gate.Gated {
+		caching = "private, no-store"
+	}
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Content-Type", "application/octet-stream")
-	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "public, max-age=31536000, immutable")
+	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", caching)
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "ETag", fmt.Sprint("\"", fmt.Sprint(hash, "\"")))
 	PackageHttp_Write(writer, bundle.Value)
 }

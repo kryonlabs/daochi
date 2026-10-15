@@ -14,7 +14,7 @@ Document :: #string JSON
   "/api/v1/storage/plan": {
     "get": {
       "summary": "Read Dew balance and prepaid storage allowance",
-      "description": "Requires the account bearer. Returns account_id, asset_id, enabled, used_bytes, units_per_dew (1000000), monthly_units (1000000), yearly_units (10000000), monthly_xmr_atomic_units, yearly_xmr_atomic_units, and plan {period,expires_at,limit_bytes,balance}. Balance is integer millionths of Dew. XMR prices use integer atomic units (1 XMR = 1000000000000 atomic units), derived from the fixed node funding ratio, rounded up to fund the complete purchase. No fiat prices or external exchange-rate feed are used. Missing or unrepresentable XMR prices disable upgrades. The enabled node grants 10 MiB free, or 1 GiB until expires_at. Expiry blocks growth while preserving reads and deletions.",
+      "description": "Requires the account bearer. Returns account_id, asset_id, enabled, used_bytes, units_per_dew (1000000), monthly_units (20000000), yearly_units (200000000), monthly_xmr_atomic_units, yearly_xmr_atomic_units, and plan {period,expires_at,limit_bytes,balance}. Balance is integer millionths of Dew. XMR prices use integer atomic units (1 XMR = 1000000000000 atomic units), derived from the fixed node funding ratio, rounded up to fund the complete purchase. No fiat prices or external exchange-rate feed are used. Missing or unrepresentable XMR prices disable upgrades. The enabled node grants 10 MiB free, or 1 GiB until expires_at. Expiry blocks growth while preserving reads and deletions.",
       "responses": {
         "200": {"description": "Account-scoped Dew balance and storage allowance; no-store"},
         "401": {"description": "Account authentication required"},
@@ -23,7 +23,7 @@ Document :: #string JSON
     },
     "post": {
       "summary": "Buy one month or one year of storage with Dew",
-      "description": "Explicit prepaid purchase: monthly costs 1 Dew, yearly costs 10 Dew, each grants 1 GiB total. Display the fixed monthly_xmr_atomic_units or yearly_xmr_atomic_units price returned by GET before purchase. A configured fixed XMR funding ratio is required. Extends unexpired time or starts now. Does not auto-renew. The debit and allowance commit atomically. Preserve request_id on uncertain results: repeating it never charges or extends twice; changing the period for the same ID is rejected. Monero funding uses the existing account subaddress and confirmed deposit reconciliation.",
+      "description": "Explicit prepaid purchase: monthly costs 20 Dew, yearly costs 200 Dew, each grants 1 GiB total. Display the fixed monthly_xmr_atomic_units or yearly_xmr_atomic_units price returned by GET before purchase. A configured fixed XMR funding ratio is required. Extends unexpired time or starts now. Does not auto-renew. The debit and allowance commit atomically. Preserve request_id on uncertain results: repeating it never charges or extends twice; changing the period for the same ID is rejected. Monero funding uses the existing account subaddress and confirmed deposit reconciliation.",
       "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["period", "request_id"], "properties": {"period": {"type": "string", "enum": ["monthly", "yearly"]}, "request_id": {"type": "string", "maxLength": 128}}}}}},
       "responses": {
         "200": {"description": "Confirmed upgrade and current balance"},

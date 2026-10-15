@@ -17,6 +17,7 @@ account_signature :: #import "account_signature";
 operations :: #import "operational_http";
 tokens :: #import "token_http";
 storage_plans :: #import "storage_plan_http";
+unlocks :: #import "unlock_http";
 monero :: #import "monero_deposits";
 invoices :: #import "monero_invoices";
 google :: #import "google_play_http";
@@ -371,6 +372,9 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "GET /api/v1/tokens/issuer", server, HandleTokenHttpIssuer)
     Route(mux, "GET /api/v1/storage/plan", server, HandleStoragePlan)
     Route(mux, "POST /api/v1/storage/plan", server, HandleStoragePlan)
+    Route(mux, "GET /api/v1/unlocks", server, HandleUnlocks)
+    Route(mux, "POST /api/v1/unlocks", server, HandleUnlocks)
+    Route(mux, "POST /api/v1/unlocks/grant", server, HandleUnlockGrant)
     Route(mux, "GET /api/v1/tokens/balance", server, HandleTokenHttpBalance)
     Route(mux, "GET /api/v1/tokens/ledger", server, HandleTokenHttpLedger)
     Route(mux, "POST /api/v1/tokens/spend", server, HandleTokenHttpSpend)
@@ -816,4 +820,12 @@ HandleDeviceLinkClose :: (server: *Server, writer: http.ResponseWriter, request:
 
 HandleStoragePlan :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     storage_plans.Handle(Accounts(server), writer, request)
+}
+
+HandleUnlocks :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    unlocks.Handle(Accounts(server), writer, request)
+}
+
+HandleUnlockGrant :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    unlocks.Grant(Accounts(server), writer, request)
 }

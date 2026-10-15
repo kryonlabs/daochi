@@ -66,10 +66,10 @@ func StoragePlan_SchemaSQL() string {
 
 func StoragePlan_Price(period string) int64 {
 	if period == "monthly" {
-		return 1000000
+		return 20000000
 	}
 	if period == "yearly" {
-		return 10000000
+		return 200000000
 	}
 	return 0
 }

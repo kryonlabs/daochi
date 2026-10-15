@@ -27,7 +27,7 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 	other := newTestIdentity(t, handler, 0x74)
 	ctx := context.Background()
 	credit := TokenLedger_CreditPayment(store.Database, ctx, private, "monero", "storage-fixture", TokenEventInput{
-		AccountID: owner.UserID, AppID: "inbe", EventType: "credit", AmountDelta: 12000000,
+		AccountID: owner.UserID, AppID: "inbe", EventType: "credit", AmountDelta: 240000000,
 		SourceType: "monero", SourceRef: "storage-fixture",
 	}, errTokenIssuerReadOnly)
 	if credit.Error != nil {
@@ -46,10 +46,13 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 		return result
 	}
 	status := read(owner.Token)
-	if status["monthly_xmr_atomic_units"] != float64(1000000000) || status["yearly_xmr_atomic_units"] != float64(10000000000) {
+	if status["monthly_units"] != float64(20000000) || status["yearly_units"] != float64(200000000) {
+		t.Fatalf("Dew prices: %v", status)
+	}
+	if status["monthly_xmr_atomic_units"] != float64(20000000000) || status["yearly_xmr_atomic_units"] != float64(200000000000) {
 		t.Fatalf("fixed XMR prices: %v", status)
 	}
-	if got := status["plan"].(map[string]any); got["balance"] != float64(12000000) || got["limit_bytes"] != float64(FreeBytes) {
+	if got := status["plan"].(map[string]any); got["balance"] != float64(240000000) || got["limit_bytes"] != float64(FreeBytes) {
 		t.Fatalf("free plan: %v", got)
 	}
 	if got := read(other.Token)["plan"].(map[string]any)["balance"]; got != float64(0) {
@@ -63,7 +66,7 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 		}
 	}
 	plan := StoragePlan_Read(store.Database, ctx, owner.UserID, time.Now().Unix())
-	if plan.Error != nil || plan.Balance != 11000000 || plan.LimitBytes != PaidBytes {
+	if plan.Error != nil || plan.Balance != 220000000 || plan.LimitBytes != PaidBytes {
 		t.Fatalf("paid plan: %+v", plan)
 	}
 	monthlyEnd := plan.ExpiresAt
@@ -73,7 +76,7 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 		t.Fatalf("reused key: %d %s", reused.Code, reused.Body.String())
 	}
 	year := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "yearly", "storage-yearly-fixture", time.Now().Unix())
-	if year.Error != nil || year.Balance != 1000000 || year.ExpiresAt != StoragePlan_PeriodEnd(monthlyEnd, "yearly") {
+	if year.Error != nil || year.Balance != 20000000 || year.ExpiresAt != StoragePlan_PeriodEnd(monthlyEnd, "yearly") {
 		t.Fatalf("yearly extension: %+v", year)
 	}
 	ended := StoragePlan_Read(store.Database, ctx, owner.UserID, year.ExpiresAt)
@@ -128,7 +131,7 @@ func TestStoragePlanRejectsInvalidUnaffordableAndRollsBack(t *testing.T) {
 	}
 	ctx := context.Background()
 	credit := TokenLedger_CreditPayment(store.Database, ctx, private, "monero", "rollback-fixture", TokenEventInput{
-		AccountID: owner.UserID, EventType: "credit", AmountDelta: 1000000, SourceType: "monero", SourceRef: "rollback-fixture",
+		AccountID: owner.UserID, EventType: "credit", AmountDelta: 20 * UnitsPerDew, SourceType: "monero", SourceRef: "rollback-fixture",
 	}, errTokenIssuerReadOnly)
 	if credit.Error != nil {
 		t.Fatal(credit.Error)
@@ -142,7 +145,7 @@ func TestStoragePlanRejectsInvalidUnaffordableAndRollsBack(t *testing.T) {
 		t.Fatalf("expected transaction failure: %+v", failed)
 	}
 	balance := TokenLedger_Balance(store.Database, ctx, owner.UserID, AssetID)
-	if balance.Error != nil || balance.Value != 1000000 {
+	if balance.Error != nil || balance.Value != 20*UnitsPerDew {
 		t.Fatalf("failed upgrade charged Dew: %+v", balance)
 	}
 }
@@ -178,11 +181,15 @@ func TestStorageMoneroPrices(t *testing.T) {
 		atomic, units int64
 		want          int64
 	}{
-		{"monthly", 1000000000, UnitsPerDew, 1000000000},
-		{"yearly", 1000000000, UnitsPerDew, 10000000000},
-		{"monthly", 7, 3, 2333334},
-		{"monthly", 1, 2000000, 1},
-		{"monthly", math.MaxInt64, UnitsPerDew, math.MaxInt64},
+		{"monthly", 1000000000, UnitsPerDew, 20000000000},
+		{"yearly", 1000000000, UnitsPerDew, 200000000000},
+		// At 100 Dew per XMR storage keeps the XMR price it had at 5 Dew per XMR:
+		// 0.2 XMR a month and 2 XMR a year.
+		{"monthly", 1000000000000, 100 * UnitsPerDew, 200000000000},
+		{"yearly", 1000000000000, 100 * UnitsPerDew, 2000000000000},
+		{"monthly", 7, 3, 46666667},
+		{"monthly", 1, 40000000, 1},
+		{"monthly", math.MaxInt64 / 20, UnitsPerDew, math.MaxInt64 / 20 * 20},
 	} {
 		got := StoragePlan_MoneroPrice(tc.period, tc.atomic, tc.units)
 		if got.Error != nil || got.Value != tc.want {
@@ -196,11 +203,21 @@ func TestStorageMoneroPrices(t *testing.T) {
 		{"monthly", 0, UnitsPerDew},
 		{"monthly", 1, 0},
 		{"weekly", 1, UnitsPerDew},
+		{"monthly", math.MaxInt64, UnitsPerDew},
 		{"yearly", math.MaxInt64, UnitsPerDew},
 	} {
 		if got := StoragePlan_MoneroPrice(tc.period, tc.atomic, tc.units); got.Error == nil {
 			t.Fatalf("accepted invalid XMR price: %+v", tc)
 		}
+	}
+}
+
+func TestStoragePlanPrices(t *testing.T) {
+	if StoragePlan_Price("monthly") != 20000000 || StoragePlan_Price("yearly") != 200000000 {
+		t.Fatalf("storage prices: %d/%d", StoragePlan_Price("monthly"), StoragePlan_Price("yearly"))
+	}
+	if StoragePlan_Price("weekly") != 0 {
+		t.Fatal("unknown period has a price")
 	}
 }
 

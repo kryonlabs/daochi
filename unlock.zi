@@ -1,0 +1,251 @@
+// Server-priced unlocks. The node names each product's price; a client names
+// only the product. The signed Dew debit and the unlock commit together.
+#import "std/go_types"
+#import "protocol"
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+plans :: #import "storage_plan";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+TaiChi :: "inbe.practice.taichi";
+// A launch trial takes 90% off until the node's configured trial end.
+TrialDivisor :: 10
+
+AccountUnlock :: struct {
+    product: string #go_tag "json:\"product\""
+    receipt_id: string #go_tag "json:\"receipt_id\""
+    created_at: s64 #go_tag "json:\"created_at\""
+}
+UnlockProduct :: struct {
+    product: string #go_tag "json:\"product\""
+    price_units: s64 #go_tag "json:\"price_units\""
+    regular_price_units: s64 #go_tag "json:\"regular_price_units\""
+    trial_until: s64 #go_tag "json:\"trial_until\""
+}
+UnlockResult :: struct {
+    product: string #go_tag "json:\"product\""
+    unlocked: bool #go_tag "json:\"unlocked\""
+    price_units: s64 #go_tag "json:\"price_units\""
+    balance: s64 #go_tag "json:\"balance\""
+    receipt_id: string #go_tag "json:\"receipt_id\""
+    error: Error #go_tag "json:\"-\""
+}
+UnlocksResult :: struct {
+    unlocks: []AccountUnlock #go_tag "json:\"unlocks\""
+    products: []UnlockProduct #go_tag "json:\"products\""
+    error: Error #go_tag "json:\"-\""
+}
+UnlockOwnedResult :: struct {
+    value: bool
+    error: Error
+}
+
+#scope_file
+// One sellable product. A zero price means the node does not sell it.
+Offer :: struct {
+    product: string
+    app_id: string
+    units: s64
+}
+Catalog: [1]string = .[TaiChi];
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+MakeUnlocks :: (count: isize) -> []AccountUnlock #foreign builtin "make";
+AppendUnlock :: (values: []AccountUnlock, value: AccountUnlock) -> []AccountUnlock #foreign builtin "append";
+MakeProducts :: (count: isize) -> []UnlockProduct #foreign builtin "make";
+AppendProduct :: (values: []UnlockProduct, value: UnlockProduct) -> []UnlockProduct #foreign builtin "append";
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+
+Find :: (product: string) -> Offer {
+    result: Offer
+    if product == TaiChi {
+        result.product = TaiChi
+        result.app_id = "inbe"
+        result.units = plans.UnitsPerDew
+    }
+    return result
+}
+
+// The receipt that paid for the unlock names what was charged.
+SettledTx :: (transaction: *sql.Transaction, context: ctx.Context, account: string,
+    product: string, receiptID: string) -> UnlockResult {
+    result: UnlockResult
+    result.product = product
+    receipt := ledger.ByIDTx(transaction, context, receiptID)
+    result.error = receipt.error
+    if result.error != null {
+        return result
+    }
+    if !receipt.found {
+        result.error = errors.New("unlock receipt missing")
+        return result
+    }
+    balance := ledger.BalanceTx(transaction, context, account, receipts.AssetID)
+    result.error = balance.error
+    if result.error != null {
+        return result
+    }
+    result.unlocked = true
+    result.price_units = -receipt.value.AmountDelta
+    result.balance = balance.value
+    result.receipt_id = receiptID
+    return result
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL
+CREATE TABLE IF NOT EXISTS account_unlocks (
+ account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ product TEXT NOT NULL, receipt_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+ PRIMARY KEY(account_id,product)
+);
+SQL;
+}
+
+RegularPrice :: (product: string) -> s64 {
+    offer := Find(product)
+    return offer.units
+}
+
+// The price charged now. Zero for a product the node does not sell.
+Price :: (product: string, now: s64, trialUntil: s64) -> s64 {
+    regular := RegularPrice(product)
+    if now < trialUntil {
+        return regular / TrialDivisor
+    }
+    return regular
+}
+
+Products :: (now: s64, trialUntil: s64) -> []UnlockProduct {
+    result := MakeProducts(cast(isize)0)
+    for name: Catalog {
+        item: UnlockProduct
+        item.product = name
+        item.price_units = Price(name, now, trialUntil)
+        item.regular_price_units = RegularPrice(name)
+        // Zero once the trial is over, so a nonzero value always means a lower price.
+        if now < trialUntil {
+            item.trial_until = trialUntil
+        }
+        result = AppendProduct(result, item)
+    }
+    return result
+}
+
+Owned :: (database: *sql.Database, context: ctx.Context, account: string, product: string) -> UnlockOwnedResult {
+    result: UnlockOwnedResult
+    receiptID: string
+    arguments: [2]Any = .[account, product]
+    destinations: [1]Any = .[*receiptID]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT receipt_id FROM account_unlocks WHERE account_id=?1 AND product=?2", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    result.value = result.error == null
+    return result
+}
+
+List :: (database: *sql.Database, context: ctx.Context, account: string, now: s64, trialUntil: s64) -> UnlocksResult {
+    result: UnlocksResult
+    result.unlocks = MakeUnlocks(cast(isize)0)
+    result.products = Products(now, trialUntil)
+    arguments: [1]Any = .[account]
+    queried := sql.Query(database, context,
+        "SELECT product,receipt_id,created_at FROM account_unlocks WHERE account_id=?1 ORDER BY created_at,product", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    defer sql.CloseRows(queried.value)
+    while sql.Next(queried.value) {
+        item: AccountUnlock
+        destinations: [3]Any = .[*item.product, *item.receipt_id, *item.created_at]
+        result.error = sql.ScanRows(queried.value, destinations[:])
+        if result.error != null {
+            return result
+        }
+        result.unlocks = AppendUnlock(result.unlocks, item)
+    }
+    result.error = sql.RowsError(queried.value)
+    return result
+}
+
+// Unlocking twice charges once. A product is paid for once per account under
+// the key unlock:<product>; an account deleted and restored keeps that payment
+// even if the price changed since.
+Unlock :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
+    account: string, product: string, now: s64, trialUntil: s64) -> UnlockResult {
+    result: UnlockResult
+    result.product = product
+    offer := Find(product)
+    if offer.units <= 0 {
+        result.error = errors.New("unknown product")
+        return result
+    }
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    receiptID: string
+    arguments: [2]Any = .[account, product]
+    destinations: [1]Any = .[*receiptID]
+    existing := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT receipt_id FROM account_unlocks WHERE account_id=?1 AND product=?2", arguments[:]), destinations[:])
+    if existing == null {
+        return SettledTx(transaction, context, account, product, receiptID)
+    }
+    if !errors.Is(existing, sql.NoRows()) {
+        result.error = existing
+        return result
+    }
+    keyParts: [2]string = .["unlock:", product]
+    key := Join(keyParts[:], "")
+    paidArguments: [3]Any = .[account, offer.app_id, key]
+    paid := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT receipt_id FROM token_spend_nonces WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3",
+        paidArguments[:]), destinations[:])
+    if paid != null && !errors.Is(paid, sql.NoRows()) {
+        result.error = paid
+        return result
+    }
+    if paid != null {
+        event: receipts.TokenEventInput
+        event.AccountID = account
+        event.AppID = offer.app_id
+        event.EventType = "debit"
+        event.AmountDelta = -Price(product, now, trialUntil)
+        event.SourceType = "unlock"
+        event.SourceRef = product
+        debit := ledger.SpendTx(transaction, context, signer, event, key,
+            errors.New("Dew issuer unavailable"))
+        result.error = debit.error
+        if result.error != null {
+            return result
+        }
+        receiptID = debit.value.ReceiptID
+    }
+    saveArguments: [4]Any = .[account, product, receiptID, now]
+    saved := sql.ExecTx(transaction, context,
+        "INSERT INTO account_unlocks(account_id,product,receipt_id,created_at) VALUES(?1,?2,?3,?4)",
+        saveArguments[:])
+    result.error = saved.error
+    if result.error != null {
+        return result
+    }
+    result = SettledTx(transaction, context, account, product, receiptID)
+    if result.error == null {
+        result.error = sql.Commit(transaction)
+    }
+    return result
+}

@@ -1,6 +1,10 @@
 #import "std/go_types"
 config :: #import "config";
 plans :: #import "storage_plan";
+rescales :: #import "token_rescale";
+checkpoints :: #import "token_checkpoint";
+policy :: #import "token_policy";
+tokens :: #import "token";
 storage :: #import "store";
 verification :: #import "verifier";
 node :: #import "node_identity";
@@ -27,6 +31,7 @@ go_log :: #system_library "go:log";
 go_slog :: #system_library "go:log/slog";
 go_strings :: #system_library "go:strings";
 go_net :: #system_library "go:net";
+go_format :: #system_library "go:fmt";
 builtin :: #system_library "go:builtin";
 
 HTTPServer :: #type #foreign go_http "Server";
@@ -94,6 +99,9 @@ NewLogger :: (writer: io.Writer, prefix: string, flags: isize) -> *Logger #forei
 ListenHTTP :: (server: *HTTPServer) -> Error #foreign go_http "(*Server).ListenAndServe";
 ShutdownHTTP :: (server: *HTTPServer, context: ctx.Context) -> Error #foreign go_http "(*Server).Shutdown";
 ServerClosed :: () -> Error #go_field #foreign go_http "ErrServerClosed";
+PrintRescale :: (format: string, status: string, factor: s64, accounts: s64, before: s64, after: s64,
+    intents: s64, deposits: s64) #foreign go_format "Printf";
+PrintCheckpoint :: (format: string, sequence: s64, root: string) #foreign go_format "Printf";
 Minute :: 60000000000;
 Second :: 1000000000;
 
@@ -235,6 +243,48 @@ WithNodeKey :: (configuration: config.Config) -> config.Config {
 }
 
 #scope_file
+// Run once with the service stopped, after the node's Dew per XMR ratio changes.
+RescaleDew :: (configuration: config.Config, arguments: []string) -> Error {
+    usage := errors.New("usage: daochi rescale-dew FACTOR")
+    if arguments.count != 1 {
+        return usage
+    }
+    factor := tokens.ParseInteger(arguments[0])
+    if !factor.is_ok {
+        return usage
+    }
+    issuer := policy.Issuer(configuration, errors.New("rescaling needs the Dew issuer private key"))
+    if issuer.error != null {
+        return issuer.error
+    }
+    opened := storage.Open(configuration.DBPath)
+    if opened.error != null {
+        return opened.error
+    }
+    store := opened.value
+    CloseAtReturn(CloseStore, store)
+    context := ctx.Background()
+    result := rescales.Apply(store.database, context, issuer.value, factor.value)
+    if result.error != null {
+        return result.error
+    }
+    status := "applied"
+    if !result.applied {
+        status = "already applied"
+    }
+    PrintRescale("Dew rescale %s: factor %d, %d accounts credited, %d units before, %d units after, %d invoices and %d deposits scaled\n",
+        status, result.factor, result.accounts, result.units_before, result.units_after,
+        result.intents, result.deposits)
+    checkpoint := checkpoints.Create(store.database, context, issuer.value,
+        errors.New("Dew issuer unavailable"))
+    if checkpoint.error != null {
+        return checkpoint.error
+    }
+    PrintCheckpoint("Dew checkpoint at ledger sequence %d, root %s\n",
+        checkpoint.value.LedgerSeq, checkpoint.value.LedgerRoot)
+    return null
+}
+
 RunPrepared :: (configuration: config.Config, arguments: []string, createVerifier: VerifierFactory,
     signer: access.SignPrivateKey) {
     if arguments.count > 1 && arguments[1] == "inspect" {
@@ -243,6 +293,13 @@ RunPrepared :: (configuration: config.Config, arguments: []string, createVerifie
         error := inspection.Run(ctx.Background(), arguments[2:], options)
         if error != null {
             FatalError("inspect: %v", error)
+        }
+        return
+    }
+    if arguments.count > 1 && arguments[1] == "rescale-dew" {
+        error := RescaleDew(configuration, arguments[2:])
+        if error != null {
+            FatalError("rescale-dew: %v", error)
         }
         return
     }

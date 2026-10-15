@@ -34,6 +34,7 @@ type Config struct {
 	EncryptedPayloadMaxAccountBytes int64
 	EncryptedPayloadRetention       Duration
 	AccountStorageLimitBytes        int64
+	StoragePlansEnabled             bool
 	NodeRegistryPublicKey           PublicKey
 	KnownNodes                      []NodePeer
 	NodeSyncToken                   string
@@ -296,6 +297,8 @@ func Config_Load() Config {
 	result.EncryptedPayloadMaxAccountBytes = Config_EnvInt64("DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES", 0)
 	result.EncryptedPayloadRetention = Config_EnvDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", Duration(0))
 	result.AccountStorageLimitBytes = Config_EnvInt64("DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES", 0)
+	var value_4 string = Config_EnvString("DAOCHI_STORAGE_PLANS_ENABLED", "")
+	result.StoragePlansEnabled = ConfigValues_Bool(value_4, false)
 	result.NodeRegistryPublicKey = nodeRegistryPublic
 	result.KnownNodes = ConfigValues_Peers(Config_EnvString("DAOCHI_KNOWN_NODES", ""))
 	result.NodeSyncToken = Config_EnvString("DAOCHI_NODE_SYNC_TOKEN", "")
@@ -304,10 +307,10 @@ func Config_Load() Config {
 	result.NodeIdentityKeyFile = Config_EnvString("DAOCHI_NODE_IDENTITY_KEY_FILE", fmt.Sprintf("%s.node-key", Config_EnvString("DAOCHI_DB", "daochi.db")))
 	result.NodeIdentityPrivateKey = nodePrivateKey
 	result.NodeDisplayName = Config_EnvString("DAOCHI_NODE_NAME", "Daochi Node")
-	var value_4 string = os.Getenv("DAOCHI_LAN_DISCOVERY")
-	result.LANDiscovery = ConfigValues_Bool(value_4, true)
-	var value_5 string = os.Getenv("DAOCHI_LAN_ONLY")
-	result.NodeLANOnly = ConfigValues_Bool(value_5, false)
+	var value_5 string = os.Getenv("DAOCHI_LAN_DISCOVERY")
+	result.LANDiscovery = ConfigValues_Bool(value_5, true)
+	var value_6 string = os.Getenv("DAOCHI_LAN_ONLY")
+	result.NodeLANOnly = ConfigValues_Bool(value_6, false)
 	result.NodeLANNetworks = NetworkScope_ParseNetworks(os.Getenv("DAOCHI_LAN_NETWORKS"))
 	result.WaoziIssuerPublicKey = PublicKey(issuerPublic)
 	result.WaoziIssuerPrivateKey = issuerPrivate
@@ -324,16 +327,16 @@ func Config_Load() Config {
 	result.MoneroRateTokenUnits = Config_EnvInt64("MONERO_RATE_TOKEN_UNITS", 0)
 	result.MoneroMinimumAtomicAmount = Config_EnvInt64("MONERO_MINIMUM_ATOMIC_AMOUNT", 1)
 	result.MoneroConfirmationsRequired = Config_EnvInt64("MONERO_CONFIRMATIONS_REQUIRED", 10)
-	var value_6 string = os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED")
-	result.TokenDirectPurchasesEnabled = ConfigValues_Bool(value_6, false)
+	var value_7 string = os.Getenv("DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED")
+	result.TokenDirectPurchasesEnabled = ConfigValues_Bool(value_7, false)
 	result.ChatAPIKey = Config_EnvStringOrFile("DAOCHI_CHAT_API_KEY", "DAOCHI_CHAT_API_KEY_FILE", "")
 	result.ChatAPIEndpoint = Config_EnvString("DAOCHI_CHAT_ENDPOINT", "")
 	result.FeedbackToken = Config_EnvStringOrFile("DAOCHI_FEEDBACK_TOKEN", "DAOCHI_FEEDBACK_TOKEN_FILE", "")
 	result.LumiBotToken = Config_EnvStringOrFile("DAOCHI_LUMI_BOT_TOKEN", "DAOCHI_LUMI_BOT_TOKEN_FILE", "")
 	result.LumiWebhookSecret = Config_EnvStringOrFile("DAOCHI_LUMI_WEBHOOK_SECRET", "DAOCHI_LUMI_WEBHOOK_SECRET_FILE", "")
 	result.LumiOwnerID = Config_EnvString("DAOCHI_LUMI_OWNER_ID", "")
-	var value_7 string = os.Getenv("DAOCHI_TELEGRAM_ACCOUNTS_ENABLED")
-	result.TelegramAccountsEnabled = ConfigValues_Bool(value_7, false)
+	var value_8 string = os.Getenv("DAOCHI_TELEGRAM_ACCOUNTS_ENABLED")
+	result.TelegramAccountsEnabled = ConfigValues_Bool(value_8, false)
 	result.LumiCanvasURL = Config_EnvString("DAOCHI_LUMI_CANVAS_URL", "https://inbe.waozi.xyz/build/telegram/index.html")
 	result.ChatModel = Config_EnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash")
 	result.ChatDailyLimit = Config_EnvInt64("DAOCHI_CHAT_DAILY_LIMIT", 20)

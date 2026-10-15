@@ -1,6 +1,7 @@
 #import "std/go_types"
 entries :: #import "telegram_account_entry";
 history :: #import "state_history";
+plans :: #import "storage_plan";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 errors :: #import "std/errors_go";
@@ -114,7 +115,7 @@ Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     if pragmas.error != null {
         return pragmas.error
     }
-    definitions: [3]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL()]
+    definitions: [4]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), plans.SchemaSQL()]
     created := sql.Exec(database, context, Join(definitions[:], ""), empty[:])
     if created.error != null {
         return created.error

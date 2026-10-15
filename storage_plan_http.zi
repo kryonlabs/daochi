@@ -1,0 +1,79 @@
+#import "std/go_types"
+service :: #import "account_http";
+plans :: #import "storage_plan";
+storage :: #import "account_storage";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+identity :: #import "identity";
+json :: #import "std/json_go";
+http :: #import "std/http_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+
+StorageStatus :: struct {
+    account_id: string #go_tag "json:\"account_id\""
+    asset_id: string #go_tag "json:\"asset_id\""
+    enabled: bool #go_tag "json:\"enabled\""
+    plan: plans.Plan #go_tag "json:\"plan\""
+    used_bytes: s64 #go_tag "json:\"used_bytes\""
+    monthly_units: s64 #go_tag "json:\"monthly_units\""
+    yearly_units: s64 #go_tag "json:\"yearly_units\""
+    units_per_dew: s64 #go_tag "json:\"units_per_dew\""
+}
+StorageUpgrade :: struct {
+    period: string #go_tag "json:\"period\""
+    request_id: string #go_tag "json:\"request_id\""
+}
+
+#scope_export
+Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    if http.Method(request) == "POST" {
+        if !accounts.configuration.StoragePlansEnabled {
+            response.Error(writer, 503, "storage upgrades unavailable")
+            return
+        }
+        read := body.ReadJSON(writer, request, 1024)
+        command: StorageUpgrade
+        if read.error != null || json.Unmarshal(read.value, *command) != null ||
+        plans.Price(command.period) == 0 || !identity.ValidClientID(command.request_id) {
+            response.Error(writer, 400, "invalid storage upgrade")
+            return
+        }
+        purchased := plans.Purchase(accounts.database, http.Context(request),
+            accounts.configuration.WaoziIssuerPrivateKey, user.value,
+            command.period, command.request_id, clock.Unix(clock.Now()))
+        if purchased.error != null {
+            if errors.Message(purchased.error) == "insufficient balance" {
+                response.Error(writer, 402, "not enough Dew")
+            } else if errors.Message(purchased.error) == "storage request id reused" {
+                response.Error(writer, 409, "storage request id reused")
+            } else {
+                response.Error(writer, 503, "storage upgrade unavailable")
+            }
+            return
+        }
+    }
+    plan := plans.Read(accounts.database, http.Context(request), user.value, clock.Unix(clock.Now()))
+    usage := storage.Used(accounts.database, http.Context(request), user.value)
+    if plan.error != null || usage.error != null {
+        response.Error(writer, 503, "storage balance unavailable")
+        return
+    }
+    value: StorageStatus
+    value.account_id = user.value
+    value.asset_id = "waozi:token"
+    value.enabled = accounts.configuration.StoragePlansEnabled
+    value.plan = plan
+    value.used_bytes = usage.value
+    value.monthly_units = plans.Price("monthly")
+    value.yearly_units = plans.Price("yearly")
+    value.units_per_dew = plans.UnitsPerDew
+    response.JSON(writer, 200, value)
+}

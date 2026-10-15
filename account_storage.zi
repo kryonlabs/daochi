@@ -8,6 +8,9 @@ errors :: #import "std/errors_go";
 http :: #import "std/http_go";
 response :: #import "response";
 identity :: #import "identity";
+plans :: #import "storage_plan";
+clock :: #import "std/time_go";
+native :: #system_library "go:database/sql";
 go_os :: #system_library "go:os";
 go_fmt :: #system_library "go:fmt";
 
@@ -39,8 +42,28 @@ BlobStoredSQL :: "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1
 BlobRecordSQL :: "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)";
 RemoveAllRaw :: (path: string) -> Error #foreign go_os "RemoveAll";
 Concat :: (a: string, b: string) -> string #foreign go_fmt "Sprint";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
 
 #scope_export
+Limit :: (database: *sql.Database, context: ctx.Context, user: string,
+    baseline: s64, enabled: bool) -> UsageResult {
+    result: UsageResult
+    result.value = baseline
+    if !enabled {
+        return result
+    }
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    RollbackAtReturn(opened.value)
+    limited := plans.LimitTx(opened.value, context, user, baseline, enabled, clock.Unix(clock.Now()))
+    result.value = limited.value
+    result.error = limited.error
+    return result
+}
+
 Used :: (database: *sql.Database, context: ctx.Context, userID: string) -> UsageResult {
     result: UsageResult
     arguments: [1]Any = .[userID]

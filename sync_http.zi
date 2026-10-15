@@ -224,10 +224,16 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
         response.Error(writer, cast(isize)400, "invalid encrypted record page options")
         return
     }
+    allowance := storage.Limit(sync.database, context, input.UserIDHash,
+        sync.configuration.AccountStorageLimitBytes, sync.configuration.StoragePlansEnabled)
+    if allowance.error != null {
+        StorageFailure(writer, "load storage allowance", input.UserIDHash, allowance.error, "storage unavailable")
+        return
+    }
     if pageInput.value.EncryptedRecordsOnly {
         completion.complete = pages.Handle(sync.database, sync.counters, sync.notifications,
             sync.missingUser, writer, request, input, pageInput.value, publicKey.value,
-            sync.configuration.AccountStorageLimitBytes, *completion.committed)
+            allowance.value, *completion.committed)
         return
     }
     base := hash.State(sync.database, context, input.UserIDHash)
@@ -245,7 +251,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     snapshotReason := ""
     compactedThrough: s64 = 0
     apply := true
-    storageLimit := sync.configuration.AccountStorageLimitBytes
+    storageLimit := allowance.value
     staleHash := input.LastServerStateHash != "" && !EqualFold(input.LastServerStateHash, base.value) &&
         !input.FullSyncRequested
     if staleHash {
@@ -556,7 +562,13 @@ EncryptedEnvelope :: (sync: Synchronization, writer: http.ResponseWriter, reques
             return false
         }
     }
-    storageLimit := sync.configuration.AccountStorageLimitBytes
+    allowance := storage.Limit(sync.database, context, user,
+        sync.configuration.AccountStorageLimitBytes, sync.configuration.StoragePlansEnabled)
+    if allowance.error != null {
+        StorageFailure(writer, "load storage allowance", user, allowance.error, "storage unavailable")
+        return false
+    }
+    storageLimit := allowance.value
     if storageLimit > 0 {
         used := storage.Used(sync.database, context, user)
         if used.error != null {

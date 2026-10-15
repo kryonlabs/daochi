@@ -2,6 +2,7 @@
 package main
 
 import (
+	sql "database/sql"
 	fmt "fmt"
 	os "os"
 )
@@ -29,6 +30,24 @@ const BlobStoredSQL = "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_ha
 const BlobRecordSQL = "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)"
 
 var ErrStorageFull Error
+
+func AccountStorage_Limit(database *Database, context Context, user string, baseline int64, enabled bool) UsageResult {
+	var result UsageResult = UsageResult{}
+	result.Value = baseline
+	if !enabled {
+		return result
+	}
+	opened := StdSqlGo_Begin(database, context, nil)
+	result.Error = opened.Error
+	if result.Error != nil {
+		return result
+	}
+	defer (*sql.Tx).Rollback(opened.Value)
+	limited := StoragePlan_LimitTx(opened.Value, context, user, baseline, enabled, StdTimeGo_Unix(StdTimeGo_Now()))
+	result.Value = limited.Value
+	result.Error = limited.Error
+	return result
+}
 
 func AccountStorage_Used(database *Database, context Context, userID string) UsageResult {
 	var result UsageResult = UsageResult{}

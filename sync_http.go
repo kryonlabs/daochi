@@ -213,8 +213,13 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 		Response_Error(writer, int(400), "invalid encrypted record page options")
 		return
 	}
+	allowance := AccountStorage_Limit(sync.Database, context, input.UserIDHash, sync.Configuration.AccountStorageLimitBytes, sync.Configuration.StoragePlansEnabled)
+	if allowance.Error != nil {
+		SyncHttp_StorageFailure(writer, "load storage allowance", input.UserIDHash, allowance.Error, "storage unavailable")
+		return
+	}
 	if pageInput.Value.EncryptedRecordsOnly {
-		var value_11 bool = RecordSync_Handle(sync.Database, sync.Counters, sync.Notifications, sync.MissingUser, writer, request, input, pageInput.Value, publicKey.Value, sync.Configuration.AccountStorageLimitBytes, &(completion.Committed))
+		var value_11 bool = RecordSync_Handle(sync.Database, sync.Counters, sync.Notifications, sync.MissingUser, writer, request, input, pageInput.Value, publicKey.Value, allowance.Value, &(completion.Committed))
 		completion.Complete = value_11
 		return
 	}
@@ -233,7 +238,7 @@ func SyncHttp_Handle(sync Synchronization, writer ResponseWriter, request *Reque
 	snapshotReason := ""
 	var compactedThrough int64 = 0
 	apply := true
-	storageLimit := sync.Configuration.AccountStorageLimitBytes
+	storageLimit := allowance.Value
 	var value_12 bool = input.LastServerStateHash != ""
 	var value_13 bool = value_12
 	if value_13 {
@@ -586,7 +591,12 @@ func SyncHttp_EncryptedEnvelope(sync Synchronization, writer ResponseWriter, req
 			return false
 		}
 	}
-	storageLimit := sync.Configuration.AccountStorageLimitBytes
+	allowance := AccountStorage_Limit(sync.Database, context, user, sync.Configuration.AccountStorageLimitBytes, sync.Configuration.StoragePlansEnabled)
+	if allowance.Error != nil {
+		SyncHttp_StorageFailure(writer, "load storage allowance", user, allowance.Error, "storage unavailable")
+		return false
+	}
+	storageLimit := allowance.Value
 	if storageLimit > 0 {
 		used := AccountStorage_Used(sync.Database, context, user)
 		if used.Error != nil {

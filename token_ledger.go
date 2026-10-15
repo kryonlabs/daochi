@@ -323,18 +323,26 @@ func TokenLedger_CreditPayment(database *Database, context Context, signer Priva
 }
 
 func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, input TokenEventInput, key string, unavailable Error) SpendResult {
+	begun := TokenLedger_Begin(database, context, nil)
+	var result SpendResult = SpendResult{}
+	result.Error = begun.Error
+	if result.Error != nil {
+		return result
+	}
+	defer (*sql.Tx).Rollback(begun.Value)
+	result = TokenLedger_SpendTx(begun.Value, context, signer, input, key, unavailable)
+	if result.Error == nil {
+		result.Error = StdSqlGo_Commit(begun.Value)
+	}
+	return result
+}
+
+func TokenLedger_SpendTx(transaction *Transaction, context Context, signer PrivateKey, input TokenEventInput, key string, unavailable Error) SpendResult {
 	var result SpendResult = SpendResult{}
 	if input.AmountDelta >= 0 {
 		result.Error = StdErrorsGo_New("spend amount must be negative")
 		return result
 	}
-	begun := TokenLedger_Begin(database, context, nil)
-	result.Error = begun.Error
-	if result.Error != nil {
-		return result
-	}
-	transaction := begun.Value
-	defer (*sql.Tx).Rollback(transaction)
 	requestHash := TokenReceipt_SpendRequestHash(input)
 	var receiptID string = ""
 	var previousHash string = ""
@@ -362,7 +370,6 @@ func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, i
 		}
 		result.Value = existing.Value
 		result.Balance = balance.Value
-		result.Error = StdSqlGo_Commit(transaction)
 		return result
 	}
 	var value_1 bool = StdErrorsGo_Is(result.Error, StdSqlGo_NoRows())
@@ -393,6 +400,5 @@ func TokenLedger_Spend(database *Database, context Context, signer PrivateKey, i
 	result.Value = inserted.Value
 	result.Balance = balance.Value + input.AmountDelta
 	result.Created = true
-	result.Error = StdSqlGo_Commit(transaction)
 	return result
 }

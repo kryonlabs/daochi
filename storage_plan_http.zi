@@ -6,7 +6,8 @@ auth :: #import "http_auth";
 body :: #import "http_body";
 response :: #import "response";
 identity :: #import "identity";
-json :: #import "std/json_go";
+strict :: #import "strict_json";
+policy :: #import "token_policy";
 http :: #import "std/http_go";
 clock :: #import "std/time_go";
 errors :: #import "std/errors_go";
@@ -40,7 +41,8 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         accounts.configuration.MoneroRateTokenUnits)
     yearly := plans.MoneroPrice("yearly", accounts.configuration.MoneroRateAtomicAmount,
         accounts.configuration.MoneroRateTokenUnits)
-    available := accounts.configuration.StoragePlansEnabled && monthly.error == null && yearly.error == null
+    available := accounts.configuration.StoragePlansEnabled && monthly.error == null && yearly.error == null &&
+    policy.IssuerStatus(<<accounts.configuration) == "ok"
     if http.Method(request) == "POST" {
         if !available {
             response.Error(writer, 503, "storage upgrades unavailable")
@@ -48,7 +50,7 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         }
         read := body.ReadJSON(writer, request, 1024)
         command: StorageUpgrade
-        if read.error != null || json.Unmarshal(read.value, *command) != null ||
+        if read.error != null || strict.Decode(read.value, *command) != null ||
         plans.Price(command.period) == 0 || !identity.ValidClientID(command.request_id) {
             response.Error(writer, 400, "invalid storage upgrade")
             return
@@ -61,6 +63,8 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
                 response.Error(writer, 402, "not enough Dew")
             } else if errors.Message(purchased.error) == "storage request id reused" {
                 response.Error(writer, 409, "storage request id reused")
+            } else if errors.Message(purchased.error) == "storage expiry out of range" {
+                response.Error(writer, 400, "storage expiry out of range")
             } else {
                 response.Error(writer, 503, "storage upgrade unavailable")
             }

@@ -163,6 +163,7 @@ func AccountStorage_ziranInit() {
 		panic("cyclic module startup")
 	}
 	AccountStorage_ziranInitState = 1
+	StoragePlan_ziranInit()
 	AccountStorage_GlobalInit00()
 	AccountStorage_ziranInitState = 2
 }

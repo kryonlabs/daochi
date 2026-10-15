@@ -601,5 +601,6 @@ func SharedLists_ziranInit() {
 	}
 	SharedLists_ziranInitState = 1
 	AccountStorage_ziranInit()
+	StoragePlan_ziranInit()
 	SharedLists_ziranInitState = 2
 }

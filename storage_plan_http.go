@@ -29,7 +29,13 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "private, no-store")
 	monthly := StoragePlan_MoneroPrice("monthly", accounts.Configuration.MoneroRateAtomicAmount, accounts.Configuration.MoneroRateTokenUnits)
 	yearly := StoragePlan_MoneroPrice("yearly", accounts.Configuration.MoneroRateAtomicAmount, accounts.Configuration.MoneroRateTokenUnits)
-	available := accounts.Configuration.StoragePlansEnabled && monthly.Error == nil && yearly.Error == nil
+	var value_0 bool = accounts.Configuration.StoragePlansEnabled && monthly.Error == nil && yearly.Error == nil
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = TokenPolicy_IssuerStatus(*(accounts.Configuration)) == "ok"
+		value_1 = value_2
+	}
+	available := value_1
 	if StdHttpGo_Method(request) == "POST" {
 		if !available {
 			Response_Error(writer, 503, "storage upgrades unavailable")
@@ -37,38 +43,40 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 		}
 		read := HttpBody_ReadJSON(writer, request, 1024)
 		var command StorageUpgrade = StorageUpgrade{}
-		var value_0 bool = read.Error != nil
-		var value_1 bool = value_0
-		if !value_1 {
-			var value_2 Error = StdJsonGo_Unmarshal(read.Value, &(command))
-			value_1 = (value_2 != nil)
-		}
-		var value_3 bool = value_1
+		var value_3 bool = read.Error != nil
 		var value_4 bool = value_3
 		if !value_4 {
-			var value_5 bool = StoragePlan_Price(command.Period) == 0
-			value_4 = value_5
+			var value_5 Error = StrictJson_Decode(read.Value, &(command))
+			value_4 = (value_5 != nil)
 		}
 		var value_6 bool = value_4
 		var value_7 bool = value_6
 		if !value_7 {
-			var value_8 bool = Identity_ValidClientID(command.RequestId)
-			value_7 = !value_8
+			var value_8 bool = StoragePlan_Price(command.Period) == 0
+			value_7 = value_8
 		}
-		if value_7 {
+		var value_9 bool = value_7
+		var value_10 bool = value_9
+		if !value_10 {
+			var value_11 bool = Identity_ValidClientID(command.RequestId)
+			value_10 = !value_11
+		}
+		if value_10 {
 			Response_Error(writer, 400, "invalid storage upgrade")
 			return
 		}
-		var value_9 Context = StdHttpGo_Context(request)
-		var value_10 PrivateKey = accounts.Configuration.WaoziIssuerPrivateKey
-		var value_11 string = command.Period
-		var value_12 string = command.RequestId
-		purchased := StoragePlan_Purchase(accounts.Database, value_9, value_10, user.Value, value_11, value_12, StdTimeGo_Unix(StdTimeGo_Now()))
+		var value_12 Context = StdHttpGo_Context(request)
+		var value_13 PrivateKey = accounts.Configuration.WaoziIssuerPrivateKey
+		var value_14 string = command.Period
+		var value_15 string = command.RequestId
+		purchased := StoragePlan_Purchase(accounts.Database, value_12, value_13, user.Value, value_14, value_15, StdTimeGo_Unix(StdTimeGo_Now()))
 		if purchased.Error != nil {
 			if StdErrorsGo_Message(purchased.Error) == "insufficient balance" {
 				Response_Error(writer, 402, "not enough Dew")
 			} else if StdErrorsGo_Message(purchased.Error) == "storage request id reused" {
 				Response_Error(writer, 409, "storage request id reused")
+			} else if StdErrorsGo_Message(purchased.Error) == "storage expiry out of range" {
+				Response_Error(writer, 400, "storage expiry out of range")
 			} else {
 				Response_Error(writer, 503, "storage upgrade unavailable")
 			}
@@ -107,6 +115,8 @@ func StoragePlanHttp_ziranInit() {
 		panic("cyclic module startup")
 	}
 	StoragePlanHttp_ziranInitState = 1
+	StoragePlan_ziranInit()
 	AccountStorage_ziranInit()
+	TokenPolicy_ziranInit()
 	StoragePlanHttp_ziranInitState = 2
 }

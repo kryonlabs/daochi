@@ -3807,6 +3807,7 @@ func newFakeMoneroWalletRPC(t *testing.T) *fakeMoneroWalletRPC {
 			var params struct {
 				SubaddrIndices []int `json:"subaddr_indices"`
 				MinHeight      int64 `json:"min_height"`
+				FilterByHeight bool  `json:"filter_by_height"`
 				In             bool  `json:"in"`
 				Pool           bool  `json:"pool"`
 			}
@@ -3828,7 +3829,10 @@ func newFakeMoneroWalletRPC(t *testing.T) *fakeMoneroWalletRPC {
 				if minor >= 0 && transfer.Minor != minor {
 					continue
 				}
-				if len(params.SubaddrIndices) == 0 && params.MinHeight > 0 &&
+				if params.Pool && !params.In && transfer.Height > 0 {
+					continue
+				}
+				if params.FilterByHeight && params.MinHeight > 0 &&
 					transfer.Height > 0 && transfer.Height < params.MinHeight {
 					continue
 				}

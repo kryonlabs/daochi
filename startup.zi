@@ -1,5 +1,6 @@
 #import "std/go_types"
 config :: #import "config";
+plans :: #import "storage_plan";
 storage :: #import "store";
 verification :: #import "verifier";
 node :: #import "node_identity";
@@ -244,6 +245,10 @@ RunPrepared :: (configuration: config.Config, arguments: []string, createVerifie
             FatalError("inspect: %v", error)
         }
         return
+    }
+    billingError := plans.ConfigurationError(configuration)
+    if billingError != null {
+        FatalError("storage billing configuration: %v", billingError)
     }
     opened := storage.Open(configuration.DBPath)
     if opened.error != null {

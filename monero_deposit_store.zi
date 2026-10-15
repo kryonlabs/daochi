@@ -207,6 +207,22 @@ ScanHeight :: (database: *sql.Database, context: ctx.Context) -> HeightResult {
     return result
 }
 
+// Revisit unfinished deposits even after the discovery cursor advances.
+ScanFrom :: (database: *sql.Database, context: ctx.Context, bookmark: s64) -> HeightResult {
+    result: HeightResult
+    arguments: [1]Any = .[bookmark]
+    row := sql.QueryRow(database, context,
+        "SELECT COALESCE(MIN(block_height),?1) FROM monero_deposits WHERE receipt_id='' AND status IN ('confirming','confirmed') AND block_height>0 AND block_height<?1",
+        arguments[:])
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error == null && result.value > 0 {
+        // Include the boundary block for both inclusive and exclusive RPCs.
+        result.value -= 1
+    }
+    return result
+}
+
 SaveScanHeight :: (database: *sql.Database, context: ctx.Context, height: s64) -> Error {
     if height <= 0 {
         return null

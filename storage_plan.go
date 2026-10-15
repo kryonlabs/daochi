@@ -19,6 +19,7 @@ type Plan struct {
 const FreeBytes = 10485760
 const PaidBytes = 1073741824
 const UnitsPerDew = 1000000
+const MaximumExpiry = 253402300799
 
 func StoragePlan_ReadTx(transaction *Transaction, context Context, user string) Plan {
 	var result Plan = Plan{}
@@ -94,6 +95,30 @@ func StoragePlan_MoneroPrice(period string, atomic int64, units int64) TokenUnit
 		result.Value++
 	}
 	return result
+}
+
+func StoragePlan_ConfigurationError(value Config) Error {
+	if !value.StoragePlansEnabled {
+		return nil
+	}
+	if value.TokenSecretEphemeral || int64(len(value.TokenSecret)) < 32 {
+		return StdErrorsGo_New("storage billing requires a stable token secret")
+	}
+	if TokenPolicy_IssuerStatus(value) != "ok" {
+		return StdErrorsGo_New("storage billing requires the Dew issuer private key")
+	}
+	monthly := StoragePlan_MoneroPrice("monthly", value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
+	yearly := StoragePlan_MoneroPrice("yearly", value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
+	if monthly.Error != nil || yearly.Error != nil {
+		return StdErrorsGo_New("storage billing requires valid fixed XMR prices")
+	}
+	if !value.TokenDirectPurchasesEnabled || value.MoneroWalletRPCURL == "" {
+		return StdErrorsGo_New("storage billing requires Monero top-ups")
+	}
+	if value.MoneroNetwork != "mainnet" && value.MoneroNetwork != "stagenet" && value.MoneroNetwork != "testnet" {
+		return StdErrorsGo_New("storage billing requires an explicit Monero network")
+	}
+	return nil
 }
 
 func StoragePlan_PeriodEnd(start int64, period string) int64 {
@@ -188,6 +213,12 @@ func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey
 	if result.ExpiresAt > start {
 		start = result.ExpiresAt
 	}
+	expiry := StoragePlan_PeriodEnd(start, period)
+	if expiry <= start || expiry > 253402300799 {
+		var value_6 Error = StdErrorsGo_New("storage expiry out of range")
+		result.Error = value_6
+		return result
+	}
 	var event TokenEventInput = TokenEventInput{}
 	event.AccountID = user
 	event.AppID = "inbe"
@@ -201,8 +232,7 @@ func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey
 		return result
 	}
 	result.Period = period
-	var value_6 int64 = StoragePlan_PeriodEnd(start, period)
-	result.ExpiresAt = value_6
+	result.ExpiresAt = expiry
 	result.LimitBytes = 1073741824
 	result.Balance = debit.Balance
 	var value_7 [3]Any
@@ -233,4 +263,18 @@ func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey
 		result.Error = value_11
 	}
 	return result
+}
+
+var StoragePlan_ziranInitState uint8
+
+func StoragePlan_ziranInit() {
+	if StoragePlan_ziranInitState == 2 {
+		return
+	}
+	if StoragePlan_ziranInitState == 1 {
+		panic("cyclic module startup")
+	}
+	StoragePlan_ziranInitState = 1
+	TokenPolicy_ziranInit()
+	StoragePlan_ziranInitState = 2
 }

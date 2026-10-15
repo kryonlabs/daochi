@@ -27,8 +27,9 @@ type Monero struct {
 }
 
 type TransfersResult struct {
-	Value []WalletTransfer
-	Error Error
+	Value  []WalletTransfer
+	Height int64
+	Error  Error
 }
 
 type ConfirmedTransfers = struct {
@@ -162,6 +163,7 @@ func MoneroDeposits_Address(monero Monero, writer ResponseWriter, request *Reque
 	value.MinimumAtomicAmount = MoneroWallet_MinimumAtomicAmount(*(monero.Configuration))
 	value.Rate.AtomicAmount = monero.Configuration.MoneroRateAtomicAmount
 	value.Rate.TokenUnits = monero.Configuration.MoneroRateTokenUnits
+	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "private, no-store")
 	Response_JSON(writer, int(200), value)
 }
 
@@ -189,156 +191,181 @@ func MoneroDeposits_Transfers(monero Monero, context Context) TransfersResult {
 	if result.Error != nil {
 		return result
 	}
+	scan := MoneroDepositStore_ScanFrom(monero.Database, context, bookmark.Value)
+	result.Error = scan.Error
+	if result.Error != nil {
+		return result
+	}
 	var parameters __type_7d6cc8a85f09fc88 = *new(__type_7d6cc8a85f09fc88)
 	var value_0 *__type_7d6cc8a85f09fc88 = &(parameters)
 	if (*value_0) == nil {
 		(*value_0) = make(__type_7d6cc8a85f09fc88)
 	}
-	var value_1 *__type_7d6cc8a85f09fc88 = &(parameters)
-	var value_2 string = "in"
-	var value_3 Any = true
-	if (*value_1) == nil {
-		(*value_1) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_1)[value_2] = value_3
-	var value_4 *__type_7d6cc8a85f09fc88 = &(parameters)
-	var value_5 string = "pending"
-	var value_6 Any = true
-	if (*value_4) == nil {
-		(*value_4) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_4)[value_5] = value_6
-	var value_7 *__type_7d6cc8a85f09fc88 = &(parameters)
-	var value_8 string = "failed"
-	var value_9 Any = false
-	if (*value_7) == nil {
-		(*value_7) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_7)[value_8] = value_9
-	var value_10 *__type_7d6cc8a85f09fc88 = &(parameters)
-	var value_11 string = "account_index"
-	var value_12 Any = int(0)
-	if (*value_10) == nil {
-		(*value_10) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_10)[value_11] = value_12
-	var value_13 *__type_7d6cc8a85f09fc88 = &(parameters)
-	var value_14 string = "min_height"
-	var value_15 Any = bookmark.Value
-	if (*value_13) == nil {
-		(*value_13) = make(__type_7d6cc8a85f09fc88)
-	}
-	(*value_13)[value_14] = value_15
-	var confirmed ConfirmedTransfers = ConfirmedTransfers{}
-	var value_16 Error = MoneroWallet_Request(context, *(monero.Configuration), "get_transfers", parameters, &(confirmed), monero.Unavailable)
-	result.Error = value_16
+	var height WalletHeight = WalletHeight{}
+	var value_1 Error = MoneroWallet_Request(context, *(monero.Configuration), "get_height", parameters, &(height), monero.Unavailable)
+	result.Error = value_1
 	if result.Error != nil {
 		return result
 	}
-	var value_17 __type_7d6cc8a85f09fc88 = parameters
-	clear(value_17)
-	var value_18 *__type_7d6cc8a85f09fc88 = &(parameters)
-	var value_19 string = "pool"
-	var value_20 Any = true
-	if (*value_18) == nil {
-		(*value_18) = make(__type_7d6cc8a85f09fc88)
+	if height.Height > 0 && height.Height < bookmark.Value {
+		scan.Value = 0
 	}
-	(*value_18)[value_19] = value_20
-	var value_21 *__type_7d6cc8a85f09fc88 = &(parameters)
-	var value_22 string = "account_index"
-	var value_23 Any = int(0)
-	if (*value_21) == nil {
-		(*value_21) = make(__type_7d6cc8a85f09fc88)
+	var value_2 *__type_7d6cc8a85f09fc88 = &(parameters)
+	var value_3 string = "in"
+	var value_4 Any = true
+	if (*value_2) == nil {
+		(*value_2) = make(__type_7d6cc8a85f09fc88)
 	}
-	(*value_21)[value_22] = value_23
+	(*value_2)[value_3] = value_4
+	var value_5 *__type_7d6cc8a85f09fc88 = &(parameters)
+	var value_6 string = "pending"
+	var value_7 Any = true
+	if (*value_5) == nil {
+		(*value_5) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_5)[value_6] = value_7
+	var value_8 *__type_7d6cc8a85f09fc88 = &(parameters)
+	var value_9 string = "failed"
+	var value_10 Any = false
+	if (*value_8) == nil {
+		(*value_8) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_8)[value_9] = value_10
+	var value_11 *__type_7d6cc8a85f09fc88 = &(parameters)
+	var value_12 string = "account_index"
+	var value_13 Any = int(0)
+	if (*value_11) == nil {
+		(*value_11) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_11)[value_12] = value_13
+	var value_14 *__type_7d6cc8a85f09fc88 = &(parameters)
+	var value_15 string = "filter_by_height"
+	var value_16 Any = true
+	if (*value_14) == nil {
+		(*value_14) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_14)[value_15] = value_16
+	var value_17 *__type_7d6cc8a85f09fc88 = &(parameters)
+	var value_18 string = "min_height"
+	var value_19 Any = scan.Value
+	if (*value_17) == nil {
+		(*value_17) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_17)[value_18] = value_19
+	var confirmed ConfirmedTransfers = ConfirmedTransfers{}
+	var value_20 Error = MoneroWallet_Request(context, *(monero.Configuration), "get_transfers", parameters, &(confirmed), monero.Unavailable)
+	result.Error = value_20
+	if result.Error != nil {
+		return result
+	}
+	var value_21 __type_7d6cc8a85f09fc88 = parameters
+	clear(value_21)
+	var value_22 *__type_7d6cc8a85f09fc88 = &(parameters)
+	var value_23 string = "pool"
+	var value_24 Any = true
+	if (*value_22) == nil {
+		(*value_22) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_22)[value_23] = value_24
+	var value_25 *__type_7d6cc8a85f09fc88 = &(parameters)
+	var value_26 string = "account_index"
+	var value_27 Any = int(0)
+	if (*value_25) == nil {
+		(*value_25) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_25)[value_26] = value_27
 	var pool PoolTransfers = PoolTransfers{}
-	var value_24 Error = MoneroWallet_Request(context, *(monero.Configuration), "get_transfers", parameters, &(pool), monero.Unavailable)
-	result.Error = value_24
+	var value_28 Error = MoneroWallet_Request(context, *(monero.Configuration), "get_transfers", parameters, &(pool), monero.Unavailable)
+	result.Error = value_28
 	if result.Error != nil {
 		return result
 	}
 	maximum := bookmark.Value
-	var value_25 __type_7d6cc8a85f09fc88 = parameters
-	clear(value_25)
-	var height WalletHeight = WalletHeight{}
-	heightError := MoneroWallet_Request(context, *(monero.Configuration), "get_height", parameters, &(height), monero.Unavailable)
-	if heightError == nil && height.Height > maximum {
+	if height.Height > maximum {
 		maximum = height.Height
 	}
 	{
-		value_26 := confirmed.Incoming[:]
-		if int64(0) < 0 || int64(int64(len(value_26))) < int64(0) || int64(int64(len(value_26))) > int64(len(value_26)) {
+		value_29 := confirmed.Incoming[:]
+		if int64(0) < 0 || int64(int64(len(value_29))) < int64(0) || int64(int64(len(value_29))) > int64(len(value_29)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_33 := value_26[0:int64(len(value_26)):int64(len(value_26))]
-		loop_count_33 := int64(len(loop_view_33))
-		var loop_cursor_33 int64 = 0
-		for loop_cursor_33 < loop_count_33 {
-			loop_index_33 := loop_cursor_33
-			transfer := loop_view_33[loop_index_33]
+		loop_view_44 := value_29[0:int64(len(value_29)):int64(len(value_29))]
+		loop_count_44 := int64(len(loop_view_44))
+		var loop_cursor_44 int64 = 0
+		for loop_cursor_44 < loop_count_44 {
+			loop_index_44 := loop_cursor_44
+			transfer := loop_view_44[loop_index_44]
 			if transfer.Height > maximum {
 				maximum = transfer.Height
 			}
-			loop_cursor_33++
-		}
-	}
-	if maximum > bookmark.Value {
-		var value_27 Error = MoneroDepositStore_SaveScanHeight(monero.Database, context, maximum)
-		result.Error = value_27
-		if result.Error != nil {
-			return result
+			loop_cursor_44++
 		}
 	}
 	var payments __type_79590c567c780445 = *new(__type_79590c567c780445)
-	var value_28 *__type_79590c567c780445 = &(payments)
-	if (*value_28) == nil {
-		(*value_28) = make(__type_79590c567c780445)
+	var value_30 *__type_79590c567c780445 = &(payments)
+	if (*value_30) == nil {
+		(*value_30) = make(__type_79590c567c780445)
 	}
 	MoneroDeposits_CollectTransfers(payments, pool.Pool)
 	MoneroDeposits_CollectTransfers(payments, confirmed.Incoming)
 	MoneroDeposits_CollectTransfers(payments, confirmed.Pending)
-	var value_29 __type_79590c567c780445 = payments
-	var value_30 int64 = int64(len(value_29))
-	transfers := make([]WalletTransfer, int(int(0)), int(int(value_30)))
+	var value_31 __type_79590c567c780445 = payments
+	var value_32 int64 = int64(len(value_31))
+	transfers := make([]WalletTransfer, int(int(0)), int(int(value_32)))
 	{
-		var value_31 __type_79590c567c780445 = payments
-		var value_32 []string = make([]string, 0, len(value_31))
-		for value_33 := range value_31 {
-			value_32 = append(value_32, value_33)
+		var value_33 __type_79590c567c780445 = payments
+		var value_34 []string = make([]string, 0, len(value_33))
+		for value_35 := range value_33 {
+			value_34 = append(value_34, value_35)
 		}
-		if int64(0) < 0 || int64(int64(len(value_32))) < int64(0) || int64(int64(len(value_32))) > int64(len(value_32)) {
+		if int64(0) < 0 || int64(int64(len(value_34))) < int64(0) || int64(int64(len(value_34))) > int64(len(value_34)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_50 := value_32[0:int64(len(value_32)):int64(len(value_32))]
-		loop_count_50 := int64(len(loop_view_50))
-		var loop_cursor_50 int64 = 0
-		for loop_cursor_50 < loop_count_50 {
-			loop_index_50 := loop_cursor_50
-			key := loop_view_50[loop_index_50]
-			var value_35 []WalletTransfer = transfers
-			var value_36 __type_79590c567c780445 = payments
-			var value_37 string = key
-			var value_38 WalletTransfer = value_36[value_37]
-			transfers = append(value_35, value_38)
-			loop_cursor_50++
+		loop_view_55 := value_34[0:int64(len(value_34)):int64(len(value_34))]
+		loop_count_55 := int64(len(loop_view_55))
+		var loop_cursor_55 int64 = 0
+		for loop_cursor_55 < loop_count_55 {
+			loop_index_55 := loop_cursor_55
+			key := loop_view_55[loop_index_55]
+			var value_37 []WalletTransfer = transfers
+			var value_38 __type_79590c567c780445 = payments
+			var value_39 string = key
+			var value_40 WalletTransfer = value_38[value_39]
+			transfers = append(value_37, value_40)
+			loop_cursor_55++
 		}
 	}
 	result.Value = transfers
+	result.Height = maximum
 	return result
 }
 
 func MoneroDeposits_SettleDeposit(monero Monero, context Context, accountID string, transfer WalletTransfer) Error {
 	conversion := MoneroWallet_TokenUnits(transfer.Amount, monero.Configuration.MoneroRateAtomicAmount, monero.Configuration.MoneroRateTokenUnits)
+	previous := MoneroDepositStore_Deposit(monero.Database, context, transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
+	var value_0 bool = previous.Error != nil
+	var value_1 bool = value_0
+	if value_1 {
+		var value_2 bool = StdErrorsGo_Is(previous.Error, StdSqlGo_NoRows())
+		value_1 = !value_2
+	}
+	if value_1 {
+		return previous.Error
+	}
+	units := conversion.Value
+	if previous.Error == nil {
+		units = previous.Value.TokenUnits
+	}
 	status := "confirming"
 	if transfer.DoubleSpendSeen {
 		status = "double_spend"
 	} else {
-		var value_0 bool = transfer.Amount < MoneroWallet_MinimumAtomicAmount(*(monero.Configuration))
-		if value_0 || conversion.Error != nil || conversion.Value <= 0 {
+		var value_3 bool = transfer.Amount < MoneroWallet_MinimumAtomicAmount(*(monero.Configuration))
+		if value_3 || units <= 0 {
 			status = "below_minimum"
 		} else {
-			var value_1 bool = transfer.Confirmations >= MoneroWallet_ConfirmationsRequired(*(monero.Configuration))
-			if value_1 && !transfer.Locked && transfer.UnlockTime == 0 {
+			var value_4 bool = transfer.Confirmations >= MoneroWallet_ConfirmationsRequired(*(monero.Configuration))
+			if value_4 && !transfer.Locked && transfer.UnlockTime == 0 {
 				status = "confirmed"
 			}
 		}
@@ -373,19 +400,20 @@ func MoneroDeposits_Reconcile(monero Monero, context Context) Error {
 	if transfers.Error != nil {
 		return transfers.Error
 	}
+	var settlementError Error = *new(Error)
 	{
 		value_3 := transfers.Value[:]
 		if int64(0) < 0 || int64(int64(len(value_3))) < int64(0) || int64(int64(len(value_3))) > int64(len(value_3)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_14 := value_3[0:int64(len(value_3)):int64(len(value_3))]
-		loop_count_14 := int64(len(loop_view_14))
-		var loop_cursor_14 int64 = 0
-		for loop_cursor_14 < loop_count_14 {
-			loop_index_14 := loop_cursor_14
-			transfer := loop_view_14[loop_index_14]
+		loop_view_15 := value_3[0:int64(len(value_3)):int64(len(value_3))]
+		loop_count_15 := int64(len(loop_view_15))
+		var loop_cursor_15 int64 = 0
+		for loop_cursor_15 < loop_count_15 {
+			loop_index_15 := loop_cursor_15
+			transfer := loop_view_15[loop_index_15]
 			if transfer.TxID == "" || transfer.Amount <= 0 {
-				loop_cursor_14++
+				loop_cursor_15++
 				continue
 			}
 			var indices [2]int
@@ -397,17 +425,23 @@ func MoneroDeposits_Reconcile(monero Monero, context Context) Error {
 			value_6.Value, value_6.HasValue = value_4[value_5]
 			owner := value_6
 			if !owner.HasValue {
-				loop_cursor_14++
+				loop_cursor_15++
 				continue
 			}
 			settled := MoneroDeposits_SettleDeposit(monero, context, owner.Value, transfer)
 			if settled != nil {
 				slog.Warn("monero account deposit settlement failed", "account", LogSafety_LogText(owner.Value), "tx", LogSafety_LogText(transfer.TxID), "error", settled)
+				if settlementError == nil {
+					settlementError = settled
+				}
 			}
-			loop_cursor_14++
+			loop_cursor_15++
 		}
 	}
-	return nil
+	if settlementError != nil {
+		return settlementError
+	}
+	return MoneroDepositStore_SaveScanHeight(monero.Database, context, transfers.Height)
 }
 
 var MoneroDeposits_ziranInitState uint8

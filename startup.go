@@ -37,7 +37,7 @@ type Signal = os.Signal
 
 type Logger = log.Logger
 
-type zir_86e411f6e78af4e5_CancelCallback func(CancelFunc)
+type zir_301dba94d8b5e09a_CancelCallback func(CancelFunc)
 
 type CloseCallback func(*Store)
 
@@ -76,7 +76,7 @@ func Startup_NotifyContext(Parent Context, Interrupt Signal, Terminate Signal) C
 	return result
 }
 
-func Startup_CancelAtReturn(Callback zir_86e411f6e78af4e5_CancelCallback, Cancel CancelFunc) {
+func Startup_CancelAtReturn(Callback zir_301dba94d8b5e09a_CancelCallback, Cancel CancelFunc) {
 	Callback(Cancel)
 }
 
@@ -136,7 +136,7 @@ func Startup_ServerClosed() Error {
 	return http.ErrServerClosed
 }
 
-const zir_d_e4db774a387b8ba5 = 60000000000
+const zir_d_c3e0e64296ff5ca4 = 60000000000
 const Second = 1000000000
 
 func Startup_CloseStore(store *Store) {
@@ -312,6 +312,10 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 		}
 		return
 	}
+	billingError := StoragePlan_ConfigurationError(configuration)
+	if billingError != nil {
+		log.Fatalf("storage billing configuration: %v", billingError)
+	}
 	opened := Store_Open(configuration.DBPath)
 	if opened.Error != nil {
 		log.Fatalf("open store: %v", opened.Error)
@@ -355,6 +359,7 @@ func Startup_ziranInit() {
 		panic("cyclic module startup")
 	}
 	Startup_ziranInitState = 1
+	StoragePlan_ziranInit()
 	Store_ziranInit()
 	Verifier_ziranInit()
 	Server_ziranInit()

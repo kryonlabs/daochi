@@ -15,6 +15,7 @@ logs :: #import "log_safety";
 rate :: #import "rate_limit";
 address :: #import "client_address";
 sql :: #import "std/sql_go";
+errors :: #import "std/errors_go";
 ctx :: #import "std/context_go";
 http :: #import "std/http_go";
 clock :: #import "std/time_go";
@@ -41,6 +42,7 @@ Monero :: struct {
 }
 TransfersResult :: struct {
     value: []wallet.WalletTransfer
+    height: s64
     error: Error
 }
 
@@ -85,7 +87,7 @@ CollectTransfers :: (payments: Map(string, wallet.WalletTransfer), transfers: []
 #scope_export
 Address :: (monero: Monero, writer: http.ResponseWriter, request: *http.Request) {
     if !monero.configuration.TokenDirectPurchasesEnabled || !wallet.ValidRate(<<monero.configuration) ||
-        TrimSpace(monero.configuration.MoneroWalletRPCURL) == "" {
+    TrimSpace(monero.configuration.MoneroWalletRPCURL) == "" {
         response.Error(writer, cast(isize)503, "monero purchases disabled")
         return
     }
@@ -152,6 +154,7 @@ Address :: (monero: Monero, writer: http.ResponseWriter, request: *http.Request)
     value.MinimumAtomicAmount = wallet.MinimumAtomicAmount(<<monero.configuration)
     value.Rate.AtomicAmount = monero.configuration.MoneroRateAtomicAmount
     value.Rate.TokenUnits = monero.configuration.MoneroRateTokenUnits
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
     response.JSON(writer, cast(isize)200, value)
 }
 
@@ -179,13 +182,28 @@ Transfers :: (monero: Monero, context: ctx.Context) -> TransfersResult {
     if result.error != null {
         return result
     }
+    scan := storage.ScanFrom(monero.database, context, bookmark.value)
+    result.error = scan.error
+    if result.error != null {
+        return result
+    }
     parameters: Map(string, Any)
     MapInit(parameters)
+    height: WalletHeight
+    result.error = wallet.Request(context, <<monero.configuration, "get_height", parameters, *height, monero.unavailable)
+    if result.error != null {
+        return result
+    }
+    if height.height > 0 && height.height < bookmark.value {
+        // A restored/failover wallet or a shorter chain must rediscover history.
+        scan.value = 0
+    }
     MapSet(parameters, "in", true)
     MapSet(parameters, "pending", true)
     MapSet(parameters, "failed", false)
     MapSet(parameters, "account_index", cast(isize)0)
-    MapSet(parameters, "min_height", bookmark.value)
+    MapSet(parameters, "filter_by_height", true)
+    MapSet(parameters, "min_height", scan.value)
     confirmed: ConfirmedTransfers
     result.error = wallet.Request(context, <<monero.configuration, "get_transfers", parameters, *confirmed, monero.unavailable)
     if result.error != null {
@@ -200,21 +218,12 @@ Transfers :: (monero: Monero, context: ctx.Context) -> TransfersResult {
         return result
     }
     maximum := bookmark.value
-    MapClear(parameters)
-    height: WalletHeight
-    heightError := wallet.Request(context, <<monero.configuration, "get_height", parameters, *height, monero.unavailable)
-    if heightError == null && height.height > maximum {
+    if height.height > maximum {
         maximum = height.height
     }
     for transfer: confirmed.incoming {
         if transfer.Height > maximum {
             maximum = transfer.Height
-        }
-    }
-    if maximum > bookmark.value {
-        result.error = storage.SaveScanHeight(monero.database, context, maximum)
-        if result.error != null {
-            return result
         }
     }
     payments: Map(string, wallet.WalletTransfer)
@@ -227,15 +236,25 @@ Transfers :: (monero: Monero, context: ctx.Context) -> TransfersResult {
         transfers = AppendTransfer(transfers, MapGet(payments, key))
     }
     result.value = transfers
+    result.height = maximum
     return result
 }
 
 SettleDeposit :: (monero: Monero, context: ctx.Context, accountID: string, transfer: wallet.WalletTransfer) -> Error {
     conversion := wallet.TokenUnits(transfer.Amount, monero.configuration.MoneroRateAtomicAmount, monero.configuration.MoneroRateTokenUnits)
+    previous := storage.Deposit(monero.database, context, transfer.TxID,
+        transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
+    if previous.error != null && !errors.Is(previous.error, sql.NoRows()) {
+        return previous.error
+    }
+    units := conversion.value
+    if previous.error == null {
+        units = previous.value.TokenUnits
+    }
     status := "confirming"
     if transfer.DoubleSpendSeen {
         status = "double_spend"
-    } else if transfer.Amount < wallet.MinimumAtomicAmount(<<monero.configuration) || conversion.error != null || conversion.value <= 0 {
+    } else if transfer.Amount < wallet.MinimumAtomicAmount(<<monero.configuration) || units <= 0 {
         status = "below_minimum"
     } else if transfer.Confirmations >= wallet.ConfirmationsRequired(<<monero.configuration) && !transfer.Locked && transfer.UnlockTime == 0 {
         status = "confirmed"
@@ -268,6 +287,7 @@ Reconcile :: (monero: Monero, context: ctx.Context) -> Error {
     if transfers.error != null {
         return transfers.error
     }
+    settlementError: Error
     for transfer: transfers.value {
         if transfer.TxID == "" || transfer.Amount <= 0 {
             continue
@@ -283,7 +303,14 @@ Reconcile :: (monero: Monero, context: ctx.Context) -> Error {
         if settled != null {
             LogSettlementError("monero account deposit settlement failed", "account", logs.LogText(owner.value),
                 "tx", logs.LogText(transfer.TxID), "error", settled)
+            if settlementError == null {
+                settlementError = settled
+            }
         }
     }
-    return null
+    if settlementError != null {
+        return settlementError
+    }
+    // Never checkpoint past a failed persistence or ledger transaction.
+    return storage.SaveScanHeight(monero.database, context, transfers.height)
 }

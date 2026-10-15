@@ -4,6 +4,8 @@
 ledger :: #import "token_ledger";
 receipts :: #import "token_receipt";
 wallet :: #import "monero_wallet";
+configuration :: #import "config";
+policy :: #import "token_policy";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 ed :: #import "std/ed25519_go";
@@ -15,6 +17,8 @@ go_time :: #system_library "go:time";
 FreeBytes :: 10485760
 PaidBytes :: 1073741824
 UnitsPerDew :: 1000000
+// The latest UTC second representable with a four-digit calendar year.
+MaximumExpiry :: 253402300799
 
 Plan :: struct {
     period: string #go_tag "json:\"period\""
@@ -103,6 +107,30 @@ MoneroPrice :: (period: string, atomic: s64, units: s64) -> wallet.TokenUnitsRes
     return result
 }
 
+ConfigurationError :: (value: configuration.Config) -> Error {
+    if !value.StoragePlansEnabled {
+        return null
+    }
+    if value.TokenSecretEphemeral || value.TokenSecret.count < 32 {
+        return errors.New("storage billing requires a stable token secret")
+    }
+    if policy.IssuerStatus(value) != "ok" {
+        return errors.New("storage billing requires the Dew issuer private key")
+    }
+    monthly := MoneroPrice("monthly", value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
+    yearly := MoneroPrice("yearly", value.MoneroRateAtomicAmount, value.MoneroRateTokenUnits)
+    if monthly.error != null || yearly.error != null {
+        return errors.New("storage billing requires valid fixed XMR prices")
+    }
+    if !value.TokenDirectPurchasesEnabled || value.MoneroWalletRPCURL == "" {
+        return errors.New("storage billing requires Monero top-ups")
+    }
+    if value.MoneroNetwork != "mainnet" && value.MoneroNetwork != "stagenet" && value.MoneroNetwork != "testnet" {
+        return errors.New("storage billing requires an explicit Monero network")
+    }
+    return null
+}
+
 // Clamp to the last day of the target month, including February and leap years.
 PeriodEnd :: (start: s64, period: string) -> s64 {
     value := clock.UTC(clock.FromUnix(start, 0))
@@ -182,6 +210,11 @@ Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKe
     if result.expires_at > start {
         start = result.expires_at
     }
+    expiry := PeriodEnd(start, period)
+    if expiry <= start || expiry > MaximumExpiry {
+        result.error = errors.New("storage expiry out of range")
+        return result
+    }
     event: receipts.TokenEventInput
     event.AccountID = user
     event.AppID = "inbe"
@@ -196,7 +229,7 @@ Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKe
         return result
     }
     result.period = period
-    result.expires_at = PeriodEnd(start, period)
+    result.expires_at = expiry
     result.limit_bytes = PaidBytes
     result.balance = debit.balance
     planArguments: [3]Any = .[user, period, result.expires_at]

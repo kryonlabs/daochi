@@ -281,5 +281,6 @@ func StoreSchema_ziranInit() {
 	StoreSchema_ziranInitState = 1
 	TelegramAccountEntry_ziranInit()
 	SharedLists_ziranInit()
+	StoragePlan_ziranInit()
 	StoreSchema_ziranInitState = 2
 }

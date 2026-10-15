@@ -169,8 +169,8 @@ func TestMoneroDepositScanBookmarkAdvances(t *testing.T) {
 		}
 	}
 	wallet.mu.Unlock()
-	if maxSeen < 5000 {
-		t.Fatalf("rescan min_height=%d, want >= 5000 (bookmark used)", maxSeen)
+	if maxSeen < 4999 {
+		t.Fatalf("rescan min_height=%d, want >= 4999 (bookmark with boundary overlap)", maxSeen)
 	}
 }
 
@@ -200,5 +200,116 @@ func TestMoneroInvoiceCreditedOnceAcrossPaymentSets(t *testing.T) {
 	balance := TokenLedger_Balance(store.Database, context.Background(), identity.UserID, AssetID)
 	if balance.Error != nil || balance.Value != 5000000 {
 		t.Fatalf("balance = %d err=%v; one invoice must credit once", balance.Value, balance.Error)
+	}
+}
+
+func accountDepositFixture(t *testing.T) (*Server, *Store, *fakeMoneroWalletRPC, testIdentity, MoneroAccountAddress) {
+	t.Helper()
+	server, store, wallet, handler, owner := moneroReconcileTestServer(t)
+	server.Cfg.MoneroRateAtomicAmount = 1000000000
+	server.Cfg.MoneroRateTokenUnits = 1000000
+	server.Cfg.MoneroConfirmationsRequired = 10
+	res := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/address", owner.Token, nil)
+	if res.Code != 200 {
+		t.Fatalf("address: %d %s", res.Code, res.Body.String())
+	}
+	mapping := MoneroDepositStore_AccountAddress(store.Database, context.Background(), owner.UserID)
+	if mapping.Error != nil || !mapping.Found {
+		t.Fatalf("address mapping: %+v", mapping)
+	}
+	return server, store, wallet, owner, mapping.Value
+}
+
+func TestMoneroDepositMaturesBehindCursorWithOriginalQuote(t *testing.T) {
+	server, store, wallet, owner, mapping := accountDepositFixture(t)
+	payment := moneroTransfer{TxID: "maturing-deposit", Amount: 1000000000, Confirmations: 2,
+		Height: 80, Major: mapping.AccountIndex, Minor: mapping.AddressIndex, Locked: true}
+	wallet.walletHeight = 100
+	wallet.setTransfer(payment)
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	bookmark := MoneroDepositStore_ScanHeight(store.Database, context.Background())
+	if bookmark.Error != nil || bookmark.Value != 100 {
+		t.Fatalf("initial cursor: %+v", bookmark)
+	}
+	payment.Confirmations = 20
+	payment.Locked = false
+	wallet.mu.Lock()
+	wallet.walletHeight = 500
+	wallet.mu.Unlock()
+	wallet.setTransfer(payment)
+	// The original snapshot remains payable even if a new quote would yield zero.
+	server.Cfg.MoneroRateAtomicAmount = 9223372036854775807
+	for i := 0; i < 2; i++ {
+		if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	balance := TokenLedger_Balance(store.Database, context.Background(), owner.UserID, AssetID)
+	if balance.Error != nil || balance.Value != 1000000 {
+		t.Fatalf("matured credit must retain original quote exactly once: %+v", balance)
+	}
+}
+
+func TestMoneroDepositPersistenceFailureKeepsCursorForRetry(t *testing.T) {
+	server, store, wallet, owner, mapping := accountDepositFixture(t)
+	wallet.walletHeight = 500
+	wallet.setTransfer(moneroTransfer{TxID: "retry-persist", Amount: 1000000000, Confirmations: 10,
+		Height: 200, Major: mapping.AccountIndex, Minor: mapping.AddressIndex})
+	if _, err := store.Database.Exec(`CREATE TRIGGER reject_deposit BEFORE INSERT ON monero_deposits BEGIN SELECT RAISE(ABORT,'fixture failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err == nil {
+		t.Fatal("persistence failure was hidden")
+	}
+	bookmark := MoneroDepositStore_ScanHeight(store.Database, context.Background())
+	if bookmark.Error != nil || bookmark.Value != 0 {
+		t.Fatalf("failed persistence moved cursor: %+v", bookmark)
+	}
+	if _, err := store.Database.Exec(`DROP TRIGGER reject_deposit`); err != nil {
+		t.Fatal(err)
+	}
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	balance := TokenLedger_Balance(store.Database, context.Background(), owner.UserID, AssetID)
+	if balance.Error != nil || balance.Value != 1000000 {
+		t.Fatalf("retry lost credit: %+v", balance)
+	}
+}
+
+func TestMoneroDepositIssuerRecoveryAndWalletRewind(t *testing.T) {
+	server, store, wallet, owner, mapping := accountDepositFixture(t)
+	private := server.Cfg.WaoziIssuerPrivateKey
+	server.Cfg.WaoziIssuerPrivateKey = nil
+	wallet.walletHeight = 500
+	payment := moneroTransfer{TxID: "retry-issuer", Amount: 1000000000, Confirmations: 10,
+		Height: 200, Major: mapping.AccountIndex, Minor: mapping.AddressIndex}
+	wallet.setTransfer(payment)
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err == nil {
+		t.Fatal("issuer outage was hidden")
+	}
+	bookmark := MoneroDepositStore_ScanHeight(store.Database, context.Background())
+	if bookmark.Error != nil || bookmark.Value != 0 {
+		t.Fatalf("failed credit moved cursor: %+v", bookmark)
+	}
+	server.Cfg.WaoziIssuerPrivateKey = private
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// A failover wallet at a lower height must discover older unseen transfers.
+	wallet.mu.Lock()
+	wallet.walletHeight = 300
+	wallet.mu.Unlock()
+	payment.TxID = "rediscovered-after-rewind"
+	payment.Height = 150
+	wallet.setTransfer(payment)
+	if err := MoneroDeposits_Reconcile(server.monero(), context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	balance := TokenLedger_Balance(store.Database, context.Background(), owner.UserID, AssetID)
+	if balance.Error != nil || balance.Value != 2000000 {
+		t.Fatalf("issuer/wallet recovery lost credit: %+v", balance)
 	}
 }

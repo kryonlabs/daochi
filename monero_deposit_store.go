@@ -177,6 +177,26 @@ func MoneroDepositStore_ScanHeight(database *Database, context Context) HeightRe
 	return result
 }
 
+func MoneroDepositStore_ScanFrom(database *Database, context Context, bookmark int64) HeightResult {
+	var result HeightResult = HeightResult{}
+	var value_0 [1]Any
+	value_0[0] = bookmark
+	arguments := value_0
+	_ = arguments
+	var value_1 string = "SELECT COALESCE(MIN(block_height),?1) FROM monero_deposits WHERE receipt_id='' AND status IN ('confirming','confirmed') AND block_height>0 AND block_height<?1"
+	row := StdSqlGo_QueryRow(database, context, value_1, arguments[0:1:1])
+	var value_2 [1]Any
+	value_2[0] = &(result.Value)
+	destinations := value_2
+	_ = destinations
+	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	result.Error = value_3
+	if result.Error == nil && result.Value > 0 {
+		result.Value--
+	}
+	return result
+}
+
 func MoneroDepositStore_SaveScanHeight(database *Database, context Context, height int64) Error {
 	if height <= 0 {
 		return nil

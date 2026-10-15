@@ -323,5 +323,6 @@ func DelegatedSync_ziranInit() {
 	Session_ziranInit()
 	SyncValidation_ziranInit()
 	AccountStorage_ziranInit()
+	StoragePlan_ziranInit()
 	DelegatedSync_ziranInitState = 2
 }

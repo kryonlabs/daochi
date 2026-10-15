@@ -29,7 +29,7 @@ func storageAccountFixture(t *testing.T) (*Server, *Store, http.Handler, testIde
 	owner := newTestIdentity(t, handler, 0x75)
 	credit := TokenLedger_CreditPayment(store.Database, context.Background(), private,
 		"monero", "production-storage-fixture", TokenEventInput{
-			AccountID: owner.UserID, AppID: "inbe", EventType: "credit", AmountDelta: 3 * UnitsPerDew,
+			AccountID: owner.UserID, AppID: "inbe", EventType: "credit", AmountDelta: 60 * UnitsPerDew,
 			SourceType: "monero", SourceRef: "production-storage-fixture",
 		}, errTokenIssuerReadOnly)
 	if credit.Error != nil {
@@ -131,7 +131,7 @@ func TestStorageRejectsExpiryOverflowBeforeDebit(t *testing.T) {
 		t.Fatalf("expiry: %+v", plan)
 	}
 	read := StoragePlan_Read(store.Database, context.Background(), owner.UserID, now)
-	if read.Error != nil || read.Balance != 3*UnitsPerDew || read.ExpiresAt != 0 {
+	if read.Error != nil || read.Balance != 60*UnitsPerDew || read.ExpiresAt != 0 {
 		t.Fatalf("charged overflow: %+v", read)
 	}
 }

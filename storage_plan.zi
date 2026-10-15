@@ -72,12 +72,14 @@ CREATE TABLE IF NOT EXISTS server_storage_purchases (
 SQL;
 }
 
+// Twenty times the launch prices, so moving from 5 to 100 Dew per XMR keeps
+// each storage period's XMR price.
 Price :: (period: string) -> s64 {
     if period == "monthly" {
-        return UnitsPerDew
+        return 20 * UnitsPerDew
     }
     if period == "yearly" {
-        return 10 * UnitsPerDew
+        return 200 * UnitsPerDew
     }
     return 0
 }

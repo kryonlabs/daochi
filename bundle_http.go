@@ -20,24 +20,24 @@ type Release struct {
 	Signature string "json:\"signature\""
 }
 
-type zir_10ec5c4f6be0ae99_Decoded struct {
+type zir_81018ee7c163d186_Decoded struct {
 	Value []uint8
 	Error Error
 }
 
-type zir_99d25837ba5a518f_WriteResult struct {
+type zir_3ae2391e02ff8e4c_WriteResult struct {
 	Count int
 	Error Error
 }
 
-func BundleHttp_Decode(Value string) zir_10ec5c4f6be0ae99_Decoded {
-	var result zir_10ec5c4f6be0ae99_Decoded
+func BundleHttp_Decode(Value string) zir_81018ee7c163d186_Decoded {
+	var result zir_81018ee7c163d186_Decoded
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }
 
-func BundleHttp_Write(Writer ResponseWriter, Data []uint8) zir_99d25837ba5a518f_WriteResult {
-	var result zir_99d25837ba5a518f_WriteResult
+func BundleHttp_Write(Writer ResponseWriter, Data []uint8) zir_3ae2391e02ff8e4c_WriteResult {
+	var result zir_3ae2391e02ff8e4c_WriteResult
 	result.Count, result.Error = (http.ResponseWriter).Write(Writer, Data)
 	return result
 }
@@ -192,6 +192,11 @@ func BundleHttp_Route(registry Registry, writer ResponseWriter, request *Request
 	if parts[1] == "latest" {
 		StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "no-store")
 		Response_JSON(writer, 200, release)
+		return
+	}
+	gate := PackGrant_Gate(fmt.Sprint(root, fmt.Sprint(release.SHA256, ".zib")))
+	if gate.Gated {
+		Response_Error(writer, 403, "package grant required")
 		return
 	}
 	bundle := StdFileGo_ReadFile(fmt.Sprint(root, fmt.Sprint(release.SHA256, ".zib")))

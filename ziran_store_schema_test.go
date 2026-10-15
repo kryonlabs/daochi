@@ -49,6 +49,7 @@ func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 		name := entry["tbl_name"].(string)
 		if strings.HasPrefix(name, "server_authorization_") || strings.HasPrefix(name, "server_telegram_") ||
 			name == "server_storage_plans" || name == "server_storage_purchases" ||
+			name == "account_unlocks" || name == "token_rescales" ||
 			name == "server_shared_lists" || name == "server_list_invitations" || name == "server_list_commands" ||
 			name == "server_state_hashes" || strings.HasPrefix(entry["name"].(string), "server_state_hashes") {
 			continue

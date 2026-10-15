@@ -20,6 +20,7 @@ Document :: #string JSON
       ],
       "responses": {
         "200":{"description":"Signed release metadata or the portable bundle"},
+        "403":{"description":"The artifact is gated; v2 serves it with a grant"},
         "404":{"description":"App or release is unavailable"}
       }
     }
@@ -37,7 +38,23 @@ Document :: #string JSON
       "responses": {
         "200":{"description":"Signed release metadata or the portable bundle"},
         "400":{"description":"Invalid interface version or bucket"},
+        "403":{"description":"The artifact is gated; request it with a grant"},
         "404":{"description":"App or release is unavailable, or no release fits the app"}
+      }
+    }
+  },
+  "/api/v2/packages/{app_id}/{asset}/{grant}": {
+    "get": {
+      "summary": "Read a gated portable artifact with a download grant",
+      "parameters": [
+        {"name":"app_id","in":"path","required":true,"schema":{"type":"string"}},
+        {"name":"asset","in":"path","required":true,"description":"The artifact SHA-256 followed by .zib","schema":{"type":"string"}},
+        {"name":"grant","in":"path","required":true,"description":"An unexpired grant from POST /api/v1/unlocks/grant for the artifact's product. Artifacts that are not gated ignore it","schema":{"type":"string"}}
+      ],
+      "responses": {
+        "200":{"description":"The portable bundle; private, no-store when gated"},
+        "403":{"description":"The artifact is gated and the grant is missing, expired, forged or for another product"},
+        "404":{"description":"App or artifact is unavailable"}
       }
     }
   }

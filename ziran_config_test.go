@@ -324,6 +324,7 @@ var configEnvironmentKeys = []string{
 	"DAOCHI_TOKEN_SECRET_HEX",
 	"DAOCHI_TOKEN_TTL_SECONDS",
 	"DAOCHI_STORAGE_PLANS_ENABLED",
+	"DAOCHI_UNLOCK_TRIAL_UNTIL",
 	"MONERO_CONFIRMATIONS_REQUIRED",
 	"MONERO_MINIMUM_ATOMIC_AMOUNT",
 	"MONERO_NETWORK",
@@ -349,7 +350,7 @@ func assertConfigurationMatchesBaseline(t *testing.T) Config {
 	expected := baselineLoadConfig()
 	actualType := reflect.TypeOf(actual)
 	expectedType := reflect.TypeOf(expected)
-	if actualType.NumField() != expectedType.NumField()+1 {
+	if actualType.NumField() != expectedType.NumField()+2 {
 		t.Fatal("configuration fields changed")
 	}
 	for i := 0; i < expectedType.NumField(); i++ {

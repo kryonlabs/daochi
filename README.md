@@ -287,17 +287,18 @@ observed. Existing product invoices remain available during migration.
 Inbe calls this account credit **Dew**. Its existing asset ID stays
 `waozi:token`, with 1,000,000 integer ledger units per Dew. Storage prices
 are fixed in **XMR**, with no dollar peg, exchange-rate feed, or fiat conversion.
-Choose the fixed XMR price for one month and express it in atomic units
-(1 XMR = 1,000,000,000,000 atomic units). Set `MONERO_RATE_ATOMIC_AMOUNT`
-to that amount and `MONERO_RATE_TOKEN_UNITS=1000000`. One Dew then funds one
-month; 10 Dew funds one year at ten times the monthly XMR price. The app shows
+Choose how much Dew one XMR buys and express that ratio in integer units
+(1 XMR = 1,000,000,000,000 atomic units). For 100 Dew per XMR, set
+`MONERO_RATE_ATOMIC_AMOUNT=1000000000000` and
+`MONERO_RATE_TOKEN_UNITS=100000000`. One month of storage costs 20 Dew
+(0.2 XMR at that ratio) and one year costs 200 Dew. The app shows
 the node's XMR prices before purchase. Confirmed deposits retain their
 snapshotted fixed ratio, and existing Dew balances remain intact.
 
 Set `DAOCHI_STORAGE_PLANS_ENABLED=true` on a node offering prepaid storage.
 A valid fixed Monero ratio is required before upgrades can be purchased.
-The free allowance is 10 MiB. A monthly purchase costs 1 Dew and a yearly
-purchase costs 10 Dew; both grant 1 GiB total storage. Purchases extend an
+The free allowance is 10 MiB. A monthly purchase costs 20 Dew and a yearly
+purchase costs 200 Dew; both grant 1 GiB total storage. Purchases extend an
 existing paid period or start immediately, with calendar month/year expiry.
 They do not renew automatically. `GET /api/v1/storage/plan` returns the
 authenticated account's balance and allowance. `POST` to the same endpoint
@@ -310,6 +311,23 @@ uploads that grow an account above its allowance are refused, while reads
 and space-reducing changes remain available. Storage upgrades are opt-in on
 each node; nodes without them retain their configured storage-limit behavior.
 The Inbe Play build has no Dew purchase or storage-upgrade UI.
+
+Unlocks are priced by the node, never by the client. `GET /api/v1/unlocks`
+lists the account's unlocks and each product's current and regular price;
+`POST` with `{"product":"inbe.practice.taichi"}` debits the price once (1 Dew)
+and records the unlock in the same transaction. Setting
+`DAOCHI_UNLOCK_TRIAL_UNTIL` to a Unix time sells every unlock at 90% off until
+then. `POST /api/v1/unlocks/grant` returns a one-hour download grant, signed by
+the Dew issuer, for a product the account has unlocked. A package artifact
+with a `<sha256>.zib.product` file beside it naming a product is gated: it is
+served, uncached, only at `/api/v2/packages/<app>/<sha256>.zib/<grant>` with an
+unexpired grant for that product.
+
+When the node's Dew per XMR ratio changes, stop the service and run
+`daochi rescale-dew FACTOR` once with the node's environment. Every positive
+balance gains `(FACTOR-1)×balance` as a signed credit, so no ledger row is
+rewritten; uncredited Monero invoices and deposits are scaled in the same
+transaction, and a new checkpoint is signed. Running it again changes nothing.
 
 The background reconciler runs whenever `MONERO_WALLET_RPC_URL` is configured,
 even with `DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED` unset, so confirmed deposits

@@ -1,0 +1,131 @@
+// Short-lived download grants for gated packs. A grant names one product and
+// its expiry and is signed by the Dew issuer, so any node holding the issuer's
+// public key can check it without a database lookup. Both halves are unpadded
+// base64url, which keeps the grant safe as one URL path segment.
+#import "std/go_types"
+identity :: #import "identity";
+files :: #import "std/file_go";
+ed :: #import "std/ed25519_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+go_base64 :: #system_library "go:encoding/base64";
+go_strconv :: #system_library "go:strconv";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+
+// The payload prefix keeps a grant signature from ever matching a token
+// receipt or checkpoint signed by the same key.
+GrantPrefix :: "daochi-pack-grant-v1";
+GrantSeconds :: 3600
+
+PackGrant :: struct {
+    grant: string #go_tag "json:\"grant\""
+    expires_at: s64 #go_tag "json:\"expires_at\""
+    error: Error #go_tag "json:\"-\""
+}
+// A gated artifact has a node-side `<sha>.zib.product` file naming the product
+// that unlocks it. An unreadable or invalid file leaves the artifact gated
+// with no product, so no grant opens it.
+PackGate :: struct {
+    gated: bool
+    product: string
+}
+
+#scope_file
+Encoding :: #type #foreign go_base64 "Encoding";
+BytesResult :: struct {
+    value: []u8
+    error: Error
+}
+Number :: struct {
+    value: s64
+    error: Error
+}
+RawURL :: () -> *Encoding #go_field #foreign go_base64 "RawURLEncoding";
+EncodeRaw :: (encoding: *Encoding, value: []u8) -> string #foreign go_base64 "(*Encoding).EncodeToString";
+DecodeRaw :: (encoding: *Encoding, value: string) -> BytesResult #go_results #foreign go_base64 "(*Encoding).DecodeString";
+FormatInteger :: (value: s64, base: isize) -> string #foreign go_strconv "FormatInt";
+ParseInteger :: (value: string, base: isize, bits: isize) -> Number #go_results #foreign go_strconv "ParseInt";
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+PrivateLength :: (value: ed.PrivateKey) -> isize #foreign builtin "len";
+PublicLength :: (value: ed.PublicKey) -> isize #foreign builtin "len";
+
+Payload :: (product: string, expiresAt: s64) -> string {
+    fields: [3]string = .[GrantPrefix, product, FormatInteger(expiresAt, cast(isize)10)]
+    return Join(fields[:], "\n")
+}
+
+// Only the canonical spelling decodes, so one grant has one URL.
+Decode :: (value: string) -> BytesResult {
+    result := DecodeRaw(RawURL(), value)
+    if result.error == null && EncodeRaw(RawURL(), result.value) != value {
+        result.error = errors.New("non-canonical grant encoding")
+    }
+    return result
+}
+
+#scope_export
+Issue :: (signer: ed.PrivateKey, product: string, expiresAt: s64, unavailable: Error) -> PackGrant {
+    result: PackGrant
+    if PrivateLength(signer) != cast(isize)64 {
+        result.error = unavailable
+        return result
+    }
+    if !identity.ValidNamespace(product) || expiresAt <= 0 {
+        result.error = errors.New("invalid pack grant")
+        return result
+    }
+    payload := text.ToBytes(Payload(product, expiresAt))
+    parts: [2]string = .[EncodeRaw(RawURL(), payload), EncodeRaw(RawURL(), ed.Sign(signer, payload))]
+    result.grant = Join(parts[:], ".")
+    result.expires_at = expiresAt
+    return result
+}
+
+// True only for an unexpired grant, signed by the issuer, for exactly this product.
+Valid :: (publicKey: ed.PublicKey, grant: string, product: string, now: s64) -> bool {
+    if PublicLength(publicKey) != cast(isize)32 || !identity.ValidNamespace(product) {
+        return false
+    }
+    parts := Split(grant, ".")
+    if parts.count != 2 {
+        return false
+    }
+    payload := Decode(parts[0])
+    signature := Decode(parts[1])
+    if payload.error != null || signature.error != null || signature.value.count != 64 {
+        return false
+    }
+    if !ed.Verify(publicKey, payload.value, signature.value) {
+        return false
+    }
+    fields := Split(text.FromBytes(payload.value), "\n")
+    if fields.count != 3 || fields[0] != GrantPrefix || fields[1] != product {
+        return false
+    }
+    expiry := ParseInteger(fields[2], cast(isize)10, cast(isize)64)
+    if expiry.error != null || FormatInteger(expiry.value, cast(isize)10) != fields[2] {
+        return false
+    }
+    return now < expiry.value
+}
+
+Gate :: (artifactPath: string) -> PackGate {
+    result: PackGate
+    parts: [2]string = .[artifactPath, ".product"]
+    named := files.ReadFile(Join(parts[:], ""))
+    if errors.Is(named.error, files.NotExist()) {
+        return result
+    }
+    result.gated = true
+    if named.error != null || named.value.count > 256 {
+        return result
+    }
+    product := TrimSpace(text.FromBytes(named.value))
+    if identity.ValidNamespace(product) {
+        result.product = product
+    }
+    return result
+}

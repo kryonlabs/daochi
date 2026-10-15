@@ -1,0 +1,229 @@
+// One-shot Dew rescale for a change of the node's Dew per XMR ratio. Existing
+// ledger rows are never rewritten: each positive balance gains (factor-1)×balance
+// through the signed payment-credit path, with the account as the payment ID.
+// Uncredited Monero invoices and deposits are scaled in the same transaction,
+// and a marker row makes a second run change nothing.
+#import "std/go_types"
+#import "protocol"
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+go_format :: #system_library "go:fmt";
+builtin :: #system_library "go:builtin";
+
+RescaleProvider :: "rescale-v1";
+
+RescaleResult :: struct {
+    factor: s64
+    accounts: s64
+    units_before: s64
+    units_after: s64
+    intents: s64
+    deposits: s64
+    // False when an earlier run already rescaled; the totals are then that run's.
+    applied: bool
+    error: Error
+}
+
+#scope_file
+RescaleBalance :: struct {
+    account: string
+    units: s64
+}
+BalancesResult :: struct {
+    value: []RescaleBalance
+    error: Error
+}
+MaximumUnits :: 9223372036854775807
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+AppendBalance :: (values: []RescaleBalance, value: RescaleBalance) -> []RescaleBalance #foreign builtin "append";
+FactorError :: (format: string, factor: s64) -> Error #foreign go_format "Errorf";
+
+TotalTx :: (transaction: *sql.Transaction, context: ctx.Context) -> ledger.BalanceResult {
+    result: ledger.BalanceResult
+    arguments: [1]Any = .[receipts.AssetID]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COALESCE(SUM(amount_delta),0) FROM token_ledger WHERE asset_id=?1", arguments[:]), destinations[:])
+    return result
+}
+
+// Read every positive balance before writing, so no query stays open.
+BalancesTx :: (transaction: *sql.Transaction, context: ctx.Context) -> BalancesResult {
+    result: BalancesResult
+    arguments: [1]Any = .[receipts.AssetID]
+    queried := sql.QueryTx(transaction, context,
+        "SELECT account_id,SUM(amount_delta) FROM token_ledger WHERE asset_id=?1 GROUP BY account_id HAVING SUM(amount_delta)>0 ORDER BY account_id",
+        arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    defer sql.CloseRows(queried.value)
+    while sql.Next(queried.value) {
+        item: RescaleBalance
+        destinations: [2]Any = .[*item.account, *item.units]
+        result.error = sql.ScanRows(queried.value, destinations[:])
+        if result.error != null {
+            return result
+        }
+        result.value = AppendBalance(result.value, item)
+    }
+    result.error = sql.RowsError(queried.value)
+    return result
+}
+
+// SQLite turns an overflowing integer product into a float, so refuse first.
+OverflowTx :: (transaction: *sql.Transaction, context: ctx.Context, query: string, arguments: []Any) -> Error {
+    count: s64
+    destinations: [1]Any = .[*count]
+    error := sql.ScanRow(sql.QueryRowTx(transaction, context, query, arguments), destinations[:])
+    if error != null {
+        return error
+    }
+    if count > 0 {
+        return errors.New("rescale overflow")
+    }
+    return null
+}
+
+ScaleTx :: (transaction: *sql.Transaction, context: ctx.Context, query: string, arguments: []Any) -> sql.AffectedRowsResult {
+    result: sql.AffectedRowsResult
+    written := sql.ExecTx(transaction, context, query, arguments)
+    result.error = written.error
+    if result.error != null {
+        return result
+    }
+    return sql.RowsAffected(written.value)
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL
+CREATE TABLE IF NOT EXISTS token_rescales (
+ provider TEXT PRIMARY KEY, factor INTEGER NOT NULL, accounts INTEGER NOT NULL,
+ units_before INTEGER NOT NULL, units_after INTEGER NOT NULL,
+ intents INTEGER NOT NULL, deposits INTEGER NOT NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+SQL;
+}
+
+Apply :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, factor: s64) -> RescaleResult {
+    result: RescaleResult
+    result.factor = factor
+    if factor < 2 {
+        result.error = errors.New("rescale factor must be at least 2")
+        return result
+    }
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    previous: RescaleResult
+    markerArguments: [1]Any = .[RescaleProvider]
+    markerDestinations: [6]Any = .[*previous.factor, *previous.accounts, *previous.units_before,
+        *previous.units_after, *previous.intents, *previous.deposits]
+    marker := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT factor,accounts,units_before,units_after,intents,deposits FROM token_rescales WHERE provider=?1",
+        markerArguments[:]), markerDestinations[:])
+    if marker == null {
+        if previous.factor != factor {
+            result.error = FactorError("Dew was already rescaled by %d", previous.factor)
+            return result
+        }
+        return previous
+    }
+    if !errors.Is(marker, sql.NoRows()) {
+        result.error = marker
+        return result
+    }
+    before := TotalTx(transaction, context)
+    result.error = before.error
+    if result.error != null {
+        return result
+    }
+    result.units_before = before.value
+    balances := BalancesTx(transaction, context)
+    result.error = balances.error
+    if result.error != null {
+        return result
+    }
+    for balance: balances.value {
+        if balance.units > MaximumUnits / factor {
+            result.error = errors.New("rescale overflow")
+            return result
+        }
+        event: receipts.TokenEventInput
+        event.AccountID = balance.account
+        event.EventType = "credit"
+        event.AmountDelta = balance.units * (factor - 1)
+        event.SourceType = "rescale"
+        event.SourceRef = RescaleProvider
+        credited := ledger.CreditPaymentTx(transaction, context, signer, RescaleProvider,
+            balance.account, event, errors.New("Dew issuer unavailable"))
+        result.error = credited.error
+        if result.error != null {
+            return result
+        }
+        result.accounts += 1
+    }
+    limit := MaximumUnits / factor
+    intentArguments: [2]Any = .[limit, receipts.AssetID]
+    result.error = OverflowTx(transaction, context,
+        "SELECT COUNT(*) FROM token_payment_intents WHERE token_units>?1 AND receipt_id='' AND status IN ('pending','expired') AND asset_id=?2",
+        intentArguments[:])
+    if result.error != null {
+        return result
+    }
+    depositArguments: [1]Any = .[limit]
+    result.error = OverflowTx(transaction, context,
+        "SELECT COUNT(*) FROM monero_deposits WHERE (token_units>?1 OR rate_token_units>?1) AND receipt_id=''",
+        depositArguments[:])
+    if result.error != null {
+        return result
+    }
+    scaleArguments: [2]Any = .[factor, receipts.AssetID]
+    intents := ScaleTx(transaction, context,
+        "UPDATE token_payment_intents SET token_units=token_units*?1,updated_at=CURRENT_TIMESTAMP WHERE receipt_id='' AND status IN ('pending','expired') AND asset_id=?2",
+        scaleArguments[:])
+    result.error = intents.error
+    if result.error != null {
+        return result
+    }
+    result.intents = intents.value
+    factorArguments: [1]Any = .[factor]
+    deposits := ScaleTx(transaction, context,
+        "UPDATE monero_deposits SET token_units=token_units*?1,rate_token_units=rate_token_units*?1,updated_at=CURRENT_TIMESTAMP WHERE receipt_id=''",
+        factorArguments[:])
+    result.error = deposits.error
+    if result.error != null {
+        return result
+    }
+    result.deposits = deposits.value
+    after := TotalTx(transaction, context)
+    result.error = after.error
+    if result.error != null {
+        return result
+    }
+    result.units_after = after.value
+    saveArguments: [7]Any = .[RescaleProvider, factor, result.accounts, result.units_before,
+        result.units_after, result.intents, result.deposits]
+    saved := sql.ExecTx(transaction, context,
+        "INSERT INTO token_rescales(provider,factor,accounts,units_before,units_after,intents,deposits) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        saveArguments[:])
+    result.error = saved.error
+    if result.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    result.applied = result.error == null
+    return result
+}

@@ -1,0 +1,99 @@
+#import "std/go_types"
+service :: #import "account_http";
+unlocks :: #import "unlock";
+grants :: #import "pack_grant";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+identity :: #import "identity";
+strict :: #import "strict_json";
+http :: #import "std/http_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+
+UnlockCommand :: struct {
+    product: string #go_tag "json:\"product\""
+}
+
+#scope_file
+ReadCommand :: (writer: http.ResponseWriter, request: *http.Request) -> UnlockCommand {
+    command: UnlockCommand
+    read := body.ReadJSON(writer, request, 1024)
+    if read.error != null || strict.Decode(read.value, *command) != null ||
+    !identity.ValidNamespace(command.product) {
+        command.product = ""
+    }
+    return command
+}
+
+#scope_export
+// GET lists the account's unlocks and the node's prices; POST buys one at the
+// node's price.
+Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    now := clock.Unix(clock.Now())
+    trialUntil := accounts.configuration.UnlockTrialUntil
+    if http.Method(request) == "POST" {
+        command := ReadCommand(writer, request)
+        if command.product == "" {
+            response.Error(writer, 400, "invalid unlock")
+            return
+        }
+        unlocked := unlocks.Unlock(accounts.database, http.Context(request),
+            accounts.configuration.WaoziIssuerPrivateKey, user.value, command.product, now, trialUntil)
+        if unlocked.error != null {
+            if errors.Message(unlocked.error) == "unknown product" {
+                response.Error(writer, 404, "unknown product")
+            } else if errors.Message(unlocked.error) == "insufficient balance" {
+                response.Error(writer, 402, "insufficient balance")
+            } else {
+                response.Error(writer, 503, "unlock unavailable")
+            }
+            return
+        }
+        response.JSON(writer, 200, unlocked)
+        return
+    }
+    listed := unlocks.List(accounts.database, http.Context(request), user.value, now, trialUntil)
+    if listed.error != null {
+        response.Error(writer, 503, "unlocks unavailable")
+        return
+    }
+    response.JSON(writer, 200, listed)
+}
+
+// A grant opens the product's gated packs for one hour.
+Grant :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    command := ReadCommand(writer, request)
+    if command.product == "" {
+        response.Error(writer, 400, "invalid grant request")
+        return
+    }
+    owned := unlocks.Owned(accounts.database, http.Context(request), user.value, command.product)
+    if owned.error != null {
+        response.Error(writer, 503, "pack grants unavailable")
+        return
+    }
+    if !owned.value {
+        response.Error(writer, 403, "product not unlocked")
+        return
+    }
+    issued := grants.Issue(accounts.configuration.WaoziIssuerPrivateKey, command.product,
+        clock.Unix(clock.Now()) + grants.GrantSeconds, errors.New("Dew issuer unavailable"))
+    if issued.error != null {
+        response.Error(writer, 503, "pack grants unavailable")
+        return
+    }
+    response.JSON(writer, 200, issued)
+}

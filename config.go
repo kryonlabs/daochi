@@ -35,6 +35,7 @@ type Config struct {
 	EncryptedPayloadRetention       Duration
 	AccountStorageLimitBytes        int64
 	StoragePlansEnabled             bool
+	UnlockTrialUntil                int64
 	NodeRegistryPublicKey           PublicKey
 	KnownNodes                      []NodePeer
 	NodeSyncToken                   string
@@ -299,6 +300,7 @@ func Config_Load() Config {
 	result.AccountStorageLimitBytes = Config_EnvInt64("DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES", 0)
 	var value_4 string = Config_EnvString("DAOCHI_STORAGE_PLANS_ENABLED", "")
 	result.StoragePlansEnabled = ConfigValues_Bool(value_4, false)
+	result.UnlockTrialUntil = Config_EnvInt64("DAOCHI_UNLOCK_TRIAL_UNTIL", 0)
 	result.NodeRegistryPublicKey = nodeRegistryPublic
 	result.KnownNodes = ConfigValues_Peers(Config_EnvString("DAOCHI_KNOWN_NODES", ""))
 	result.NodeSyncToken = Config_EnvString("DAOCHI_NODE_SYNC_TOKEN", "")

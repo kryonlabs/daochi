@@ -2,6 +2,7 @@
 package main
 
 import (
+	fmt "fmt"
 	log "log"
 	slog "log/slog"
 	net "net"
@@ -37,7 +38,7 @@ type Signal = os.Signal
 
 type Logger = log.Logger
 
-type zir_301dba94d8b5e09a_CancelCallback func(CancelFunc)
+type zir_cd0367c0a5ef381f_CancelCallback func(CancelFunc)
 
 type CloseCallback func(*Store)
 
@@ -76,7 +77,7 @@ func Startup_NotifyContext(Parent Context, Interrupt Signal, Terminate Signal) C
 	return result
 }
 
-func Startup_CancelAtReturn(Callback zir_301dba94d8b5e09a_CancelCallback, Cancel CancelFunc) {
+func Startup_CancelAtReturn(Callback zir_cd0367c0a5ef381f_CancelCallback, Cancel CancelFunc) {
 	Callback(Cancel)
 }
 
@@ -136,7 +137,7 @@ func Startup_ServerClosed() Error {
 	return http.ErrServerClosed
 }
 
-const zir_d_c3e0e64296ff5ca4 = 60000000000
+const zir_d_bbb71e8aee79adac = 60000000000
 const Second = 1000000000
 
 func Startup_CloseStore(store *Store) {
@@ -298,6 +299,44 @@ func Startup_WithNodeKey(configuration Config) Config {
 	return configuration
 }
 
+func Startup_RescaleDew(configuration Config, arguments []string) Error {
+	usage := StdErrorsGo_New("usage: daochi rescale-dew FACTOR")
+	if int64(len(arguments)) != 1 {
+		return usage
+	}
+	factor := Token_ParseInteger(arguments[0])
+	if !factor.IsOk {
+		return usage
+	}
+	issuer := TokenPolicy_Issuer(configuration, StdErrorsGo_New("rescaling needs the Dew issuer private key"))
+	if issuer.Error != nil {
+		return issuer.Error
+	}
+	opened := Store_Open(configuration.DBPath)
+	if opened.Error != nil {
+		return opened.Error
+	}
+	store := opened.Value
+	defer Startup_CloseAtReturn(func(value_0 *Store) { Startup_CloseStore(value_0) }, store)
+	context := StdContextGo_Background()
+	result := TokenRescale_Apply(store.Database, context, issuer.Value, factor.Value)
+	if result.Error != nil {
+		return result.Error
+	}
+	status := "applied"
+	if !result.Applied {
+		status = "already applied"
+	}
+	fmt.Printf("Dew rescale %s: factor %d, %d accounts credited, %d units before, %d units after, %d invoices and %d deposits scaled\n", status, int64(result.Factor), int64(result.Accounts), int64(result.UnitsBefore), int64(result.UnitsAfter), int64(result.Intents), int64(result.Deposits))
+	var value_1 *Database = store.Database
+	checkpoint := TokenCheckpoint_Create(value_1, context, issuer.Value, StdErrorsGo_New("Dew issuer unavailable"))
+	if checkpoint.Error != nil {
+		return checkpoint.Error
+	}
+	fmt.Printf("Dew checkpoint at ledger sequence %d, root %s\n", int64(checkpoint.Value.LedgerSeq), checkpoint.Value.LedgerRoot)
+	return nil
+}
+
 func Startup_RunPrepared(configuration Config, arguments []string, createVerifier VerifierFactory, signer SignPrivateKey) {
 	if int64(len(arguments)) > 1 && arguments[1] == "inspect" {
 		var options InspectOptions = InspectOptions{}
@@ -307,8 +346,20 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 			panic("slice range out of bounds")
 		}
 		error := Inspect_Run(value_0, arguments[2:int64(len(arguments)):int64(len(arguments))], options)
+		_ = error
 		if error != nil {
 			log.Fatalf("inspect: %v", error)
+		}
+		return
+	}
+	if int64(len(arguments)) > 1 && arguments[1] == "rescale-dew" {
+		if int64(2) < 0 || int64(int64(len(arguments))) < int64(2) || int64(int64(len(arguments))) > int64(len(arguments)) {
+			panic("slice range out of bounds")
+		}
+		error := Startup_RescaleDew(configuration, arguments[2:int64(len(arguments)):int64(len(arguments))])
+		_ = error
+		if error != nil {
+			log.Fatalf("rescale-dew: %v", error)
 		}
 		return
 	}
@@ -321,9 +372,9 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 		log.Fatalf("open store: %v", opened.Error)
 	}
 	store := opened.Value
-	defer Startup_CloseAtReturn(func(value_2 *Store) { Startup_CloseStore(value_2) }, store)
-	var value_3 VerifierFactory = createVerifier
-	verifier := value_3()
+	defer Startup_CloseAtReturn(func(value_3 *Store) { Startup_CloseStore(value_3) }, store)
+	var value_4 VerifierFactory = createVerifier
+	verifier := value_4()
 	if verifier.Error != nil {
 		if StdErrorsGo_Is(verifier.Error, ErrVerifierUnavailable) {
 			log.Fatal("ML-DSA-44 verifier unavailable: build with CGO_ENABLED=1 and liboqs installed")
@@ -332,12 +383,12 @@ func Startup_RunPrepared(configuration Config, arguments []string, createVerifie
 	}
 	server := Server_New(configuration, store, verifier.Value, signer)
 	runtime := Startup_NotifyContext(StdContextGo_Background(), Startup_Interrupt(), Startup_Terminate())
-	defer Startup_CancelAtReturn(func(value_4 CancelFunc) { StdContextGo_Cancel(value_4) }, runtime.Cancel)
+	defer Startup_CancelAtReturn(func(value_5 CancelFunc) { StdContextGo_Cancel(value_5) }, runtime.Cancel)
 	var group WorkerGroup = *new(WorkerGroup)
 	Startup_StartWorkers(server, runtime.Value, &(group), Startup_NativeWorkers())
 	http := Startup_NewHTTPServer(configuration.Addr, Server_Routes(server))
-	var value_6 Listen = func(value_5 *HTTPServer) Error { return Startup_ListenNative(value_5) }
-	Startup_Serve(http, configuration, runtime.Value, runtime.Cancel, &(group), value_6, func(value_7 *HTTPServer, value_8 Context) Error { return Startup_ShutdownNative(value_7, value_8) })
+	var value_7 Listen = func(value_6 *HTTPServer) Error { return Startup_ListenNative(value_6) }
+	Startup_Serve(http, configuration, runtime.Value, runtime.Cancel, &(group), value_7, func(value_8 *HTTPServer, value_9 Context) Error { return Startup_ShutdownNative(value_8, value_9) })
 }
 
 func Startup_Run(configuration Config, arguments []string, createVerifier VerifierFactory, signer SignPrivateKey) {
@@ -360,6 +411,7 @@ func Startup_ziranInit() {
 	}
 	Startup_ziranInitState = 1
 	StoragePlan_ziranInit()
+	TokenPolicy_ziranInit()
 	Store_ziranInit()
 	Verifier_ziranInit()
 	Server_ziranInit()

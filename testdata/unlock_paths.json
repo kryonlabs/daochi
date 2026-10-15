@@ -1,0 +1,104 @@
+{
+  "/api/v1/unlocks": {
+    "get": {
+      "summary": "List the account's unlocks and the node's unlock prices",
+      "description": "Requires the account bearer. Returns unlocks [{product,receipt_id,created_at}] with created_at in Unix seconds, and products [{product,price_units,regular_price_units,trial_until}]. Prices are integer millionths of Dew. price_units is the price charged now; during a launch trial it is a tenth of regular_price_units and trial_until is the trial's end in Unix seconds, otherwise trial_until is 0.",
+      "responses": {
+        "200": {
+          "description": "Account unlocks and current prices; no-store"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "503": {
+          "description": "Unlocks unavailable"
+        }
+      }
+    },
+    "post": {
+      "summary": "Unlock a product with Dew at the node's price",
+      "description": "The node sets the price; the client names only the product. Returns {product,unlocked,price_units,balance,receipt_id}. The signed Dew debit and the unlock commit atomically. Unlocking an unlocked product charges nothing and returns the original receipt and the price it charged.",
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "product"
+              ],
+              "properties": {
+                "product": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Unlocked, with the charged price and current balance"
+        },
+        "400": {
+          "description": "Malformed request"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "402": {
+          "description": "Insufficient balance"
+        },
+        "404": {
+          "description": "Unknown product"
+        },
+        "503": {
+          "description": "Unlocks unavailable"
+        }
+      }
+    }
+  },
+  "/api/v1/unlocks/grant": {
+    "post": {
+      "summary": "Get a one-hour download grant for an unlocked product",
+      "description": "Returns {grant,expires_at}. The grant is base64url(payload).base64url(Ed25519 signature) by the Dew issuer; the payload is daochi-pack-grant-v1, the product and the Unix expiry, separated by newlines. Append it as the last path segment of a gated package artifact URL.",
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "product"
+              ],
+              "properties": {
+                "product": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Grant and expiry; no-store"
+        },
+        "400": {
+          "description": "Malformed request"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "403": {
+          "description": "The account has not unlocked this product"
+        },
+        "503": {
+          "description": "Grants unavailable"
+        }
+      }
+    }
+  }
+}

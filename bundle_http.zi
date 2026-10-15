@@ -13,6 +13,7 @@ identity :: #import "identity";
 signing :: #import "signing";
 response :: #import "response";
 app_registry :: #import "app_http";
+grants :: #import "pack_grant";
 strings :: #system_library "go:strings";
 hex :: #system_library "go:encoding/hex";
 fmt :: #system_library "go:fmt";
@@ -110,6 +111,12 @@ Route :: (registry: app_registry.Registry, writer: http.ResponseWriter, request:
     if parts[1] == "latest" {
         http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "no-store")
         response.JSON(writer, 200, release)
+        return
+    }
+    // A gated pack is served only by the v2 route, which checks its grant.
+    gate := grants.Gate(Concat(root, Concat(release.SHA256, ".zib")))
+    if gate.gated {
+        response.Error(writer, 403, "package grant required")
         return
     }
     bundle := files.ReadFile(Concat(root, Concat(release.SHA256, ".zib")))

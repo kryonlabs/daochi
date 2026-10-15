@@ -1413,7 +1413,7 @@ func baselineOpenAPISpec() map[string]any {
 		},
 	}
 	paths := result["paths"].(map[string]any)
-	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json", "testdata/blob_paths.json", "testdata/telegram_paths.json", "testdata/authorization_paths.json", "testdata/device_link_paths.json", "testdata/storage_plan_paths.json"} {
+	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json", "testdata/blob_paths.json", "testdata/telegram_paths.json", "testdata/authorization_paths.json", "testdata/device_link_paths.json", "testdata/shared_list_paths.json", "testdata/storage_plan_paths.json"} {
 		data, err := os.ReadFile(fixture)
 		if err != nil {
 			panic(err)

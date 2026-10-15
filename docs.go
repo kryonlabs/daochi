@@ -7846,6 +7846,17 @@ func Docs_Paths() __type_7d6cc8a85f09fc88 {
 		(*value_51) = make(__type_7d6cc8a85f09fc88)
 	}
 	(*value_51)[value_52] = value_53
+	lists := SharedListPaths_Paths()
+	var value_57 *__type_7d6cc8a85f09fc88 = &(result)
+	var value_58 string = "/api/v1/lists"
+	var value_60 __type_7d6cc8a85f09fc88 = lists
+	var value_61 string = "/api/v1/lists"
+	var value_62 Any = value_60[value_61]
+	var value_59 Any = value_62
+	if (*value_57) == nil {
+		(*value_57) = make(__type_7d6cc8a85f09fc88)
+	}
+	(*value_57)[value_58] = value_59
 	packages := PackagePaths_Paths()
 	blobs := BlobPaths_Paths()
 	var value_63 *__type_7d6cc8a85f09fc88 = &(result)

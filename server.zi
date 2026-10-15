@@ -22,6 +22,7 @@ invoices :: #import "monero_invoices";
 google :: #import "google_play_http";
 accounts :: #import "account_http";
 social :: #import "social_http";
+lists :: #import "shared_lists";
 registry :: #import "app_http";
 bundles :: #import "bundle_http";
 blobs :: #import "blob_http";
@@ -406,6 +407,8 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/account/delete", server, HandleDeleteAccount)
     Route(mux, "POST /api/v1/account/delete-with-key", server, HandleDeleteAccountWithKey)
     Route(mux, "GET /api/v1/friends", server, HandleSocialHttpFriends)
+    Route(mux, "GET /api/v1/lists", server, HandleLists)
+    Route(mux, "POST /api/v1/lists", server, HandleLists)
     Route(mux, "DELETE /api/v1/friends/", server, HandleSocialHttpRemoveFriend)
     Route(mux, "GET /api/v1/friends/requests", server, HandleSocialHttpRequests)
     Route(mux, "POST /api/v1/friends/requests", server, HandleSocialHttpCreateRequest)
@@ -607,6 +610,10 @@ HandleAppHttpRecords :: (server: *Server, writer: http.ResponseWriter, request: 
 
 HandleSocialHttpFriends :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     social.Friends(Social(server), writer, request)
+}
+
+HandleLists :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    lists.Handle(Accounts(server), writer, request)
 }
 
 HandleSocialHttpRemoveFriend :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

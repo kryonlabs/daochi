@@ -1,0 +1,25 @@
+{
+  "/api/v1/lists": {
+    "get": {
+      "summary": "Read accepted shared lists and list invitations",
+      "description": "Requires the account bearer and X-Daochi-User. Pending recipients see invitation metadata only. List contents are stored on this node. Lists notifications are scoped to the Lists app.",
+      "responses": {
+        "200": {"description": "Account-scoped lists and invitations arrays; deleted owner lists are tombstones"},
+        "401": {"description": "Account authentication required"}
+      }
+    },
+    "post": {
+      "summary": "Invite a friend, answer an invitation or update a shared list",
+      "description": "Commands use a stable request_id (at most 36 characters) and action invite, accept, decline, save or delete. Repeating the same request returns its current snapshot; reusing its ID for a different body is rejected. Invite sends target and list {id,title,items:[{id,title,comment,done}]}. Accept/decline sends invitation_id; only its target may answer a pending invitation. Save sends list with its current revision. Accepted friends can edit items; owners alone rename, delete and invite. Up to 32 active shared lists and 256 shared items per account. Errors retain the existing list.",
+      "requestBody": {"required": true,"content": {"application/json": {"schema": {"type":"object","required":["request_id","action"],"properties":{"request_id":{"type":"string","maxLength":36},"action":{"type":"string","enum":["invite","accept","decline","save","delete"]},"target":{"type":"string"},"invitation_id":{"type":"string"},"list":{"type":"object"}}}}}},
+      "responses": {
+        "200": {"description": "Confirmed command and fresh account-scoped snapshot"},
+        "400": {"description": "Malformed or oversized command"},
+        "401": {"description": "Account authentication required"},
+        "403": {"description": "Friendship or owner permission required"},
+        "404": {"description": "List or invitation is inaccessible"},
+        "409": {"description": "Stale revision, capacity reached, answered invitation or mismatched retry"}
+      }
+    }
+  }
+}

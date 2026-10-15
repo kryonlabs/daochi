@@ -1,0 +1,13 @@
+{
+  "/api/v1/rates": {
+    "get": {
+      "summary": "Read the node's XMR/USD display rate and Dew funding ratio",
+      "description": "Public. Returns xmr_usd_cents (integer US cents per XMR), updated_at (Unix seconds), sources (the agreeing source names), and the node's fixed Dew funding ratio xmr_atomic_units per token_units (0 when unset). The node refreshes the USD rate every ten minutes from several public sources and keeps the median of at least two that agree within 10%. Without a rate newer than two hours, xmr_usd_cents and updated_at are 0 and sources is empty. The USD rate is for display only: it never sets a price, a charge or a Dew credit.",
+      "responses": {
+        "200": {
+          "description": "Current display rate; cacheable for five minutes"
+        }
+      }
+    }
+  }
+}

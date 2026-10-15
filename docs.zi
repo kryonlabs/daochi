@@ -1,5 +1,6 @@
 storage_plans :: #import "storage_plan_paths";
 unlock_paths :: #import "unlock_paths";
+exchange_rate_paths :: #import "exchange_rate_paths";
 #import "std/go_types"
 #import "std/map_go"
 #import "protocol"
@@ -2125,6 +2126,8 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/unlocks", MapGet(unlocks, "/api/v1/unlocks"))
     MapSet(result, "/api/v1/unlocks/grant", MapGet(unlocks, "/api/v1/unlocks/grant"))
     MapSet(result, "/api/v1/unlocks/products", MapGet(unlocks, "/api/v1/unlocks/products"))
+    rates := exchange_rate_paths.Paths()
+    MapSet(result, "/api/v1/rates", MapGet(rates, "/api/v1/rates"))
     lists := shared_list_paths.Paths()
     MapSet(result, "/api/v1/lists", MapGet(lists, "/api/v1/lists"))
     packages := package_paths.Paths()

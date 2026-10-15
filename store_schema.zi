@@ -5,6 +5,7 @@ lists :: #import "shared_lists";
 plans :: #import "storage_plan";
 unlocks :: #import "unlock";
 rescales :: #import "token_rescale";
+exchange_rates :: #import "exchange_rate";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 errors :: #import "std/errors_go";
@@ -127,8 +128,8 @@ Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     if pragmas.error != null {
         return pragmas.error
     }
-    definitions: [7]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
-        plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL()]
+    definitions: [8]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
+        plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL(), exchange_rates.SchemaSQL()]
     created := sql.Exec(database, context, Join(definitions[:], ""), empty[:])
     if created.error != null {
         return created.error

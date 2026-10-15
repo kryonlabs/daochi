@@ -67,6 +67,14 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
     response.JSON(writer, 200, listed)
 }
 
+// Prices are public, so the app shows an offer before anyone signs in.
+Prices :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "no-store")
+    reply: unlocks.UnlockPrices
+    reply.products = unlocks.Products(clock.Unix(clock.Now()), accounts.configuration.UnlockTrialUntil)
+    response.JSON(writer, 200, reply)
+}
+
 // A grant opens the product's gated packs for one hour.
 Grant :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
     user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)

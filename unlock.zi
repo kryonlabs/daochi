@@ -41,6 +41,10 @@ UnlocksResult :: struct {
     products: []UnlockProduct #go_tag "json:\"products\""
     error: Error #go_tag "json:\"-\""
 }
+// The node's prices alone, which anyone may read.
+UnlockPrices :: struct {
+    products: []UnlockProduct #go_tag "json:\"products\""
+}
 UnlockOwnedResult :: struct {
     value: bool
     error: Error

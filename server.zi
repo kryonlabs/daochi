@@ -375,6 +375,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "GET /api/v1/unlocks", server, HandleUnlocks)
     Route(mux, "POST /api/v1/unlocks", server, HandleUnlocks)
     Route(mux, "POST /api/v1/unlocks/grant", server, HandleUnlockGrant)
+    Route(mux, "GET /api/v1/unlocks/products", server, HandleUnlockPrices)
     Route(mux, "GET /api/v1/tokens/balance", server, HandleTokenHttpBalance)
     Route(mux, "GET /api/v1/tokens/ledger", server, HandleTokenHttpLedger)
     Route(mux, "POST /api/v1/tokens/spend", server, HandleTokenHttpSpend)
@@ -828,4 +829,8 @@ HandleUnlocks :: (server: *Server, writer: http.ResponseWriter, request: *http.R
 
 HandleUnlockGrant :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     unlocks.Grant(Accounts(server), writer, request)
+}
+
+HandleUnlockPrices :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    unlocks.Prices(Accounts(server), writer, request)
 }

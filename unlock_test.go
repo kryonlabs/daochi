@@ -170,6 +170,17 @@ func TestUnlockTrialPrice(t *testing.T) {
 		if len(unlocks) != 0 || !equalJSONMaps(products[0], want) {
 			t.Fatalf("trial until %d: %v %v", tc.trialUntil, unlocks, products)
 		}
+		// The same prices are public, for an app that has not signed in.
+		public := httptest.NewRecorder()
+		handler.ServeHTTP(public, httptest.NewRequest(http.MethodGet, "/api/v1/unlocks/products", nil))
+		var prices struct {
+			Products []map[string]any `json:"products"`
+		}
+		if public.Code != 200 || public.Header().Get("Cache-Control") != "no-store" ||
+			json.Unmarshal(public.Body.Bytes(), &prices) != nil || len(prices.Products) != 1 ||
+			!equalJSONMaps(prices.Products[0], want) || strings.Contains(public.Body.String(), "receipt") {
+			t.Fatalf("public prices: %d %s", public.Code, public.Body.String())
+		}
 		creditDew(t, store, private, owner.UserID, "trial-fixture-"+owner.UserID[:8], UnitsPerDew)
 		unlocked := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
 		if unlocked.PriceUnits != tc.price || unlocked.Balance != UnitsPerDew-tc.price {

@@ -36,6 +36,10 @@ type UnlocksResult struct {
 	Error    Error           "json:\"-\""
 }
 
+type UnlockPrices struct {
+	Products []UnlockProduct "json:\"products\""
+}
+
 type UnlockOwnedResult struct {
 	Value bool
 	Error Error

@@ -26,7 +26,7 @@ Append :: (values: []TokenAsset, value: TokenAsset) -> []TokenAsset #foreign bui
 Execute :: (database: *sql.Database, context: ctx.Context, query: string) -> ExecResult #go_results #foreign go_sql "(*DB).ExecContext";
 SeedQuery :: #string SQL
 INSERT INTO token_assets(issuer_id,asset_id,display_name,decimals,status)
-VALUES('waozi','waozi:token','Chi',6,'active')
+VALUES('waozi','waozi:token','Dew',6,'active')
 ON CONFLICT(asset_id) DO UPDATE SET
     issuer_id=excluded.issuer_id,
     display_name=excluded.display_name,

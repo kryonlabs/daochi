@@ -284,6 +284,28 @@ public ID returns the same address, so purchasing for yourself and gifting use
 the same payment flow. Rate values are snapshotted when a transfer is first
 observed. Existing product invoices remain available during migration.
 
+Inbe calls this account credit **Dew**. Its existing asset ID stays
+`waozi:token`, with 1,000,000 integer ledger units per Dew. One Dew represents
+US$1 of storage credit. The node operator maintains the Monero conversion
+quote through the two rate settings above; confirmed deposits retain their
+snapshotted quote.
+
+Set `DAOCHI_STORAGE_PLANS_ENABLED=true` on a node offering prepaid storage.
+The free allowance is 10 MiB. A monthly purchase costs 1 Dew and a yearly
+purchase costs 10 Dew; both grant 1 GiB total storage. Purchases extend an
+existing paid period or start immediately, with calendar month/year expiry.
+They do not renew automatically. `GET /api/v1/storage/plan` returns the
+authenticated account's balance and allowance. `POST` to the same endpoint
+accepts `period` (`monthly` or `yearly`) and a persistent `request_id`.
+The signed ledger debit and paid allowance commit together; retry the same
+request ID after an uncertain result to avoid a second charge.
+
+After expiry, the account returns to 10 MiB. Existing data remains available;
+uploads that grow an account above its allowance are refused, while reads
+and space-reducing changes remain available. Storage upgrades are opt-in on
+each node; nodes without them retain their configured storage-limit behavior.
+The Inbe Play build has no Dew purchase or storage-upgrade UI.
+
 The background reconciler runs whenever `MONERO_WALLET_RPC_URL` is configured,
 even with `DAOCHI_TOKEN_DIRECT_PURCHASES_ENABLED` unset, so confirmed deposits
 keep settling while purchase creation is disabled. The deposit scan keeps a

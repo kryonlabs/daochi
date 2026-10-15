@@ -193,7 +193,13 @@ func BlobHttp_Route(store Registry, writer ResponseWriter, request *Request) {
 			Response_Error(writer, 500, "blob storage unavailable")
 			return
 		}
-		limit := store.Configuration.AccountStorageLimitBytes
+		allowance := AccountStorage_Limit(store.Database, context, user.Value, store.Configuration.AccountStorageLimitBytes, store.Configuration.StoragePlansEnabled)
+		if allowance.Error != nil {
+			SignedTx_Forget(store.Database, context, header.Value)
+			Response_Error(writer, 503, "storage unavailable")
+			return
+		}
+		limit := allowance.Value
 		if !stored.Value && limit > 0 {
 			used := AccountStorage_Used(store.Database, context, user.Value)
 			if used.Error != nil {

@@ -48,6 +48,7 @@ func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 	for _, entry := range result.Value {
 		name := entry["tbl_name"].(string)
 		if strings.HasPrefix(name, "server_authorization_") || strings.HasPrefix(name, "server_telegram_") ||
+			name == "server_storage_plans" || name == "server_storage_purchases" ||
 			name == "server_state_hashes" || strings.HasPrefix(entry["name"].(string), "server_state_hashes") {
 			continue
 		}
@@ -208,8 +209,13 @@ func TestZiranStoreOpenAgainstBaseline(t *testing.T) {
 func schemaOpenSnapshot(t *testing.T, store *Store) map[string]any {
 	t.Helper()
 	value := schemaData(t, store)
-	for _, table := range value {
+	for name, table := range value {
 		for _, row := range table.([]map[string]any) {
+			// The owner renamed this asset; its identity and six-decimal units stay fixed.
+			// TestZiranTokenAssetSeedPreservesReleasedFields checks the new display name.
+			if name == "token_assets" && row["asset_id"] == "waozi:token" {
+				row["display_name"] = "<credit name>"
+			}
 			for _, column := range []string{"created_at", "updated_at"} {
 				if stamp, ok := row[column].(string); ok && stamp != "" {
 					if _, err := time.Parse(CanonicalTimestampLayout, stamp); err != nil {

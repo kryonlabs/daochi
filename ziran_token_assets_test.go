@@ -36,7 +36,7 @@ FROM token_assets WHERE asset_id='waozi:token'`).Scan(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if issuer != "waozi" || asset != "waozi:token" || display != "Chi" ||
+	if issuer != "waozi" || asset != "waozi:token" || display != "Dew" ||
 		decimals != 6 || status != "active" || created != "2000-01-01" ||
 		updated == "2000-01-01" {
 		t.Fatalf("seeded asset fields: %q/%q/%q/%d/%q/%q/%q",

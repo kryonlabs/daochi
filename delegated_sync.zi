@@ -1,3 +1,4 @@
+clock :: #import "std/time_go";
 // A scoped principal can sync exactly one approved collection per request.
 // Owner v6, full snapshots, account metadata, broad reads and deletes remain
 // on their existing owner-only routes.
@@ -10,6 +11,7 @@ session :: #import "session";
 validation :: #import "sync_validation";
 writes :: #import "sync_writes";
 storage :: #import "account_storage";
+plans :: #import "storage_plan";
 body :: #import "http_body";
 strict :: #import "strict_json";
 json :: #import "std/json_go";
@@ -135,7 +137,14 @@ Handle :: (authorizations: service.Authorizations, writer: http.ResponseWriter, 
         }
     }
     result := DelegatedSyncResponse.{collection = input.collection, nextVersion = input.sinceVersion}
-    storageLimit := authorizations.configuration.AccountStorageLimitBytes
+    allowance := plans.LimitTx(transaction, context, grant.accountID,
+        authorizations.configuration.AccountStorageLimitBytes,
+        authorizations.configuration.StoragePlansEnabled, clock.Unix(clock.Now()))
+    if allowance.error != null {
+        response.Error(writer, 503, "storage unavailable")
+        return
+    }
+    storageLimit := allowance.value
     checkStorage := storageLimit > 0 && sync.EncryptedRecords.count > 0
     usedBefore: s64 = 0
     if checkStorage {

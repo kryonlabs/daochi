@@ -130,7 +130,14 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
             response.Error(writer, 500, "blob storage unavailable")
             return
         }
-        limit := store.configuration.AccountStorageLimitBytes
+        allowance := storage.Limit(store.database, context, user.value,
+            store.configuration.AccountStorageLimitBytes, store.configuration.StoragePlansEnabled)
+        if allowance.error != null {
+            signed.Forget(store.database, context, header.value)
+            response.Error(writer, 503, "storage unavailable")
+            return
+        }
+        limit := allowance.value
         if !stored.value && limit > 0 {
             used := storage.Used(store.database, context, user.value)
             if used.error != null {

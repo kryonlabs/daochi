@@ -32,7 +32,7 @@ func TokenAssets_Execute(Database *Database, Context Context, Query string) zir_
 	return result
 }
 
-const SeedQuery = "INSERT INTO token_assets(issuer_id,asset_id,display_name,decimals,status)\nVALUES('waozi','waozi:token','Chi',6,'active')\nON CONFLICT(asset_id) DO UPDATE SET\n    issuer_id=excluded.issuer_id,\n    display_name=excluded.display_name,\n    decimals=excluded.decimals,\n    status=excluded.status,\n    updated_at=CURRENT_TIMESTAMP\n"
+const SeedQuery = "INSERT INTO token_assets(issuer_id,asset_id,display_name,decimals,status)\nVALUES('waozi','waozi:token','Dew',6,'active')\nON CONFLICT(asset_id) DO UPDATE SET\n    issuer_id=excluded.issuer_id,\n    display_name=excluded.display_name,\n    decimals=excluded.decimals,\n    status=excluded.status,\n    updated_at=CURRENT_TIMESTAMP\n"
 
 func TokenAssets_List(database *Database, context Context) AssetsResult {
 	var result AssetsResult = AssetsResult{}
@@ -58,7 +58,7 @@ func TokenAssets_List(database *Database, context Context) AssetsResult {
 }
 
 func TokenAssets_Seed(database *Database, context Context) Error {
-	var value_0 string = "INSERT INTO token_assets(issuer_id,asset_id,display_name,decimals,status)\nVALUES('waozi','waozi:token','Chi',6,'active')\nON CONFLICT(asset_id) DO UPDATE SET\n    issuer_id=excluded.issuer_id,\n    display_name=excluded.display_name,\n    decimals=excluded.decimals,\n    status=excluded.status,\n    updated_at=CURRENT_TIMESTAMP\n"
+	var value_0 string = "INSERT INTO token_assets(issuer_id,asset_id,display_name,decimals,status)\nVALUES('waozi','waozi:token','Dew',6,'active')\nON CONFLICT(asset_id) DO UPDATE SET\n    issuer_id=excluded.issuer_id,\n    display_name=excluded.display_name,\n    decimals=excluded.decimals,\n    status=excluded.status,\n    updated_at=CURRENT_TIMESTAMP\n"
 	result := TokenAssets_Execute(database, context, value_0)
 	return result.Error
 }

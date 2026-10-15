@@ -324,18 +324,27 @@ CreditPayment :: (database: *sql.Database, context: ctx.Context, signer: ed.Priv
 }
 
 Spend :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, input: TokenEventInput, key: string, unavailable: Error) -> SpendResult {
+    begun := Begin(database, context, null)
+    result: SpendResult
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    RollbackAtReturn(begun.value)
+    result = SpendTx(begun.value, context, signer, input, key, unavailable)
+    if result.error == null {
+        result.error = sql.Commit(begun.value)
+    }
+    return result
+}
+
+// Storage access and its debit must commit together.
+SpendTx :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.PrivateKey, input: TokenEventInput, key: string, unavailable: Error) -> SpendResult {
     result: SpendResult
     if input.AmountDelta >= 0 {
         result.error = errors.New("spend amount must be negative")
         return result
     }
-    begun := Begin(database, context, null)
-    result.error = begun.error
-    if result.error != null {
-        return result
-    }
-    transaction := begun.value
-    RollbackAtReturn(transaction)
     requestHash := receipts.SpendRequestHash(input)
     receiptID: string
     previousHash: string
@@ -363,7 +372,6 @@ Spend :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, 
         }
         result.value = existing.value
         result.balance = balance.value
-        result.error = sql.Commit(transaction)
         return result
     }
     if !errors.Is(result.error, sql.NoRows()) {
@@ -394,6 +402,5 @@ Spend :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, 
     result.value = inserted.value
     result.balance = balance.value + input.AmountDelta
     result.created = true
-    result.error = sql.Commit(transaction)
     return result
 }

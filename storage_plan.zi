@@ -1,0 +1,193 @@
+// Prepaid storage time. A signed Dew debit and its expiry commit atomically.
+#import "std/go_types"
+#import "protocol"
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+go_time :: #system_library "go:time";
+
+FreeBytes :: 10485760
+PaidBytes :: 1073741824
+UnitsPerDew :: 1000000
+
+Plan :: struct {
+    period: string #go_tag "json:\"period\""
+    expires_at: s64 #go_tag "json:\"expires_at\""
+    limit_bytes: s64 #go_tag "json:\"limit_bytes\""
+    balance: s64 #go_tag "json:\"balance\""
+    error: Error #go_tag "json:\"-\""
+}
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+AddDate :: (value: clock.Time, years: isize, months: isize, days: isize) -> clock.Time #foreign go_time "Time.AddDate";
+Day :: (value: clock.Time) -> isize #foreign go_time "Time.Day";
+
+ReadTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string) -> Plan {
+    result: Plan
+    arguments: [1]Any = .[user]
+    destinations: [2]Any = .[*result.period, *result.expires_at]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT period,expires_at FROM server_storage_plans WHERE user_id=?1", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+    }
+    return result
+}
+
+SnapshotTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string, now: s64) -> Plan {
+    result := ReadTx(transaction, context, user)
+    if result.error != null {
+        return result
+    }
+    result.limit_bytes = ifx result.expires_at > now then PaidBytes else FreeBytes
+    balance := ledger.BalanceTx(transaction, context, user, receipts.AssetID)
+    result.balance = balance.value
+    result.error = balance.error
+    return result
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL
+CREATE TABLE IF NOT EXISTS server_storage_plans (
+ user_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ period TEXT NOT NULL CHECK(period IN ('monthly','yearly')), expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS server_storage_purchases (
+ user_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ request_id TEXT NOT NULL, period TEXT NOT NULL, expires_at INTEGER NOT NULL,
+ receipt_id TEXT NOT NULL, PRIMARY KEY(user_id,request_id)
+);
+SQL;
+}
+
+Price :: (period: string) -> s64 {
+    if period == "monthly" {
+        return UnitsPerDew
+    }
+    if period == "yearly" {
+        return 10 * UnitsPerDew
+    }
+    return 0
+}
+
+// Clamp to the last day of the target month, including February and leap years.
+PeriodEnd :: (start: s64, period: string) -> s64 {
+    value := clock.UTC(clock.FromUnix(start, 0))
+    months: isize = ifx period == "yearly" then 12 else 1
+    first := AddDate(value, 0, months, 1 - Day(value))
+    last := AddDate(first, 0, 1, -1)
+    day := Day(value)
+    if day > Day(last) {
+        day = Day(last)
+    }
+    return clock.Unix(AddDate(first, 0, 0, day - 1))
+}
+
+LimitTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string,
+    baseline: s64, enabled: bool, now: s64) -> ledger.BalanceResult {
+    result: ledger.BalanceResult
+    result.value = baseline
+    if !enabled {
+        return result
+    }
+    result.value = FreeBytes
+    plan := ReadTx(transaction, context, user)
+    result.error = plan.error
+    if plan.error == null && plan.expires_at > now {
+        result.value = PaidBytes
+    }
+    return result
+}
+
+Read :: (database: *sql.Database, context: ctx.Context, user: string, now: s64) -> Plan {
+    result: Plan
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    RollbackAtReturn(opened.value)
+    return SnapshotTx(opened.value, context, user, now)
+}
+
+Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
+    user: string, period: string, key: string, now: s64) -> Plan {
+    result: Plan
+    price := Price(period)
+    if price == 0 {
+        result.error = errors.New("invalid storage period")
+        return result
+    }
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    arguments: [2]Any = .[user, key]
+    destinations: [2]Any = .[*result.period, *result.expires_at]
+    previous := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT period,expires_at FROM server_storage_purchases WHERE user_id=?1 AND request_id=?2",
+        arguments[:]), destinations[:])
+    if previous == null {
+        if result.period != period {
+            result.error = errors.New("storage request id reused")
+            return result
+        }
+        return SnapshotTx(transaction, context, user, now)
+    }
+    if !errors.Is(previous, sql.NoRows()) {
+        result.error = previous
+        return result
+    }
+    result = ReadTx(transaction, context, user)
+    if result.error != null {
+        return result
+    }
+    start := now
+    if result.expires_at > start {
+        start = result.expires_at
+    }
+    event: receipts.TokenEventInput
+    event.AccountID = user
+    event.AppID = "inbe"
+    event.EventType = "debit"
+    event.AmountDelta = -price
+    event.SourceType = "storage"
+    event.SourceRef = key
+    debit := ledger.SpendTx(transaction, context, signer, event, key,
+        errors.New("Dew issuer unavailable"))
+    result.error = debit.error
+    if result.error != null {
+        return result
+    }
+    result.period = period
+    result.expires_at = PeriodEnd(start, period)
+    result.limit_bytes = PaidBytes
+    result.balance = debit.balance
+    planArguments: [3]Any = .[user, period, result.expires_at]
+    saved := sql.ExecTx(transaction, context,
+        "INSERT INTO server_storage_plans(user_id,period,expires_at) VALUES(?1,?2,?3) ON CONFLICT(user_id) DO UPDATE SET period=excluded.period,expires_at=excluded.expires_at",
+        planArguments[:])
+    result.error = saved.error
+    if result.error != null {
+        return result
+    }
+    purchaseArguments: [5]Any = .[user, key, period, result.expires_at, debit.value.ReceiptID]
+    saved = sql.ExecTx(transaction, context,
+        "INSERT INTO server_storage_purchases(user_id,request_id,period,expires_at,receipt_id) VALUES(?1,?2,?3,?4,?5)",
+        purchaseArguments[:])
+    result.error = saved.error
+    if result.error == null {
+        result.error = sql.Commit(transaction)
+    }
+    return result
+}

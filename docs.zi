@@ -1,3 +1,4 @@
+storage_plans :: #import "storage_plan_paths";
 #import "std/go_types"
 #import "std/map_go"
 #import "protocol"
@@ -2116,6 +2117,8 @@ Paths :: () -> Map(string, Any) {
     for name: authorizationNames {
         MapSet(result, name, MapGet(authorization, name))
     }
+    storagePlans := storage_plans.Paths()
+    MapSet(result, "/api/v1/storage/plan", MapGet(storagePlans, "/api/v1/storage/plan"))
     packages := package_paths.Paths()
     blobs := blob_paths.Paths()
     MapSet(result, "/api/v1/blobs/{app_id}/{sha256}", MapGet(blobs, "/api/v1/blobs/{app_id}/{sha256}"))

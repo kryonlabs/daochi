@@ -323,6 +323,7 @@ var configEnvironmentKeys = []string{
 	"DAOCHI_TOKEN_PRODUCTS",
 	"DAOCHI_TOKEN_SECRET_HEX",
 	"DAOCHI_TOKEN_TTL_SECONDS",
+	"DAOCHI_STORAGE_PLANS_ENABLED",
 	"MONERO_CONFIRMATIONS_REQUIRED",
 	"MONERO_MINIMUM_ATOMIC_AMOUNT",
 	"MONERO_NETWORK",
@@ -348,16 +349,19 @@ func assertConfigurationMatchesBaseline(t *testing.T) Config {
 	expected := baselineLoadConfig()
 	actualType := reflect.TypeOf(actual)
 	expectedType := reflect.TypeOf(expected)
-	if actualType.NumField() != expectedType.NumField() {
+	if actualType.NumField() != expectedType.NumField()+1 {
 		t.Fatal("configuration fields changed")
 	}
-	for i := 0; i < actualType.NumField(); i++ {
-		got := actualType.Field(i)
+	for i := 0; i < expectedType.NumField(); i++ {
 		want := expectedType.Field(i)
+		got, ok := actualType.FieldByName(want.Name)
+		if !ok {
+			t.Fatalf("released field missing: %s", want.Name)
+		}
 		if got.Name != want.Name || got.Type != want.Type || got.Tag != want.Tag {
 			t.Fatalf("configuration field %d: got %#v, want %#v", i, got, want)
 		}
-		if !reflect.DeepEqual(reflect.ValueOf(actual).Field(i).Interface(), reflect.ValueOf(expected).Field(i).Interface()) {
+		if !reflect.DeepEqual(reflect.ValueOf(actual).FieldByName(want.Name).Interface(), reflect.ValueOf(expected).Field(i).Interface()) {
 			t.Fatalf("configuration field %s differs", got.Name)
 		}
 	}

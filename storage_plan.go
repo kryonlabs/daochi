@@ -73,6 +73,29 @@ func StoragePlan_Price(period string) int64 {
 	return 0
 }
 
+func StoragePlan_MoneroPrice(period string, atomic int64, units int64) TokenUnitsResult {
+	price := StoragePlan_Price(period)
+	result := MoneroWallet_TokenUnits(price, units, atomic)
+	if result.Error != nil {
+		return result
+	}
+	var credited TokenUnitsResult = TokenUnitsResult{}
+	if result.Value > 0 {
+		credited = MoneroWallet_TokenUnits(result.Value, atomic, units)
+		if credited.Error != nil {
+			return credited
+		}
+	}
+	if credited.Value < price {
+		if result.Value == 9223372036854775807 {
+			result.Error = StdErrorsGo_New("monero storage price overflow")
+			return result
+		}
+		result.Value++
+	}
+	return result
+}
+
 func StoragePlan_PeriodEnd(start int64, period string) int64 {
 	value := StdTimeGo_UTC(StdTimeGo_FromUnix(start, 0))
 	var value_0 int = 0

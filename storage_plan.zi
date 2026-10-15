@@ -3,6 +3,7 @@
 #import "protocol"
 ledger :: #import "token_ledger";
 receipts :: #import "token_receipt";
+wallet :: #import "monero_wallet";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 ed :: #import "std/ed25519_go";
@@ -75,6 +76,31 @@ Price :: (period: string) -> s64 {
         return 10 * UnitsPerDew
     }
     return 0
+}
+
+// The fixed node ratio quotes storage directly in Monero, without fiat prices.
+// Round up to the smallest atomic amount that funds the complete purchase.
+MoneroPrice :: (period: string, atomic: s64, units: s64) -> wallet.TokenUnitsResult {
+    price := Price(period)
+    result := wallet.TokenUnits(price, units, atomic)
+    if result.error != null {
+        return result
+    }
+    credited: wallet.TokenUnitsResult
+    if result.value > 0 {
+        credited = wallet.TokenUnits(result.value, atomic, units)
+        if credited.error != null {
+            return credited
+        }
+    }
+    if credited.value < price {
+        if result.value == 9223372036854775807 {
+            result.error = errors.New("monero storage price overflow")
+            return result
+        }
+        result.value += 1
+    }
+    return result
 }
 
 // Clamp to the last day of the target month, including February and leap years.

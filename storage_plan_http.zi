@@ -20,6 +20,8 @@ StorageStatus :: struct {
     monthly_units: s64 #go_tag "json:\"monthly_units\""
     yearly_units: s64 #go_tag "json:\"yearly_units\""
     units_per_dew: s64 #go_tag "json:\"units_per_dew\""
+    monthly_xmr_atomic_units: s64 #go_tag "json:\"monthly_xmr_atomic_units\""
+    yearly_xmr_atomic_units: s64 #go_tag "json:\"yearly_xmr_atomic_units\""
 }
 StorageUpgrade :: struct {
     period: string #go_tag "json:\"period\""
@@ -34,8 +36,13 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         return
     }
     http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    monthly := plans.MoneroPrice("monthly", accounts.configuration.MoneroRateAtomicAmount,
+        accounts.configuration.MoneroRateTokenUnits)
+    yearly := plans.MoneroPrice("yearly", accounts.configuration.MoneroRateAtomicAmount,
+        accounts.configuration.MoneroRateTokenUnits)
+    available := accounts.configuration.StoragePlansEnabled && monthly.error == null && yearly.error == null
     if http.Method(request) == "POST" {
-        if !accounts.configuration.StoragePlansEnabled {
+        if !available {
             response.Error(writer, 503, "storage upgrades unavailable")
             return
         }
@@ -69,11 +76,15 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
     value: StorageStatus
     value.account_id = user.value
     value.asset_id = "waozi:token"
-    value.enabled = accounts.configuration.StoragePlansEnabled
+    value.enabled = available
     value.plan = plan
     value.used_bytes = usage.value
     value.monthly_units = plans.Price("monthly")
     value.yearly_units = plans.Price("yearly")
     value.units_per_dew = plans.UnitsPerDew
+    if monthly.error == null && yearly.error == null {
+        value.monthly_xmr_atomic_units = monthly.value
+        value.yearly_xmr_atomic_units = yearly.value
+    }
     response.JSON(writer, 200, value)
 }

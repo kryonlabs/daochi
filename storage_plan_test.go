@@ -29,7 +29,7 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 	other := newTestIdentity(t, handler, 0x74)
 	ctx := context.Background()
 	credit := TokenLedger_CreditPayment(store.Database, ctx, private, "monero", "storage-fixture", TokenEventInput{
-		AccountID: owner.UserID, AppID: "inbe", EventType: "credit", AmountDelta: 2400 * UnitsPerDew,
+		AccountID: owner.UserID, AppID: "inbe", EventType: "credit", AmountDelta: 24 * UnitsPerDew,
 		SourceType: "monero", SourceRef: "storage-fixture",
 	}, errTokenIssuerReadOnly)
 	if credit.Error != nil {
@@ -48,19 +48,19 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 		return result
 	}
 	status := read(owner.Token)
-	if status["monthly_units"] != float64(200000000) || status["yearly_units"] != float64(2000000000) {
+	if status["monthly_units"] != float64(2000000) || status["yearly_units"] != float64(20000000) {
 		t.Fatalf("Dew prices: %v", status)
 	}
-	if status["monthly_xmr_atomic_units"] != float64(200000000000) || status["yearly_xmr_atomic_units"] != float64(2000000000000) {
+	if status["monthly_xmr_atomic_units"] != float64(2000000000) || status["yearly_xmr_atomic_units"] != float64(20000000000) {
 		t.Fatalf("fixed XMR prices: %v", status)
 	}
 	offers, _ := json.Marshal(status["plans"])
 	if status["free_bytes"] != float64(FreeBytes) || string(offers) != `[`+
-		`{"limit_bytes":1073741824,"monthly_units":200000000,"monthly_xmr_atomic_units":200000000000,"size":"1gb","yearly_units":2000000000,"yearly_xmr_atomic_units":2000000000000},`+
-		`{"limit_bytes":5368709120,"monthly_units":600000000,"monthly_xmr_atomic_units":600000000000,"size":"5gb","yearly_units":6000000000,"yearly_xmr_atomic_units":6000000000000}]` {
+		`{"limit_bytes":1073741824,"monthly_units":2000000,"monthly_xmr_atomic_units":2000000000,"size":"1gb","yearly_units":20000000,"yearly_xmr_atomic_units":20000000000},`+
+		`{"limit_bytes":5368709120,"monthly_units":6000000,"monthly_xmr_atomic_units":6000000000,"size":"5gb","yearly_units":60000000,"yearly_xmr_atomic_units":60000000000}]` {
 		t.Fatalf("plans: %v %s", status["free_bytes"], offers)
 	}
-	if got := status["plan"].(map[string]any); got["balance"] != float64(2400*UnitsPerDew) || got["limit_bytes"] != float64(FreeBytes) || got["size"] != "" {
+	if got := status["plan"].(map[string]any); got["balance"] != float64(24*UnitsPerDew) || got["limit_bytes"] != float64(FreeBytes) || got["size"] != "" {
 		t.Fatalf("free plan: %v", got)
 	}
 	if got := read(other.Token)["plan"].(map[string]any)["balance"]; got != float64(0) {
@@ -74,7 +74,7 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 		}
 	}
 	plan := StoragePlan_Read(store.Database, ctx, owner.UserID, time.Now().Unix())
-	if plan.Error != nil || plan.Balance != 2200*UnitsPerDew || plan.LimitBytes != PaidBytes || plan.Size != "1gb" {
+	if plan.Error != nil || plan.Balance != 22*UnitsPerDew || plan.LimitBytes != PaidBytes || plan.Size != "1gb" {
 		t.Fatalf("paid plan: %+v", plan)
 	}
 	monthlyEnd := plan.ExpiresAt
@@ -84,7 +84,7 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 		t.Fatalf("reused key: %d %s", reused.Code, reused.Body.String())
 	}
 	year := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "yearly", "storage-yearly-fixture", time.Now().Unix())
-	if year.Error != nil || year.Balance != 200*UnitsPerDew || year.ExpiresAt != StoragePlan_PeriodEnd(monthlyEnd, "yearly") {
+	if year.Error != nil || year.Balance != 2*UnitsPerDew || year.ExpiresAt != StoragePlan_PeriodEnd(monthlyEnd, "yearly") {
 		t.Fatalf("yearly extension: %+v", year)
 	}
 	ended := StoragePlan_Read(store.Database, ctx, owner.UserID, year.ExpiresAt)
@@ -191,15 +191,15 @@ func TestStorageMoneroPrices(t *testing.T) {
 		atomic, units int64
 		want          int64
 	}{
-		// At 1000 Dew per XMR, 1 GB costs 0.2 XMR a month and 2 XMR a year, as it
-		// did at 100 Dew per XMR; 5 GB costs three times that.
-		{"1gb", "monthly", 1000000000000, 1000 * UnitsPerDew, 200000000000},
-		{"1gb", "yearly", 1000000000000, 1000 * UnitsPerDew, 2000000000000},
-		{"5gb", "monthly", 1000000000000, 1000 * UnitsPerDew, 600000000000},
-		{"5gb", "yearly", 1000000000000, 1000 * UnitsPerDew, 6000000000000},
-		{"1gb", "monthly", 7, 3, 466666667},
+		// At 1000 Dew per XMR, 1 GB costs 0.002 XMR a month and 0.02 XMR a year;
+		// 5 GB costs three times that.
+		{"1gb", "monthly", 1000000000000, 1000 * UnitsPerDew, 2000000000},
+		{"1gb", "yearly", 1000000000000, 1000 * UnitsPerDew, 20000000000},
+		{"5gb", "monthly", 1000000000000, 1000 * UnitsPerDew, 6000000000},
+		{"5gb", "yearly", 1000000000000, 1000 * UnitsPerDew, 60000000000},
+		{"1gb", "monthly", 7, 3, 4666667},
 		{"1gb", "monthly", 1, 400000000, 1},
-		{"1gb", "monthly", math.MaxInt64 / 200, UnitsPerDew, math.MaxInt64 / 200 * 200},
+		{"1gb", "monthly", math.MaxInt64 / 2, UnitsPerDew, math.MaxInt64 / 2 * 2},
 	} {
 		got := StoragePlan_MoneroPrice(tc.size, tc.period, tc.atomic, tc.units)
 		if got.Error != nil || got.Value != tc.want {
@@ -215,13 +215,13 @@ func TestStorageMoneroPrices(t *testing.T) {
 		{"1gb", "weekly", 1, UnitsPerDew},
 		{"2gb", "monthly", 1, UnitsPerDew},
 		{"1gb", "monthly", math.MaxInt64, UnitsPerDew},
-		{"5gb", "yearly", math.MaxInt64 / 1000, UnitsPerDew},
+		{"5gb", "yearly", math.MaxInt64 / 50, UnitsPerDew},
 	} {
 		if got := StoragePlan_MoneroPrice(tc.size, tc.period, tc.atomic, tc.units); got.Error == nil {
 			t.Fatalf("accepted invalid XMR price: %+v", tc)
 		}
 	}
-	if StoragePlan_Priced(math.MaxInt64/1000, UnitsPerDew) || !StoragePlan_Priced(1000000000000, 1000*UnitsPerDew) {
+	if StoragePlan_Priced(math.MaxInt64/50, UnitsPerDew) || !StoragePlan_Priced(1000000000000, 1000*UnitsPerDew) {
 		t.Fatal("every plan needs an XMR price")
 	}
 }
@@ -231,10 +231,10 @@ func TestStoragePlanPrices(t *testing.T) {
 		size, period string
 		dew          int64
 	}{
-		{"1gb", "monthly", 200},
-		{"1gb", "yearly", 2000},
-		{"5gb", "monthly", 600},
-		{"5gb", "yearly", 6000},
+		{"1gb", "monthly", 2},
+		{"1gb", "yearly", 20},
+		{"5gb", "monthly", 6},
+		{"5gb", "yearly", 60},
 		{"1gb", "weekly", 0},
 		{"2gb", "monthly", 0},
 		{"", "monthly", 0},
@@ -284,7 +284,7 @@ func TestStoragePlanSizeChangesConvertRemainingTime(t *testing.T) {
 	owner := newTestIdentity(t, handler, 0x78)
 	ctx := context.Background()
 	credit := TokenLedger_CreditPayment(store.Database, ctx, private, "monero", "size-fixture", TokenEventInput{
-		AccountID: owner.UserID, EventType: "credit", AmountDelta: 10000 * UnitsPerDew,
+		AccountID: owner.UserID, EventType: "credit", AmountDelta: 100 * UnitsPerDew,
 		SourceType: "monero", SourceRef: "size-fixture",
 	}, errTokenIssuerReadOnly)
 	if credit.Error != nil {
@@ -293,13 +293,13 @@ func TestStoragePlanSizeChangesConvertRemainingTime(t *testing.T) {
 	day := int64(86400)
 	start := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
 	small := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "monthly", "size-small", start)
-	if small.Error != nil || small.ExpiresAt != start+31*day || small.LimitBytes != PaidBytes || small.Balance != 9800*UnitsPerDew {
+	if small.Error != nil || small.ExpiresAt != start+31*day || small.LimitBytes != PaidBytes || small.Balance != 98*UnitsPerDew {
 		t.Fatalf("1 GB month: %+v", small)
 	}
 	// Thirty days of 1 GB left become ten days of 5 GB, then a month.
 	now := start + day
 	large := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "5gb", "monthly", "size-large", now)
-	if large.Error != nil || large.Size != "5gb" || large.LimitBytes != LargeBytes || large.Balance != 9200*UnitsPerDew ||
+	if large.Error != nil || large.Size != "5gb" || large.LimitBytes != LargeBytes || large.Balance != 92*UnitsPerDew ||
 		large.ExpiresAt != StoragePlan_PeriodEnd(now+10*day, "monthly") {
 		t.Fatalf("5 GB month: %+v", large)
 	}

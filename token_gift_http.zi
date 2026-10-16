@@ -1,0 +1,60 @@
+#import "std/go_types"
+service :: #import "account_http";
+gifts :: #import "token_gift";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+identity :: #import "identity";
+strict :: #import "strict_json";
+policy :: #import "token_policy";
+http :: #import "std/http_go";
+errors :: #import "std/errors_go";
+
+GiftCommand :: struct {
+    recipient: string #go_tag "json:\"recipient\""
+    units: s64 #go_tag "json:\"units\""
+    request_id: string #go_tag "json:\"request_id\""
+}
+
+#scope_export
+// POST sends Dew to a friend. Keep the request ID on uncertain results: the
+// same ID never sends twice, and another recipient or amount for it is refused.
+Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    read := body.ReadJSON(writer, request, 1024)
+    command: GiftCommand
+    if read.error != null || strict.Decode(read.value, *command) != null ||
+    !identity.ValidUserID(command.recipient) || command.recipient == user.value ||
+    command.units <= 0 || !identity.ValidClientID(command.request_id) {
+        response.Error(writer, 400, "invalid gift")
+        return
+    }
+    if policy.IssuerStatus(<<accounts.configuration) != "ok" {
+        response.Error(writer, 503, "gifts unavailable")
+        return
+    }
+    sent := gifts.Send(accounts.database, http.Context(request),
+        accounts.configuration.WaoziIssuerPrivateKey, user.value,
+        command.recipient, command.units, command.request_id)
+    if sent.error != null {
+        message := errors.Message(sent.error)
+        if message == "insufficient balance" {
+            response.Error(writer, 402, "not enough Dew")
+        } else if message == "friendship required" {
+            response.Error(writer, 403, "friendship required")
+        } else if message == "idempotency key reused for different spend" {
+            response.Error(writer, 409, "gift request id reused")
+        } else if message == "invalid gift" {
+            response.Error(writer, 400, "invalid gift")
+        } else {
+            response.Error(writer, 503, "gift unavailable")
+        }
+        return
+    }
+    response.JSON(writer, 200, sent)
+}

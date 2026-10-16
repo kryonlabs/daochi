@@ -1,0 +1,105 @@
+// A Dew gift from one account to a friend. The sender's signed debit and the
+// friend's signed credit commit together, and repeating a request ID never
+// moves Dew twice.
+#import "std/go_types"
+#import "protocol"
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+identity :: #import "identity";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+go_strings :: #system_library "go:strings";
+
+// Credits name the sender and request, so the same gift credits once.
+GiftProvider :: "gift-v1";
+
+GiftResult :: struct {
+    request_id: string #go_tag "json:\"request_id\""
+    recipient: string #go_tag "json:\"recipient\""
+    units: s64 #go_tag "json:\"units\""
+    // The sender's balance after the gift.
+    balance: s64 #go_tag "json:\"balance\""
+    receipt_id: string #go_tag "json:\"receipt_id\""
+    error: Error #go_tag "json:\"-\""
+}
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+
+Friends :: (transaction: *sql.Transaction, context: ctx.Context,
+    first: string, second: string) -> bool {
+    arguments: [2]Any = .[first, second]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT EXISTS(SELECT 1 FROM server_friendships WHERE (user_id_a=?1 AND user_id_b=?2) OR (user_id_a=?2 AND user_id_b=?1))",
+        arguments[:])
+    found: bool
+    destinations: [1]Any = .[*found]
+    return sql.ScanRow(row, destinations[:]) == null && found
+}
+
+#scope_export
+// Moves `units` (millionths of Dew) from the sender to a friend. A repeated
+// request returns the first result, even after the friendship has ended.
+Send :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
+    sender: string, recipient: string, units: s64, requestID: string) -> GiftResult {
+    result: GiftResult
+    result.request_id = requestID
+    result.recipient = recipient
+    result.units = units
+    if !identity.ValidUserID(sender) || !identity.ValidUserID(recipient) ||
+    sender == recipient || units <= 0 || !identity.ValidClientID(requestID) {
+        result.error = errors.New("invalid gift")
+        return result
+    }
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    unavailable := errors.New("Dew issuer unavailable")
+    keyParts: [2]string = .["gift:", requestID]
+    debit: receipts.TokenEventInput
+    debit.AccountID = sender
+    debit.AppID = "inbe"
+    debit.EventType = "debit"
+    debit.AmountDelta = -units
+    debit.SourceType = "gift"
+    debit.SourceRef = recipient
+    spent := ledger.SpendTx(transaction, context, signer, debit, Join(keyParts[:], ""), unavailable)
+    result.error = spent.error
+    if result.error != null {
+        return result
+    }
+    // A new gift needs a friendship now; the rollback undoes its debit.
+    if spent.created && !Friends(transaction, context, sender, recipient) {
+        result.error = errors.New("friendship required")
+        return result
+    }
+    credit: receipts.TokenEventInput
+    credit.AccountID = recipient
+    credit.AppID = "inbe"
+    credit.EventType = "credit"
+    credit.AmountDelta = units
+    credit.SourceType = "gift"
+    credit.SourceRef = sender
+    paymentParts: [3]string = .[sender, ":", requestID]
+    credited := ledger.CreditPaymentTx(transaction, context, signer, GiftProvider,
+        Join(paymentParts[:], ""), credit, unavailable)
+    result.error = credited.error
+    if result.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    if result.error != null {
+        return result
+    }
+    result.balance = spent.balance
+    result.receipt_id = spent.value.ReceiptID
+    return result
+}

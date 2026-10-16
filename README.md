@@ -70,6 +70,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `GET /api/v1/tokens/balance?app_id=<optional-app-id>`
 - `GET /api/v1/tokens/ledger?since=<optional-seq>&app_id=<optional-app-id>`
 - `POST /api/v1/tokens/spend`
+- `POST /api/v1/tokens/gifts` (Dew to a friend)
 - `POST /api/v1/tokens/purchases/google/verify`
 - `POST /api/v1/tokens/purchases/monero/invoices`
 - `GET /api/v1/tokens/purchases/monero/invoices/{id}`
@@ -327,6 +328,15 @@ the Dew issuer, for a product the account has unlocked. A package artifact
 with a `<sha256>.zib.product` file beside it naming a product is gated: it is
 served, uncached, only at `/api/v2/packages/<app>/<sha256>.zib/<grant>` with an
 unexpired grant for that product.
+
+An account can send Dew to a friend: `POST /api/v1/tokens/gifts` with the
+friend's `recipient` account ID, `units` (millionths of Dew) and a persistent
+`request_id`. The sender's signed debit and the friend's signed credit commit
+together, both with `source_type` `gift`. Only accepted friends receive gifts;
+a gift to oneself, above the balance or to anyone else is refused and moves
+nothing. Retry the same request ID after an uncertain result: it never sends
+twice and answers with the first result even after the friendship ends, while
+the same ID with another recipient or amount is refused.
 
 `GET /api/v1/rates` is public and lets an app show what Dew and XMR amounts
 are worth in US dollars. It returns `xmr_usd_cents` (US cents per XMR),

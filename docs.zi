@@ -1,5 +1,6 @@
 storage_plans :: #import "storage_plan_paths";
 unlock_paths :: #import "unlock_paths";
+gift_paths :: #import "token_gift_paths";
 exchange_rate_paths :: #import "exchange_rate_paths";
 #import "std/go_types"
 #import "std/map_go"
@@ -187,6 +188,7 @@ PAGE_SECTION_2;
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct payment prices when direct purchases are enabled.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's token balance computed from signed ledger events.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits tokens with app policy and idempotency enforcement.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/gifts</code><p>Sends Dew to a friend; the debit and the friend's credit commit together.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/purchases/monero/invoices</code><p>Creates a bearer-authenticated invoice for a configured token product.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/invoices/{id}</code><p>Returns invoice status and settles a confirmed payment against the authenticated account.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/address</code><p>Returns the authenticated account's permanent Monero purchase address.</p></section>
@@ -2125,6 +2127,8 @@ Paths :: () -> Map(string, Any) {
     unlocks := unlock_paths.Paths()
     MapSet(result, "/api/v1/unlocks", MapGet(unlocks, "/api/v1/unlocks"))
     MapSet(result, "/api/v1/unlocks/grant", MapGet(unlocks, "/api/v1/unlocks/grant"))
+    gifts := gift_paths.Paths()
+    MapSet(result, "/api/v1/tokens/gifts", MapGet(gifts, "/api/v1/tokens/gifts"))
     MapSet(result, "/api/v1/unlocks/products", MapGet(unlocks, "/api/v1/unlocks/products"))
     rates := exchange_rate_paths.Paths()
     MapSet(result, "/api/v1/rates", MapGet(rates, "/api/v1/rates"))

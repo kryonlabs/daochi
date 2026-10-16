@@ -1,0 +1,31 @@
+#import "std/go_types"
+#import "std/map_go"
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+
+Paths :: () -> Map(string, Any) {
+    paths: Map(string, Any)
+    json.Unmarshal(text.ToBytes(Document), *paths)
+    return paths
+}
+
+Document :: #string JSON
+{
+  "/api/v1/tokens/gifts": {
+    "post": {
+      "summary": "Send Dew to a friend",
+      "description": "Requires the account bearer. Moves units (integer millionths of Dew) from the caller to recipient, the account_id of an accepted friend. The sender's signed debit and the friend's signed credit commit together, with source_type gift and each other's account as source_ref. Preserve request_id on uncertain results: repeating it never sends twice and returns the first result even after the friendship ends; the same request_id with another recipient or amount is rejected. Returns the sender's balance after the gift.",
+      "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["recipient", "units", "request_id"], "properties": {"recipient": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "units": {"type": "integer", "minimum": 1}, "request_id": {"type": "string", "minLength": 8, "maxLength": 128}}}}}},
+      "responses": {
+        "200": {"description": "Gift sent: request_id, recipient, units, balance and the debit receipt_id; no-store"},
+        "400": {"description": "Invalid recipient, amount or request ID, or a gift to oneself"},
+        "401": {"description": "Account authentication required"},
+        "402": {"description": "Not enough Dew"},
+        "403": {"description": "The recipient is not a friend"},
+        "409": {"description": "Request ID reused for another recipient or amount"},
+        "503": {"description": "Gifts unavailable; retain the request ID"}
+      }
+    }
+  }
+}
+JSON;

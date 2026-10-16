@@ -119,6 +119,7 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct payment prices when direct purchases are enabled.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's token balance computed from signed ledger events.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits tokens with app policy and idempotency enforcement.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/gifts</code><p>Sends Dew to a friend; the debit and the friend's credit commit together.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/purchases/monero/invoices</code><p>Creates a bearer-authenticated invoice for a configured token product.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/invoices/{id}</code><p>Returns invoice status and settles a confirmed payment against the authenticated account.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/address</code><p>Returns the authenticated account's permanent Monero purchase address.</p></section>
@@ -1413,7 +1414,7 @@ func baselineOpenAPISpec() map[string]any {
 		},
 	}
 	paths := result["paths"].(map[string]any)
-	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json", "testdata/blob_paths.json", "testdata/telegram_paths.json", "testdata/authorization_paths.json", "testdata/device_link_paths.json", "testdata/shared_list_paths.json", "testdata/storage_plan_paths.json", "testdata/unlock_paths.json", "testdata/exchange_rate_paths.json"} {
+	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json", "testdata/blob_paths.json", "testdata/telegram_paths.json", "testdata/authorization_paths.json", "testdata/device_link_paths.json", "testdata/shared_list_paths.json", "testdata/storage_plan_paths.json", "testdata/unlock_paths.json", "testdata/token_gift_paths.json", "testdata/exchange_rate_paths.json"} {
 		data, err := os.ReadFile(fixture)
 		if err != nil {
 			panic(err)

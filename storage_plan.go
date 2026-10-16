@@ -87,9 +87,9 @@ func StoragePlan_ActiveBytes(plan Plan, now int64) int64 {
 func StoragePlan_Price(size string, period string) int64 {
 	var monthly int64 = 0
 	if size == "1gb" {
-		monthly = 200000000
+		monthly = 2000000
 	} else if size == "5gb" {
-		monthly = 600000000
+		monthly = 6000000
 	}
 	if period == "monthly" {
 		return monthly

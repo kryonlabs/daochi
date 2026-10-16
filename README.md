@@ -291,15 +291,15 @@ are fixed in **XMR**, with no dollar peg, exchange-rate feed, or fiat conversion
 Choose how much Dew one XMR buys and express that ratio in integer units
 (1 XMR = 1,000,000,000,000 atomic units). For 1000 Dew per XMR, set
 `MONERO_RATE_ATOMIC_AMOUNT=1000000000000` and
-`MONERO_RATE_TOKEN_UNITS=1000000000`. One month of 1 GB storage costs 200 Dew
-(0.2 XMR at that ratio) and one year costs 2000 Dew. The app shows
+`MONERO_RATE_TOKEN_UNITS=1000000000`. One month of 1 GB storage costs 2 Dew
+(0.002 XMR at that ratio) and one year costs 20 Dew. The app shows
 the node's Dew prices before purchase. Confirmed deposits retain their
 snapshotted fixed ratio, and existing Dew balances remain intact.
 
 Set `DAOCHI_STORAGE_PLANS_ENABLED=true` on a node offering prepaid storage.
 A valid fixed Monero ratio is required before upgrades can be purchased.
-The free allowance is 10 MiB. Two sizes are sold: 1 GiB costs 200 Dew a month
-or 2000 Dew a year, and 5 GiB costs 600 Dew a month or 6000 Dew a year.
+The free allowance is 10 MiB. Two sizes are sold: 1 GiB costs 2 Dew a month
+or 20 Dew a year, and 5 GiB costs 6 Dew a month or 60 Dew a year.
 Buying the current size extends an existing paid period or starts
 immediately, with calendar month/year expiry. Buying the other size starts
 now, and the unexpired time carries over converted by the monthly prices

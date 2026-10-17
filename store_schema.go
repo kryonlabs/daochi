@@ -23,6 +23,7 @@ const Tables6 = "CREATE TABLE IF NOT EXISTS token_processed_payments (\n\tprovid
 const Tables7 = "CREATE TABLE IF NOT EXISTS token_app_permissions (\n\tapp_id TEXT NOT NULL REFERENCES server_apps(app_id) ON DELETE CASCADE,\n\tasset_id TEXT NOT NULL REFERENCES token_assets(asset_id) ON DELETE CASCADE,\n\tpermission TEXT NOT NULL,\n\tstatus TEXT NOT NULL DEFAULT 'active',\n\tlegacy_unsigned_until INTEGER NOT NULL DEFAULT 0,\n\tcreated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\tPRIMARY KEY(app_id, asset_id, permission)\n);\n\nCREATE TABLE IF NOT EXISTS node_sync_cursors (\n\tpeer_key TEXT PRIMARY KEY,\n\tcursor TEXT NOT NULL,\n\tupdated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n);\n"
 const Tables8 = "CREATE TABLE IF NOT EXISTS server_chat_usage (\n    account_id TEXT NOT NULL,\n    day TEXT NOT NULL,\n    used INTEGER NOT NULL,\n    PRIMARY KEY(account_id,day)\n);\nCREATE TABLE IF NOT EXISTS server_app_feedback (\n    account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,\n    id TEXT NOT NULL,\n    app_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    message TEXT NOT NULL,\n    context TEXT NOT NULL,\n    reply TEXT NOT NULL DEFAULT '',\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY(account_id,id)\n);\n"
 const Tables9 = "CREATE TABLE IF NOT EXISTS server_authorization_requests (\n    request_id TEXT PRIMARY KEY,\n    account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,\n    app_id TEXT NOT NULL REFERENCES server_apps(app_id),\n    node_id TEXT NOT NULL,\n    audience TEXT NOT NULL,\n    expires_at INTEGER NOT NULL,\n    bot_id INTEGER NOT NULL DEFAULT 0,\n    telegram_id INTEGER NOT NULL DEFAULT 0,\n    client_id TEXT NOT NULL DEFAULT '',\n    signing_key TEXT NOT NULL DEFAULT '',\n    encryption_key TEXT NOT NULL DEFAULT '',\n    scopes_json TEXT NOT NULL,\n    claim_nonce TEXT NOT NULL,\n    status TEXT NOT NULL DEFAULT 'pending'\n);\nCREATE TABLE IF NOT EXISTS server_authorization_grants (\n    grant_id TEXT PRIMARY KEY,\n    account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,\n    request_id TEXT NOT NULL UNIQUE REFERENCES server_authorization_requests(request_id),\n    app_id TEXT NOT NULL REFERENCES server_apps(app_id),\n    node_id TEXT NOT NULL,\n    audience TEXT NOT NULL,\n    not_before INTEGER NOT NULL,\n    expires_at INTEGER NOT NULL,\n    nonce TEXT NOT NULL,\n    revoked_at INTEGER NOT NULL DEFAULT 0,\n    grant_json TEXT NOT NULL,\n    UNIQUE(account_id,nonce)\n);\nCREATE TABLE IF NOT EXISTS server_authorization_challenges (\n    challenge TEXT PRIMARY KEY,\n    grant_id TEXT NOT NULL REFERENCES server_authorization_grants(grant_id) ON DELETE CASCADE,\n    expires_at INTEGER NOT NULL,\n    consumed_at INTEGER NOT NULL DEFAULT 0\n);\nCREATE TABLE IF NOT EXISTS server_authorization_sessions (\n    session_id TEXT PRIMARY KEY,\n    grant_id TEXT NOT NULL REFERENCES server_authorization_grants(grant_id) ON DELETE CASCADE,\n    challenge TEXT NOT NULL UNIQUE,\n    expires_at INTEGER NOT NULL\n);\nCREATE TABLE IF NOT EXISTS server_authorization_nonces (\n    grant_id TEXT NOT NULL REFERENCES server_authorization_grants(grant_id) ON DELETE CASCADE,\n    nonce TEXT NOT NULL,\n    expires_at INTEGER NOT NULL,\n    PRIMARY KEY(grant_id,nonce)\n);\nCREATE TABLE IF NOT EXISTS server_telegram_init_claims (\n    digest TEXT PRIMARY KEY,\n    request_id TEXT NOT NULL REFERENCES server_authorization_requests(request_id) ON DELETE CASCADE,\n    expires_at INTEGER NOT NULL\n);\n"
+const FeedbackReplies = "\nCREATE TABLE IF NOT EXISTS server_app_feedback_replies (\n    account_id TEXT NOT NULL,\n    report_id TEXT NOT NULL,\n    id TEXT NOT NULL,\n    reply TEXT NOT NULL,\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY(account_id,id),\n    FOREIGN KEY(account_id,report_id) REFERENCES server_app_feedback(account_id,id) ON DELETE CASCADE\n);\n"
 const BackfillMesh = "\nINSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nLEFT JOIN (SELECT DISTINCT user_id_hash,collection,record_id FROM server_mesh_changes) c\n  ON c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\nWHERE c.record_id IS NULL\n"
 const AliasIndex = "\nCREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique\nON server_users(alias)\nWHERE alias IS NOT NULL AND alias<>''"
 const MeditationInfo = "PRAGMA table_info(server_meditation_logs)"
@@ -192,7 +193,7 @@ func StoreSchema_Ensure(database *Database, context Context) Error {
 	if pragmas.Error != nil {
 		return pragmas.Error
 	}
-	var value_1 [8]string
+	var value_1 [9]string
 	var value_2 string = strings.Join(Tables[0:9:9], "")
 	value_1[0] = value_2
 	var value_3 string = TelegramAccountEntry_SchemaSQL()
@@ -209,23 +210,25 @@ func StoreSchema_Ensure(database *Database, context Context) Error {
 	value_1[6] = value_8
 	var value_9 string = ExchangeRate_SchemaSQL()
 	value_1[7] = value_9
+	var value_10 string = "\nCREATE TABLE IF NOT EXISTS server_app_feedback_replies (\n    account_id TEXT NOT NULL,\n    report_id TEXT NOT NULL,\n    id TEXT NOT NULL,\n    reply TEXT NOT NULL,\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY(account_id,id),\n    FOREIGN KEY(account_id,report_id) REFERENCES server_app_feedback(account_id,id) ON DELETE CASCADE\n);\n"
+	value_1[8] = value_10
 	definitions := value_1
 	_ = definitions
-	var value_10 string = strings.Join(definitions[0:8:8], "")
-	var value_11 []Any
-	if int64(0) < 0 || int64(int64(len(value_11))) < int64(0) || int64(int64(len(value_11))) > int64(len(value_11)) {
+	var value_11 string = strings.Join(definitions[0:9:9], "")
+	var value_12 []Any
+	if int64(0) < 0 || int64(int64(len(value_12))) < int64(0) || int64(int64(len(value_12))) > int64(len(value_12)) {
 		panic("slice range out of bounds")
 	}
-	created := StdSqlGo_Exec(database, context, value_10, value_11[0:int64(len(value_11)):int64(len(value_11))])
+	created := StdSqlGo_Exec(database, context, value_11, value_12[0:int64(len(value_12)):int64(len(value_12))])
 	if created.Error != nil {
 		return created.Error
 	}
-	var value_12 string = "\nINSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nLEFT JOIN (SELECT DISTINCT user_id_hash,collection,record_id FROM server_mesh_changes) c\n  ON c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\nWHERE c.record_id IS NULL\n"
-	var value_13 []Any
-	if int64(0) < 0 || int64(int64(len(value_13))) < int64(0) || int64(int64(len(value_13))) > int64(len(value_13)) {
+	var value_13 string = "\nINSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nLEFT JOIN (SELECT DISTINCT user_id_hash,collection,record_id FROM server_mesh_changes) c\n  ON c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\nWHERE c.record_id IS NULL\n"
+	var value_14 []Any
+	if int64(0) < 0 || int64(int64(len(value_14))) < int64(0) || int64(int64(len(value_14))) > int64(len(value_14)) {
 		panic("slice range out of bounds")
 	}
-	backfilled := StdSqlGo_Exec(database, context, value_12, value_13[0:int64(len(value_13)):int64(len(value_13))])
+	backfilled := StdSqlGo_Exec(database, context, value_13, value_14[0:int64(len(value_14)):int64(len(value_14))])
 	if backfilled.Error != nil {
 		return backfilled.Error
 	}
@@ -244,39 +247,39 @@ func StoreSchema_Ensure(database *Database, context Context) Error {
 	for it_index := int64(0); it_index < 32; it_index++ {
 		statement := Upgrades[it_index]
 		_ = statement
-		var value_14 []Any
-		if int64(0) < 0 || int64(int64(len(value_14))) < int64(0) || int64(int64(len(value_14))) > int64(len(value_14)) {
+		var value_15 []Any
+		if int64(0) < 0 || int64(int64(len(value_15))) < int64(0) || int64(int64(len(value_15))) > int64(len(value_15)) {
 			panic("slice range out of bounds")
 		}
-		written := StdSqlGo_Exec(database, context, statement, value_14[0:int64(len(value_14)):int64(len(value_14))])
+		written := StdSqlGo_Exec(database, context, statement, value_15[0:int64(len(value_15)):int64(len(value_15))])
 		_ = written
-		var value_15 bool = written.Error != nil
-		var value_16 bool = value_15
-		if value_16 {
-			var value_17 bool = strings.Contains(StdErrorsGo_Message(written.Error), "duplicate column")
-			value_16 = !value_17
+		var value_16 bool = written.Error != nil
+		var value_17 bool = value_16
+		if value_17 {
+			var value_18 bool = strings.Contains(StdErrorsGo_Message(written.Error), "duplicate column")
+			value_17 = !value_18
 		}
-		if value_16 {
+		if value_17 {
 			return written.Error
 		}
 	}
-	var value_18 string = "\nCREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique\nON server_users(alias)\nWHERE alias IS NOT NULL AND alias<>''"
-	var value_19 []Any
-	if int64(0) < 0 || int64(int64(len(value_19))) < int64(0) || int64(int64(len(value_19))) > int64(len(value_19)) {
+	var value_19 string = "\nCREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique\nON server_users(alias)\nWHERE alias IS NOT NULL AND alias<>''"
+	var value_20 []Any
+	if int64(0) < 0 || int64(int64(len(value_20))) < int64(0) || int64(int64(len(value_20))) > int64(len(value_20)) {
 		panic("slice range out of bounds")
 	}
-	indexed := StdSqlGo_Exec(database, context, value_18, value_19[0:int64(len(value_19)):int64(len(value_19))])
+	indexed := StdSqlGo_Exec(database, context, value_19, value_20[0:int64(len(value_20)):int64(len(value_20))])
 	if indexed.Error != nil {
 		return indexed.Error
 	}
 	for it_index := int64(0); it_index < 18; it_index++ {
 		statement := Indexes[it_index]
 		_ = statement
-		var value_20 []Any
-		if int64(0) < 0 || int64(int64(len(value_20))) < int64(0) || int64(int64(len(value_20))) > int64(len(value_20)) {
+		var value_21 []Any
+		if int64(0) < 0 || int64(int64(len(value_21))) < int64(0) || int64(int64(len(value_21))) > int64(len(value_21)) {
 			panic("slice range out of bounds")
 		}
-		written := StdSqlGo_Exec(database, context, statement, value_20[0:int64(len(value_20)):int64(len(value_20))])
+		written := StdSqlGo_Exec(database, context, statement, value_21[0:int64(len(value_21)):int64(len(value_21))])
 		_ = written
 		if written.Error != nil {
 			return written.Error

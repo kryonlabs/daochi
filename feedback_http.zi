@@ -9,6 +9,7 @@ json :: #import "std/json_go";
 sql :: #import "std/sql_go";
 url :: #import "std/url_go";
 text :: #import "std/text_go";
+errors :: #import "std/errors_go";
 strings :: #system_library "go:strings";
 native_sql :: #system_library "go:database/sql";
 builtin :: #system_library "go:builtin";
@@ -22,6 +23,8 @@ Feedback :: struct {
     message: string #go_tag "json:\"message\""
     context: string #go_tag "json:\"context\""
     reply: string #go_tag "json:\"reply\""
+    // A reply's own ID adds it beside earlier replies to the same report.
+    reply_id: string #go_tag "json:\"reply_id,omitempty\""
     created_at: string #go_tag "json:\"created_at\""
 }
 FeedbackList :: struct {
@@ -32,6 +35,25 @@ FeedbackList :: struct {
 TrimSpace :: (value: string) -> string #foreign strings;
 CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign native_sql "(*Rows).Close";
 Append :: (values: []Feedback, value: Feedback) -> []Feedback #foreign builtin "append";
+
+// Every reply an account received, oldest first: the first reply kept on its
+// report, under the report's ID, then the added replies under their own IDs.
+// Apps remember the IDs they showed, so each reply is shown once, in order.
+RepliesQuery :: "SELECT id,app_id,'','','',reply,created_at FROM (SELECT id,app_id,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
+
+ReplyId :: (value: string) -> bool {
+    if value.count != 64 {
+        return false
+    }
+    for byte: value {
+        digit := byte >= cast(u8)48 && byte <= cast(u8)57
+        letter := byte >= cast(u8)97 && byte <= cast(u8)102
+        if !digit && !letter {
+            return false
+        }
+    }
+    return true
+}
 
 RequireOperator :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request) -> bool {
     token := service.configuration.FeedbackToken
@@ -91,7 +113,8 @@ List :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request
         user = authenticated.value
     }
     arguments: [1]Any = .[user]
-    query := "SELECT id,app_id,title,message,context,reply,created_at FROM server_app_feedback WHERE account_id=?1 ORDER BY created_at DESC,id DESC LIMIT 100"
+    // Report lists show each report's latest reply.
+    query := "SELECT f.id,f.app_id,f.title,f.message,f.context,COALESCE((SELECT r.reply FROM server_app_feedback_replies r WHERE r.account_id=f.account_id AND r.report_id=f.id ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1),f.reply),f.created_at FROM server_app_feedback f WHERE f.account_id=?1 ORDER BY f.created_at DESC,f.id DESC LIMIT 100"
     page_arguments: [2]Any = .[user, "0"]
     replies := !admin && url.Value(url.Query(http.RequestURL(request)), "replies") == "1"
     if replies {
@@ -110,11 +133,11 @@ List :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request
             page_arguments[1] = offset
         }
         // Two maximum-size replies still fit the app's bounded response buffer.
-        query = "SELECT id,app_id,'','','',reply,created_at FROM server_app_feedback WHERE account_id=?1 AND reply<>'' ORDER BY created_at DESC,id DESC LIMIT 2 OFFSET ?2"
+        query = RepliesQuery
     }
     if admin {
         // The operator inbox names each reporting account by its public alias.
-        query = "SELECT f.id,f.app_id,f.title,f.message,f.context,f.reply,f.created_at,f.account_id,COALESCE(u.alias,'') FROM server_app_feedback f LEFT JOIN server_users u ON u.user_id_hash=f.account_id ORDER BY f.created_at DESC,f.id DESC LIMIT 100"
+        query = "SELECT f.id,f.app_id,f.title,f.message,f.context,COALESCE((SELECT r.reply FROM server_app_feedback_replies r WHERE r.account_id=f.account_id AND r.report_id=f.id ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1),f.reply),f.created_at,f.account_id,COALESCE(u.alias,'') FROM server_app_feedback f LEFT JOIN server_users u ON u.user_id_hash=f.account_id ORDER BY f.created_at DESC,f.id DESC LIMIT 100"
     }
     queried := sql.Query(service.database, http.Context(request), query,
         ifx admin then arguments[0:0] else ifx replies then page_arguments[:] else arguments[:])
@@ -141,6 +164,40 @@ List :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request
     response.JSON(writer, cast(isize)200, value)
 }
 
+// Adds a reply with its own ID beside the report's earlier replies. Retrying
+// the same ID with the same reply changes nothing; the same ID with another
+// report or text is refused.
+AddReply :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request, input: Feedback) {
+    arguments: [4]Any = .[input.account_id, input.id, input.reply_id, input.reply]
+    written := sql.Exec(service.database, http.Context(request),
+        "INSERT INTO server_app_feedback_replies(account_id,report_id,id,reply) SELECT ?1,?2,?3,?4 WHERE EXISTS(SELECT 1 FROM server_app_feedback WHERE account_id=?1 AND id=?2) ON CONFLICT(account_id,id) DO NOTHING", arguments[:])
+    if written.error != null {
+        response.Error(writer, cast(isize)503, "feedback unavailable")
+        return
+    }
+    report: string
+    reply: string
+    destinations: [2]Any = .[*report, *reply]
+    keys: [2]Any = .[input.account_id, input.reply_id]
+    row := sql.QueryRow(service.database, http.Context(request),
+        "SELECT report_id,reply FROM server_app_feedback_replies WHERE account_id=?1 AND id=?2", keys[:])
+    scanned := sql.ScanRow(row, destinations[:])
+    if errors.Is(scanned, sql.NoRows()) {
+        response.Error(writer, cast(isize)404, "feedback not found")
+        return
+    }
+    if scanned != null {
+        response.Error(writer, cast(isize)503, "feedback unavailable")
+        return
+    }
+    if report != input.id || reply != input.reply {
+        response.Error(writer, cast(isize)409, "reply ID already used")
+        return
+    }
+    response.JSON(writer, cast(isize)200, input.id)
+}
+
+// Without its own ID, a reply is the report's single reply, as before.
 Reply :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request) {
     if !RequireOperator(service, writer, request) {
         return
@@ -149,8 +206,13 @@ Reply :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Reques
     input: Feedback
     if received.error != null || json.Unmarshal(received.value, *input) != null ||
     input.id.count != 64 || input.account_id.count != 64 ||
-    TrimSpace(input.reply) == "" || input.reply.count > 4096 {
+    TrimSpace(input.reply) == "" || input.reply.count > 4096 ||
+    (input.reply_id != "" && !ReplyId(input.reply_id)) {
         response.Error(writer, cast(isize)400, "invalid feedback reply")
+        return
+    }
+    if input.reply_id != "" {
+        AddReply(service, writer, request, input)
         return
     }
     arguments: [3]Any = .[input.reply, input.id, input.account_id]

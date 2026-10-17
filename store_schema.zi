@@ -128,8 +128,8 @@ Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     if pragmas.error != null {
         return pragmas.error
     }
-    definitions: [8]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
-        plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL(), exchange_rates.SchemaSQL()]
+    definitions: [9]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
+        plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL(), exchange_rates.SchemaSQL(), FeedbackReplies]
     created := sql.Exec(database, context, Join(definitions[:], ""), empty[:])
     if created.error != null {
         return created.error
@@ -784,6 +784,21 @@ CREATE TABLE IF NOT EXISTS server_telegram_init_claims (
 );
 SQL_9;
 Tables: [9]string = .[Tables1, Tables2, Tables3, Tables4, Tables5, Tables6, Tables7, Tables8, Tables9];
+// Replies the developer adds to a report beside the first one, which stays
+// in server_app_feedback.reply. Each has its own ID, so apps show every reply
+// once and a retried reply is not repeated.
+FeedbackReplies :: #string SQL_REPLIES
+
+CREATE TABLE IF NOT EXISTS server_app_feedback_replies (
+    account_id TEXT NOT NULL,
+    report_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    reply TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(account_id,id),
+    FOREIGN KEY(account_id,report_id) REFERENCES server_app_feedback(account_id,id) ON DELETE CASCADE
+);
+SQL_REPLIES;
 // Materialize existing keys once instead of scanning the entire change log
 // separately for every encrypted record during each server restart.
 BackfillMesh :: #string SQL_END

@@ -299,7 +299,7 @@ snapshotted fixed ratio, and existing Dew balances remain intact.
 
 Set `DAOCHI_STORAGE_PLANS_ENABLED=true` on a node offering prepaid storage.
 A valid fixed Monero ratio is required before upgrades can be purchased.
-The free allowance is 10 MiB. Two sizes are sold: 1 GiB costs 2 Dew a month
+The free allowance is the node's `DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES`. Two sizes are sold: 1 GiB costs 2 Dew a month
 or 20 Dew a year, and 5 GiB costs 6 Dew a month or 60 Dew a year.
 Buying the current size extends an existing paid period or starts
 immediately, with calendar month/year expiry. Buying the other size starts
@@ -312,7 +312,7 @@ same endpoint accepts `period` (`monthly` or `yearly`), `size` (`1gb` or
 The signed ledger debit and paid allowance commit together; retry the same
 request ID after an uncertain result to avoid a second charge.
 
-After expiry, the account returns to 10 MiB. Existing data remains available;
+After expiry, the account returns to the free allowance. Existing data remains available;
 uploads that grow an account above its allowance are refused, while reads
 and space-reducing changes remain available. Storage upgrades are opt-in on
 each node; nodes without them retain their configured storage-limit behavior.

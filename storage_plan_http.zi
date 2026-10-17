@@ -98,7 +98,8 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         }
         purchased := plans.Purchase(accounts.database, http.Context(request),
             accounts.configuration.WaoziIssuerPrivateKey, user.value,
-            command.size, command.period, command.request_id, clock.Unix(clock.Now()))
+            command.size, command.period, command.request_id, clock.Unix(clock.Now()),
+            accounts.configuration.AccountStorageLimitBytes)
         if purchased.error != null {
             if errors.Message(purchased.error) == "insufficient balance" {
                 response.Error(writer, 402, "not enough Dew")
@@ -112,7 +113,8 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
             return
         }
     }
-    plan := plans.Read(accounts.database, http.Context(request), user.value, clock.Unix(clock.Now()))
+    plan := plans.Read(accounts.database, http.Context(request), user.value, clock.Unix(clock.Now()),
+        accounts.configuration.AccountStorageLimitBytes)
     usage := storage.Used(accounts.database, http.Context(request), user.value)
     if plan.error != null || usage.error != null {
         response.Error(writer, 503, "storage balance unavailable")
@@ -124,7 +126,8 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
     value.enabled = available
     value.plan = plan
     value.used_bytes = usage.value
-    value.free_bytes = plans.FreeBytes
+    // The node's configured free allowance; 0 means unlimited.
+    value.free_bytes = accounts.configuration.AccountStorageLimitBytes
     value.units_per_dew = plans.UnitsPerDew
     value.plans = Offers(atomic, units)
     // The 1 GB plan comes first.

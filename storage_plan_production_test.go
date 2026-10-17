@@ -84,7 +84,7 @@ func TestStorageConcurrentRetriesAndInsufficientBalance(t *testing.T) {
 	if ok, insufficient := run(6, false); ok != 2 || insufficient != 4 {
 		t.Fatalf("bounded balance: %d/%d", ok, insufficient)
 	}
-	plan := StoragePlan_Read(store.Database, context.Background(), owner.UserID, time.Now().Unix())
+	plan := StoragePlan_Read(store.Database, context.Background(), owner.UserID, time.Now().Unix(), 0)
 	if plan.Error != nil || plan.Balance != 0 {
 		t.Fatalf("balance: %+v", plan)
 	}
@@ -129,11 +129,11 @@ func TestStorageRejectsExpiryOverflowBeforeDebit(t *testing.T) {
 	server, store, _, owner := storageAccountFixture(t)
 	now := time.Date(9999, 12, 15, 0, 0, 0, 0, time.UTC).Unix()
 	plan := StoragePlan_Purchase(store.Database, context.Background(), server.Cfg.WaoziIssuerPrivateKey,
-		owner.UserID, "1gb", "monthly", "expiry-overflow", now)
+		owner.UserID, "1gb", "monthly", "expiry-overflow", now, server.Cfg.AccountStorageLimitBytes)
 	if plan.Error == nil || plan.Error.Error() != "storage expiry out of range" {
 		t.Fatalf("expiry: %+v", plan)
 	}
-	read := StoragePlan_Read(store.Database, context.Background(), owner.UserID, now)
+	read := StoragePlan_Read(store.Database, context.Background(), owner.UserID, now, server.Cfg.AccountStorageLimitBytes)
 	if read.Error != nil || read.Balance != 6*UnitsPerDew || read.ExpiresAt != 0 {
 		t.Fatalf("charged overflow: %+v", read)
 	}

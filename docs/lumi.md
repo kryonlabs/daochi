@@ -37,18 +37,24 @@ task or habit content into diagnostics.
 The developer harness reads `GET /api/v1/admin/feedback` with `X-Daochi-Admin`.
 The inbox includes `account_id` and the account's public `account_alias` (empty
 when it has none). Reply through
-`POST /api/v1/admin/feedback/reply` with `account_id`, `id` and `reply`.
+`POST /api/v1/admin/feedback/reply` with `account_id`, `id` and `reply`. Without
+`reply_id` the reply is the report's single reply, as before. With its own
+64-character hexadecimal `reply_id` a reply is added beside the report's earlier
+replies; retrying the same `reply_id` and text adds nothing.
 Both operator endpoints are disabled unless `DAOCHI_FEEDBACK_TOKEN_FILE`,
 `DAOCHI_FEEDBACK_TOKEN` or the existing `DAOCHI_ADMIN_TOKEN` is configured.
 The installer creates a private feedback token when none exists, keeping other
 node administration settings intact.
 Replies are scoped to the reporting account, including when two accounts use
 the same report ID. Lumi reads `GET /api/v1/feedback?replies=1&offset=0`, two
-replies per page, and attributes developer replies explicitly.
+replies per page, oldest first, and attributes developer replies explicitly.
+Each reply has its own `id` (the report's ID for its single reply), so Lumi
+shows every reply once, in order.
 
 `scripts/feedback.py --host USER@NODE inbox` lets the local developer harness
 read reports without receiving the node's admin credential. To send an authored
-reply, use `reply --account-id ACCOUNT --report-id REPORT --reply-file FILE`.
+reply, use `reply --account-id ACCOUNT --report-id REPORT --reply-file FILE`;
+add `--reply-id ID` to add it beside the report's earlier replies.
 The remote helper reads the node's private credential and uses loopback HTTP;
 reply text travels as JSON over SSH, without being interpolated into commands.
 

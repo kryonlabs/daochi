@@ -53,6 +53,8 @@ def main():
     reply.add_argument("--account-id", required=True)
     reply.add_argument("--report-id", required=True)
     reply.add_argument("--reply-file", required=True, type=Path)
+    # A reply with its own ID is added beside the report's earlier replies.
+    reply.add_argument("--reply-id")
     args = parser.parse_args()
     operation = {"action": args.action}
     if args.action == "reply":
@@ -61,6 +63,10 @@ def main():
             parser.error("reply must contain 1 to 4096 bytes")
         operation["reply"] = {"account_id": args.account_id, "id": args.report_id,
                               "reply": message}
+        if args.reply_id is not None:
+            if len(args.reply_id) != 64 or any(c not in "0123456789abcdef" for c in args.reply_id):
+                parser.error("reply ID must be 64 lowercase hexadecimal characters")
+            operation["reply"]["reply_id"] = args.reply_id
     result = subprocess.run(
         ["ssh", "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
          args.host, "python3 -c " + shlex.quote(REMOTE)],

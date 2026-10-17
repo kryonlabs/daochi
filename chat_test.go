@@ -238,6 +238,117 @@ func TestFeedbackRepliesStayAccountScopedAndBounded(t *testing.T) {
 	}
 }
 
+func TestFeedbackReportCarriesEveryReplyInOrder(t *testing.T) {
+	server, store, _ := testServer(t)
+	server.Cfg.AdminToken = "developer-token"
+	handler := server.Routes()
+	first := newTestIdentity(t, handler, 0x7b)
+	second := newTestIdentity(t, handler, 0x7c)
+	report := strings.Repeat("c", 64)
+	body := `{"id":"` + report + `","app_id":"inbe","title":"Bell","message":"Ring a bell every minute","context":""}`
+	for _, identity := range []testIdentity{first, second} {
+		if out := chatRequest(handler, identity, "/api/v1/feedback", body); out.Code != 200 {
+			t.Fatalf("report: %d %s", out.Code, out.Body.String())
+		}
+	}
+	reply := func(account, id, replyID, text string) int {
+		fields := map[string]string{"account_id": account, "id": id, "reply": text}
+		if replyID != "" {
+			fields["reply_id"] = replyID
+		}
+		data, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feedback/reply", bytes.NewReader(data))
+		req.Header.Set("X-Daochi-Admin", "developer-token")
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, req)
+		return out.Code
+	}
+	added := strings.Repeat("1", 64)
+	later := strings.Repeat("2", 64)
+	if code := reply(first.UserID, report, "", "Added in 2.1.34."); code != 200 {
+		t.Fatalf("first reply: %d", code)
+	}
+	if code := reply(first.UserID, report, added, "You can turn the bell off in settings."); code != 200 {
+		t.Fatalf("added reply: %d", code)
+	}
+	// Retrying a reply with its ID adds nothing; the ID cannot carry another reply.
+	if code := reply(first.UserID, report, added, "You can turn the bell off in settings."); code != 200 {
+		t.Fatalf("retried reply: %d", code)
+	}
+	if code := reply(first.UserID, report, added, "Another text"); code != 409 {
+		t.Fatalf("reused reply ID: %d", code)
+	}
+	if code := reply(first.UserID, strings.Repeat("d", 64), later, "No such report"); code != 404 {
+		t.Fatalf("reply to a missing report: %d", code)
+	}
+	if code := reply(first.UserID, report, "not-a-reply-id", "Malformed"); code != 400 {
+		t.Fatalf("malformed reply ID: %d", code)
+	}
+	if code := reply(first.UserID, report, later, "Thanks again for the idea."); code != 200 {
+		t.Fatalf("later reply: %d", code)
+	}
+	replies := func(identity testIdentity) []map[string]string {
+		var result []map[string]string
+		for offset := 0; ; offset += 2 {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/feedback?replies=1&offset="+strconv.Itoa(offset), nil)
+			req.Header.Set("Authorization", "Bearer "+identity.Token)
+			req.Header.Set("X-Daochi-User", identity.UserID)
+			out := httptest.NewRecorder()
+			handler.ServeHTTP(out, req)
+			var page struct {
+				Feedback []map[string]string `json:"feedback"`
+			}
+			if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &page) != nil {
+				t.Fatalf("replies page: %d %s", out.Code, out.Body.String())
+			}
+			result = append(result, page.Feedback...)
+			if len(page.Feedback) < 2 {
+				return result
+			}
+		}
+	}
+	got := replies(first)
+	want := [][2]string{{report, "Added in 2.1.34."}, {added, "You can turn the bell off in settings."}, {later, "Thanks again for the idea."}}
+	if len(got) != len(want) {
+		t.Fatalf("every reply once, in order: %v", got)
+	}
+	for index, item := range got {
+		if item["id"] != want[index][0] || item["reply"] != want[index][1] || item["message"] != "" {
+			t.Fatalf("reply %d: %v", index, item)
+		}
+	}
+	if other := replies(second); len(other) != 0 {
+		t.Fatalf("replies crossed accounts: %v", other)
+	}
+	// The report lists show the latest reply.
+	out := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feedback", nil)
+	req.Header.Set("Authorization", "Bearer "+first.Token)
+	req.Header.Set("X-Daochi-User", first.UserID)
+	handler.ServeHTTP(out, req)
+	if out.Code != 200 || !strings.Contains(out.Body.String(), "Thanks again for the idea.") || strings.Contains(out.Body.String(), "Added in 2.1.34.") {
+		t.Fatalf("report list reply: %d %s", out.Code, out.Body.String())
+	}
+	inbox := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feedback", nil)
+	inbox.Header.Set("X-Daochi-Admin", "developer-token")
+	out = httptest.NewRecorder()
+	handler.ServeHTTP(out, inbox)
+	if out.Code != 200 || !strings.Contains(out.Body.String(), "Thanks again for the idea.") {
+		t.Fatalf("operator inbox reply: %d %s", out.Code, out.Body.String())
+	}
+	// Removing a report removes its replies.
+	if _, err := store.Database.Exec("DELETE FROM server_app_feedback WHERE account_id=?1 AND id=?2", first.UserID, report); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := store.Database.QueryRow("SELECT COUNT(*) FROM server_app_feedback_replies").Scan(&left); err != nil || left != 0 {
+		t.Fatalf("replies outlived their report: %d %v", left, err)
+	}
+}
+
 func TestChatCodingProviderUsesConfiguredEndpointAndBoundedThinking(t *testing.T) {
 	server, _, _ := testServer(t)
 	server.Cfg.ChatAPIKey = "coding-key"

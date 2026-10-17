@@ -16,11 +16,29 @@ type Feedback struct {
 	Message      string "json:\"message\""
 	Context      string "json:\"context\""
 	Reply        string "json:\"reply\""
+	ReplyId      string "json:\"reply_id,omitempty\""
 	CreatedAt    string "json:\"created_at\""
 }
 
 type FeedbackList struct {
 	Feedback []Feedback "json:\"feedback\""
+}
+
+const RepliesQuery = "SELECT id,app_id,'','','',reply,created_at FROM (SELECT id,app_id,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
+
+func FeedbackHttp_ReplyId(value string) bool {
+	if int64(len(value)) != 64 {
+		return false
+	}
+	for it_index := int64(0); it_index < int64(len(value)); it_index++ {
+		byte := value[it_index]
+		digit := byte >= 48 && byte <= 57
+		letter := byte >= 97 && byte <= 102
+		if !digit && !letter {
+			return false
+		}
+	}
+	return true
 }
 
 func FeedbackHttp_RequireOperator(service Chat, writer ResponseWriter, request *Request) bool {
@@ -112,7 +130,7 @@ func FeedbackHttp_List(service Chat, writer ResponseWriter, request *Request, ad
 	value_1[0] = user
 	arguments := value_1
 	_ = arguments
-	query := "SELECT id,app_id,title,message,context,reply,created_at FROM server_app_feedback WHERE account_id=?1 ORDER BY created_at DESC,id DESC LIMIT 100"
+	query := "SELECT f.id,f.app_id,f.title,f.message,f.context,COALESCE((SELECT r.reply FROM server_app_feedback_replies r WHERE r.account_id=f.account_id AND r.report_id=f.id ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1),f.reply),f.created_at FROM server_app_feedback f WHERE f.account_id=?1 ORDER BY f.created_at DESC,f.id DESC LIMIT 100"
 	var value_2 [2]Any
 	value_2[0] = user
 	value_2[1] = "0"
@@ -139,10 +157,10 @@ func FeedbackHttp_List(service Chat, writer ResponseWriter, request *Request, ad
 		if offset != "" {
 			page_arguments[1] = offset
 		}
-		query = "SELECT id,app_id,'','','',reply,created_at FROM server_app_feedback WHERE account_id=?1 AND reply<>'' ORDER BY created_at DESC,id DESC LIMIT 2 OFFSET ?2"
+		query = "SELECT id,app_id,'','','',reply,created_at FROM (SELECT id,app_id,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
 	}
 	if admin {
-		query = "SELECT f.id,f.app_id,f.title,f.message,f.context,f.reply,f.created_at,f.account_id,COALESCE(u.alias,'') FROM server_app_feedback f LEFT JOIN server_users u ON u.user_id_hash=f.account_id ORDER BY f.created_at DESC,f.id DESC LIMIT 100"
+		query = "SELECT f.id,f.app_id,f.title,f.message,f.context,COALESCE((SELECT r.reply FROM server_app_feedback_replies r WHERE r.account_id=f.account_id AND r.report_id=f.id ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1),f.reply),f.created_at,f.account_id,COALESCE(u.alias,'') FROM server_app_feedback f LEFT JOIN server_users u ON u.user_id_hash=f.account_id ORDER BY f.created_at DESC,f.id DESC LIMIT 100"
 	}
 	var value_5 Context = StdHttpGo_Context(request)
 	var value_6 []Any = nil
@@ -200,6 +218,51 @@ func FeedbackHttp_List(service Chat, writer ResponseWriter, request *Request, ad
 	Response_JSON(writer, int(200), value)
 }
 
+func FeedbackHttp_AddReply(service Chat, writer ResponseWriter, request *Request, input Feedback) {
+	var value_0 [4]Any
+	value_0[0] = input.AccountId
+	value_0[1] = input.ID
+	value_0[2] = input.ReplyId
+	value_0[3] = input.Reply
+	arguments := value_0
+	_ = arguments
+	var value_1 Context = StdHttpGo_Context(request)
+	var value_2 string = "INSERT INTO server_app_feedback_replies(account_id,report_id,id,reply) SELECT ?1,?2,?3,?4 WHERE EXISTS(SELECT 1 FROM server_app_feedback WHERE account_id=?1 AND id=?2) ON CONFLICT(account_id,id) DO NOTHING"
+	written := StdSqlGo_Exec(service.Database, value_1, value_2, arguments[0:4:4])
+	if written.Error != nil {
+		Response_Error(writer, int(503), "feedback unavailable")
+		return
+	}
+	var report string = ""
+	var reply string = ""
+	var value_3 [2]Any
+	value_3[0] = &(report)
+	value_3[1] = &(reply)
+	destinations := value_3
+	_ = destinations
+	var value_4 [2]Any
+	value_4[0] = input.AccountId
+	value_4[1] = input.ReplyId
+	keys := value_4
+	_ = keys
+	var value_5 Context = StdHttpGo_Context(request)
+	row := StdSqlGo_QueryRow(service.Database, value_5, "SELECT report_id,reply FROM server_app_feedback_replies WHERE account_id=?1 AND id=?2", keys[0:2:2])
+	scanned := StdSqlGo_ScanRow(row, destinations[0:2:2])
+	if StdErrorsGo_Is(scanned, StdSqlGo_NoRows()) {
+		Response_Error(writer, int(404), "feedback not found")
+		return
+	}
+	if scanned != nil {
+		Response_Error(writer, int(503), "feedback unavailable")
+		return
+	}
+	if report != input.ID || reply != input.Reply {
+		Response_Error(writer, int(409), "reply ID already used")
+		return
+	}
+	Response_JSON(writer, int(200), input.ID)
+}
+
 func FeedbackHttp_Reply(service Chat, writer ResponseWriter, request *Request) {
 	var value_0 bool = FeedbackHttp_RequireOperator(service, writer, request)
 	if !value_0 {
@@ -219,18 +282,33 @@ func FeedbackHttp_Reply(service Chat, writer ResponseWriter, request *Request) {
 		var value_6 bool = strings.TrimSpace(input.Reply) == ""
 		value_5 = value_6
 	}
-	if value_5 || int64(len(input.Reply)) > 4096 {
+	var value_7 bool = value_5 || int64(len(input.Reply)) > 4096
+	var value_8 bool = value_7
+	if !value_8 {
+		var value_9 bool = input.ReplyId != ""
+		var value_10 bool = value_9
+		if value_10 {
+			var value_11 bool = FeedbackHttp_ReplyId(input.ReplyId)
+			value_10 = !value_11
+		}
+		value_8 = value_10
+	}
+	if value_8 {
 		Response_Error(writer, int(400), "invalid feedback reply")
 		return
 	}
-	var value_7 [3]Any
-	value_7[0] = input.Reply
-	value_7[1] = input.ID
-	value_7[2] = input.AccountId
-	arguments := value_7
+	if input.ReplyId != "" {
+		FeedbackHttp_AddReply(service, writer, request, input)
+		return
+	}
+	var value_12 [3]Any
+	value_12[0] = input.Reply
+	value_12[1] = input.ID
+	value_12[2] = input.AccountId
+	arguments := value_12
 	_ = arguments
-	var value_8 Context = StdHttpGo_Context(request)
-	written := StdSqlGo_Exec(service.Database, value_8, "UPDATE server_app_feedback SET reply=?1 WHERE id=?2 AND account_id=?3", arguments[0:3:3])
+	var value_13 Context = StdHttpGo_Context(request)
+	written := StdSqlGo_Exec(service.Database, value_13, "UPDATE server_app_feedback SET reply=?1 WHERE id=?2 AND account_id=?3", arguments[0:3:3])
 	if written.Error != nil {
 		Response_Error(writer, int(503), "feedback unavailable")
 		return

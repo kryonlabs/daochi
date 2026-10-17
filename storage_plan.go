@@ -17,7 +17,6 @@ type Plan struct {
 	Error      Error  "json:\"-\""
 }
 
-const FreeBytes = 10485760
 const PaidBytes = 1073741824
 const LargeBytes = 5368709120
 const UnitsPerDew = 1000000
@@ -47,12 +46,12 @@ func StoragePlan_ReadTx(transaction *Transaction, context Context, user string) 
 	return result
 }
 
-func StoragePlan_SnapshotTx(transaction *Transaction, context Context, user string, now int64) Plan {
+func StoragePlan_SnapshotTx(transaction *Transaction, context Context, user string, now int64, free int64) Plan {
 	result := StoragePlan_ReadTx(transaction, context, user)
 	if result.Error != nil {
 		return result
 	}
-	result.LimitBytes = StoragePlan_ActiveBytes(result, now)
+	result.LimitBytes = StoragePlan_ActiveBytes(result, now, free)
 	balance := TokenLedger_BalanceTx(transaction, context, user, "waozi:token")
 	result.Balance = balance.Value
 	result.Error = balance.Error
@@ -73,9 +72,9 @@ func StoragePlan_SizeBytes(size string) int64 {
 	return 0
 }
 
-func StoragePlan_ActiveBytes(plan Plan, now int64) int64 {
+func StoragePlan_ActiveBytes(plan Plan, now int64, free int64) int64 {
 	if plan.ExpiresAt <= now {
-		return 10485760
+		return free
 	}
 	bytes := StoragePlan_SizeBytes(plan.Size)
 	if bytes == 0 {
@@ -193,11 +192,11 @@ func StoragePlan_LimitTx(transaction *Transaction, context Context, user string,
 	}
 	plan := StoragePlan_ReadTx(transaction, context, user)
 	result.Error = plan.Error
-	result.Value = StoragePlan_ActiveBytes(plan, now)
+	result.Value = StoragePlan_ActiveBytes(plan, now, baseline)
 	return result
 }
 
-func StoragePlan_Read(database *Database, context Context, user string, now int64) Plan {
+func StoragePlan_Read(database *Database, context Context, user string, now int64, free int64) Plan {
 	var result Plan = Plan{}
 	opened := StdSqlGo_Begin(database, context, nil)
 	result.Error = opened.Error
@@ -205,10 +204,10 @@ func StoragePlan_Read(database *Database, context Context, user string, now int6
 		return result
 	}
 	defer (*sql.Tx).Rollback(opened.Value)
-	return StoragePlan_SnapshotTx(opened.Value, context, user, now)
+	return StoragePlan_SnapshotTx(opened.Value, context, user, now, free)
 }
 
-func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey, user string, size string, period string, key string, now int64) Plan {
+func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey, user string, size string, period string, key string, now int64, free int64) Plan {
 	var result Plan = Plan{}
 	price := StoragePlan_Price(size, period)
 	if price == 0 {
@@ -242,7 +241,7 @@ func StoragePlan_Purchase(database *Database, context Context, signer PrivateKey
 			result.Error = value_4
 			return result
 		}
-		return StoragePlan_SnapshotTx(transaction, context, user, now)
+		return StoragePlan_SnapshotTx(transaction, context, user, now, free)
 	}
 	var value_5 bool = StdErrorsGo_Is(previous, StdSqlGo_NoRows())
 	if !value_5 {

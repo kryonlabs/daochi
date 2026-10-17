@@ -14,7 +14,8 @@ errors :: #import "std/errors_go";
 native :: #system_library "go:database/sql";
 go_time :: #system_library "go:time";
 
-FreeBytes :: 10485760
+// The free allowance is not fixed here: it is the node's account storage
+// limit (DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES), passed in as free.
 PaidBytes :: 1073741824
 LargeBytes :: 5368709120
 Sizes: [2]string = .["1gb", "5gb"];
@@ -48,12 +49,13 @@ ReadTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string) ->
     return result
 }
 
-SnapshotTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string, now: s64) -> Plan {
+SnapshotTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string, now: s64,
+    free: s64) -> Plan {
     result := ReadTx(transaction, context, user)
     if result.error != null {
         return result
     }
-    result.limit_bytes = ActiveBytes(result, now)
+    result.limit_bytes = ActiveBytes(result, now, free)
     balance := ledger.BalanceTx(transaction, context, user, receipts.AssetID)
     result.balance = balance.value
     result.error = balance.error
@@ -87,10 +89,11 @@ SizeBytes :: (size: string) -> s64 {
     return 0
 }
 
-// An unexpired plan's allowance. Rows from before sizes existed are 1 GB.
-ActiveBytes :: (plan: Plan, now: s64) -> s64 {
+// An unexpired plan's allowance, or the node's free allowance. Rows from
+// before sizes existed are 1 GB.
+ActiveBytes :: (plan: Plan, now: s64, free: s64) -> s64 {
     if plan.expires_at <= now {
-        return FreeBytes
+        return free
     }
     bytes := SizeBytes(plan.size)
     if bytes == 0 {
@@ -209,11 +212,11 @@ LimitTx :: (transaction: *sql.Transaction, context: ctx.Context, user: string,
     }
     plan := ReadTx(transaction, context, user)
     result.error = plan.error
-    result.value = ActiveBytes(plan, now)
+    result.value = ActiveBytes(plan, now, baseline)
     return result
 }
 
-Read :: (database: *sql.Database, context: ctx.Context, user: string, now: s64) -> Plan {
+Read :: (database: *sql.Database, context: ctx.Context, user: string, now: s64, free: s64) -> Plan {
     result: Plan
     opened := sql.Begin(database, context, null)
     result.error = opened.error
@@ -221,11 +224,11 @@ Read :: (database: *sql.Database, context: ctx.Context, user: string, now: s64) 
         return result
     }
     RollbackAtReturn(opened.value)
-    return SnapshotTx(opened.value, context, user, now)
+    return SnapshotTx(opened.value, context, user, now, free)
 }
 
 Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
-    user: string, size: string, period: string, key: string, now: s64) -> Plan {
+    user: string, size: string, period: string, key: string, now: s64, free: s64) -> Plan {
     result: Plan
     price := Price(size, period)
     if price == 0 {
@@ -249,7 +252,7 @@ Purchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKe
             result.error = errors.New("storage request id reused")
             return result
         }
-        return SnapshotTx(transaction, context, user, now)
+        return SnapshotTx(transaction, context, user, now, free)
     }
     if !errors.Is(previous, sql.NoRows()) {
         result.error = previous

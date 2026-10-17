@@ -117,7 +117,8 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 		var value_15 string = command.Size
 		var value_16 string = command.Period
 		var value_17 string = command.RequestId
-		purchased := StoragePlan_Purchase(accounts.Database, value_13, value_14, user.Value, value_15, value_16, value_17, StdTimeGo_Unix(StdTimeGo_Now()))
+		var value_18 int64 = StdTimeGo_Unix(StdTimeGo_Now())
+		purchased := StoragePlan_Purchase(accounts.Database, value_13, value_14, user.Value, value_15, value_16, value_17, value_18, accounts.Configuration.AccountStorageLimitBytes)
 		if purchased.Error != nil {
 			if StdErrorsGo_Message(purchased.Error) == "insufficient balance" {
 				Response_Error(writer, 402, "not enough Dew")
@@ -131,7 +132,9 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 			return
 		}
 	}
-	plan := StoragePlan_Read(accounts.Database, StdHttpGo_Context(request), user.Value, StdTimeGo_Unix(StdTimeGo_Now()))
+	var value_19 Context = StdHttpGo_Context(request)
+	var value_20 int64 = StdTimeGo_Unix(StdTimeGo_Now())
+	plan := StoragePlan_Read(accounts.Database, value_19, user.Value, value_20, accounts.Configuration.AccountStorageLimitBytes)
 	usage := AccountStorage_Used(accounts.Database, StdHttpGo_Context(request), user.Value)
 	if plan.Error != nil || usage.Error != nil {
 		Response_Error(writer, 503, "storage balance unavailable")
@@ -143,7 +146,7 @@ func StoragePlanHttp_Handle(accounts Accounts, writer ResponseWriter, request *R
 	value.Enabled = available
 	value.Plan = plan
 	value.UsedBytes = usage.Value
-	value.FreeBytes = 10485760
+	value.FreeBytes = accounts.Configuration.AccountStorageLimitBytes
 	value.UnitsPerDew = 1000000
 	value.Plans = StoragePlanHttp_Offers(atomic, units)
 	standard := value.Plans[0]

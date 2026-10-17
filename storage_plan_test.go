@@ -13,6 +13,9 @@ import (
 	"time"
 )
 
+// The free allowance comes from the node's configured account storage limit.
+const testFreeBytes int64 = 20971520
+
 func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 	server, store, _ := testServer(t)
 	public, private, err := ed25519.GenerateKey(nil)
@@ -22,6 +25,7 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 	server.Cfg.WaoziIssuerPublicKey = public
 	server.Cfg.WaoziIssuerPrivateKey = private
 	server.Cfg.StoragePlansEnabled = true
+	server.Cfg.AccountStorageLimitBytes = testFreeBytes
 	server.Cfg.MoneroRateAtomicAmount = 1000000000
 	server.Cfg.MoneroRateTokenUnits = UnitsPerDew
 	handler := server.Routes()
@@ -55,12 +59,12 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 		t.Fatalf("fixed XMR prices: %v", status)
 	}
 	offers, _ := json.Marshal(status["plans"])
-	if status["free_bytes"] != float64(FreeBytes) || string(offers) != `[`+
+	if status["free_bytes"] != float64(testFreeBytes) || string(offers) != `[`+
 		`{"limit_bytes":1073741824,"monthly_units":2000000,"monthly_xmr_atomic_units":2000000000,"size":"1gb","yearly_units":20000000,"yearly_xmr_atomic_units":20000000000},`+
 		`{"limit_bytes":5368709120,"monthly_units":6000000,"monthly_xmr_atomic_units":6000000000,"size":"5gb","yearly_units":60000000,"yearly_xmr_atomic_units":60000000000}]` {
 		t.Fatalf("plans: %v %s", status["free_bytes"], offers)
 	}
-	if got := status["plan"].(map[string]any); got["balance"] != float64(24*UnitsPerDew) || got["limit_bytes"] != float64(FreeBytes) || got["size"] != "" {
+	if got := status["plan"].(map[string]any); got["balance"] != float64(24*UnitsPerDew) || got["limit_bytes"] != float64(testFreeBytes) || got["size"] != "" {
 		t.Fatalf("free plan: %v", got)
 	}
 	if got := read(other.Token)["plan"].(map[string]any)["balance"]; got != float64(0) {
@@ -73,7 +77,7 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 			t.Fatalf("purchase %d: %s", res.Code, res.Body.String())
 		}
 	}
-	plan := StoragePlan_Read(store.Database, ctx, owner.UserID, time.Now().Unix())
+	plan := StoragePlan_Read(store.Database, ctx, owner.UserID, time.Now().Unix(), testFreeBytes)
 	if plan.Error != nil || plan.Balance != 22*UnitsPerDew || plan.LimitBytes != PaidBytes || plan.Size != "1gb" {
 		t.Fatalf("paid plan: %+v", plan)
 	}
@@ -83,30 +87,30 @@ func TestStoragePlansChargeOnceAndExpire(t *testing.T) {
 	if reused.Code != 409 {
 		t.Fatalf("reused key: %d %s", reused.Code, reused.Body.String())
 	}
-	year := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "yearly", "storage-yearly-fixture", time.Now().Unix())
+	year := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "yearly", "storage-yearly-fixture", time.Now().Unix(), testFreeBytes)
 	if year.Error != nil || year.Balance != 2*UnitsPerDew || year.ExpiresAt != StoragePlan_PeriodEnd(monthlyEnd, "yearly") {
 		t.Fatalf("yearly extension: %+v", year)
 	}
-	ended := StoragePlan_Read(store.Database, ctx, owner.UserID, year.ExpiresAt)
-	if ended.Error != nil || ended.LimitBytes != FreeBytes {
+	ended := StoragePlan_Read(store.Database, ctx, owner.UserID, year.ExpiresAt, testFreeBytes)
+	if ended.Error != nil || ended.LimitBytes != testFreeBytes {
 		t.Fatalf("expired allowance: %+v", ended)
 	}
-	limited := AccountStorage_Limit(store.Database, ctx, owner.UserID, 5, true)
+	limited := AccountStorage_Limit(store.Database, ctx, owner.UserID, testFreeBytes, true)
 	if limited.Error != nil || limited.Value != PaidBytes {
 		t.Fatalf("paid sync allowance: %+v", limited)
 	}
-	limited = AccountStorage_Limit(store.Database, ctx, other.UserID, 5, true)
-	if limited.Error != nil || limited.Value != FreeBytes {
+	limited = AccountStorage_Limit(store.Database, ctx, other.UserID, testFreeBytes, true)
+	if limited.Error != nil || limited.Value != testFreeBytes {
 		t.Fatalf("other account allowance: %+v", limited)
 	}
 	if _, err := store.Database.Exec("UPDATE server_storage_plans SET expires_at=0 WHERE user_id=?", owner.UserID); err != nil {
 		t.Fatal(err)
 	}
-	limited = AccountStorage_Limit(store.Database, ctx, owner.UserID, 5, true)
-	if limited.Error != nil || limited.Value != FreeBytes {
+	limited = AccountStorage_Limit(store.Database, ctx, owner.UserID, testFreeBytes, true)
+	if limited.Error != nil || limited.Value != testFreeBytes {
 		t.Fatalf("expired sync allowance: %+v", limited)
 	}
-	if !AccountStorage_Exceeds(PaidBytes, PaidBytes+1, FreeBytes) || AccountStorage_Exceeds(PaidBytes, PaidBytes-1, FreeBytes) {
+	if !AccountStorage_Exceeds(PaidBytes, PaidBytes+1, testFreeBytes) || AccountStorage_Exceeds(PaidBytes, PaidBytes-1, testFreeBytes) {
 		t.Fatal("expiry must block growth and allow freeing space")
 	}
 }
@@ -150,7 +154,7 @@ func TestStoragePlanRejectsInvalidUnaffordableAndRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "monthly", "rollback-request", time.Now().Unix())
+	failed := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "monthly", "rollback-request", time.Now().Unix(), testFreeBytes)
 	if failed.Error == nil || !strings.Contains(failed.Error.Error(), "fixture failure") {
 		t.Fatalf("expected transaction failure: %+v", failed)
 	}
@@ -292,43 +296,43 @@ func TestStoragePlanSizeChangesConvertRemainingTime(t *testing.T) {
 	}
 	day := int64(86400)
 	start := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
-	small := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "monthly", "size-small", start)
+	small := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "monthly", "size-small", start, testFreeBytes)
 	if small.Error != nil || small.ExpiresAt != start+31*day || small.LimitBytes != PaidBytes || small.Balance != 98*UnitsPerDew {
 		t.Fatalf("1 GB month: %+v", small)
 	}
 	// Thirty days of 1 GB left become ten days of 5 GB, then a month.
 	now := start + day
-	large := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "5gb", "monthly", "size-large", now)
+	large := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "5gb", "monthly", "size-large", now, testFreeBytes)
 	if large.Error != nil || large.Size != "5gb" || large.LimitBytes != LargeBytes || large.Balance != 92*UnitsPerDew ||
 		large.ExpiresAt != StoragePlan_PeriodEnd(now+10*day, "monthly") {
 		t.Fatalf("5 GB month: %+v", large)
 	}
-	read := StoragePlan_Read(store.Database, ctx, owner.UserID, now)
+	read := StoragePlan_Read(store.Database, ctx, owner.UserID, now, testFreeBytes)
 	if read.Error != nil || read.Size != "5gb" || read.LimitBytes != LargeBytes || read.ExpiresAt != large.ExpiresAt {
 		t.Fatalf("5 GB plan: %+v", read)
 	}
-	if limited := AccountStorage_Limit(store.Database, ctx, owner.UserID, 5, true); limited.Error != nil || limited.Value != LargeBytes {
+	if limited := AccountStorage_Limit(store.Database, ctx, owner.UserID, testFreeBytes, true); limited.Error != nil || limited.Value != LargeBytes {
 		t.Fatalf("5 GB sync allowance: %+v", limited)
 	}
 	// Another 5 GB month extends from the current end.
-	longer := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "5gb", "monthly", "size-large-again", now)
+	longer := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "5gb", "monthly", "size-large-again", now, testFreeBytes)
 	if longer.Error != nil || longer.ExpiresAt != StoragePlan_PeriodEnd(large.ExpiresAt, "monthly") {
 		t.Fatalf("5 GB extension: %+v", longer)
 	}
 	// Back to 1 GB: each remaining 5 GB second becomes three 1 GB seconds.
 	later := now + 2*day
-	smaller := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "monthly", "size-small-again", later)
+	smaller := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "1gb", "monthly", "size-small-again", later, testFreeBytes)
 	if smaller.Error != nil || smaller.Size != "1gb" || smaller.LimitBytes != PaidBytes ||
 		smaller.ExpiresAt != StoragePlan_PeriodEnd(later+3*(longer.ExpiresAt-later), "monthly") {
 		t.Fatalf("back to 1 GB: %+v", smaller)
 	}
 	// A retry returns the recorded purchase; another size or period for the same ID is refused.
-	retry := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "5gb", "monthly", "size-large", later)
+	retry := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, "5gb", "monthly", "size-large", later, testFreeBytes)
 	if retry.Error != nil || retry.Balance != smaller.Balance || retry.Size != "1gb" {
 		t.Fatalf("retry: %+v", retry)
 	}
 	for _, reused := range []struct{ size, period string }{{"1gb", "monthly"}, {"5gb", "yearly"}} {
-		if got := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, reused.size, reused.period, "size-large", later); got.Error == nil ||
+		if got := StoragePlan_Purchase(store.Database, ctx, private, owner.UserID, reused.size, reused.period, "size-large", later, testFreeBytes); got.Error == nil ||
 			got.Error.Error() != "storage request id reused" {
 			t.Fatalf("reused %+v: %+v", reused, got)
 		}
@@ -399,7 +403,7 @@ INSERT INTO server_storage_purchases(user_id,request_id,period,expires_at,receip
 	if err := store.Database.QueryRow(`SELECT size FROM server_storage_purchases WHERE request_id='old'`).Scan(&purchase); err != nil || purchase != "1gb" {
 		t.Fatalf("purchase size: %q, %v", purchase, err)
 	}
-	limit := AccountStorage_Limit(store.Database, context.Background(), "paid-before-sizes", 5, true)
+	limit := AccountStorage_Limit(store.Database, context.Background(), "paid-before-sizes", testFreeBytes, true)
 	if limit.Error != nil || limit.Value != PaidBytes {
 		t.Fatalf("allowance before sizes: %+v", limit)
 	}

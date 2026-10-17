@@ -31,6 +31,9 @@ ReleaseV2 :: struct {
     Artifacts: []Artifact #go_tag "json:\"artifacts\""
     Dependencies: []Dependency #go_tag "json:\"dependencies\""
     Signature: string #go_tag "json:\"signature\""
+    // "beta" keeps an app out of app lists until a person asks to see beta
+    // apps. It only changes who sees the app; the release stays signed.
+    Channel: string #go_tag "json:\"channel,omitempty\""
 }
 
 #scope_file
@@ -84,7 +87,8 @@ Valid :: (release: ReleaseV2, appID: string) -> bool {
     release.ModuleAPI <= 0 || release.DataSchema < 0 ||
     !identity.ValidNamespace(release.KeyID) ||
     release.Artifacts.count < 1 || release.Artifacts.count > 2 ||
-    release.Dependencies.count > 64 {
+    release.Dependencies.count > 64 ||
+    (release.Channel != "" && release.Channel != "beta") {
         return false
     }
     index: s64 = 0

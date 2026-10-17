@@ -33,15 +33,16 @@ type ReleaseV2 struct {
 	Artifacts    []Artifact   "json:\"artifacts\""
 	Dependencies []Dependency "json:\"dependencies\""
 	Signature    string       "json:\"signature\""
+	Channel      string       "json:\"channel,omitempty\""
 }
 
-type zir_b8622117a5354859_Decoded struct {
+type zir_1b7c73ebd7fbf0d4_Decoded struct {
 	Value []uint8
 	Error Error
 }
 
-func PackageRelease_Decode(Value string) zir_b8622117a5354859_Decoded {
-	var result zir_b8622117a5354859_Decoded
+func PackageRelease_Decode(Value string) zir_1b7c73ebd7fbf0d4_Decoded {
+	var result zir_1b7c73ebd7fbf0d4_Decoded
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }
@@ -106,25 +107,26 @@ func PackageRelease_Valid(release ReleaseV2, appID string) bool {
 		var value_6 bool = Identity_ValidNamespace(release.KeyID)
 		value_5 = !value_6
 	}
-	if value_5 || int64(len(release.Artifacts)) < 1 || int64(len(release.Artifacts)) > 2 || int64(len(release.Dependencies)) > 64 {
+	var value_7 bool = value_5 || int64(len(release.Artifacts)) < 1 || int64(len(release.Artifacts)) > 2 || int64(len(release.Dependencies)) > 64
+	if value_7 || (release.Channel != "" && release.Channel != "beta") {
 		return false
 	}
 	var index int64 = 0
 	for index < int64(len(release.Artifacts)) {
 		artifact := release.Artifacts[index]
-		var value_7 string = ""
+		var value_8 string = ""
 		if index == 0 {
-			value_7 = "module"
+			value_8 = "module"
 		} else {
-			value_7 = "standalone"
+			value_8 = "standalone"
 		}
-		expected := value_7
-		var value_8 bool = artifact.Variant != expected || artifact.Size < 8
-		if !value_8 {
-			var value_9 bool = PackageRelease_HashValid(artifact.SHA256)
-			value_8 = !value_9
+		expected := value_8
+		var value_9 bool = artifact.Variant != expected || artifact.Size < 8
+		if !value_9 {
+			var value_10 bool = PackageRelease_HashValid(artifact.SHA256)
+			value_9 = !value_10
 		}
-		if value_8 {
+		if value_9 {
 			return false
 		}
 		index++
@@ -132,26 +134,26 @@ func PackageRelease_Valid(release ReleaseV2, appID string) bool {
 	index = 0
 	for index < int64(len(release.Dependencies)) {
 		dependency := release.Dependencies[index]
-		var value_10 bool = Identity_ValidNamespace(dependency.AppID)
-		var value_11 bool = !value_10 || dependency.AppID == appID
-		if !value_11 {
-			var value_12 bool = PackageRelease_VersionValid(dependency.Version)
-			value_11 = !value_12
+		var value_11 bool = Identity_ValidNamespace(dependency.AppID)
+		var value_12 bool = !value_11 || dependency.AppID == appID
+		if !value_12 {
+			var value_13 bool = PackageRelease_VersionValid(dependency.Version)
+			value_12 = !value_13
 		}
-		var value_13 bool = value_11 || dependency.Size < 8
-		if !value_13 {
-			var value_14 bool = PackageRelease_HashValid(dependency.SHA256)
-			value_13 = !value_14
+		var value_14 bool = value_12 || dependency.Size < 8
+		if !value_14 {
+			var value_15 bool = PackageRelease_HashValid(dependency.SHA256)
+			value_14 = !value_15
 		}
-		if value_13 {
+		if value_14 {
 			return false
 		}
-		var value_15 bool = index > 0
-		if value_15 {
-			var value_16 bool = strings.Compare((release.Dependencies[(index-1)]).AppID, dependency.AppID) >= 0
-			value_15 = value_16
+		var value_16 bool = index > 0
+		if value_16 {
+			var value_17 bool = strings.Compare((release.Dependencies[(index-1)]).AppID, dependency.AppID) >= 0
+			value_16 = value_17
 		}
-		if value_15 {
+		if value_16 {
 			return false
 		}
 		index++

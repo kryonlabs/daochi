@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -94,6 +95,20 @@ func TestIndependentPackageReleases(t *testing.T) {
 	}
 	if get("diary/latest", 200).Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("latest must not be cached")
+	}
+	// A beta release keeps its channel when served, so apps can hide it.
+	betaDiary := makeRelease("diary", 2, "1.0.1")
+	betaDiary.Channel = "beta"
+	stage(betaDiary)
+	var served ReleaseV2
+	if err := json.Unmarshal(get("diary/latest", 200).Body.Bytes(), &served); err != nil {
+		t.Fatal(err)
+	}
+	if served.Channel != "beta" {
+		t.Fatal("the beta channel was dropped")
+	}
+	if strings.Contains(get("inbe/latest", 200).Body.String(), "channel") {
+		t.Fatal("a release without a channel gained one")
 	}
 	invalid := newDiary
 	invalid.HostAPI = 2 // Compatibility metadata is signed too.
@@ -258,5 +273,14 @@ func TestPackageReleaseDescriptorValidation(t *testing.T) {
 	}
 	if PackageRelease_Valid(invalid, "diary") {
 		t.Fatal("accepted duplicate dependencies")
+	}
+	beta := valid
+	beta.Channel = "beta"
+	if !PackageRelease_Valid(beta, "diary") {
+		t.Fatal("rejected a beta release")
+	}
+	beta.Channel = "nightly"
+	if PackageRelease_Valid(beta, "diary") {
+		t.Fatal("accepted an unknown channel")
 	}
 }

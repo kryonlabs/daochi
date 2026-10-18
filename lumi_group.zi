@@ -16,7 +16,51 @@ regexp :: #system_library "go:regexp";
 Pattern :: #type #foreign regexp "Regexp";
 Compile :: (pattern: string) -> *Pattern #foreign regexp "MustCompile";
 Match :: (pattern: *Pattern, value: string) -> bool #foreign regexp "(*Regexp).MatchString";
-Address: *Pattern = Compile("(?i)(^|[ \t\r\n])@inlumi_bot($|[ \t\r\n,!.?:;])|^/[a-z_]+@inlumi_bot($|[ \t\r\n])");
+Address: *Pattern = Compile("(?i)(^|[ \t\r\n])@inlumi_bot($|[ \t\r\n,!.?:;])|^/[a-z_]+@inlumi_bot($|[ \t\r\n])|^(?:(?:hi|hey|hello|yo|thanks|thank you)[ ,!.\t]*)?lumi($|[ ,!.?:;\t\r\n])|\\b(?:you|your|u)\\b[^\r\n]{0,160}[ ,\t]+lumi[ !?.]*$|,[ \t]*lumi[ !?.]*$");
+AppTopic: *Pattern = Compile("(?i)\\b(?:inner[ \t_-]*breeze|inbe)\\b");
+AppActivity: *Pattern = Compile("(?i)\\b(?:breath(?:e|ing|work)?|meditat(?:e|ion|ing)|mindful(?:ness)?|habits?|streaks?|journals?|journaling|diary|diaries|practices?)\\b");
+PrivateAction: *Pattern = Compile("(?i)\\b(?:show|read|list|fetch|get|access|display|delete|remove|edit)\\s+(?:me\\s+)?(?:my|our)\\s+(?:inner\\s+breeze\\s+)?(?:account|tasks?|todos?|habits?|diary|journal|progress|streaks?|settings|data)\\b|\\bwhat\\s+(?:are|is)\\s+my\\s+(?:tasks?|habits?|progress|streaks?)\\b|^(?:(?:@inlumi_bot|lumi)[,: ]*)?(?:please\\s+)?(?:add|create|delete|remove|edit|complete|mark|record|save|change|set)\\b.{0,100}\\b(?:tasks?|todos?|habits?|diary|journals?|settings|account)\\b");
+HomeQuestion: *Pattern = Compile("(?i)\\b(?:where\\s+(?:do\\s+you\\s+live|are\\s+you(?:\\s+from|\\s+based)?)|your\\s+(?:home|location)|do\\s+you\\s+(?:live|have\\s+a\\s+home))\\b");
+SocialGreeting: *Pattern = Compile("(?i)\\b(?:hi|hey|hello|thanks|thank\\s+you|pleasure|nice\\s+to\\s+meet|doing\\s+(?:well|good|great)|how\\s+are\\s+you)\\b");
+
+Decision :: struct {
+    model: bool
+    reply: string
+}
+
+// Run before typing, reserving quota, or constructing any model request.
+// A direct off-topic question receives a brief local answer, never an LLM call.
+Decide :: (input: string, replying: bool) -> Decision {
+    result: Decision
+    parsed := commands.Parse(input)
+    if parsed.foreign {
+        return result
+    }
+    directed := replying || Match(Address, input)
+    related := Match(AppTopic, input) || (directed && Match(AppActivity, input))
+    if !directed && !related {
+        return result
+    }
+    if Match(PrivateAction, input) || (directed && parsed.name != "" &&
+    parsed.name != "start" && parsed.name != "help" && parsed.name != "app" && parsed.name != "history") {
+        result.reply = "I can't access anyone's Inner Breeze account in a group chat. Use your connected private chat with me or open Inner Breeze for personal tasks, habits and diary entries."
+        return result
+    }
+    if directed && Match(HomeQuestion, input) {
+        result.reply = "I live in Inner Breeze 🌿 I'm its companion, so I don't have a physical home."
+        return result
+    }
+    if related {
+        result.model = true
+        return result
+    }
+    if parsed.name == "start" || parsed.name == "help" || parsed.name == "app" || parsed.name == "history" || Match(SocialGreeting, input) {
+        result.reply = "Hi 🌿 I'm Lumi, the Inner Breeze companion. I can help with breathing, habits, journaling and using the app. Your account is available only in your connected private chat or inside Inner Breeze."
+        return result
+    }
+    result.reply = "I'm Lumi, the Inner Breeze companion 🌿 I can help with Inner Breeze, breathing, habits and journaling. I'll leave other topics to the group."
+    return result
+}
 
 Handle :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request,
     update: s64, destination: s64, owner: s64, message: s64, thread: s64,
@@ -27,9 +71,9 @@ Handle :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Reque
         response.JSON(writer, 200, true)
         return
     }
-    parsed := commands.Parse(input)
     bot := telegram.BotID(configuration.LumiBotToken)
-    if parsed.foreign || (!Match(Address, input) && (bot <= 0 || replyBot != bot)) {
+    decision := Decide(input, bot > 0 && replyBot == bot)
+    if !decision.model && decision.reply == "" {
         response.JSON(writer, 200, true)
         return
     }
@@ -57,8 +101,11 @@ Handle :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Reque
         response.JSON(writer, 200, true)
         return
     }
-    unused transport.Typing(configuration.LumiBotToken, destination)
-    content := chat.GroupReply(service, writer, request, input)
+    content := decision.reply
+    if decision.model {
+        unused transport.Typing(configuration.LumiBotToken, destination)
+        content = chat.GroupReply(service, writer, request, input)
+    }
     delivered := transport.DeliverReply(configuration.LumiBotToken, destination, message, thread, content)
     state := ifx delivered.message_id > 0 then "delivered" else "uncertain"
     if delivered.message_id == 0 {

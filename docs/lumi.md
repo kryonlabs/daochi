@@ -83,17 +83,29 @@ their argument text. Empty required arguments receive usage instructions.
 
 The owner can also enable Lumi in the private Agent Lab group with
 `DAOCHI_LUMI_GROUP_ID` (the negative Telegram group ID).
-It defaults to disabled. Lumi answers group members' explicit
-`@inlumi_bot` mentions, commands addressed to Lumi, and replies to Lumi in
-that group. This uses the existing webhook, model and daily allowances;
-no additional poller is started. Group conversation does not load personal
-app context or execute app tools. Private-chat input remains unchanged.
+It defaults to disabled. A local regex check runs before typing or spending
+model allowance. Unrelated group chatter is ignored. Inner Breeze questions
+can use the existing model; breathing, meditation, habit and journal questions
+also qualify when addressed to Lumi or sent as a reply to it. Standalone
+names such as `Lumi, ...` and `where do you live lumi?` count as direct address,
+without matching words such as `luminous` or `Lumi_bot_fake`.
+
+Direct greetings, simple personal questions, help commands, off-topic direct
+requests and account-action requests receive short built-in replies and use
+no model tokens. Only Inner Breeze explanations use the model, with a bounded
+group reply budget. This uses the existing webhook and daily allowances;
+no additional poller is started. Group conversation never loads account
+context or executes app tools, even when the sender has a connected private
+chat. Account-specific help belongs in that connected private chat or the
+app. Private-chat input and its normal app actions remain unchanged.
 With Telegram's existing privacy mode enabled, start with
 `/start@inlumi_bot` or `/help@inlumi_bot`, then reply to Lumi's message.
 Plain username mentions require Telegram to deliver them, for example when
 the bot's privacy mode is disabled. See [Telegram's message delivery rules](https://core.telegram.org/bots/faq#what-messages-will-my-bot-get).
 Each incoming update is claimed durably before generation and sent once as
-a reply in the same topic. Receipts retain Telegram's delivered message ID;
+a reply in the same topic. If Telegram cannot expose the original message to
+the bot, the answer can still appear in that same group without a reply link.
+Receipts retain Telegram's delivered message ID;
 an uncertain delivery is never replayed automatically.
 
 Check the menu and profile with `python3 scripts/configure-lumi-bot.py --host

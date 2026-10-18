@@ -565,10 +565,10 @@ func Chat_GroupReply(service Chat, writer ResponseWriter, request *Request, inpu
 	payload.Model = service.Configuration.ChatModel
 	var value_0 []ChatMessage = make([]ChatMessage, int(2))
 	payload.Messages = value_0
-	var value_1 string = "You are Lumi, the friendly companion from Inner Breeze, speaking as @inlumi_bot in Waozi's private Agent Lab group. Reply briefly and naturally in the user's language. You can chat here, but have no access to personal app data or execution tools in this group. Never claim you changed settings, sent feedback, published anything or completed an action. Do not invent conversation history. For personal habits, tasks or diary actions, ask the owner to open Inner Breeze. Stay warm, direct and concise."
+	var value_1 string = "You are Lumi, the Inner Breeze companion, speaking as @inlumi_bot in a group chat. Help only with Inner Breeze and its breathing, meditation, habits, journaling and task features. Reply briefly and naturally in the user's language. If the message drifts to an unrelated topic, give a short reminder of your Inner Breeze scope instead of answering that topic. You have no account access, personal app context or execution tools in any group, even if this person linked their account in private. Never claim you read or changed personal data, settings, feedback or any other action. For account-specific help, ask the person to use their connected private chat with Lumi or open Inner Breeze. Do not invent conversation history or a physical location. Stay warm, direct and concise."
 	payload.Messages[0] = ChatMessage{Role: "system", Content: value_1}
 	payload.Messages[1] = ChatMessage{Role: "user", Content: input}
-	Chat_Budget(&(payload), 512, 1536)
+	Chat_Budget(&(payload), 256, 768)
 	answered := Chat_AskModel(service, request, ChatHTTPClient, payload)
 	content := strings.TrimSpace(answered.Message.Content)
 	if answered.Status != 0 || int64(len(answered.Message.ToolCalls)) > 0 || int64(len(content)) == 0 || int64(len(content)) > 4096 {

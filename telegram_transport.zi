@@ -49,6 +49,7 @@ TelegramCallbackAnswer :: struct {
 }
 ReplyParameters :: struct {
     message_id: s64 #go_tag "json:\"message_id\""
+    allow_sending_without_reply: bool #go_tag "json:\"allow_sending_without_reply\""
 }
 TelegramReplySend :: struct {
     chat_id: s64 #go_tag "json:\"chat_id\""
@@ -72,7 +73,7 @@ ReplyAnswer :: struct {
 DeliverReply :: (token: string, destination: s64, original: s64, thread: s64, content: string) -> MessageReceipt {
     failed: MessageReceipt
     encoded := json.Marshal(TelegramReplySend.{chat_id = destination, text = content,
-        message_thread_id = thread, reply_parameters = ReplyParameters.{message_id = original}})
+        message_thread_id = thread, reply_parameters = ReplyParameters.{message_id = original, allow_sending_without_reply = true}})
     if encoded.error != null {
         return failed
     }

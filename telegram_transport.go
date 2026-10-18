@@ -43,7 +43,8 @@ type TelegramCallbackAnswer struct {
 }
 
 type ReplyParameters struct {
-	MessageId int64 "json:\"message_id\""
+	MessageId                int64 "json:\"message_id\""
+	AllowSendingWithoutReply bool  "json:\"allow_sending_without_reply\""
 }
 
 type TelegramReplySend struct {
@@ -72,7 +73,7 @@ var TelegramHTTPClient *Client
 
 func TelegramTransport_DeliverReply(token string, destination int64, original int64, thread int64, content string) MessageReceipt {
 	var failed MessageReceipt = MessageReceipt{}
-	var value_0 TelegramReplySend = TelegramReplySend{ChatId: destination, Text: content, MessageThreadId: thread, ReplyParameters: ReplyParameters{MessageId: original}}
+	var value_0 TelegramReplySend = TelegramReplySend{ChatId: destination, Text: content, MessageThreadId: thread, ReplyParameters: ReplyParameters{MessageId: original, AllowSendingWithoutReply: true}}
 	encoded := StdJsonGo_Marshal(value_0)
 	if encoded.Error != nil {
 		return failed

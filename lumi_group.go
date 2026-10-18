@@ -9,7 +9,80 @@ import (
 // #import std_go_types
 type Pattern = regexp.Regexp
 
+type Decision struct {
+	Model bool
+	Reply string
+}
+
 var Address *Pattern
+var AppTopic *Pattern
+var AppActivity *Pattern
+var PrivateAction *Pattern
+var HomeQuestion *Pattern
+var SocialGreeting *Pattern
+
+func LumiGroup_Decide(input string, replying bool) Decision {
+	var result Decision = Decision{}
+	parsed := LumiCommands_Parse(input)
+	if parsed.Foreign {
+		return result
+	}
+	var value_0 bool = replying
+	if !value_0 {
+		var value_1 bool = (*regexp.Regexp).MatchString(Address, input)
+		value_0 = value_1
+	}
+	directed := value_0
+	var value_2 bool = (*regexp.Regexp).MatchString(AppTopic, input)
+	var value_3 bool = value_2
+	if !value_3 {
+		var value_4 bool = directed
+		if value_4 {
+			var value_5 bool = (*regexp.Regexp).MatchString(AppActivity, input)
+			value_4 = value_5
+		}
+		value_3 = value_4
+	}
+	related := value_3
+	if !directed && !related {
+		return result
+	}
+	var value_6 bool = (*regexp.Regexp).MatchString(PrivateAction, input)
+	var value_7 bool = value_6
+	if !value_7 {
+		var value_8 bool = directed && parsed.Name != "" && parsed.Name != "start" && parsed.Name != "help" && parsed.Name != "app"
+		value_7 = (value_8 && parsed.Name != "history")
+	}
+	if value_7 {
+		result.Reply = "I can't access anyone's Inner Breeze account in a group chat. Use your connected private chat with me or open Inner Breeze for personal tasks, habits and diary entries."
+		return result
+	}
+	var value_9 bool = directed
+	if value_9 {
+		var value_10 bool = (*regexp.Regexp).MatchString(HomeQuestion, input)
+		value_9 = value_10
+	}
+	if value_9 {
+		result.Reply = "I live in Inner Breeze 🌿 I'm its companion, so I don't have a physical home."
+		return result
+	}
+	if related {
+		result.Model = true
+		return result
+	}
+	var value_11 bool = parsed.Name == "start" || parsed.Name == "help" || parsed.Name == "app" || parsed.Name == "history"
+	var value_12 bool = value_11
+	if !value_12 {
+		var value_13 bool = (*regexp.Regexp).MatchString(SocialGreeting, input)
+		value_12 = value_13
+	}
+	if value_12 {
+		result.Reply = "Hi 🌿 I'm Lumi, the Inner Breeze companion. I can help with breathing, habits, journaling and using the app. Your account is available only in your connected private chat or inside Inner Breeze."
+		return result
+	}
+	result.Reply = "I'm Lumi, the Inner Breeze companion 🌿 I can help with Inner Breeze, breathing, habits and journaling. I'll leave other topics to the group."
+	return result
+}
 
 func LumiGroup_Handle(service Chat, writer ResponseWriter, request *Request, update int64, destination int64, owner int64, message int64, thread int64, input string, replyBot int64) {
 	configuration := service.Configuration
@@ -18,40 +91,35 @@ func LumiGroup_Handle(service Chat, writer ResponseWriter, request *Request, upd
 		Response_JSON(writer, 200, true)
 		return
 	}
-	parsed := LumiCommands_Parse(input)
 	bot := TelegramInit_BotID(configuration.LumiBotToken)
-	var value_1 bool = parsed.Foreign
-	if !value_1 {
-		var value_2 bool = (*regexp.Regexp).MatchString(Address, input)
-		value_1 = (!value_2 && (bot <= 0 || replyBot != bot))
-	}
-	if value_1 {
+	decision := LumiGroup_Decide(input, bot > 0 && replyBot == bot)
+	if !decision.Model && decision.Reply == "" {
 		Response_JSON(writer, 200, true)
 		return
 	}
 	context := StdHttpGo_Context(request)
 	var empty [0]Any
 	_ = empty
-	var value_3 string = "CREATE TABLE IF NOT EXISTS server_lumi_group_deliveries(update_id INTEGER PRIMARY KEY,chat_id INTEGER NOT NULL,source_message INTEGER NOT NULL,state TEXT NOT NULL,message_id INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL,UNIQUE(chat_id,source_message))"
-	var value_4 []Any
-	if int64(0) < 0 || int64(int64(len(value_4))) < int64(0) || int64(int64(len(value_4))) > int64(len(value_4)) {
+	var value_1 string = "CREATE TABLE IF NOT EXISTS server_lumi_group_deliveries(update_id INTEGER PRIMARY KEY,chat_id INTEGER NOT NULL,source_message INTEGER NOT NULL,state TEXT NOT NULL,message_id INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL,UNIQUE(chat_id,source_message))"
+	var value_2 []Any
+	if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
 		panic("slice range out of bounds")
 	}
-	created := StdSqlGo_Exec(service.Database, context, value_3, value_4[0:int64(len(value_4)):int64(len(value_4))])
+	created := StdSqlGo_Exec(service.Database, context, value_1, value_2[0:int64(len(value_2)):int64(len(value_2))])
 	if created.Error != nil {
 		Response_Error(writer, 503, "group receipt unavailable")
 		return
 	}
-	var value_5 [4]Any
-	value_5[0] = update
-	value_5[1] = destination
-	value_5[2] = message
-	var value_6 int64 = StdTimeGo_Unix(StdTimeGo_Now())
-	value_5[3] = value_6
-	arguments := value_5
+	var value_3 [4]Any
+	value_3[0] = update
+	value_3[1] = destination
+	value_3[2] = message
+	var value_4 int64 = StdTimeGo_Unix(StdTimeGo_Now())
+	value_3[3] = value_4
+	arguments := value_3
 	_ = arguments
-	var value_7 string = "INSERT OR IGNORE INTO server_lumi_group_deliveries(update_id,chat_id,source_message,state,created) VALUES(?1,?2,?3,'claimed',?4)"
-	claimed := StdSqlGo_Exec(service.Database, context, value_7, arguments[0:4:4])
+	var value_5 string = "INSERT OR IGNORE INTO server_lumi_group_deliveries(update_id,chat_id,source_message,state,created) VALUES(?1,?2,?3,'claimed',?4)"
+	claimed := StdSqlGo_Exec(service.Database, context, value_5, arguments[0:4:4])
 	if claimed.Error != nil {
 		Response_Error(writer, 503, "group receipt unavailable")
 		return
@@ -65,35 +133,62 @@ func LumiGroup_Handle(service Chat, writer ResponseWriter, request *Request, upd
 		Response_JSON(writer, 200, true)
 		return
 	}
-	TelegramTransport_Typing(configuration.LumiBotToken, destination)
-	content := Chat_GroupReply(service, writer, request, input)
-	delivered := TelegramTransport_DeliverReply(configuration.LumiBotToken, destination, message, thread, content)
-	var value_8 string = ""
-	if delivered.MessageId > 0 {
-		value_8 = "delivered"
-	} else {
-		value_8 = "uncertain"
+	content := decision.Reply
+	if decision.Model {
+		TelegramTransport_Typing(configuration.LumiBotToken, destination)
+		content = Chat_GroupReply(service, writer, request, input)
 	}
-	state := value_8
+	delivered := TelegramTransport_DeliverReply(configuration.LumiBotToken, destination, message, thread, content)
+	var value_6 string = ""
+	if delivered.MessageId > 0 {
+		value_6 = "delivered"
+	} else {
+		value_6 = "uncertain"
+	}
+	state := value_6
 	if delivered.MessageId == 0 {
 		if delivered.ErrorCode >= 400 && delivered.ErrorCode < 500 {
 			state = "rejected"
 		}
 		fmt.Printf("Lumi group delivery failed: http=%d api=%d reason=%s\n", delivered.HttpStatus, delivered.ErrorCode, delivered.Reason)
 	}
-	var value_9 [3]Any
-	value_9[0] = update
-	value_9[1] = state
-	value_9[2] = delivered.MessageId
-	saved := value_9
+	var value_7 [3]Any
+	value_7[0] = update
+	value_7[1] = state
+	value_7[2] = delivered.MessageId
+	saved := value_7
 	_ = saved
-	var value_10 Context = StdContextGo_Background()
-	StdSqlGo_Exec(service.Database, value_10, "UPDATE server_lumi_group_deliveries SET state=?2,message_id=?3 WHERE update_id=?1", saved[0:3:3])
+	var value_8 Context = StdContextGo_Background()
+	StdSqlGo_Exec(service.Database, value_8, "UPDATE server_lumi_group_deliveries SET state=?2,message_id=?3 WHERE update_id=?1", saved[0:3:3])
 	Response_JSON(writer, 200, true)
 }
 
 func LumiGroup_GlobalInit00() {
-	Address = regexp.MustCompile("(?i)(^|[ \t\r\n])@inlumi_bot($|[ \t\r\n,!.?:;])|^/[a-z_]+@inlumi_bot($|[ \t\r\n])")
+	var value_0 string = "(?i)(^|[ \t\r\n])@inlumi_bot($|[ \t\r\n,!.?:;])|^/[a-z_]+@inlumi_bot($|[ \t\r\n])|^(?:(?:hi|hey|hello|yo|thanks|thank you)[ ,!.\t]*)?lumi($|[ ,!.?:;\t\r\n])|\\b(?:you|your|u)\\b[^\r\n]{0,160}[ ,\t]+lumi[ !?.]*$|,[ \t]*lumi[ !?.]*$"
+	Address = regexp.MustCompile(value_0)
+}
+
+func LumiGroup_GlobalInit10() {
+	AppTopic = regexp.MustCompile("(?i)\\b(?:inner[ \t_-]*breeze|inbe)\\b")
+}
+
+func LumiGroup_GlobalInit20() {
+	var value_0 string = "(?i)\\b(?:breath(?:e|ing|work)?|meditat(?:e|ion|ing)|mindful(?:ness)?|habits?|streaks?|journals?|journaling|diary|diaries|practices?)\\b"
+	AppActivity = regexp.MustCompile(value_0)
+}
+
+func LumiGroup_GlobalInit30() {
+	var value_0 string = "(?i)\\b(?:show|read|list|fetch|get|access|display|delete|remove|edit)\\s+(?:me\\s+)?(?:my|our)\\s+(?:inner\\s+breeze\\s+)?(?:account|tasks?|todos?|habits?|diary|journal|progress|streaks?|settings|data)\\b|\\bwhat\\s+(?:are|is)\\s+my\\s+(?:tasks?|habits?|progress|streaks?)\\b|^(?:(?:@inlumi_bot|lumi)[,: ]*)?(?:please\\s+)?(?:add|create|delete|remove|edit|complete|mark|record|save|change|set)\\b.{0,100}\\b(?:tasks?|todos?|habits?|diary|journals?|settings|account)\\b"
+	PrivateAction = regexp.MustCompile(value_0)
+}
+
+func LumiGroup_GlobalInit40() {
+	var value_0 string = "(?i)\\b(?:where\\s+(?:do\\s+you\\s+live|are\\s+you(?:\\s+from|\\s+based)?)|your\\s+(?:home|location)|do\\s+you\\s+(?:live|have\\s+a\\s+home))\\b"
+	HomeQuestion = regexp.MustCompile(value_0)
+}
+
+func LumiGroup_GlobalInit50() {
+	SocialGreeting = regexp.MustCompile("(?i)\\b(?:hi|hey|hello|thanks|thank\\s+you|pleasure|nice\\s+to\\s+meet|doing\\s+(?:well|good|great)|how\\s+are\\s+you)\\b")
 }
 
 var LumiGroup_ziranInitState uint8
@@ -110,6 +205,11 @@ func LumiGroup_ziranInit() {
 	TelegramTransport_ziranInit()
 	TelegramInit_ziranInit()
 	LumiGroup_GlobalInit00()
+	LumiGroup_GlobalInit10()
+	LumiGroup_GlobalInit20()
+	LumiGroup_GlobalInit30()
+	LumiGroup_GlobalInit40()
+	LumiGroup_GlobalInit50()
 	LumiGroup_ziranInitState = 2
 }
 

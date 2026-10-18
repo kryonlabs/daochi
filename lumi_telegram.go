@@ -26,11 +26,17 @@ type TelegramChat struct {
 	Type string "json:\"type\""
 }
 
+type TelegramReply struct {
+	From TelegramUser "json:\"from\""
+}
+
 type TelegramMessage struct {
-	MessageId int64        "json:\"message_id\""
-	From      TelegramUser "json:\"from\""
-	Chat      TelegramChat "json:\"chat\""
-	Text      string       "json:\"text\""
+	MessageId       int64         "json:\"message_id\""
+	From            TelegramUser  "json:\"from\""
+	Chat            TelegramChat  "json:\"chat\""
+	Text            string        "json:\"text\""
+	MessageThreadId int64         "json:\"message_thread_id\""
+	ReplyToMessage  TelegramReply "json:\"reply_to_message\""
 }
 
 type TelegramCallback struct {
@@ -532,6 +538,14 @@ func LumiTelegram_Webhook(service Chat, entryService AccountEntries, writer Resp
 		message = callback.Message
 		sender = callback.From
 	}
+	if callback.ID == "" && (message.Chat.Type == "group" || message.Chat.Type == "supergroup") {
+		if !sender.IsBot {
+			LumiGroup_Handle(service, writer, request, update.UpdateId, message.Chat.ID, sender.ID, message.MessageId, message.MessageThreadId, message.Text, message.ReplyToMessage.From.ID)
+		} else {
+			Response_JSON(writer, int(200), true)
+		}
+		return
+	}
 	if message.Chat.Type != "private" || sender.ID <= 0 || sender.IsBot || message.Chat.ID != sender.ID {
 		Response_JSON(writer, int(200), true)
 		return
@@ -717,5 +731,6 @@ func LumiTelegram_ziranInit() {
 	Authorization_ziranInit()
 	TelegramTransport_ziranInit()
 	StoreSchema_ziranInit()
+	LumiGroup_ziranInit()
 	LumiTelegram_ziranInitState = 2
 }

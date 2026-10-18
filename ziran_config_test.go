@@ -276,6 +276,7 @@ var configEnvironmentKeys = []string{
 	"DAOCHI_LUMI_WEBHOOK_SECRET",
 	"DAOCHI_LUMI_WEBHOOK_SECRET_FILE",
 	"DAOCHI_LUMI_OWNER_ID",
+	"DAOCHI_LUMI_GROUP_ID",
 	"DAOCHI_LUMI_CANVAS_URL",
 	"DAOCHI_TELEGRAM_ACCOUNTS_ENABLED",
 	"DAOCHI_ADDR",
@@ -350,7 +351,7 @@ func assertConfigurationMatchesBaseline(t *testing.T) Config {
 	expected := baselineLoadConfig()
 	actualType := reflect.TypeOf(actual)
 	expectedType := reflect.TypeOf(expected)
-	if actualType.NumField() != expectedType.NumField()+2 {
+	if actualType.NumField() != expectedType.NumField()+3 {
 		t.Fatal("configuration fields changed")
 	}
 	for i := 0; i < expectedType.NumField(); i++ {
@@ -367,6 +368,19 @@ func assertConfigurationMatchesBaseline(t *testing.T) Config {
 		}
 	}
 	return actual
+}
+
+func TestLumiGroupConfiguration(t *testing.T) {
+	clearConfigEnvironment(t)
+	configuration := Config_Load()
+	if configuration.LumiGroupID != 0 {
+		t.Fatal("group replies enabled by default")
+	}
+	t.Setenv("DAOCHI_LUMI_GROUP_ID", "-1001234")
+	configuration = Config_Load()
+	if configuration.LumiGroupID != -1001234 {
+		t.Fatal("explicit group route was not loaded")
+	}
 }
 
 func TestZiranConfigDefaultsAndKeyIdentity(t *testing.T) {

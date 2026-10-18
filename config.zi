@@ -66,6 +66,7 @@ Config :: struct {
     LumiBotToken: string
     LumiWebhookSecret: string
     LumiOwnerID: string
+    LumiGroupID: s64
     TelegramAccountsEnabled: bool
     LumiCanvasURL: string
     FeedbackToken: string
@@ -312,6 +313,14 @@ Load :: () -> Config {
     result.LumiBotToken = EnvStringOrFile("DAOCHI_LUMI_BOT_TOKEN", "DAOCHI_LUMI_BOT_TOKEN_FILE", "")
     result.LumiWebhookSecret = EnvStringOrFile("DAOCHI_LUMI_WEBHOOK_SECRET", "DAOCHI_LUMI_WEBHOOK_SECRET_FILE", "")
     result.LumiOwnerID = EnvString("DAOCHI_LUMI_OWNER_ID", "")
+    group := Getenv("DAOCHI_LUMI_GROUP_ID")
+    if group != "" {
+        parsed := ParseInt(group, 10, 64)
+        if parsed.error != null {
+            FatalValue("invalid %s: not an integer: %q", "DAOCHI_LUMI_GROUP_ID", group)
+        }
+        result.LumiGroupID = parsed.value
+    }
     result.TelegramAccountsEnabled = Bool(Getenv("DAOCHI_TELEGRAM_ACCOUNTS_ENABLED"), false)
     result.LumiCanvasURL = EnvString("DAOCHI_LUMI_CANVAS_URL", "https://inbe.waozi.xyz/build/telegram/index.html")
     result.ChatModel = EnvString("DAOCHI_CHAT_MODEL", "glm-4.7-flash")

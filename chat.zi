@@ -448,6 +448,31 @@ ParseHabitIcons :: (content: string, request: HabitIconRequest) -> HabitIconAnsw
 }
 
 #scope_export
+// Agent Lab conversation uses the existing Lumi provider and quotas, without
+// loading an account's app context or offering personal app tools.
+GroupReply :: (service: Chat, writer: http.ResponseWriter, request: *http.Request, input: string) -> string {
+    AllowSlowAnswer(writer, ChatWait + 10000000000)
+    if service.configuration.ChatAPIKey == "" {
+        return "I'm here, but my online conversation is temporarily unavailable."
+    }
+    reserved := Reserve(service, http.Context(request), "lumi-group")
+    if reserved.error != null || !reserved.allowed {
+        return "I'm here. My conversation allowance is unavailable right now; please try again later."
+    }
+    payload: ProviderRequest
+    payload.model = service.configuration.ChatModel
+    payload.messages = MakeMessages(2)
+    payload.messages[0] = ChatMessage.{role = "system", content = "You are Lumi, the friendly companion from Inner Breeze, speaking as @inlumi_bot in Waozi's private Agent Lab group. Reply briefly and naturally in the user's language. You can chat here, but have no access to personal app data or execution tools in this group. Never claim you changed settings, sent feedback, published anything or completed an action. Do not invent conversation history. For personal habits, tasks or diary actions, ask the owner to open Inner Breeze. Stay warm, direct and concise."}
+    payload.messages[1] = ChatMessage.{role = "user", content = input}
+    Budget(*payload, 512, 1536)
+    answered := AskModel(service, request, ChatHTTPClient, payload)
+    content := TrimSpace(answered.message.content)
+    if answered.status != 0 || answered.message.tool_calls.count > 0 || content.count == 0 || content.count > 4096 {
+        return "I'm here, but couldn't finish that reply. Please ask me again."
+    }
+    return content
+}
+
 Complete :: (service: Chat, writer: http.ResponseWriter, request: *http.Request) {
     user := AuthorizedUser(service, writer, request)
     if user == "" {

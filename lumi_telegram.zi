@@ -17,6 +17,7 @@ transport :: #import "telegram_transport";
 schema :: #import "store_schema";
 ctx :: #import "std/context_go";
 commands :: #import "lumi_commands";
+group :: #import "lumi_group";
 strings :: #system_library "go:strings";
 native_sql :: #system_library "go:database/sql";
 Join :: (parts: []string, separator: string) -> string #foreign strings;
@@ -42,6 +43,11 @@ TelegramMessage :: struct {
     from: TelegramUser #go_tag "json:\"from\""
     chat: TelegramChat #go_tag "json:\"chat\""
     text: string #go_tag "json:\"text\""
+    message_thread_id: s64 #go_tag "json:\"message_thread_id\""
+    reply_to_message: TelegramReply #go_tag "json:\"reply_to_message\""
+}
+TelegramReply :: struct {
+    from: TelegramUser #go_tag "json:\"from\""
 }
 TelegramCallback :: struct {
     id: string #go_tag "json:\"id\""
@@ -413,6 +419,16 @@ Webhook :: (service: chat.Chat, entryService: entries.AccountEntries, writer: ht
     if callback.id != "" {
         message = callback.message
         sender = callback.from
+    }
+    if callback.id == "" && (message.chat.type == "group" || message.chat.type == "supergroup") {
+        if !sender.is_bot {
+            group.Handle(service, writer, request, update.update_id, message.chat.id,
+                sender.id, message.message_id, message.message_thread_id, message.text,
+                message.reply_to_message.from.id)
+        } else {
+            response.JSON(writer, cast(isize)200, true)
+        }
+        return
     }
     if message.chat.type != "private" || sender.id <= 0 || sender.is_bot || message.chat.id != sender.id {
         response.JSON(writer, cast(isize)200, true)

@@ -67,10 +67,10 @@ Prune :: (database: *sql.Database, context: ctx.Context, now: clock.Time) -> Err
     }
     // Account deletion removes its counts; a request answered while the
     // account was being deleted can still leave one behind. The node's own
-    // total is kept under the name "node".
+    // total and the explicitly configured group allowance are not accounts.
     empty: [0]Any
     orphaned := sql.ExecTx(transaction, context,
-        "DELETE FROM server_chat_usage WHERE account_id<>'node' AND NOT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=server_chat_usage.account_id)", empty[:])
+        "DELETE FROM server_chat_usage WHERE account_id NOT IN ('node','lumi-group') AND NOT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=server_chat_usage.account_id)", empty[:])
     if orphaned.error != null {
         return orphaned.error
     }

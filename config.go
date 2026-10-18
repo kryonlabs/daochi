@@ -68,6 +68,7 @@ type Config struct {
 	LumiBotToken                    string
 	LumiWebhookSecret               string
 	LumiOwnerID                     string
+	LumiGroupID                     int64
 	TelegramAccountsEnabled         bool
 	LumiCanvasURL                   string
 	FeedbackToken                   string
@@ -337,6 +338,14 @@ func Config_Load() Config {
 	result.LumiBotToken = Config_EnvStringOrFile("DAOCHI_LUMI_BOT_TOKEN", "DAOCHI_LUMI_BOT_TOKEN_FILE", "")
 	result.LumiWebhookSecret = Config_EnvStringOrFile("DAOCHI_LUMI_WEBHOOK_SECRET", "DAOCHI_LUMI_WEBHOOK_SECRET_FILE", "")
 	result.LumiOwnerID = Config_EnvString("DAOCHI_LUMI_OWNER_ID", "")
+	group := os.Getenv("DAOCHI_LUMI_GROUP_ID")
+	if group != "" {
+		parsed := Config_ParseInt(group, int(10), int(64))
+		if parsed.Error != nil {
+			log.Fatalf("invalid %s: not an integer: %q", "DAOCHI_LUMI_GROUP_ID", group)
+		}
+		result.LumiGroupID = parsed.Value
+	}
 	var value_8 string = os.Getenv("DAOCHI_TELEGRAM_ACCOUNTS_ENABLED")
 	result.TelegramAccountsEnabled = ConfigValues_Bool(value_8, false)
 	result.LumiCanvasURL = Config_EnvString("DAOCHI_LUMI_CANVAS_URL", "https://inbe.waozi.xyz/build/telegram/index.html")

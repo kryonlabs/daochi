@@ -81,6 +81,21 @@ deleted.
 Commands addressed to another bot are ignored; addressed Lumi commands preserve
 their argument text. Empty required arguments receive usage instructions.
 
+The owner can also enable Lumi in the private Agent Lab group with
+`DAOCHI_LUMI_GROUP_ID` (the negative Telegram group ID).
+It defaults to disabled. Lumi answers group members' explicit
+`@inlumi_bot` mentions, commands addressed to Lumi, and replies to Lumi in
+that group. This uses the existing webhook, model and daily allowances;
+no additional poller is started. Group conversation does not load personal
+app context or execute app tools. Private-chat input remains unchanged.
+With Telegram's existing privacy mode enabled, start with
+`/start@inlumi_bot` or `/help@inlumi_bot`, then reply to Lumi's message.
+Plain username mentions require Telegram to deliver them, for example when
+the bot's privacy mode is disabled. See [Telegram's message delivery rules](https://core.telegram.org/bots/faq#what-messages-will-my-bot-get).
+Each incoming update is claimed durably before generation and sent once as
+a reply in the same topic. Receipts retain Telegram's delivered message ID;
+an uncertain delivery is never replayed automatically.
+
 Check the menu and profile with `python3 scripts/configure-lumi-bot.py --host
 USER@NODE`; add `--apply` to update and verify them. The helper reads the node's
 existing `/etc/daochi/daochi.env` or a supplied `--env-file`, including

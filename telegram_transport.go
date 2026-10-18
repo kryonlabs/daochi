@@ -42,8 +42,108 @@ type TelegramCallbackAnswer struct {
 	CallbackQueryId string "json:\"callback_query_id\""
 }
 
+type ReplyParameters struct {
+	MessageId int64 "json:\"message_id\""
+}
+
+type TelegramReplySend struct {
+	ChatId          int64           "json:\"chat_id\""
+	Text            string          "json:\"text\""
+	MessageThreadId int64           "json:\"message_thread_id,omitempty\""
+	ReplyParameters ReplyParameters "json:\"reply_parameters\""
+}
+
+type MessageReceipt struct {
+	MessageId  int64  "json:\"message_id\""
+	HttpStatus int    "json:\"-\""
+	ErrorCode  int    "json:\"-\""
+	Reason     string "json:\"-\""
+}
+
+type ReplyAnswer struct {
+	Ok          bool           "json:\"ok\""
+	Result      MessageReceipt "json:\"result\""
+	ErrorCode   int            "json:\"error_code\""
+	Description string         "json:\"description\""
+}
+
 var TelegramAPIBase string = "https://api.telegram.org"
 var TelegramHTTPClient *Client
+
+func TelegramTransport_DeliverReply(token string, destination int64, original int64, thread int64, content string) MessageReceipt {
+	var failed MessageReceipt = MessageReceipt{}
+	var value_0 TelegramReplySend = TelegramReplySend{ChatId: destination, Text: content, MessageThreadId: thread, ReplyParameters: ReplyParameters{MessageId: original}}
+	encoded := StdJsonGo_Marshal(value_0)
+	if encoded.Error != nil {
+		return failed
+	}
+	var value_1 [3]string
+	value_1[0] = TelegramAPIBase
+	value_1[1] = "/bot"
+	value_1[2] = token
+	parts := value_1
+	_ = parts
+	var value_2 [2]string
+	var value_3 string = strings.Join(parts[0:3:3], "")
+	value_2[0] = value_3
+	value_2[1] = "/sendMessage"
+	endpoint := value_2
+	_ = endpoint
+	var value_4 *zir_2e945fe77912b4d4_StringReader = strings.NewReader(StdTextGo_FromBytes(encoded.Value))
+	request := StdHttpGo_NewRequest(StdContextGo_Background(), "POST", strings.Join(endpoint[0:2:2], ""), Reader(value_4))
+	if request.Error != nil {
+		return failed
+	}
+	StdHttpGo_SetHeader(StdHttpGo_Headers(request.Value), "Content-Type", "application/json")
+	received := StdHttpGo_Do(TelegramHTTPClient, request.Value)
+	if received.Error != nil {
+		return failed
+	}
+	stream := StdHttpGo_ResponseBody(received.Value)
+	defer (io.ReadCloser).Close(stream)
+	bytes := StdIoGo_ReadAll(StdIoGo_LimitReader(Reader(stream), 65537))
+	var answer ReplyAnswer = ReplyAnswer{}
+	failed.HttpStatus = StdHttpGo_StatusCode(received.Value)
+	var value_5 bool = bytes.Error != nil || int64(len(bytes.Value)) > 65536
+	var value_6 bool = value_5
+	if !value_6 {
+		var value_7 Error = StdJsonGo_Unmarshal(bytes.Value, &(answer))
+		value_6 = (value_7 != nil)
+	}
+	if value_6 {
+		return failed
+	}
+	failed.ErrorCode = answer.ErrorCode
+	if failed.HttpStatus != 200 || !answer.Ok {
+		failed.Reason = "telegram_rejected"
+		if strings.Contains(answer.Description, "reply") {
+			failed.Reason = "reply_unavailable"
+		}
+		if strings.Contains(answer.Description, "thread") {
+			failed.Reason = "thread_unavailable"
+		}
+		if strings.Contains(answer.Description, "chat not found") {
+			failed.Reason = "chat_unavailable"
+		}
+		if strings.Contains(answer.Description, "rights") {
+			failed.Reason = "permissions"
+		}
+		if strings.Contains(answer.Description, "text is empty") {
+			failed.Reason = "empty_text"
+		}
+		var value_8 bool = strings.Contains(answer.Description, "blocked")
+		var value_9 bool = value_8
+		if !value_9 {
+			var value_10 bool = strings.Contains(answer.Description, "kicked")
+			value_9 = value_10
+		}
+		if value_9 {
+			failed.Reason = "membership"
+		}
+		return failed
+	}
+	return answer.Result
+}
 
 func TelegramTransport_Nonce() string {
 	var bytes [16]uint8

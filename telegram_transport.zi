@@ -17,6 +17,7 @@ StringReader :: #type #foreign strings "Reader";
 Reader :: (value: string) -> *StringReader #foreign strings "NewReader";
 EncodeHex :: (bytes: []u8) -> string #foreign hex "EncodeToString";
 Join :: (parts: []string, separator: string) -> string #foreign strings;
+Contains :: (value: string, part: string) -> bool #foreign strings;
 CloseAtReturn :: (stream: io.ReadCloser) #go_defer #foreign native_io "ReadCloser.Close";
 
 TelegramAPIBase: string = "https://api.telegram.org";
@@ -45,6 +46,80 @@ TelegramChatAction :: struct {
 }
 TelegramCallbackAnswer :: struct {
     callback_query_id: string #go_tag "json:\"callback_query_id\""
+}
+ReplyParameters :: struct {
+    message_id: s64 #go_tag "json:\"message_id\""
+}
+TelegramReplySend :: struct {
+    chat_id: s64 #go_tag "json:\"chat_id\""
+    text: string #go_tag "json:\"text\""
+    message_thread_id: s64 #go_tag "json:\"message_thread_id,omitempty\""
+    reply_parameters: ReplyParameters #go_tag "json:\"reply_parameters\""
+}
+MessageReceipt :: struct {
+    message_id: s64 #go_tag "json:\"message_id\""
+    http_status: isize #go_tag "json:\"-\""
+    error_code: isize #go_tag "json:\"-\""
+    reason: string #go_tag "json:\"-\""
+}
+ReplyAnswer :: struct {
+    ok: bool #go_tag "json:\"ok\""
+    result: MessageReceipt #go_tag "json:\"result\""
+    error_code: isize #go_tag "json:\"error_code\""
+    description: string #go_tag "json:\"description\""
+}
+
+DeliverReply :: (token: string, destination: s64, original: s64, thread: s64, content: string) -> MessageReceipt {
+    failed: MessageReceipt
+    encoded := json.Marshal(TelegramReplySend.{chat_id = destination, text = content,
+        message_thread_id = thread, reply_parameters = ReplyParameters.{message_id = original}})
+    if encoded.error != null {
+        return failed
+    }
+    parts: [3]string = .[TelegramAPIBase, "/bot", token]
+    endpoint: [2]string = .[Join(parts[:], ""), "/sendMessage"]
+    request := http.NewRequest(context.Background(), "POST", Join(endpoint[:], ""),
+        cast(io.Reader)Reader(text.FromBytes(encoded.value)))
+    if request.error != null {
+        return failed
+    }
+    http.SetHeader(http.Headers(request.value), "Content-Type", "application/json")
+    received := http.Do(TelegramHTTPClient, request.value)
+    if received.error != null {
+        return failed
+    }
+    stream := http.ResponseBody(received.value)
+    CloseAtReturn(stream)
+    bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 65537))
+    answer: ReplyAnswer
+    failed.http_status = http.StatusCode(received.value)
+    if bytes.error != null || bytes.value.count > 65536 || json.Unmarshal(bytes.value, *answer) != null {
+        return failed
+    }
+    failed.error_code = answer.error_code
+    if failed.http_status != 200 || !answer.ok {
+        failed.reason = "telegram_rejected"
+        if Contains(answer.description, "reply") {
+            failed.reason = "reply_unavailable"
+        }
+        if Contains(answer.description, "thread") {
+            failed.reason = "thread_unavailable"
+        }
+        if Contains(answer.description, "chat not found") {
+            failed.reason = "chat_unavailable"
+        }
+        if Contains(answer.description, "rights") {
+            failed.reason = "permissions"
+        }
+        if Contains(answer.description, "text is empty") {
+            failed.reason = "empty_text"
+        }
+        if Contains(answer.description, "blocked") || Contains(answer.description, "kicked") {
+            failed.reason = "membership"
+        }
+        return failed
+    }
+    return answer.result
 }
 
 Nonce :: () -> string {

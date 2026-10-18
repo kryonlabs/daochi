@@ -67,7 +67,7 @@ func Retention_Prune(database *Database, context Context, now Time) Error {
 	}
 	var empty [0]Any
 	_ = empty
-	var value_4 string = "DELETE FROM server_chat_usage WHERE account_id<>'node' AND NOT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=server_chat_usage.account_id)"
+	var value_4 string = "DELETE FROM server_chat_usage WHERE account_id NOT IN ('node','lumi-group') AND NOT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=server_chat_usage.account_id)"
 	var value_5 []Any
 	if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
 		panic("slice range out of bounds")

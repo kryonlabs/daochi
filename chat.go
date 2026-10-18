@@ -552,6 +552,31 @@ func Chat_ParseHabitIcons(content string, request HabitIconRequest) HabitIconAns
 	return result
 }
 
+func Chat_GroupReply(service Chat, writer ResponseWriter, request *Request, input string) string {
+	Chat_AllowSlowAnswer(writer, 45000000000)
+	if service.Configuration.ChatAPIKey == "" {
+		return "I'm here, but my online conversation is temporarily unavailable."
+	}
+	reserved := Chat_Reserve(service, StdHttpGo_Context(request), "lumi-group")
+	if reserved.Error != nil || !reserved.Allowed {
+		return "I'm here. My conversation allowance is unavailable right now; please try again later."
+	}
+	var payload ProviderRequest = ProviderRequest{}
+	payload.Model = service.Configuration.ChatModel
+	var value_0 []ChatMessage = make([]ChatMessage, int(2))
+	payload.Messages = value_0
+	var value_1 string = "You are Lumi, the friendly companion from Inner Breeze, speaking as @inlumi_bot in Waozi's private Agent Lab group. Reply briefly and naturally in the user's language. You can chat here, but have no access to personal app data or execution tools in this group. Never claim you changed settings, sent feedback, published anything or completed an action. Do not invent conversation history. For personal habits, tasks or diary actions, ask the owner to open Inner Breeze. Stay warm, direct and concise."
+	payload.Messages[0] = ChatMessage{Role: "system", Content: value_1}
+	payload.Messages[1] = ChatMessage{Role: "user", Content: input}
+	Chat_Budget(&(payload), 512, 1536)
+	answered := Chat_AskModel(service, request, ChatHTTPClient, payload)
+	content := strings.TrimSpace(answered.Message.Content)
+	if answered.Status != 0 || int64(len(answered.Message.ToolCalls)) > 0 || int64(len(content)) == 0 || int64(len(content)) > 4096 {
+		return "I'm here, but couldn't finish that reply. Please ask me again."
+	}
+	return content
+}
+
 func Chat_Complete(service Chat, writer ResponseWriter, request *Request) {
 	user := Chat_AuthorizedUser(service, writer, request)
 	if user == "" {

@@ -1,0 +1,75 @@
+// An explicitly configured private group uses Lumi's existing webhook and
+// provider. Claim each update before generating or sending; never replay a
+// delivery whose outcome is uncertain.
+#import "std/go_types"
+chat :: #import "chat";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+clock :: #import "std/time_go";
+ctx :: #import "std/context_go";
+response :: #import "response";
+transport :: #import "telegram_transport";
+telegram :: #import "telegram_init";
+commands :: #import "lumi_commands";
+regexp :: #system_library "go:regexp";
+
+Pattern :: #type #foreign regexp "Regexp";
+Compile :: (pattern: string) -> *Pattern #foreign regexp "MustCompile";
+Match :: (pattern: *Pattern, value: string) -> bool #foreign regexp "(*Regexp).MatchString";
+Address: *Pattern = Compile("(?i)(^|[ \t\r\n])@inlumi_bot($|[ \t\r\n,!.?:;])|^/[a-z_]+@inlumi_bot($|[ \t\r\n])");
+
+Handle :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Request,
+    update: s64, destination: s64, owner: s64, message: s64, thread: s64,
+    input: string, replyBot: s64) {
+    configuration := service.configuration
+    if configuration.LumiGroupID >= 0 || destination != configuration.LumiGroupID || owner <= 0 ||
+    update <= 0 || message <= 0 || input.count == 0 || input.count > 4096 {
+        response.JSON(writer, 200, true)
+        return
+    }
+    parsed := commands.Parse(input)
+    bot := telegram.BotID(configuration.LumiBotToken)
+    if parsed.foreign || (!Match(Address, input) && (bot <= 0 || replyBot != bot)) {
+        response.JSON(writer, 200, true)
+        return
+    }
+    context := http.Context(request)
+    empty: [0]Any
+    created := sql.Exec(service.database, context,
+        "CREATE TABLE IF NOT EXISTS server_lumi_group_deliveries(update_id INTEGER PRIMARY KEY,chat_id INTEGER NOT NULL,source_message INTEGER NOT NULL,state TEXT NOT NULL,message_id INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL,UNIQUE(chat_id,source_message))", empty[:])
+    if created.error != null {
+        response.Error(writer, 503, "group receipt unavailable")
+        return
+    }
+    arguments: [4]Any = .[update, destination, message, clock.Unix(clock.Now())]
+    claimed := sql.Exec(service.database, context,
+        "INSERT OR IGNORE INTO server_lumi_group_deliveries(update_id,chat_id,source_message,state,created) VALUES(?1,?2,?3,'claimed',?4)", arguments[:])
+    if claimed.error != null {
+        response.Error(writer, 503, "group receipt unavailable")
+        return
+    }
+    affected := sql.RowsAffected(claimed.value)
+    if affected.error != null {
+        response.Error(writer, 503, "group receipt unavailable")
+        return
+    }
+    if affected.value == 0 {
+        response.JSON(writer, 200, true)
+        return
+    }
+    unused transport.Typing(configuration.LumiBotToken, destination)
+    content := chat.GroupReply(service, writer, request, input)
+    delivered := transport.DeliverReply(configuration.LumiBotToken, destination, message, thread, content)
+    state := ifx delivered.message_id > 0 then "delivered" else "uncertain"
+    if delivered.message_id == 0 {
+        if delivered.error_code >= 400 && delivered.error_code < 500 {
+            state = "rejected"
+        }
+        // Never log a credential-bearing URL, message text or provider output.
+        print("Lumi group delivery failed: http=% api=% reason=%\n", delivered.http_status, delivered.error_code, delivered.reason)
+    }
+    saved: [3]Any = .[update, state, delivered.message_id]
+    unused sql.Exec(service.database, ctx.Background(),
+        "UPDATE server_lumi_group_deliveries SET state=?2,message_id=?3 WHERE update_id=?1", saved[:])
+    response.JSON(writer, 200, true)
+}

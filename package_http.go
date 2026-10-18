@@ -42,6 +42,10 @@ type Rollout struct {
 	Until    int64 "json:\"until\""
 }
 
+type ReleaseHistory struct {
+	Versions []ReleaseV2 "json:\"versions\""
+}
+
 func PackageHttp_ParseNumber(Value string, Base int, Bits int) zir_b61aa8d2a6b992a1_Number {
 	var result zir_b61aa8d2a6b992a1_Number
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
@@ -142,31 +146,110 @@ func PackageHttp_Trusted(context Registry, request *Request, value ReleaseV2) bo
 
 func PackageHttp_Older(context Registry, request *Request, root string, appID string, latest int64, wanted Interfaces) Selected {
 	var result Selected = Selected{}
+	retained := StdFileGo_ReadFile(fmt.Sprint(root, "history-v2.json"))
+	if retained.Error == nil {
+		var history ReleaseHistory = ReleaseHistory{}
+		var value_0 bool = int64(len(retained.Value)) > 262144
+		if !value_0 {
+			var value_1 Error = StdJsonGo_Unmarshal(retained.Value, &(history))
+			value_0 = (value_1 != nil)
+		}
+		if value_0 || int64(len(history.Versions)) == 0 || int64(len(history.Versions)) > 3 {
+			return result
+		}
+		var previous int64 = 9223372036854775807
+		{
+			value_2 := history.Versions[:]
+			if int64(0) < 0 || int64(int64(len(value_2))) < int64(0) || int64(int64(len(value_2))) > int64(len(value_2)) {
+				panic("slice range out of bounds")
+			}
+			loop_view_8 := value_2[0:int64(len(value_2)):int64(len(value_2))]
+			loop_count_8 := int64(len(loop_view_8))
+			var loop_cursor_8 int64 = 0
+			for loop_cursor_8 < loop_count_8 {
+				loop_index_8 := loop_cursor_8
+				value := loop_view_8[loop_index_8]
+				_ = value
+				var value_3 bool = value.Sequence >= previous
+				var value_4 bool = value_3
+				if !value_4 {
+					var value_5 bool = PackageRelease_Valid(value, appID)
+					value_4 = !value_5
+				}
+				if value_4 {
+					return result
+				}
+				previous = value.Sequence
+				loop_cursor_8++
+			}
+		}
+		{
+			value_6 := history.Versions[:]
+			if int64(0) < 0 || int64(int64(len(value_6))) < int64(0) || int64(int64(len(value_6))) > int64(len(value_6)) {
+				panic("slice range out of bounds")
+			}
+			loop_view_14 := value_6[0:int64(len(value_6)):int64(len(value_6))]
+			loop_count_14 := int64(len(loop_view_14))
+			var loop_cursor_14 int64 = 0
+			for loop_cursor_14 < loop_count_14 {
+				loop_index_14 := loop_cursor_14
+				value := loop_view_14[loop_index_14]
+				_ = value
+				var value_7 bool = value.Sequence < latest
+				var value_8 bool = value_7
+				if value_8 {
+					var value_9 bool = PackageHttp_Fits(value, wanted)
+					value_8 = value_9
+				}
+				var value_10 bool = value_8
+				var value_11 bool = value_10
+				if value_11 {
+					var value_12 bool = PackageHttp_Trusted(context, request, value)
+					value_11 = value_12
+				}
+				var value_13 bool = value_11
+				var value_14 bool = value_13
+				if value_14 {
+					var value_15 int64 = value.Sequence
+					var value_16 bool = PackageHttp_HeldBack(root, value_15, PackageHttp_Bucket(request))
+					value_14 = !value_16
+				}
+				if value_14 {
+					result.Value = value
+					result.Found = true
+					return result
+				}
+				loop_cursor_14++
+			}
+		}
+		return result
+	}
 	sequence := latest - 1
 	for sequence > 0 && sequence > latest-256 {
 		metadata := StdFileGo_ReadFile(fmt.Sprint(root, fmt.Sprint(fmt.Sprint("release-", fmt.Sprint(int64(sequence))), ".json")))
 		if metadata.Error == nil && int64(len(metadata.Value)) <= 65536 {
 			var value ReleaseV2 = ReleaseV2{}
-			var value_0 Error = StdJsonGo_Unmarshal(metadata.Value, &(value))
-			var value_1 bool = value_0 == nil && value.Sequence == sequence
-			var value_2 bool = value_1
-			if value_2 {
-				var value_3 bool = PackageRelease_Valid(value, appID)
-				value_2 = value_3
+			_ = value
+			var value_17 Error = StdJsonGo_Unmarshal(metadata.Value, &(value))
+			var value_18 bool = value_17 == nil && value.Sequence == sequence
+			var value_19 bool = value_18
+			if value_19 {
+				var value_20 bool = PackageRelease_Valid(value, appID)
+				value_19 = value_20
 			}
-			var value_4 bool = value_2
-			var value_5 bool = value_4
-			if value_5 {
-				var value_6 bool = PackageHttp_Fits(value, wanted)
-				value_5 = value_6
+			var value_21 bool = value_19
+			var value_22 bool = value_21
+			if value_22 {
+				var value_23 bool = PackageHttp_Fits(value, wanted)
+				value_22 = value_23
 			}
-			var value_7 bool = value_5
-			var value_8 bool = value_7
-			if value_8 {
-				var value_9 bool = PackageHttp_Trusted(context, request, value)
-				value_8 = value_9
+			var value_24 bool = value_22
+			var value_25 bool = value_24
+			if value_25 {
+				var value_26 bool = PackageHttp_Trusted(context, request, value)
+				value_25 = value_26
 			}
-			if value_8 {
+			if value_25 {
 				result.Value = value
 				result.Found = true
 				return result
@@ -175,6 +258,90 @@ func PackageHttp_Older(context Registry, request *Request, root string, appID st
 		sequence--
 	}
 	return result
+}
+
+func PackageHttp_History(context Registry, writer ResponseWriter, request *Request, root string, appID string) {
+	wanted := PackageHttp_Wanted(request)
+	bucket := PackageHttp_Bucket(request)
+	if !wanted.Valid || bucket < 0 {
+		Response_Error(writer, 400, "invalid interface version or bucket")
+		return
+	}
+	metadata := StdFileGo_ReadFile(fmt.Sprint(root, "history-v2.json"))
+	var history ReleaseHistory = ReleaseHistory{}
+	var fallback [1]ReleaseV2
+	if metadata.Error != nil {
+		metadata = StdFileGo_ReadFile(fmt.Sprint(root, "latest-v2.json"))
+		var value_0 bool = metadata.Error != nil || int64(len(metadata.Value)) > 65536
+		var value_1 bool = value_0
+		if !value_1 {
+			var value_2 Error = StdJsonGo_Unmarshal(metadata.Value, &(fallback[0]))
+			value_1 = (value_2 != nil)
+		}
+		if value_1 {
+			Response_Error(writer, 404, "portable history unavailable")
+			return
+		}
+		history.Versions = fallback[0:1:1]
+	} else {
+		var value_3 bool = int64(len(metadata.Value)) > 262144
+		if !value_3 {
+			var value_4 Error = StdJsonGo_Unmarshal(metadata.Value, &(history))
+			value_3 = (value_4 != nil)
+		}
+		if value_3 {
+			Response_Error(writer, 503, "invalid portable history")
+			return
+		}
+	}
+	if int64(len(history.Versions)) == 0 || int64(len(history.Versions)) > 3 {
+		Response_Error(writer, 503, "invalid portable history")
+		return
+	}
+	var selected [3]ReleaseV2
+	var count int64 = 0
+	var previous int64 = 9223372036854775807
+	{
+		value_5 := history.Versions[:]
+		if int64(0) < 0 || int64(int64(len(value_5))) < int64(0) || int64(int64(len(value_5))) > int64(len(value_5)) {
+			panic("slice range out of bounds")
+		}
+		loop_view_28 := value_5[0:int64(len(value_5)):int64(len(value_5))]
+		loop_count_28 := int64(len(loop_view_28))
+		var loop_cursor_28 int64 = 0
+		for loop_cursor_28 < loop_count_28 {
+			loop_index_28 := loop_cursor_28
+			value := loop_view_28[loop_index_28]
+			var value_6 bool = value.Sequence >= previous
+			if !value_6 {
+				var value_7 bool = PackageRelease_Valid(value, appID)
+				value_6 = !value_7
+			}
+			if value_6 {
+				Response_Error(writer, 503, "invalid portable history")
+				return
+			}
+			previous = value.Sequence
+			var value_8 bool = PackageHttp_Fits(value, wanted)
+			var value_9 bool = value_8
+			if value_9 {
+				var value_10 bool = PackageHttp_Trusted(context, request, value)
+				value_9 = value_10
+			}
+			var value_11 bool = value_9
+			if value_11 {
+				var value_12 bool = PackageHttp_HeldBack(root, value.Sequence, bucket)
+				value_11 = !value_12
+			}
+			if value_11 {
+				selected[count] = value
+				count++
+			}
+			loop_cursor_28++
+		}
+	}
+	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "no-store")
+	Response_JSON(writer, 200, ReleaseHistory{Versions: selected[0:count:count]})
 }
 
 func PackageHttp_LatestSequence(dbPath string, appID string) int64 {
@@ -211,7 +378,7 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 	grant := ""
 	if int64(len(parts)) == 3 {
 		grant = parts[2]
-		if parts[1] == "latest" || grant == "" {
+		if parts[1] == "latest" || parts[1] == "history" || grant == "" {
 			Response_Error(writer, 404, "package not found")
 			return
 		}
@@ -236,6 +403,10 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		return
 	}
 	root := fmt.Sprint(fmt.Sprint(context.Configuration.DBPath, ".packages/"), fmt.Sprint(appID, "/"))
+	if parts[1] == "history" {
+		PackageHttp_History(context, writer, request, root, appID)
+		return
+	}
 	filename := "latest-v2.json"
 	hash := ""
 	if parts[1] != "latest" {
@@ -311,16 +482,16 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		if int64(0) < 0 || int64(int64(len(value_19))) < int64(0) || int64(int64(len(value_19))) > int64(len(value_19)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_69 := value_19[0:int64(len(value_19)):int64(len(value_19))]
-		loop_count_69 := int64(len(loop_view_69))
-		var loop_cursor_69 int64 = 0
-		for loop_cursor_69 < loop_count_69 {
-			loop_index_69 := loop_cursor_69
-			artifact := loop_view_69[loop_index_69]
+		loop_view_73 := value_19[0:int64(len(value_19)):int64(len(value_19))]
+		loop_count_73 := int64(len(loop_view_73))
+		var loop_cursor_73 int64 = 0
+		for loop_cursor_73 < loop_count_73 {
+			loop_index_73 := loop_cursor_73
+			artifact := loop_view_73[loop_index_73]
 			if artifact.SHA256 == hash {
 				expected = artifact.Size
 			}
-			loop_cursor_69++
+			loop_cursor_73++
 		}
 	}
 	if expected == 0 {

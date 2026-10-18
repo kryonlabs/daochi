@@ -54,6 +54,12 @@ Rollout :: struct {
     Percent: s64 #go_tag "json:\"percent\""
     Until: s64 #go_tag "json:\"until\""
 }
+// Each entry remains a publisher-signed descriptor. The index itself grants
+// no trust; host interfaces and active publisher keys are checked per entry.
+ReleaseHistory :: struct {
+    Versions: []release.ReleaseV2 #go_tag "json:\"versions\""
+}
+
 ParseNumber :: (value: string, base: isize, bits: isize) -> Number #go_results #foreign strconv "ParseInt";
 Sequence :: (sequence: s64) -> string #foreign fmt "Sprint";
 TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
@@ -133,11 +139,31 @@ Trusted :: (context: registry.Registry, request: *http.Request,
         text.ToBytes(release.SigningMessage(value)), signature.value)
 }
 
-// Every published release stays archived by sequence. The walk is bounded so
-// a long history cannot make one request read the whole store.
+// Retained choices may have large sequence gaps. Read the bounded history
+// first; older stores without it keep their bounded archive fallback.
 Older :: (context: registry.Registry, request: *http.Request, root: string,
     appID: string, latest: s64, wanted: Interfaces) -> Selected {
     result: Selected
+    retained := files.ReadFile(Join(root, "history-v2.json"))
+    if retained.error == null {
+        history: ReleaseHistory
+        if retained.value.count > 262144 || json.Unmarshal(retained.value, *history) != null ||
+        history.Versions.count == 0 || history.Versions.count > 3 { return result }
+        previous: s64 = 9223372036854775807
+        for value: history.Versions {
+            if value.Sequence >= previous || !release.Valid(value, appID) { return result }
+            previous = value.Sequence
+        }
+        for value: history.Versions {
+            if value.Sequence < latest && Fits(value, wanted) && Trusted(context, request, value) &&
+            !HeldBack(root, value.Sequence, Bucket(request)) {
+                result.value = value
+                result.found = true
+                return result
+            }
+        }
+        return result
+    }
     sequence := latest - 1
     while sequence > 0 && sequence > latest - 256 {
         metadata := files.ReadFile(Join(root, Join(Join("release-", Sequence(sequence)), ".json")))
@@ -153,6 +179,52 @@ Older :: (context: registry.Registry, request: *http.Request, root: string,
         sequence -= 1
     }
     return result
+}
+
+History :: (context: registry.Registry, writer: http.ResponseWriter,
+    request: *http.Request, root: string, appID: string) {
+    wanted := Wanted(request)
+    bucket := Bucket(request)
+    if !wanted.valid || bucket < 0 {
+        response.Error(writer, 400, "invalid interface version or bucket")
+        return
+    }
+    metadata := files.ReadFile(Join(root, "history-v2.json"))
+    history: ReleaseHistory
+    fallback: [1]release.ReleaseV2
+    if metadata.error != null {
+        metadata = files.ReadFile(Join(root, "latest-v2.json"))
+        if metadata.error != null || metadata.value.count > 65536 ||
+        json.Unmarshal(metadata.value, *fallback[0]) != null {
+            response.Error(writer, 404, "portable history unavailable")
+            return
+        }
+        history.Versions = fallback[:]
+    } else if metadata.value.count > 262144 || json.Unmarshal(metadata.value, *history) != null {
+        response.Error(writer, 503, "invalid portable history")
+        return
+    }
+    if history.Versions.count == 0 || history.Versions.count > 3 {
+        response.Error(writer, 503, "invalid portable history")
+        return
+    }
+    selected: [3]release.ReleaseV2
+    count: s64 = 0
+    previous: s64 = 9223372036854775807
+    for value: history.Versions {
+        if value.Sequence >= previous || !release.Valid(value, appID) {
+            response.Error(writer, 503, "invalid portable history")
+            return
+        }
+        previous = value.Sequence
+        if Fits(value, wanted) && Trusted(context, request, value) &&
+        !HeldBack(root, value.Sequence, bucket) {
+            selected[count] = value
+            count += 1
+        }
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "no-store")
+    response.JSON(writer, 200, ReleaseHistory.{.Versions = selected[:count]})
 }
 
 #scope_export
@@ -181,7 +253,7 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
     grant := ""
     if parts.count == 3 {
         grant = parts[2]
-        if parts[1] == "latest" || grant == "" {
+        if parts[1] == "latest" || parts[1] == "history" || grant == "" {
             response.Error(writer, 404, "package not found")
             return
         }
@@ -199,6 +271,10 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         return
     }
     root := Join(Join(context.configuration.DBPath, ".packages/"), Join(appID, "/"))
+    if parts[1] == "history" {
+        History(context, writer, request, root, appID)
+        return
+    }
     filename := "latest-v2.json"
     hash := ""
     if parts[1] != "latest" {

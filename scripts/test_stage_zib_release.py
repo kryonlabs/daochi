@@ -8,11 +8,30 @@ import unittest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from app_release import signing_message
+from package_retention import retain
 
 SCRIPT = Path(__file__).with_name('stage-zib-release.py')
 
 
 class StageReleaseTest(unittest.TestCase):
+    def test_malformed_dependency_metadata_preserves_existing_blobs(self):
+        with tempfile.TemporaryDirectory(prefix='retention-metadata-') as temporary:
+            store = Path(temporary)
+            root = store / 'game'
+            root.mkdir()
+            for sequence in range(1, 5):
+                value = dict(app_id='game', sequence=sequence,
+                    artifacts=[dict(sha256=f'{sequence:064x}')], dependencies=[])
+                (root / f'release-{sequence}.json').write_text(json.dumps(value))
+                (root / (f'{sequence:064x}' + '.zib')).write_bytes(b'preserve')
+            broken = store / 'collection'
+            broken.mkdir()
+            (broken / 'release-1.json').write_text(json.dumps(dict(app_id='collection', sequence=1,
+                artifacts=[dict(sha256='f' * 64)], dependencies=[None])))
+            retain(store, lambda path, data: path.write_bytes(data))
+            self.assertTrue((root / 'release-1.json').exists())
+            self.assertTrue((root / (f'{1:064x}' + '.zib')).exists())
+
     def test_component_versions_variants_and_dependencies(self):
         with tempfile.TemporaryDirectory(prefix='stage-app-') as temporary:
             root = Path(temporary)
@@ -55,6 +74,42 @@ class StageReleaseTest(unittest.TestCase):
             stage('diary', 3, '1.0.2', [diary], expected=2)
             stage('diary', 3, '01.0.0', expected=2)
             self.assertEqual(diary.read_bytes(), second)
+
+    def test_retains_three_release_choices_and_referenced_dependency_bytes(self):
+        with tempfile.TemporaryDirectory(prefix='retained-apps-') as temporary:
+            root = Path(temporary)
+            key = Ed25519PrivateKey.generate()
+            private = root / 'publisher.pem'
+            private.write_bytes(key.private_bytes(serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+            bundle = root / 'game.zib'
+            store = root / 'packages'
+            def stage(app, number, dependency=None):
+                bundle.write_bytes(b'ZIB\0payload' + str(number).encode())
+                command = [sys.executable, SCRIPT, '--store', store, '--app', app,
+                    '--key-id', 'release', '--key', private, '--format-version', '2',
+                    '--version', f'1.0.{number}', '--sequence', str(number)]
+                if dependency:
+                    command.extend(['--dependency', dependency])
+                subprocess.run([*command, bundle], check=True, capture_output=True)
+                return json.loads((store / app / 'latest-v2.json').read_text())
+            first = stage('game', 1)
+            dependency = root / 'dependency.json'
+            dependency.write_text(json.dumps(first))
+            stage('collection', 1, dependency)
+            for number in range(2, 6):
+                stage('game', number)
+            archives = sorted(p.name for p in (store / 'game').glob('release-*.json'))
+            self.assertEqual(archives, ['release-3.json', 'release-4.json', 'release-5.json'])
+            history = json.loads((store / 'game/history-v2.json').read_text())['versions']
+            self.assertEqual([r['sequence'] for r in history], [5, 4, 3])
+            for release in history:
+                key.public_key().verify(bytes.fromhex(release['signature']), signing_message(release))
+            first_blob = store / 'game' / (first['artifacts'][0]['sha256'] + '.zib')
+            self.assertTrue(first_blob.exists(), 'Retained parent still needs its exact dependency')
+            second = __import__('hashlib').sha256(b'ZIB\0payload2').hexdigest()
+            self.assertFalse((store / 'game' / (second + '.zib')).exists())
+            self.assertEqual(json.loads((store / 'game/latest-v2.json').read_text())['sequence'], 5)
 
     def test_signed_immutable_release_and_monotonic_publication(self):
         with tempfile.TemporaryDirectory(prefix='stage-zib-') as temporary:

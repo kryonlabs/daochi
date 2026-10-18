@@ -7,6 +7,14 @@ import os
 from pathlib import Path
 import re
 import tempfile
+# This module is also imported directly by consumer signature fixtures.
+# Resolve its sibling without depending on the caller's Python search path.
+import importlib.util
+_retention_spec = importlib.util.spec_from_file_location(
+    "package_retention", Path(__file__).with_name("package_retention.py"))
+_retention_module = importlib.util.module_from_spec(_retention_spec)
+_retention_spec.loader.exec_module(_retention_module)
+retain = _retention_module.retain
 
 IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z")
 VERSION = re.compile(r"(?:0|[1-9][0-9]{0,8})\.(?:0|[1-9][0-9]{0,8})\.(?:0|[1-9][0-9]{0,8})\Z")
@@ -109,7 +117,14 @@ def stage(args, key):
     if len(encoded) > 65536:
         raise ValueError("release descriptor is too large")
     root = args.store / args.app
-    with publication_lock(root):
+    with publication_lock(args.store), publication_lock(root):
+        # A concurrent publication may have pruned a dependency after it was
+        # inspected above. Recheck under the same lock used by retention.
+        for dependency in dependencies:
+            path = args.store / dependency['app_id'] / (dependency['sha256'] + '.zib')
+            data = read_bundle(path)
+            if len(data) != dependency['size'] or sha256(data).hexdigest() != dependency['sha256']:
+                raise ValueError('dependency changed before publication')
         latest = root / "latest-v2.json"
         if latest.exists():
             previous = json.loads(latest.read_bytes())
@@ -130,4 +145,5 @@ def stage(args, key):
             raise ValueError("release sequence is already occupied")
         atomic_write(sequence, encoded)
         atomic_write(latest, encoded)
+        retain(args.store, atomic_write)
     return release

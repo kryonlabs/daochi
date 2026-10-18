@@ -96,6 +96,58 @@ func TestIndependentPackageReleases(t *testing.T) {
 	if get("diary/latest", 200).Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("latest must not be cached")
 	}
+	// History exposes only bounded, compatible publisher-signed releases.
+	historyPath := server.Cfg.DBPath + ".packages/diary/history-v2.json"
+	writeHistory := func(values ...ReleaseV2) {
+		t.Helper()
+		encoded, _ := json.Marshal(map[string]interface{}{"versions": values})
+		if err := os.WriteFile(historyPath, encoded, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeHistory(newDiary, diary)
+	var history struct {
+		Versions []ReleaseV2 `json:"versions"`
+	}
+	historyResponse := get("diary/history?host_api=1&module_api=1", 200)
+	if err := json.Unmarshal(historyResponse.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Versions) != 2 || history.Versions[0].Sequence != 2 ||
+		history.Versions[1].Sequence != 1 || historyResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("history did not preserve the signed newest-first choices")
+	}
+	for _, value := range history.Versions {
+		if !ed25519.Verify(private.Public().(ed25519.PublicKey),
+			[]byte(PackageRelease_SigningMessage(value)), func() []byte {
+				signature, err := hex.DecodeString(value.Signature)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return signature
+			}()) {
+			t.Fatal("history changed a signed descriptor")
+		}
+	}
+	forged := diary
+	forged.Version = "9.9.9"
+	writeHistory(newDiary, forged)
+	if err := json.Unmarshal(get("diary/history", 200).Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Versions) != 1 {
+		t.Fatal("forged history entry was offered")
+	}
+	writeHistory(newDiary, newDiary)
+	get("diary/history", 503)
+	writeHistory(newDiary, diary, diary, diary)
+	get("diary/history", 503)
+	writeHistory(newDiary, rootRelease)
+	get("diary/history", 503)
+	writeHistory(newDiary, diary)
+	get("diary/history?host_api=wrong", 400)
+	get("diary/history/grant", 404)
+	get("inbe/history", 200) // Older nodes/stores may only have latest metadata.
 	// A beta release keeps its channel when served, so apps can hide it.
 	betaDiary := makeRelease("diary", 2, "1.0.1")
 	betaDiary.Channel = "beta"
@@ -244,6 +296,18 @@ func TestPackageReleaseForOlderHosts(t *testing.T) {
 		if value := latest("?bucket=80", 200); value.Sequence != newest.Sequence {
 			t.Fatalf("rollout %q held back a released version: %d", text, value.Sequence)
 		}
+	}
+	// Retaining three releases must still serve older hosts when sequence
+	// numbers have gaps larger than the legacy bounded archive walk.
+	far := publish(1024, "2.0.0", 8, 2)
+	history, _ := json.Marshal(struct {
+		Versions []ReleaseV2 `json:"versions"`
+	}{[]ReleaseV2{far, forFive}})
+	if err := os.WriteFile(filepath.Join(root, "history-v2.json"), history, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if value := latest("?host_api=5", 200); value.Sequence != forFive.Sequence {
+		t.Fatalf("retained compatible release lost across sequence gap: %d", value.Sequence)
 	}
 }
 

@@ -36,9 +36,9 @@ func TestLumiGroupRouteAndDeliveryReceipts(t *testing.T) {
 			if len(input.Messages) != 2 || len(input.Tools) != 0 || strings.Contains(input.Messages[0].Content, "Current app context") {
 				t.Error("group request included personal context or tools")
 			}
-			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"Hello from Lumi."}}]}`)
+			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"Hello from Lumi."}}]}`)
 		case "/bot8967366018:fixture/sendChatAction":
-			fmt.Fprint(w, `{"ok":true}`)
+			_, _ = fmt.Fprint(w, `{"ok":true}`)
 		case "/bot8967366018:fixture/sendMessage":
 			sends.Add(1)
 			var input struct {
@@ -57,15 +57,15 @@ func TestLumiGroupRouteAndDeliveryReceipts(t *testing.T) {
 				t.Errorf("wrong group, topic, reply or text: %+v", input)
 			}
 			if failSend {
-				http.Error(w, "uncertain", 503)
+				http.Error(w, "uncertain", http.StatusServiceUnavailable)
 				return
 			}
 			if rejectSend {
 				w.WriteHeader(400)
-				fmt.Fprint(w, `{"ok":false,"error_code":400,"description":"fixture rejection"}`)
+				_, _ = fmt.Fprint(w, `{"ok":false,"error_code":400,"description":"fixture rejection"}`)
 				return
 			}
-			fmt.Fprint(w, `{"ok":true,"result":{"message_id":777}}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":777}}`)
 		default:
 			t.Errorf("unexpected request %s", r.URL.Path)
 		}
@@ -242,13 +242,13 @@ func TestLumiGroupLocalRepliesNeverUseLinkedAccountOrTokens(t *testing.T) {
 			if linkedAccount != "" && strings.Contains(string(body), linkedAccount) {
 				t.Error("linked account leaked into group prompt")
 			}
-			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"Inner Breeze explanation."}}]}`)
+			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"Inner Breeze explanation."}}]}`)
 		case "/bot8967366018:fixture/sendMessage":
 			sends.Add(1)
-			fmt.Fprint(w, `{"ok":true,"result":{"message_id":777}}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":777}}`)
 		case "/bot8967366018:fixture/sendChatAction":
 			typing.Add(1)
-			fmt.Fprint(w, `{"ok":true}`)
+			_, _ = fmt.Fprint(w, `{"ok":true}`)
 		default:
 			t.Errorf("unexpected request %s", r.URL.Path)
 		}

@@ -50,7 +50,7 @@
           "name": "asset",
           "in": "path",
           "required": true,
-          "description": "latest or the release SHA-256 followed by .zib",
+          "description": "latest, history (up to three signed releases), or the release SHA-256 followed by .zib",
           "schema": {
             "type": "string"
           }
@@ -58,7 +58,7 @@
         {
           "name": "host_api",
           "in": "query",
-          "description": "For latest: the newest host interface the app runs; an older archived release is served when the latest needs a newer one",
+          "description": "For latest/history: the newest host interface the app runs; an older archived release is served when the latest needs a newer one",
           "schema": {
             "type": "integer",
             "minimum": 1,
@@ -68,7 +68,7 @@
         {
           "name": "module_api",
           "in": "query",
-          "description": "For latest: the module interface the app requires",
+          "description": "For latest/history: the module interface the app requires",
           "schema": {
             "type": "integer",
             "minimum": 1,
@@ -78,7 +78,7 @@
         {
           "name": "bucket",
           "in": "query",
-          "description": "For latest: the device's stable rollout bucket; a staged release reaches buckets below its share until it expires. Apps without a bucket count as 99",
+          "description": "For latest/history: the device's stable rollout bucket; a staged release reaches buckets below its share until it expires. Apps without a bucket count as 99",
           "schema": {
             "type": "integer",
             "minimum": 0,

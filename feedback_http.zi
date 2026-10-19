@@ -39,7 +39,8 @@ Append :: (values: []Feedback, value: Feedback) -> []Feedback #foreign builtin "
 // Every reply an account received, oldest first: the first reply kept on its
 // report, under the report's ID, then the added replies under their own IDs.
 // Apps remember the IDs they showed, so each reply is shown once, in order.
-RepliesQuery :: "SELECT id,app_id,'','','',reply,created_at FROM (SELECT id,app_id,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
+// Each reply carries its report's title, which apps quote above the reply.
+RepliesQuery :: "SELECT id,app_id,title,'','',reply,created_at FROM (SELECT id,app_id,title,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,f.title,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
 
 ReplyId :: (value: string) -> bool {
     if value.count != 64 {

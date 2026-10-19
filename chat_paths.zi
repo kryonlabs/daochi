@@ -190,7 +190,7 @@ Document4 :: #string JSON_4
 "/api/v1/admin/feedback/reply": {
     "post": {
       "summary": "Reply to an app feedback report",
-      "description": "Requires X-Daochi-Admin and the account_id returned by the private inbox. Replies target exactly one account's report. Without reply_id, the reply is the report's single reply and replaces an earlier one. With a 64-character hexadecimal reply_id, it is added beside the report's earlier replies; retrying the same reply_id and reply changes nothing, and reusing a reply_id for another reply returns 409. The reporting account can read replies through GET /api/v1/feedback. Use replies=1 and a numeric offset to retrieve at most two replies per page, oldest first and without report diagnostics; each reply carries its own id (the report's ID for the single reply).",
+      "description": "Requires X-Daochi-Admin and the account_id returned by the private inbox. Replies target exactly one account's report. Without reply_id, the reply is the report's single reply and replaces an earlier one. With a 64-character hexadecimal reply_id, it is added beside the report's earlier replies; retrying the same reply_id and reply changes nothing, and reusing a reply_id for another reply returns 409. The reporting account can read replies through GET /api/v1/feedback. Use replies=1 and a numeric offset to retrieve at most two replies per page, oldest first and without report diagnostics; each reply carries its own id (the report's ID for the single reply) and its report's title.",
       "requestBody": {
         "required": true,
         "content": {

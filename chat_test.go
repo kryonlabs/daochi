@@ -316,7 +316,10 @@ func TestFeedbackReportCarriesEveryReplyInOrder(t *testing.T) {
 		t.Fatalf("every reply once, in order: %v", got)
 	}
 	for index, item := range got {
-		if item["id"] != want[index][0] || item["reply"] != want[index][1] || item["message"] != "" {
+		// Every reply names the report it answers by its title, without the
+		// report's message or diagnostics.
+		if item["id"] != want[index][0] || item["reply"] != want[index][1] || item["title"] != "Bell" ||
+			item["message"] != "" || item["context"] != "" {
 			t.Fatalf("reply %d: %v", index, item)
 		}
 	}

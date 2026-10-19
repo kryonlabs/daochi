@@ -24,7 +24,7 @@ type FeedbackList struct {
 	Feedback []Feedback "json:\"feedback\""
 }
 
-const RepliesQuery = "SELECT id,app_id,'','','',reply,created_at FROM (SELECT id,app_id,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
+const RepliesQuery = "SELECT id,app_id,title,'','',reply,created_at FROM (SELECT id,app_id,title,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,f.title,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
 
 func FeedbackHttp_ReplyId(value string) bool {
 	if int64(len(value)) != 64 {
@@ -157,7 +157,7 @@ func FeedbackHttp_List(service Chat, writer ResponseWriter, request *Request, ad
 		if offset != "" {
 			page_arguments[1] = offset
 		}
-		query = "SELECT id,app_id,'','','',reply,created_at FROM (SELECT id,app_id,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
+		query = "SELECT id,app_id,title,'','',reply,created_at FROM (SELECT id,app_id,title,reply,created_at,0 AS position FROM server_app_feedback WHERE account_id=?1 AND reply<>'' UNION ALL SELECT r.id,f.app_id,f.title,r.reply,r.created_at,r.rowid AS position FROM server_app_feedback_replies r JOIN server_app_feedback f ON f.account_id=r.account_id AND f.id=r.report_id WHERE r.account_id=?1) ORDER BY created_at,position,id LIMIT 2 OFFSET ?2"
 	}
 	if admin {
 		query = "SELECT f.id,f.app_id,f.title,f.message,f.context,COALESCE((SELECT r.reply FROM server_app_feedback_replies r WHERE r.account_id=f.account_id AND r.report_id=f.id ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1),f.reply),f.created_at,f.account_id,COALESCE(u.alias,'') FROM server_app_feedback f LEFT JOIN server_users u ON u.user_id_hash=f.account_id ORDER BY f.created_at DESC,f.id DESC LIMIT 100"

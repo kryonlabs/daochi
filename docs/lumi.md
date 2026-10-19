@@ -49,7 +49,8 @@ Replies are scoped to the reporting account, including when two accounts use
 the same report ID. Lumi reads `GET /api/v1/feedback?replies=1&offset=0`, two
 replies per page, oldest first, and attributes developer replies explicitly.
 Each reply has its own `id` (the report's ID for its single reply), so Lumi
-shows every reply once, in order.
+shows every reply once, in order, and its report's `title`, which Lumi quotes
+above the reply as a chat app quotes the message being answered.
 
 `scripts/feedback.py --host USER@NODE inbox` lets the local developer harness
 read reports without receiving the node's admin credential. To send an authored

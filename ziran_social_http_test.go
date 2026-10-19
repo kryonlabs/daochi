@@ -242,7 +242,7 @@ func TestZiranSocialDecodersAgainstBaseline(t *testing.T) {
 			}
 		}
 	}
-	for _, practice := range []string{"whm", "meditation", "sun_salutation", "", "WHM", "\xff"} {
+	for _, practice := range []string{"whm", "meditation", "sun_salutation", "patterns", "tai_chi", "astral_projection", "", "WHM", "\xff"} {
 		for _, metric := range []string{"streak", "avg_hold", "avg_time", "", "\xff"} {
 			if SocialHttp_ValidMetric(practice, metric) != baselineSocialHttpValidLeaderboardMetric(practice, metric) {
 				t.Fatal("leaderboard query policy changed")

@@ -2772,6 +2772,41 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		t.Fatalf("patterns avg hold should be rejected, status = %d body=%s", res.Code, res.Body.String())
 	}
 
+	// Tai Chi (activity 4) and Astral Projection (activity 5) rank by their
+	// own sessions too, by streak only.
+	practiceToday := time.Now().UTC().Format("20060102")
+	practiceYesterday := time.Now().UTC().AddDate(0, 0, -1).Format("20060102")
+	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-tai-chi-stats","sessions":[{"id":"alice-tai-chi-1","started_at":"2026-06-28T02:00:00Z","local_date":`+practiceToday+`,"topic":"0","activity":4,"source":"test","rounds_hash":"tai-chi-1","deleted_at":0,"updated_at":"2026-06-28T02:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":600}]}]}`))
+	syncWithBody(t, handler, "", bob.UserID, bob.Token, []byte(`{"user_id_hash":"`+bob.UserID+`","client_id":"bob-astral-stats","sessions":[{"id":"bob-astral-1","started_at":"2026-06-28T03:00:00Z","local_date":`+practiceYesterday+`,"topic":"0","activity":5,"source":"test","rounds_hash":"astral-1","deleted_at":0,"updated_at":"2026-06-28T03:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":900}]},{"id":"bob-astral-2","started_at":"2026-06-28T04:00:00Z","local_date":`+practiceToday+`,"topic":"0","activity":5,"source":"test","rounds_hash":"astral-2","deleted_at":0,"updated_at":"2026-06-28T04:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":900}]}]}`))
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=tai_chi&metric=streak", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("tai chi streak status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 1 ||
+		stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 {
+		t.Fatalf("unexpected tai chi streak stats: %#v", stats.Rows)
+	}
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=astral_projection&metric=streak", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("astral projection streak status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != bob.UserID || stats.Rows[0].Value != 2 ||
+		stats.Rows[1].UserIDHash != alice.UserID || stats.Rows[1].Value != 0 {
+		t.Fatalf("unexpected astral projection streak stats: %#v", stats.Rows)
+	}
+	for _, practice := range []string{"tai_chi", "astral_projection"} {
+		res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice="+practice+"&metric=avg_hold", bob, nil)
+		if res.Code != http.StatusBadRequest {
+			t.Fatalf("%s avg hold should be rejected, status = %d body=%s", practice, res.Code, res.Body.String())
+		}
+	}
+
 	res = friendJSONRequest(t, handler, http.MethodDelete, "/api/v1/friends/"+alice.UserID, bob, nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("remove status = %d body=%s", res.Code, res.Body.String())

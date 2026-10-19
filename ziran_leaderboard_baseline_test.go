@@ -27,6 +27,10 @@ func baselineLeaderboardLeaderboardActivity(practice string) int {
 		return 2
 	case "patterns":
 		return 3
+	case "tai_chi":
+		return 4
+	case "astral_projection":
+		return 5
 	default:
 		return 0
 	}

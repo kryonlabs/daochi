@@ -143,6 +143,12 @@ func Leaderboard_Activity(practice string) int {
 	if practice == "patterns" {
 		return int(3)
 	}
+	if practice == "tai_chi" {
+		return int(4)
+	}
+	if practice == "astral_projection" {
+		return int(5)
+	}
 	return int(0)
 }
 

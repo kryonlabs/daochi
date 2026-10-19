@@ -66,7 +66,7 @@ func SocialHttp_ValidMetric(practice string, metric string) bool {
 	if practice == "meditation" {
 		return metric == "streak" || metric == "avg_time"
 	}
-	if practice == "sun_salutation" || practice == "patterns" {
+	if practice == "sun_salutation" || practice == "patterns" || practice == "tai_chi" || practice == "astral_projection" {
 		return metric == "streak"
 	}
 	return false

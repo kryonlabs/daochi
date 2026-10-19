@@ -310,7 +310,7 @@ func baselineSocialHttpValidLeaderboardMetric(practice, metric string) bool {
 		return metric == "streak" || metric == "avg_hold"
 	case "meditation":
 		return metric == "streak" || metric == "avg_time"
-	case "sun_salutation", "patterns":
+	case "sun_salutation", "patterns", "tai_chi", "astral_projection":
 		return metric == "streak"
 	default:
 		return false

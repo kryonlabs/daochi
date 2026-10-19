@@ -133,6 +133,12 @@ Activity :: (practice: string) -> isize {
     if practice == "patterns" {
         return cast(isize)3
     }
+    if practice == "tai_chi" {
+        return cast(isize)4
+    }
+    if practice == "astral_projection" {
+        return cast(isize)5
+    }
     return cast(isize)0
 }
 

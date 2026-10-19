@@ -321,6 +321,19 @@ SQL;
     return result
 }
 
+// Reports whether two accounts are accepted friends inside the caller's
+// transaction. A failed read counts as no friendship.
+AreFriends :: (transaction: *sql.Transaction, context: ctx.Context,
+    first: string, second: string) -> bool {
+    arguments: [2]Any = .[first, second]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT EXISTS(SELECT 1 FROM server_friendships WHERE (user_id_a=?1 AND user_id_b=?2) OR (user_id_a=?2 AND user_id_b=?1))",
+        arguments[:])
+    found: bool
+    destinations: [1]Any = .[*found]
+    return sql.ScanRow(row, destinations[:]) == null && found
+}
+
 Authoritative :: (database: *sql.Database, context: ctx.Context, userID: string) -> SocialResult {
     result: SocialResult
     friends := Friends(database, context, userID)

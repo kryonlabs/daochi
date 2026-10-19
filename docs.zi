@@ -1,6 +1,7 @@
 storage_plans :: #import "storage_plan_paths";
 unlock_paths :: #import "unlock_paths";
 gift_paths :: #import "token_gift_paths";
+publication_paths :: #import "publications_paths";
 exchange_rate_paths :: #import "exchange_rate_paths";
 #import "std/go_types"
 #import "std/map_go"
@@ -197,6 +198,8 @@ PAGE_SECTION_2;
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/account/app-grants</code><p>Lists or creates bearer-authenticated grants for sharing registered app collection prefixes across apps.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/account/app-records</code><p>Returns encrypted records from a granted collection prefix for cross-app use.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
+<section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/publications</code><p>Publishes level collections and finds the newest public ones or the ones an author lets the caller see.</p></section>
+<section class="endpoint"><span class="method">GET/DELETE</span><code>/api/v1/publications/{id}</code><p>Fetches a visible publication with its document, or lets its author unpublish it.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete</code><p>Deletes all remote data for the signed sync account without uploading the private key.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Legacy signed deletion endpoint kept for older clients.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
@@ -2134,6 +2137,9 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/rates", MapGet(rates, "/api/v1/rates"))
     lists := shared_list_paths.Paths()
     MapSet(result, "/api/v1/lists", MapGet(lists, "/api/v1/lists"))
+    published := publication_paths.Paths()
+    MapSet(result, "/api/v1/publications", MapGet(published, "/api/v1/publications"))
+    MapSet(result, "/api/v1/publications/{id}", MapGet(published, "/api/v1/publications/{id}"))
     packages := package_paths.Paths()
     blobs := blob_paths.Paths()
     MapSet(result, "/api/v1/blobs/{app_id}/{sha256}", MapGet(blobs, "/api/v1/blobs/{app_id}/{sha256}"))

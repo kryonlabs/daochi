@@ -1,0 +1,214 @@
+// Publication endpoints: authors publish collections of game levels, and the
+// people they allow find and play them. Every answer is private to the caller.
+#import "std/go_types"
+#import "sync_types"
+publications :: #import "publications";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+lookup :: #import "account_lookup";
+quota :: #import "account_storage";
+requests :: #import "request_rate";
+limits :: #import "rate_limit";
+config :: #import "config";
+metrics :: #import "metrics";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+sql :: #import "std/sql_go";
+clock :: #import "std/time_go";
+json :: #import "std/json_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+logging :: #system_library "go:log/slog";
+
+Publications :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    limiter: *limits.RateLimiter
+}
+
+#scope_file
+PublicationResponse :: struct {
+    publication: publications.PublicationMeta #go_tag "json:\"publication\""
+}
+PublicationDocumentResponse :: struct {
+    publication: publications.PublicationMeta #go_tag "json:\"publication\""
+    document: RawMessage #go_tag "json:\"document\""
+}
+PublicationListResponse :: struct {
+    publications: []publications.PublicationMeta #go_tag "json:\"publications\""
+}
+UnpublishedResponse :: struct {
+    deleted: bool #go_tag "json:\"deleted\""
+}
+
+PublicationPath :: "/api/v1/publications/"
+
+Join :: (values: []string, separator: string) -> string #foreign strings;
+TrimSpace :: (value: string) -> string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+MakeMetas :: (count: isize) -> []publications.PublicationMeta #foreign builtin "make";
+LogError :: (message: string, key: string, error: Error) #foreign logging "Error";
+
+// Returns the authenticated account, or "" after answering the request.
+Bearer :: (service: Publications, writer: http.ResponseWriter, request: *http.Request) -> string {
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    user := auth.BearerUser(service.database, request, service.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        auth.Respond(writer, service.counters, user.authentication)
+        return ""
+    }
+    return user.value
+}
+
+// Publishing and unpublishing share one hourly allowance per account, and
+// reads one per minute.
+Allow :: (service: Publications, writer: http.ResponseWriter, user: string, writing: bool) -> bool {
+    parts: [2]string = .["publications:read:", user]
+    limit: isize = 120
+    window := cast(clock.Duration)60000000000
+    if writing {
+        parts[0] = "publications:write:"
+        limit = 60
+        window = cast(clock.Duration)3600000000000
+    }
+    if !requests.Allow(service.limiter, service.counters, Join(parts[:], ""), limit, window) {
+        response.Error(writer, cast(isize)429, "publication rate limit exceeded")
+        return false
+    }
+    return true
+}
+
+// Answers a failed result and reports whether there was one.
+Refused :: (writer: http.ResponseWriter, result: publications.PublicationResult) -> bool {
+    if result.error == null {
+        return false
+    }
+    if errors.Is(result.error, quota.ErrStorageFull) {
+        quota.RespondFull(writer, result.storage)
+        return true
+    }
+    if result.status == cast(isize)0 {
+        LogError("publications", "error", result.error)
+        response.Error(writer, cast(isize)500, "publications unavailable")
+        return true
+    }
+    response.Error(writer, result.status, errors.Message(result.error))
+    return true
+}
+
+PathID :: (request: *http.Request) -> string {
+    return TrimPrefix(url.Path(http.RequestURL(request)), PublicationPath)
+}
+
+#scope_export
+// POST creates a publication, or replaces the caller's own one named by
+// `id`; anyone else's answers 404.
+Publish :: (service: Publications, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(service, writer, request)
+    if user == "" || !Allow(service, writer, user, true) {
+        return
+    }
+    read := body.ReadJSON(writer, request, 300000)
+    if read.error != null && errors.Message(read.error) == "request body too large" {
+        response.Error(writer, cast(isize)413, "publication too large")
+        return
+    }
+    draft: publications.PublicationDraft
+    if read.error != null || json.Unmarshal(read.value, *draft) != null {
+        response.Error(writer, cast(isize)400, "invalid publication")
+        return
+    }
+    published := publications.Publish(service.database, http.Context(request),
+        service.configuration.*, user, draft)
+    if Refused(writer, published) {
+        return
+    }
+    output: PublicationResponse
+    output.publication = published.value
+    response.JSON(writer, cast(isize)200, output)
+}
+
+// DELETE removes the caller's own publication.
+Unpublish :: (service: Publications, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(service, writer, request)
+    if user == "" || !Allow(service, writer, user, true) {
+        return
+    }
+    removed := publications.Unpublish(service.database, http.Context(request), user, PathID(request))
+    if Refused(writer, removed) {
+        return
+    }
+    output: UnpublishedResponse
+    output.deleted = true
+    response.JSON(writer, cast(isize)200, output)
+}
+
+// GET lists the newest public publications, or with `author` (an alias,
+// @alias or public ID) that author's publications the caller may see.
+// `format` keeps one kind of document.
+List :: (service: Publications, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(service, writer, request)
+    if user == "" || !Allow(service, writer, user, false) {
+        return
+    }
+    query := url.Query(http.RequestURL(request))
+    format := TrimSpace(url.Value(query, "format"))
+    author := TrimSpace(url.Value(query, "author"))
+    if format != "" && !publications.ValidFormat(format) {
+        response.Error(writer, cast(isize)400, "invalid format")
+        return
+    }
+    context := http.Context(request)
+    output: PublicationListResponse
+    output.publications = MakeMetas(cast(isize)0)
+    if author == "" {
+        listed := publications.Recent(service.database, context, user, format)
+        if listed.error != null {
+            LogError("publications", "error", listed.error)
+            response.Error(writer, cast(isize)500, "publications unavailable")
+            return
+        }
+        output.publications = listed.value
+        response.JSON(writer, cast(isize)200, output)
+        return
+    }
+    resolved := lookup.Resolve(service.database, context, author)
+    if resolved.error != null {
+        LogError("publications", "error", resolved.error)
+        response.Error(writer, cast(isize)500, "publications unavailable")
+        return
+    }
+    // An unknown author has published nothing.
+    if !resolved.found {
+        response.JSON(writer, cast(isize)200, output)
+        return
+    }
+    listed := publications.ByAuthor(service.database, context, user, resolved.value, format)
+    if listed.error != null {
+        LogError("publications", "error", listed.error)
+        response.Error(writer, cast(isize)500, "publications unavailable")
+        return
+    }
+    output.publications = listed.value
+    response.JSON(writer, cast(isize)200, output)
+}
+
+// GET /{id} returns a publication and its document when the caller may see
+// it; otherwise 404.
+Read :: (service: Publications, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(service, writer, request)
+    if user == "" || !Allow(service, writer, user, false) {
+        return
+    }
+    fetched := publications.Fetch(service.database, http.Context(request), user, PathID(request))
+    if Refused(writer, fetched) {
+        return
+    }
+    output: PublicationDocumentResponse
+    output.publication = fetched.value
+    output.document = fetched.document
+    response.JSON(writer, cast(isize)200, output)
+}

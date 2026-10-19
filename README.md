@@ -96,6 +96,10 @@ API access is scoped by account, with explicit shared surfaces:
 - `DELETE /api/v1/friends/{user_id_hash}`
 - `PUT /api/v1/profile/stats`
 - `GET /api/v1/friends/stats?app=&practice=&metric=`
+- `GET /api/v1/publications?format=&author=` (published level collections)
+- `POST /api/v1/publications`
+- `GET /api/v1/publications/{id}`
+- `DELETE /api/v1/publications/{id}`
 - `DELETE /api/v1/account`
 - `POST /api/v1/account/delete-with-key`
 - `GET /openapi.json`
@@ -337,6 +341,21 @@ a gift to oneself, above the balance or to anyone else is refused and moves
 nothing. Retry the same request ID after an uncertain result: it never sends
 twice and answers with the first result even after the friendship ends, while
 the same ID with another recipient or amount is refused.
+
+People can publish collections of custom game levels for others to find and
+play. `POST /api/v1/publications` publishes one from a `format` (1-64
+characters of `a-z0-9.-`), a `title` (1-80 bytes of text), a `visibility` and
+the `document`, a JSON object of at most 256 KiB that the node keeps as it is. A
+`public` publication is for everyone, `friends` for the author's friends, and
+`private` for the author alone. Send its `id` to replace one of your own; to
+anyone else it answers 404. An account keeps at most 100 publications, and
+their documents count toward its storage. `GET /api/v1/publications` lists the
+newest public ones, or with `author` (an alias or account ID) the ones that
+author lets you see; `format` keeps one kind. `GET /api/v1/publications/{id}`
+returns a visible publication with its document, and its author removes it
+with `DELETE`. Each publication reports its `levels`, the length of the
+document's top-level `levels` array. An account may publish or unpublish 60
+times an hour and read 120 times a minute.
 
 `GET /api/v1/rates` is public and lets an app show what Dew and XMR amounts
 are worth in US dollars. It returns `xmr_usd_cents` (US cents per XMR),

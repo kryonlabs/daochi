@@ -26,6 +26,7 @@ google :: #import "google_play_http";
 accounts :: #import "account_http";
 social :: #import "social_http";
 lists :: #import "shared_lists";
+publications :: #import "publications_http";
 registry :: #import "app_http";
 bundles :: #import "bundle_http";
 blobs :: #import "blob_http";
@@ -418,6 +419,10 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "GET /api/v1/friends", server, HandleSocialHttpFriends)
     Route(mux, "GET /api/v1/lists", server, HandleLists)
     Route(mux, "POST /api/v1/lists", server, HandleLists)
+    Route(mux, "GET /api/v1/publications", server, HandlePublicationsList)
+    Route(mux, "POST /api/v1/publications", server, HandlePublicationsPublish)
+    Route(mux, "GET /api/v1/publications/", server, HandlePublicationsRead)
+    Route(mux, "DELETE /api/v1/publications/", server, HandlePublicationsUnpublish)
     Route(mux, "DELETE /api/v1/friends/", server, HandleSocialHttpRemoveFriend)
     Route(mux, "GET /api/v1/friends/requests", server, HandleSocialHttpRequests)
     Route(mux, "POST /api/v1/friends/requests", server, HandleSocialHttpCreateRequest)
@@ -623,6 +628,31 @@ HandleSocialHttpFriends :: (server: *Server, writer: http.ResponseWriter, reques
 
 HandleLists :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     lists.Handle(Accounts(server), writer, request)
+}
+
+Publications :: (server: *Server) -> publications.Publications {
+    result: publications.Publications
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.limiter = server.limiter
+    return result
+}
+
+HandlePublicationsList :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    publications.List(Publications(server), writer, request)
+}
+
+HandlePublicationsPublish :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    publications.Publish(Publications(server), writer, request)
+}
+
+HandlePublicationsRead :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    publications.Read(Publications(server), writer, request)
+}
+
+HandlePublicationsUnpublish :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    publications.Unpublish(Publications(server), writer, request)
 }
 
 HandleSocialHttpRemoveFriend :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

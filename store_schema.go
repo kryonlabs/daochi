@@ -193,7 +193,7 @@ func StoreSchema_Ensure(database *Database, context Context) Error {
 	if pragmas.Error != nil {
 		return pragmas.Error
 	}
-	var value_1 [9]string
+	var value_1 [10]string
 	var value_2 string = strings.Join(Tables[0:9:9], "")
 	value_1[0] = value_2
 	var value_3 string = TelegramAccountEntry_SchemaSQL()
@@ -202,33 +202,35 @@ func StoreSchema_Ensure(database *Database, context Context) Error {
 	value_1[2] = value_4
 	var value_5 string = SharedLists_SchemaSQL()
 	value_1[3] = value_5
-	var value_6 string = StoragePlan_SchemaSQL()
+	var value_6 string = Publications_SchemaSQL()
 	value_1[4] = value_6
-	var value_7 string = Unlock_SchemaSQL()
+	var value_7 string = StoragePlan_SchemaSQL()
 	value_1[5] = value_7
-	var value_8 string = TokenRescale_SchemaSQL()
+	var value_8 string = Unlock_SchemaSQL()
 	value_1[6] = value_8
-	var value_9 string = ExchangeRate_SchemaSQL()
+	var value_9 string = TokenRescale_SchemaSQL()
 	value_1[7] = value_9
-	var value_10 string = "\nCREATE TABLE IF NOT EXISTS server_app_feedback_replies (\n    account_id TEXT NOT NULL,\n    report_id TEXT NOT NULL,\n    id TEXT NOT NULL,\n    reply TEXT NOT NULL,\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY(account_id,id),\n    FOREIGN KEY(account_id,report_id) REFERENCES server_app_feedback(account_id,id) ON DELETE CASCADE\n);\n"
+	var value_10 string = ExchangeRate_SchemaSQL()
 	value_1[8] = value_10
+	var value_11 string = "\nCREATE TABLE IF NOT EXISTS server_app_feedback_replies (\n    account_id TEXT NOT NULL,\n    report_id TEXT NOT NULL,\n    id TEXT NOT NULL,\n    reply TEXT NOT NULL,\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY(account_id,id),\n    FOREIGN KEY(account_id,report_id) REFERENCES server_app_feedback(account_id,id) ON DELETE CASCADE\n);\n"
+	value_1[9] = value_11
 	definitions := value_1
 	_ = definitions
-	var value_11 string = strings.Join(definitions[0:9:9], "")
-	var value_12 []Any
-	if int64(0) < 0 || int64(int64(len(value_12))) < int64(0) || int64(int64(len(value_12))) > int64(len(value_12)) {
+	var value_12 string = strings.Join(definitions[0:10:10], "")
+	var value_13 []Any
+	if int64(0) < 0 || int64(int64(len(value_13))) < int64(0) || int64(int64(len(value_13))) > int64(len(value_13)) {
 		panic("slice range out of bounds")
 	}
-	created := StdSqlGo_Exec(database, context, value_11, value_12[0:int64(len(value_12)):int64(len(value_12))])
+	created := StdSqlGo_Exec(database, context, value_12, value_13[0:int64(len(value_13)):int64(len(value_13))])
 	if created.Error != nil {
 		return created.Error
 	}
-	var value_13 string = "\nINSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nLEFT JOIN (SELECT DISTINCT user_id_hash,collection,record_id FROM server_mesh_changes) c\n  ON c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\nWHERE c.record_id IS NULL\n"
-	var value_14 []Any
-	if int64(0) < 0 || int64(int64(len(value_14))) < int64(0) || int64(int64(len(value_14))) > int64(len(value_14)) {
+	var value_14 string = "\nINSERT INTO server_mesh_changes(user_id_hash,collection,record_id)\nSELECT r.user_id_hash,r.collection,r.id\nFROM server_encrypted_records r\nLEFT JOIN (SELECT DISTINCT user_id_hash,collection,record_id FROM server_mesh_changes) c\n  ON c.user_id_hash=r.user_id_hash AND c.collection=r.collection AND c.record_id=r.id\nWHERE c.record_id IS NULL\n"
+	var value_15 []Any
+	if int64(0) < 0 || int64(int64(len(value_15))) < int64(0) || int64(int64(len(value_15))) > int64(len(value_15)) {
 		panic("slice range out of bounds")
 	}
-	backfilled := StdSqlGo_Exec(database, context, value_13, value_14[0:int64(len(value_14)):int64(len(value_14))])
+	backfilled := StdSqlGo_Exec(database, context, value_14, value_15[0:int64(len(value_15)):int64(len(value_15))])
 	if backfilled.Error != nil {
 		return backfilled.Error
 	}
@@ -247,39 +249,39 @@ func StoreSchema_Ensure(database *Database, context Context) Error {
 	for it_index := int64(0); it_index < 32; it_index++ {
 		statement := Upgrades[it_index]
 		_ = statement
-		var value_15 []Any
-		if int64(0) < 0 || int64(int64(len(value_15))) < int64(0) || int64(int64(len(value_15))) > int64(len(value_15)) {
+		var value_16 []Any
+		if int64(0) < 0 || int64(int64(len(value_16))) < int64(0) || int64(int64(len(value_16))) > int64(len(value_16)) {
 			panic("slice range out of bounds")
 		}
-		written := StdSqlGo_Exec(database, context, statement, value_15[0:int64(len(value_15)):int64(len(value_15))])
+		written := StdSqlGo_Exec(database, context, statement, value_16[0:int64(len(value_16)):int64(len(value_16))])
 		_ = written
-		var value_16 bool = written.Error != nil
-		var value_17 bool = value_16
-		if value_17 {
-			var value_18 bool = strings.Contains(StdErrorsGo_Message(written.Error), "duplicate column")
-			value_17 = !value_18
+		var value_17 bool = written.Error != nil
+		var value_18 bool = value_17
+		if value_18 {
+			var value_19 bool = strings.Contains(StdErrorsGo_Message(written.Error), "duplicate column")
+			value_18 = !value_19
 		}
-		if value_17 {
+		if value_18 {
 			return written.Error
 		}
 	}
-	var value_19 string = "\nCREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique\nON server_users(alias)\nWHERE alias IS NOT NULL AND alias<>''"
-	var value_20 []Any
-	if int64(0) < 0 || int64(int64(len(value_20))) < int64(0) || int64(int64(len(value_20))) > int64(len(value_20)) {
+	var value_20 string = "\nCREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_unique\nON server_users(alias)\nWHERE alias IS NOT NULL AND alias<>''"
+	var value_21 []Any
+	if int64(0) < 0 || int64(int64(len(value_21))) < int64(0) || int64(int64(len(value_21))) > int64(len(value_21)) {
 		panic("slice range out of bounds")
 	}
-	indexed := StdSqlGo_Exec(database, context, value_19, value_20[0:int64(len(value_20)):int64(len(value_20))])
+	indexed := StdSqlGo_Exec(database, context, value_20, value_21[0:int64(len(value_21)):int64(len(value_21))])
 	if indexed.Error != nil {
 		return indexed.Error
 	}
 	for it_index := int64(0); it_index < 18; it_index++ {
 		statement := Indexes[it_index]
 		_ = statement
-		var value_21 []Any
-		if int64(0) < 0 || int64(int64(len(value_21))) < int64(0) || int64(int64(len(value_21))) > int64(len(value_21)) {
+		var value_22 []Any
+		if int64(0) < 0 || int64(int64(len(value_22))) < int64(0) || int64(int64(len(value_22))) > int64(len(value_22)) {
 			panic("slice range out of bounds")
 		}
-		written := StdSqlGo_Exec(database, context, statement, value_21[0:int64(len(value_21)):int64(len(value_21))])
+		written := StdSqlGo_Exec(database, context, statement, value_22[0:int64(len(value_22)):int64(len(value_22))])
 		_ = written
 		if written.Error != nil {
 			return written.Error
@@ -300,6 +302,7 @@ func StoreSchema_ziranInit() {
 	StoreSchema_ziranInitState = 1
 	TelegramAccountEntry_ziranInit()
 	SharedLists_ziranInit()
+	Publications_ziranInit()
 	StoragePlan_ziranInit()
 	Unlock_ziranInit()
 	StoreSchema_ziranInitState = 2

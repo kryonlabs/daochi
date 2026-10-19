@@ -107,23 +107,6 @@ func SharedLists_ValidList(list List) bool {
 	return true
 }
 
-func SharedLists_Friends(transaction *Transaction, context Context, first string, second string) bool {
-	var value_0 [2]Any
-	value_0[0] = first
-	value_0[1] = second
-	arguments := value_0
-	_ = arguments
-	var value_1 string = "SELECT EXISTS(SELECT 1 FROM server_friendships WHERE (user_id_a=?1 AND user_id_b=?2) OR (user_id_a=?2 AND user_id_b=?1))"
-	row := StdSqlGo_QueryRowTx(transaction, context, value_1, arguments[0:2:2])
-	var found bool = false
-	var value_2 [1]Any
-	value_2[0] = &(found)
-	destinations := value_2
-	_ = destinations
-	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	return value_3 == nil && found
-}
-
 func SharedLists_HasCapacity(transaction *Transaction, context Context, user string, listID string, itemCount int64) bool {
 	var value_0 [2]Any
 	value_0[0] = user
@@ -171,7 +154,7 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 		wanted := "declined"
 		if command.Action == "accept" {
 			wanted = "accepted"
-			var value_3 bool = SharedLists_Friends(transaction, context, owner, user)
+			var value_3 bool = FriendStore_AreFriends(transaction, context, owner, user)
 			if !value_3 {
 				return SharedLists_Failure(int(403), "sender is no longer a friend")
 			}
@@ -228,7 +211,7 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 		}
 		var value_14 bool = value_12
 		if !value_14 {
-			var value_15 bool = SharedLists_Friends(transaction, context, user, command.Target)
+			var value_15 bool = FriendStore_AreFriends(transaction, context, user, command.Target)
 			value_14 = !value_15
 		}
 		if value_14 {
@@ -280,7 +263,7 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 		var value_22 bool = value_21 != nil || !allowed
 		var value_23 bool = value_22
 		if !value_23 {
-			var value_24 bool = SharedLists_Friends(transaction, context, owner, user)
+			var value_24 bool = FriendStore_AreFriends(transaction, context, owner, user)
 			value_23 = !value_24
 		}
 		if value_23 {

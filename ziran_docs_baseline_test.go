@@ -128,6 +128,8 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/account/app-grants</code><p>Lists or creates bearer-authenticated grants for sharing registered app collection prefixes across apps.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/account/app-records</code><p>Returns encrypted records from a granted collection prefix for cross-app use.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
+<section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/publications</code><p>Publishes level collections and finds the newest public ones or the ones an author lets the caller see.</p></section>
+<section class="endpoint"><span class="method">GET/DELETE</span><code>/api/v1/publications/{id}</code><p>Fetches a visible publication with its document, or lets its author unpublish it.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete</code><p>Deletes all remote data for the signed sync account without uploading the private key.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Legacy signed deletion endpoint kept for older clients.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
@@ -1414,7 +1416,7 @@ func baselineOpenAPISpec() map[string]any {
 		},
 	}
 	paths := result["paths"].(map[string]any)
-	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json", "testdata/blob_paths.json", "testdata/telegram_paths.json", "testdata/authorization_paths.json", "testdata/device_link_paths.json", "testdata/shared_list_paths.json", "testdata/storage_plan_paths.json", "testdata/unlock_paths.json", "testdata/token_gift_paths.json", "testdata/exchange_rate_paths.json"} {
+	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json", "testdata/blob_paths.json", "testdata/telegram_paths.json", "testdata/authorization_paths.json", "testdata/device_link_paths.json", "testdata/shared_list_paths.json", "testdata/storage_plan_paths.json", "testdata/unlock_paths.json", "testdata/token_gift_paths.json", "testdata/publications_paths.json", "testdata/exchange_rate_paths.json"} {
 		data, err := os.ReadFile(fixture)
 		if err != nil {
 			panic(err)

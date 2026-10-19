@@ -1,0 +1,470 @@
+// Collections of custom game levels that people publish for others to find
+// and play. The node keeps each document as opaque JSON; its visibility says
+// who may list and fetch it: everyone, the author's friends, or the author.
+#import "std/go_types"
+#import "sync_types"
+friendships :: #import "friend_store";
+quota :: #import "account_storage";
+plans :: #import "storage_plan";
+ids :: #import "resource_id";
+config :: #import "config";
+clock :: #import "std/time_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+utf8 :: #system_library "go:unicode/utf8";
+builtin :: #system_library "go:builtin";
+
+MaximumPublications :: 100
+MaximumPublicationBytes :: 262144
+MaximumPublicationTitleBytes :: 80
+MaximumPublicationFormatBytes :: 64
+
+PublicationAuthor :: struct {
+    alias: string #go_tag "json:\"alias\""
+    public_id: string #go_tag "json:\"public_id\""
+}
+PublicationMeta :: struct {
+    id: string #go_tag "json:\"id\""
+    author: PublicationAuthor #go_tag "json:\"author\""
+    format: string #go_tag "json:\"format\""
+    title: string #go_tag "json:\"title\""
+    levels: s64 #go_tag "json:\"levels\""
+    visibility: string #go_tag "json:\"visibility\""
+    updated_at: s64 #go_tag "json:\"updated_at\""
+    mine: bool #go_tag "json:\"mine\""
+}
+// What an author sends to publish a new collection, or to replace one of
+// their own when `id` names it.
+PublicationDraft :: struct {
+    id: string #go_tag "json:\"id\""
+    format: string #go_tag "json:\"format\""
+    title: string #go_tag "json:\"title\""
+    visibility: string #go_tag "json:\"visibility\""
+    document: RawMessage #go_tag "json:\"document\""
+}
+PublicationResult :: struct {
+    value: PublicationMeta
+    // The stored document; only a fetch fills it.
+    document: RawMessage
+    // The HTTP status of a refusal. An error without one is a node failure.
+    status: isize
+    // Usage reported when the write would pass the account's storage limit.
+    storage: AccountStorage
+    error: Error
+}
+PublicationListResult :: struct {
+    value: []PublicationMeta
+    error: Error
+}
+
+#scope_file
+PublicationOwner :: struct {
+    value: string
+    found: bool
+    error: Error
+}
+PublicationCount :: struct {
+    value: s64
+    error: Error
+}
+MakeMetas :: (count: isize) -> []PublicationMeta #foreign builtin "make";
+AppendMeta :: (values: []PublicationMeta, value: PublicationMeta) -> []PublicationMeta #foreign builtin "append";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+TrimSpace :: (value: string) -> string #foreign strings;
+ValidString :: (value: string) -> bool #foreign utf8;
+
+PublicationColumns :: "SELECT p.id,p.author,COALESCE(u.alias,''),p.format,p.title,p.levels,p.visibility,p.updated_at"
+PublicationSource :: " FROM server_publications p JOIN server_users u ON u.user_id_hash=p.author"
+// A listing returns at most 50 publications, newest first.
+PublicationOrder :: " ORDER BY p.updated_at DESC,p.rowid DESC LIMIT 50"
+
+Refusal :: (status: isize, message: string) -> PublicationResult {
+    result: PublicationResult
+    result.status = status
+    result.error = errors.New(message)
+    return result
+}
+
+Failed :: (error: Error) -> PublicationResult {
+    result: PublicationResult
+    result.error = error
+    return result
+}
+
+ValidVisibility :: (value: string) -> bool {
+    return value == "public" || value == "friends" || value == "private"
+}
+
+// A title is readable UTF-8 text without control characters.
+ValidTitle :: (value: string) -> bool {
+    if value.count < 1 || value.count > MaximumPublicationTitleBytes || TrimSpace(value) == "" || !ValidString(value) {
+        return false
+    }
+    index: s64 = 0
+    while index < value.count {
+        byte: u8 = value[index]
+        // C0 controls and DEL.
+        if byte < cast(u8)32 || byte == cast(u8)127 {
+            return false
+        }
+        // C1 controls, U+0080 to U+009F, are encoded as 0xC2 0x80-0x9F.
+        if byte == cast(u8)194 && index + 1 < value.count {
+            next: u8 = value[index + 1]
+            if next >= cast(u8)128 && next <= cast(u8)159 {
+                return false
+            }
+        }
+        index += 1
+    }
+    return true
+}
+
+// Identifiers are the 32 lowercase hex characters New issues.
+ValidPublicationID :: (value: string) -> bool {
+    if value.count != 32 {
+        return false
+    }
+    for byte: value {
+        if !(byte >= cast(u8)48 && byte <= cast(u8)57) && !(byte >= cast(u8)97 && byte <= cast(u8)102) {
+            return false
+        }
+    }
+    return true
+}
+
+// The document is a JSON object; the request decoder has already checked
+// that it is valid JSON and kept its exact bytes.
+ValidDocument :: (document: RawMessage) -> bool {
+    bytes := cast([]u8)document
+    return bytes.count > 0 && bytes[0] == cast(u8)123
+}
+
+DocumentTooLarge :: (document: RawMessage) -> bool {
+    return (cast([]u8)document).count > MaximumPublicationBytes
+}
+
+MetaDestinations :: (meta: *PublicationMeta) -> [8]Any {
+    values: [8]Any
+    values[0] = *meta.id
+    values[1] = *meta.author.public_id
+    values[2] = *meta.author.alias
+    values[3] = *meta.format
+    values[4] = *meta.title
+    values[5] = *meta.levels
+    values[6] = *meta.visibility
+    values[7] = *meta.updated_at
+    return values
+}
+
+// Authors see everything of theirs, friends also see friends-only work, and
+// everyone sees public work.
+Visible :: (transaction: *sql.Transaction, context: ctx.Context,
+    viewer: string, author: string, visibility: string) -> bool {
+    if viewer == author || visibility == "public" {
+        return true
+    }
+    if visibility == "friends" {
+        return friendships.AreFriends(transaction, context, viewer, author)
+    }
+    return false
+}
+
+AuthorOf :: (transaction: *sql.Transaction, context: ctx.Context, id: string) -> PublicationOwner {
+    result: PublicationOwner
+    arguments: [1]Any = .[id]
+    destinations: [1]Any = .[*result.value]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT author FROM server_publications WHERE id=?1", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    result.found = result.error == null
+    return result
+}
+
+Count :: (transaction: *sql.Transaction, context: ctx.Context, author: string) -> PublicationCount {
+    result: PublicationCount
+    arguments: [1]Any = .[author]
+    destinations: [1]Any = .[*result.value]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM server_publications WHERE author=?1", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    return result
+}
+
+// The number of levels is the length of the document's top-level "levels"
+// array, or zero when it has none.
+Levels :: (transaction: *sql.Transaction, context: ctx.Context, document: string) -> PublicationCount {
+    result: PublicationCount
+    arguments: [1]Any = .[document]
+    destinations: [1]Any = .[*result.value]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT CASE WHEN json_type(?1,'$.levels')='array' THEN json_array_length(?1,'$.levels') ELSE 0 END",
+        arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    return result
+}
+
+ReadMeta :: (transaction: *sql.Transaction, context: ctx.Context,
+    viewer: string, id: string) -> PublicationResult {
+    result: PublicationResult
+    parts: [3]string = .[PublicationColumns, PublicationSource, " WHERE p.id=?1"]
+    arguments: [1]Any = .[id]
+    destinations := MetaDestinations(*result.value)
+    row := sql.QueryRowTx(transaction, context, Join(parts[:], ""), arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    result.value.mine = result.value.author.public_id == viewer
+    return result
+}
+
+ReadList :: (transaction: *sql.Transaction, context: ctx.Context, viewer: string,
+    query: string, arguments: []Any) -> PublicationListResult {
+    result: PublicationListResult
+    result.value = MakeMetas(cast(isize)0)
+    queried := sql.QueryTx(transaction, context, query, arguments)
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    defer sql.CloseRows(queried.value)
+    while sql.Next(queried.value) {
+        meta: PublicationMeta
+        destinations := MetaDestinations(*meta)
+        result.error = sql.ScanRows(queried.value, destinations[:])
+        if result.error != null {
+            return result
+        }
+        meta.mine = meta.author.public_id == viewer
+        result.value = AppendMeta(result.value, meta)
+    }
+    result.error = sql.RowsError(queried.value)
+    return result
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL
+CREATE TABLE IF NOT EXISTS server_publications (
+ id TEXT PRIMARY KEY,
+ author TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ format TEXT NOT NULL, title TEXT NOT NULL,
+ visibility TEXT NOT NULL CHECK(visibility IN ('public','friends','private')),
+ levels INTEGER NOT NULL DEFAULT 0, document TEXT NOT NULL,
+ created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS server_publications_author ON server_publications(author,updated_at);
+CREATE INDEX IF NOT EXISTS server_publications_recent ON server_publications(visibility,format,updated_at);
+SQL;
+}
+
+// A format names the kind of document, such as a game's level format.
+ValidFormat :: (value: string) -> bool {
+    if value.count < 1 || value.count > MaximumPublicationFormatBytes {
+        return false
+    }
+    for byte: value {
+        lower := byte >= cast(u8)97 && byte <= cast(u8)122
+        digit := byte >= cast(u8)48 && byte <= cast(u8)57
+        // '.' and '-'.
+        mark := byte == cast(u8)46 || byte == cast(u8)45
+        if !lower && !digit && !mark {
+            return false
+        }
+    }
+    return true
+}
+
+// Creates a publication, or replaces the author's own one named by `id`. The
+// document counts toward the author's storage, and an author keeps at most
+// MaximumPublications.
+Publish :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
+    author: string, draft: PublicationDraft) -> PublicationResult {
+    if !ValidFormat(draft.format) || !ValidTitle(draft.title) ||
+    !ValidVisibility(draft.visibility) || !ValidDocument(draft.document) {
+        return Refusal(cast(isize)400, "invalid publication")
+    }
+    if DocumentTooLarge(draft.document) {
+        return Refusal(cast(isize)413, "publication too large")
+    }
+    replacing := draft.id != ""
+    if replacing && !ValidPublicationID(draft.id) {
+        return Refusal(cast(isize)404, "publication not found")
+    }
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return Failed(opened.error)
+    }
+    transaction := opened.value
+    defer sql.Rollback(transaction)
+    id := draft.id
+    if replacing {
+        // Someone else's publication answers like a missing one.
+        owner := AuthorOf(transaction, context, id)
+        if owner.error != null {
+            return Failed(owner.error)
+        }
+        if !owner.found || owner.value != author {
+            return Refusal(cast(isize)404, "publication not found")
+        }
+    } else {
+        count := Count(transaction, context, author)
+        if count.error != null {
+            return Failed(count.error)
+        }
+        if count.value >= MaximumPublications {
+            return Refusal(cast(isize)413, "too many publications")
+        }
+        generated := ids.New()
+        if generated.error != null {
+            return Failed(generated.error)
+        }
+        id = generated.value
+    }
+    now := clock.Unix(clock.Now())
+    before := quota.UsedTx(transaction, context, author)
+    if before.error != null {
+        return Failed(before.error)
+    }
+    limit := plans.LimitTx(transaction, context, author,
+        configuration.AccountStorageLimitBytes, configuration.StoragePlansEnabled, now)
+    if limit.error != null {
+        return Failed(limit.error)
+    }
+    document := text.FromBytes(cast([]u8)draft.document)
+    levels := Levels(transaction, context, document)
+    if levels.error != null {
+        return Refusal(cast(isize)400, "invalid publication")
+    }
+    arguments: [8]Any = .[id, author, draft.format, draft.title, draft.visibility,
+        levels.value, document, now]
+    statement := "INSERT INTO server_publications(id,author,format,title,visibility,levels,document,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8)"
+    if replacing {
+        statement = "UPDATE server_publications SET format=?3,title=?4,visibility=?5,levels=?6,document=?7,updated_at=?8 WHERE id=?1 AND author=?2"
+    }
+    written := sql.ExecTx(transaction, context, statement, arguments[:])
+    if written.error != null {
+        return Failed(written.error)
+    }
+    after := quota.UsedTx(transaction, context, author)
+    if after.error != null {
+        return Failed(after.error)
+    }
+    if quota.Exceeds(before.value, after.value, limit.value) {
+        refused: PublicationResult
+        refused.status = cast(isize)413
+        refused.error = quota.ErrStorageFull
+        refused.storage = quota.Report(before.value, limit.value)
+        return refused
+    }
+    result := ReadMeta(transaction, context, author, id)
+    if result.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    return result
+}
+
+// Deletes the author's own publication; anyone else's answers like a
+// missing one.
+Unpublish :: (database: *sql.Database, context: ctx.Context, author: string, id: string) -> PublicationResult {
+    if !ValidPublicationID(id) {
+        return Refusal(cast(isize)404, "publication not found")
+    }
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return Failed(opened.error)
+    }
+    transaction := opened.value
+    defer sql.Rollback(transaction)
+    owner := AuthorOf(transaction, context, id)
+    if owner.error != null {
+        return Failed(owner.error)
+    }
+    if !owner.found || owner.value != author {
+        return Refusal(cast(isize)404, "publication not found")
+    }
+    arguments: [2]Any = .[id, author]
+    removed := sql.ExecTx(transaction, context,
+        "DELETE FROM server_publications WHERE id=?1 AND author=?2", arguments[:])
+    if removed.error != null {
+        return Failed(removed.error)
+    }
+    result: PublicationResult
+    result.error = sql.Commit(transaction)
+    return result
+}
+
+// The newest public publications, optionally of one format.
+Recent :: (database: *sql.Database, context: ctx.Context, viewer: string, format: string) -> PublicationListResult {
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        result: PublicationListResult
+        result.error = opened.error
+        return result
+    }
+    defer sql.Rollback(opened.value)
+    parts: [4]string = .[PublicationColumns, PublicationSource,
+        " WHERE p.visibility='public' AND (?1='' OR p.format=?1)", PublicationOrder]
+    arguments: [1]Any = .[format]
+    return ReadList(opened.value, context, viewer, Join(parts[:], ""), arguments[:])
+}
+
+// An author's publications the viewer may see, newest first.
+ByAuthor :: (database: *sql.Database, context: ctx.Context, viewer: string,
+    author: string, format: string) -> PublicationListResult {
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        result: PublicationListResult
+        result.error = opened.error
+        return result
+    }
+    transaction := opened.value
+    defer sql.Rollback(transaction)
+    mine := viewer == author
+    friends := !mine && friendships.AreFriends(transaction, context, viewer, author)
+    parts: [4]string = .[PublicationColumns, PublicationSource,
+        " WHERE p.author=?1 AND (?2='' OR p.format=?2) AND (p.visibility='public' OR (p.visibility='friends' AND ?3) OR ?4)",
+        PublicationOrder]
+    arguments: [4]Any = .[author, format, friends, mine]
+    return ReadList(transaction, context, viewer, Join(parts[:], ""), arguments[:])
+}
+
+// A publication and its document when the viewer may see it; otherwise it
+// answers like a missing one.
+Fetch :: (database: *sql.Database, context: ctx.Context, viewer: string, id: string) -> PublicationResult {
+    if !ValidPublicationID(id) {
+        return Refusal(cast(isize)404, "publication not found")
+    }
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return Failed(opened.error)
+    }
+    transaction := opened.value
+    defer sql.Rollback(transaction)
+    result := ReadMeta(transaction, context, viewer, id)
+    if errors.Is(result.error, sql.NoRows()) {
+        return Refusal(cast(isize)404, "publication not found")
+    }
+    if result.error != null {
+        return result
+    }
+    if !Visible(transaction, context, viewer, result.value.author.public_id, result.value.visibility) {
+        return Refusal(cast(isize)404, "publication not found")
+    }
+    document: string
+    arguments: [1]Any = .[id]
+    destinations: [1]Any = .[*document]
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT document FROM server_publications WHERE id=?1", arguments[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    result.document = cast(RawMessage)text.ToBytes(document)
+    return result
+}

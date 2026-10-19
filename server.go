@@ -28,7 +28,7 @@ type ServerVerifier func(*Server, []uint8, []uint8, []uint8) bool
 
 type ServerStats func(*Server, Context, string) PublicStatsResult
 
-type zir_b79efe5dd14dd13b_Results__string__Error struct {
+type zir_266bf15855ab71eb_Results__string__Error struct {
 	Value0 string
 	Value1 Error
 }
@@ -290,9 +290,9 @@ func (receiver *Server) mesh() Mesh {
 	return Server_Mesh(receiver)
 }
 
-func Server_AuthenticateToken(server *Server, request *Request) zir_b79efe5dd14dd13b_Results__string__Error {
+func Server_AuthenticateToken(server *Server, request *Request) zir_266bf15855ab71eb_Results__string__Error {
 	result := HttpAuth_AuthenticateToken(server.Store.Database, request, server.Cfg.TokenSecret)
-	var value_2 zir_b79efe5dd14dd13b_Results__string__Error = zir_b79efe5dd14dd13b_Results__string__Error{}
+	var value_2 zir_266bf15855ab71eb_Results__string__Error = zir_266bf15855ab71eb_Results__string__Error{}
 	value_2.Value0 = result.Value
 	var value_3 Error = AuthenticationError_Convert(result.Authentication)
 	value_2.Value1 = value_3
@@ -786,37 +786,53 @@ func Server_Routes(server *Server) Handler {
 		Server_HandleLists(value_380, value_381, value_382)
 	})
 	var value_386 ServerHandler = func(value_383 *Server, value_384 ResponseWriter, value_385 *Request) {
-		Server_HandleSocialHttpRemoveFriend(value_383, value_384, value_385)
+		Server_HandlePublicationsList(value_383, value_384, value_385)
 	}
-	Server_Route(mux, "DELETE /api/v1/friends/", server, value_386)
+	Server_Route(mux, "GET /api/v1/publications", server, value_386)
 	var value_390 ServerHandler = func(value_387 *Server, value_388 ResponseWriter, value_389 *Request) {
-		Server_HandleSocialHttpRequests(value_387, value_388, value_389)
+		Server_HandlePublicationsPublish(value_387, value_388, value_389)
 	}
-	Server_Route(mux, "GET /api/v1/friends/requests", server, value_390)
+	Server_Route(mux, "POST /api/v1/publications", server, value_390)
 	var value_394 ServerHandler = func(value_391 *Server, value_392 ResponseWriter, value_393 *Request) {
-		Server_HandleSocialHttpCreateRequest(value_391, value_392, value_393)
+		Server_HandlePublicationsRead(value_391, value_392, value_393)
 	}
-	Server_Route(mux, "POST /api/v1/friends/requests", server, value_394)
+	Server_Route(mux, "GET /api/v1/publications/", server, value_394)
 	var value_398 ServerHandler = func(value_395 *Server, value_396 ResponseWriter, value_397 *Request) {
-		Server_HandleSocialHttpRequestAction(value_395, value_396, value_397)
+		Server_HandlePublicationsUnpublish(value_395, value_396, value_397)
 	}
-	Server_Route(mux, "POST /api/v1/friends/requests/", server, value_398)
+	Server_Route(mux, "DELETE /api/v1/publications/", server, value_398)
 	var value_402 ServerHandler = func(value_399 *Server, value_400 ResponseWriter, value_401 *Request) {
-		Server_HandleSocialHttpPutStats(value_399, value_400, value_401)
+		Server_HandleSocialHttpRemoveFriend(value_399, value_400, value_401)
 	}
-	Server_Route(mux, "PUT /api/v1/profile/stats", server, value_402)
+	Server_Route(mux, "DELETE /api/v1/friends/", server, value_402)
 	var value_406 ServerHandler = func(value_403 *Server, value_404 ResponseWriter, value_405 *Request) {
-		Server_HandleSocialHttpFriendStats(value_403, value_404, value_405)
+		Server_HandleSocialHttpRequests(value_403, value_404, value_405)
 	}
-	Server_Route(mux, "GET /api/v1/friends/stats", server, value_406)
+	Server_Route(mux, "GET /api/v1/friends/requests", server, value_406)
 	var value_410 ServerHandler = func(value_407 *Server, value_408 ResponseWriter, value_409 *Request) {
-		Server_HandleBundleHttpRoute(value_407, value_408, value_409)
+		Server_HandleSocialHttpCreateRequest(value_407, value_408, value_409)
 	}
-	Server_Route(mux, "GET /api/v1/packages/", server, value_410)
+	Server_Route(mux, "POST /api/v1/friends/requests", server, value_410)
 	var value_414 ServerHandler = func(value_411 *Server, value_412 ResponseWriter, value_413 *Request) {
-		Server_HandlePackageHttpRoute(value_411, value_412, value_413)
+		Server_HandleSocialHttpRequestAction(value_411, value_412, value_413)
 	}
-	Server_Route(mux, "GET /api/v2/packages/", server, value_414)
+	Server_Route(mux, "POST /api/v1/friends/requests/", server, value_414)
+	var value_418 ServerHandler = func(value_415 *Server, value_416 ResponseWriter, value_417 *Request) {
+		Server_HandleSocialHttpPutStats(value_415, value_416, value_417)
+	}
+	Server_Route(mux, "PUT /api/v1/profile/stats", server, value_418)
+	var value_422 ServerHandler = func(value_419 *Server, value_420 ResponseWriter, value_421 *Request) {
+		Server_HandleSocialHttpFriendStats(value_419, value_420, value_421)
+	}
+	Server_Route(mux, "GET /api/v1/friends/stats", server, value_422)
+	var value_426 ServerHandler = func(value_423 *Server, value_424 ResponseWriter, value_425 *Request) {
+		Server_HandleBundleHttpRoute(value_423, value_424, value_425)
+	}
+	Server_Route(mux, "GET /api/v1/packages/", server, value_426)
+	var value_430 ServerHandler = func(value_427 *Server, value_428 ResponseWriter, value_429 *Request) {
+		Server_HandlePackageHttpRoute(value_427, value_428, value_429)
+	}
+	Server_Route(mux, "GET /api/v2/packages/", server, value_430)
 	return Server_WithCommonHeaders(server, Handler(mux))
 }
 
@@ -1032,6 +1048,31 @@ func Server_HandleSocialHttpFriends(server *Server, writer ResponseWriter, reque
 
 func Server_HandleLists(server *Server, writer ResponseWriter, request *Request) {
 	SharedLists_Handle(Server_Accounts(server), writer, request)
+}
+
+func Server_Publications(server *Server) Publications {
+	var result Publications = Publications{}
+	result.Database = server.Store.Database
+	result.Configuration = &(server.Cfg)
+	result.Counters = server.Metrics
+	result.Limiter = server.Limiter
+	return result
+}
+
+func Server_HandlePublicationsList(server *Server, writer ResponseWriter, request *Request) {
+	PublicationsHttp_List(Server_Publications(server), writer, request)
+}
+
+func Server_HandlePublicationsPublish(server *Server, writer ResponseWriter, request *Request) {
+	PublicationsHttp_Publish(Server_Publications(server), writer, request)
+}
+
+func Server_HandlePublicationsRead(server *Server, writer ResponseWriter, request *Request) {
+	PublicationsHttp_Read(Server_Publications(server), writer, request)
+}
+
+func Server_HandlePublicationsUnpublish(server *Server, writer ResponseWriter, request *Request) {
+	PublicationsHttp_Unpublish(Server_Publications(server), writer, request)
 }
 
 func Server_HandleSocialHttpRemoveFriend(server *Server, writer ResponseWriter, request *Request) {
@@ -1362,6 +1403,7 @@ func Server_ziranInit() {
 	MoneroInvoices_ziranInit()
 	GooglePlayHttp_ziranInit()
 	SharedLists_ziranInit()
+	PublicationsHttp_ziranInit()
 	AppHttp_ziranInit()
 	BundleHttp_ziranInit()
 	BlobHttp_ziranInit()

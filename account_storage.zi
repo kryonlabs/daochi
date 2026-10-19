@@ -1,5 +1,5 @@
 // An account's stored bytes on this node: encrypted records, encrypted
-// payloads and blobs. A node may limit them.
+// payloads, blobs, shared lists and publications. A node may limit them.
 #import "std/go_types"
 #import "sync_types"
 sql :: #import "std/sql_go";
@@ -43,6 +43,8 @@ SELECT
    FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id WHERE l.owner=?1)
 + (SELECT COALESCE(SUM(LENGTH(request_id)+LENGTH(body)),0)
    FROM server_list_commands WHERE user_id=?1)
++ (SELECT COALESCE(SUM(LENGTH(id)+LENGTH(format)+LENGTH(title)+LENGTH(document)),0)
+   FROM server_publications WHERE author=?1)
 SQL_END;
 BlobStoredSQL :: "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3)";
 BlobRecordSQL :: "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)";

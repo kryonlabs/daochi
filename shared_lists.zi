@@ -8,6 +8,7 @@ response :: #import "response";
 identity :: #import "identity";
 signing :: #import "signing";
 quota :: #import "account_storage";
+friendships :: #import "friend_store";
 plans :: #import "storage_plan";
 config :: #import "config";
 clock :: #import "std/time_go";
@@ -95,16 +96,6 @@ ValidList :: (list: List) -> bool {
     return true
 }
 
-Friends :: (transaction: *sql.Transaction, context: ctx.Context,
-    first: string, second: string) -> bool {
-    arguments: [2]Any = .[first, second]
-    row := sql.QueryRowTx(transaction, context,
-        "SELECT EXISTS(SELECT 1 FROM server_friendships WHERE (user_id_a=?1 AND user_id_b=?2) OR (user_id_a=?2 AND user_id_b=?1))", arguments[:])
-    found: bool
-    destinations: [1]Any = .[*found]
-    return sql.ScanRow(row, destinations[:]) == null && found
-}
-
 HasCapacity :: (transaction: *sql.Transaction, context: ctx.Context,
     user: string, listID: string, itemCount: s64) -> bool {
     arguments: [2]Any = .[user, listID]
@@ -136,7 +127,7 @@ Execute :: (transaction: *sql.Transaction, context: ctx.Context,
         wanted := "declined"
         if command.action == "accept" {
             wanted = "accepted"
-            if !Friends(transaction, context, owner, user) {
+            if !friendships.AreFriends(transaction, context, owner, user) {
                 return Failure(cast(isize)403, "sender is no longer a friend")
             }
             arguments[0] = listID
@@ -169,7 +160,7 @@ Execute :: (transaction: *sql.Transaction, context: ctx.Context,
     lookupError := sql.ScanRow(row, destinations[:])
     if command.action == "invite" {
         if !identity.ValidUserID(command.target) || user == command.target ||
-        !ValidList(command.list) || !Friends(transaction, context, user, command.target) {
+        !ValidList(command.list) || !friendships.AreFriends(transaction, context, user, command.target) {
             return Failure(cast(isize)403, "only existing friends may be invited")
         }
         if errors.Is(lookupError, sql.NoRows()) {
@@ -208,7 +199,7 @@ Execute :: (transaction: *sql.Transaction, context: ctx.Context,
         membership := sql.QueryRowTx(transaction, context,
             "SELECT EXISTS(SELECT 1 FROM server_list_invitations WHERE list_id=?1 AND target=?2 AND status='accepted')", arguments[0:2])
         access: [1]Any = .[*allowed]
-        if sql.ScanRow(membership, access[:]) != null || !allowed || !Friends(transaction, context, owner, user) {
+        if sql.ScanRow(membership, access[:]) != null || !allowed || !friendships.AreFriends(transaction, context, owner, user) {
             return Failure(cast(isize)404, "shared list not found")
         }
     }

@@ -316,6 +316,23 @@ func FriendStore_Friends(database *Database, context Context, userID string) Fri
 	return cleanup_return_1
 }
 
+func FriendStore_AreFriends(transaction *Transaction, context Context, first string, second string) bool {
+	var value_0 [2]Any
+	value_0[0] = first
+	value_0[1] = second
+	arguments := value_0
+	_ = arguments
+	var value_1 string = "SELECT EXISTS(SELECT 1 FROM server_friendships WHERE (user_id_a=?1 AND user_id_b=?2) OR (user_id_a=?2 AND user_id_b=?1))"
+	row := StdSqlGo_QueryRowTx(transaction, context, value_1, arguments[0:2:2])
+	var found bool = false
+	var value_2 [1]Any
+	value_2[0] = &(found)
+	destinations := value_2
+	_ = destinations
+	var value_3 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
+	return value_3 == nil && found
+}
+
 func FriendStore_Authoritative(database *Database, context Context, userID string) SocialResult {
 	var result SocialResult = SocialResult{}
 	friends := FriendStore_Friends(database, context, userID)

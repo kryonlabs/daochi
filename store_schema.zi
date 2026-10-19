@@ -2,6 +2,7 @@
 entries :: #import "telegram_account_entry";
 history :: #import "state_history";
 lists :: #import "shared_lists";
+publications :: #import "publications";
 plans :: #import "storage_plan";
 unlocks :: #import "unlock";
 rescales :: #import "token_rescale";
@@ -128,8 +129,9 @@ Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     if pragmas.error != null {
         return pragmas.error
     }
-    definitions: [9]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
-        plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL(), exchange_rates.SchemaSQL(), FeedbackReplies]
+    definitions: [10]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
+        publications.SchemaSQL(), plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL(),
+        exchange_rates.SchemaSQL(), FeedbackReplies]
     created := sql.Exec(database, context, Join(definitions[:], ""), empty[:])
     if created.error != null {
         return created.error

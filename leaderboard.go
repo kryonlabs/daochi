@@ -407,7 +407,19 @@ func Leaderboard_Friends(database *Database, context Context, userID string, app
 		for loop_cursor_7 < loop_count_7 {
 			loop_index_7 := loop_cursor_7
 			user := loop_view_7[loop_index_7]
+			if metric == "achievements" {
+				row := Leaderboard_Published(database, context, user, app, practice, metric)
+				_ = row
+				result.Error = row.Error
+				if result.Error != nil {
+					return result
+				}
+				items = append(items, row.Value)
+				loop_cursor_7++
+				continue
+			}
 			row := Leaderboard_Cached(database, context, user, app, practice, metric)
+			_ = row
 			result.Error = row.Error
 			if result.Error != nil {
 				return result
@@ -425,5 +437,40 @@ func Leaderboard_Friends(database *Database, context Context, userID string, app
 	}
 	Leaderboard_SortRows(items)
 	result.Value = items
+	return result
+}
+
+func Leaderboard_Published(database *Database, context Context, user VisibleStatsUser, app string, practice string, metric string) LeaderboardRowResult {
+	var result LeaderboardRowResult = LeaderboardRowResult{}
+	result.Value.UserIDHash = user.UserIDHash
+	result.Value.Alias = user.Alias
+	result.Value.ProfileIcon = user.ProfileIcon
+	result.Value.App = app
+	result.Value.Practice = practice
+	result.Value.Metric = metric
+	result.Value.Label = "0"
+	result.Found = true
+	var arguments [4]Any
+	arguments[0] = user.UserIDHash
+	arguments[1] = app
+	arguments[2] = practice
+	arguments[3] = metric
+	var value float64 = 0
+	var destinations [1]Any
+	destinations[0] = &(value)
+	var value_0 string = "SELECT value FROM server_profile_stats WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4"
+	var value_1 *Row = StdSqlGo_QueryRow(database, context, value_0, arguments[0:4:4])
+	result.Error = StdSqlGo_ScanRow(value_1, destinations[0:1:1])
+	if StdErrorsGo_Is(result.Error, StdSqlGo_NoRows()) {
+		result.Error = nil
+		return result
+	}
+	if result.Error != nil {
+		return result
+	}
+	if value >= 0.0 && value <= 512.0 {
+		result.Value.Value = value
+		result.Value.Label = fmt.Sprintf("%d", int(int(value)))
+	}
 	return result
 }

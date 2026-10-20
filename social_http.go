@@ -60,6 +60,9 @@ func SocialHttp_Cache(social Social, context Context, userID string, kind string
 }
 
 func SocialHttp_ValidMetric(practice string, metric string) bool {
+	if metric == "achievements" {
+		return Identity_ValidNamespace(practice)
+	}
 	if practice == "whm" {
 		return metric == "streak" || metric == "avg_hold"
 	}

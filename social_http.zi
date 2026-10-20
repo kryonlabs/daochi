@@ -84,6 +84,9 @@ Cache :: (social: Social, context: ctx.Context, userID: string, kind: string, va
 }
 
 ValidMetric :: (practice: string, metric: string) -> bool {
+    if metric == "achievements" {
+        return identity.ValidNamespace(practice)
+    }
     if practice == "whm" {
         return metric == "streak" || metric == "avg_hold"
     }

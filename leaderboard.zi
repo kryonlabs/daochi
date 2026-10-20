@@ -363,6 +363,15 @@ Friends :: (database: *sql.Database, context: ctx.Context, userID: string,
     }
     items := MakeRows(cast(isize)0, cast(isize)users.value.count)
     for user: users.value {
+        if metric == "achievements" {
+            row := Published(database, context, user, app, practice, metric)
+            result.error = row.error
+            if result.error != null {
+                return result
+            }
+            items = AppendRow(items, row.value)
+            continue
+        }
         row := Cached(database, context, user, app, practice, metric)
         result.error = row.error
         if result.error != null {
@@ -379,5 +388,42 @@ Friends :: (database: *sql.Database, context: ctx.Context, userID: string,
     }
     SortRows(items)
     result.value = items
+    return result
+}
+
+// App totals are explicitly published by their owner. They never fall
+// through to a breathing activity or reuse another app's derived cache.
+Published :: (database: *sql.Database, context: ctx.Context, user: VisibleStatsUser,
+    app: string, practice: string, metric: string) -> LeaderboardRowResult {
+    result: LeaderboardRowResult
+    result.value.UserIDHash = user.UserIDHash
+    result.value.Alias = user.Alias
+    result.value.ProfileIcon = user.ProfileIcon
+    result.value.App = app
+    result.value.Practice = practice
+    result.value.Metric = metric
+    result.value.Label = "0"
+    result.found = true
+    arguments: [4]Any
+    arguments[0] = user.UserIDHash
+    arguments[1] = app
+    arguments[2] = practice
+    arguments[3] = metric
+    value: float64
+    destinations: [1]Any
+    destinations[0] = *value
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT value FROM server_profile_stats WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null {
+        return result
+    }
+    if value >= 0.0 && value <= 512.0 {
+        result.value.Value = value
+        result.value.Label = IntegerFormat("%d", cast(isize)value)
+    }
     return result
 }

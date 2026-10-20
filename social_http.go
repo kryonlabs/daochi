@@ -60,7 +60,7 @@ func SocialHttp_Cache(social Social, context Context, userID string, kind string
 }
 
 func SocialHttp_ValidMetric(practice string, metric string) bool {
-	if metric == "achievements" {
+	if metric == "achievements" || metric == "levels" {
 		return Identity_ValidNamespace(practice)
 	}
 	if practice == "whm" {

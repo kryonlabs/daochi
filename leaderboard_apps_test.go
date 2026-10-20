@@ -84,3 +84,59 @@ func TestInstalledAppLeaderboardIsolation(t *testing.T) {
 		t.Fatalf("removed friend retained access: %#v", rows)
 	}
 }
+
+func TestGameLevelBoardsStaySeparate(t *testing.T) {
+	server, users := socialHTTPFixture(t)
+	seedLeaderboard(t, server.Store, users, time.Now())
+	request := func(method, path, body string, user int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+		r.Header.Set("X-Daochi-User", users[user])
+		w := httptest.NewRecorder()
+		if method == "PUT" {
+			SocialHttp_PutStats(server.social(), w, r)
+		} else {
+			SocialHttp_FriendStats(server.social(), w, r)
+		}
+		return w
+	}
+	put := func(user int, game string, value int) {
+		t.Helper()
+		body := fmt.Sprintf(`{"app":"inbe","metrics":[{"practice":%q,"metric":"levels","value":%d,"label":"untrusted"}]}`, game, value)
+		if w := request("PUT", "/api/v1/profile/stats", body, user); w.Code != 200 {
+			t.Fatalf("publish levels: %d %s", w.Code, w.Body)
+		}
+	}
+	read := func(game, metric string) []FriendStatRow {
+		t.Helper()
+		w := request("GET", "/api/v1/friends/stats?app=inbe&practice="+game+"&metric="+metric, "", 0)
+		if w.Code != 200 {
+			t.Fatalf("read %s %s: %d %s", game, metric, w.Code, w.Body)
+		}
+		var body FriendStatsResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Rows
+	}
+	put(0, "arcade.shovey", 12)
+	put(1, "arcade.shovey", 140)
+	put(1, "arcade.shovey-island", 3)
+	put(2, "arcade.shovey", 175) // Pending requests confer no visibility.
+	for game, want := range map[string][]float64{"arcade.shovey": {140, 12}, "arcade.shovey-island": {3, 0}} {
+		rows := read(game, "levels")
+		if len(rows) != 2 {
+			t.Fatalf("%s exposed a non-friend: %#v", game, rows)
+		}
+		for i, row := range rows {
+			if row.Value != want[i] || row.Label != fmt.Sprint(int(want[i])) || row.Practice != game || row.Metric != "levels" {
+				t.Fatalf("%s mixed boards or kept an untrusted label: %#v", game, rows)
+			}
+		}
+	}
+	// Levels are their own board, never an achievements count.
+	if rows := read("arcade.shovey", "achievements"); rows[0].Value != 0 || rows[1].Value != 0 {
+		t.Fatalf("levels leaked into achievements: %#v", rows)
+	}
+}

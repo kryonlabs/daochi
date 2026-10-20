@@ -84,7 +84,9 @@ Cache :: (social: Social, context: ctx.Context, userID: string, kind: string, va
 }
 
 ValidMetric :: (practice: string, metric: string) -> bool {
-    if metric == "achievements" {
+    // An app's own boards: earned achievements, or the levels a game such
+    // as Shovey has solved, named by the game.
+    if metric == "achievements" || metric == "levels" {
         return identity.ValidNamespace(practice)
     }
     if practice == "whm" {

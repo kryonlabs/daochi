@@ -407,7 +407,7 @@ func Leaderboard_Friends(database *Database, context Context, userID string, app
 		for loop_cursor_7 < loop_count_7 {
 			loop_index_7 := loop_cursor_7
 			user := loop_view_7[loop_index_7]
-			if metric == "achievements" {
+			if metric == "achievements" || metric == "levels" {
 				row := Leaderboard_Published(database, context, user, app, practice, metric)
 				_ = row
 				result.Error = row.Error
@@ -468,7 +468,14 @@ func Leaderboard_Published(database *Database, context Context, user VisibleStat
 	if result.Error != nil {
 		return result
 	}
-	if value >= 0.0 && value <= 512.0 {
+	var value_2 float64 = 0
+	if metric == "levels" {
+		value_2 = 100000.0
+	} else {
+		value_2 = 512.0
+	}
+	limit := value_2
+	if value >= 0.0 && value <= limit {
 		result.Value.Value = value
 		result.Value.Label = fmt.Sprintf("%d", int(int(value)))
 	}

@@ -139,6 +139,9 @@ Activity :: (practice: string) -> isize {
     if practice == "astral_projection" {
         return cast(isize)5
     }
+    if practice == "workout" {
+        return cast(isize)6
+    }
     return cast(isize)0
 }
 

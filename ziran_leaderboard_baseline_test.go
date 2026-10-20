@@ -31,6 +31,8 @@ func baselineLeaderboardLeaderboardActivity(practice string) int {
 		return 4
 	case "astral_projection":
 		return 5
+	case "workout":
+		return 6
 	default:
 		return 0
 	}

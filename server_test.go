@@ -2800,7 +2800,20 @@ func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 		stats.Rows[1].UserIDHash != alice.UserID || stats.Rows[1].Value != 0 {
 		t.Fatalf("unexpected astral projection streak stats: %#v", stats.Rows)
 	}
-	for _, practice := range []string{"tai_chi", "astral_projection"} {
+	// The 7-Minute Workout (activity 6) ranks by its sessions the same way.
+	syncWithBody(t, handler, "", alice.UserID, alice.Token, []byte(`{"user_id_hash":"`+alice.UserID+`","client_id":"alice-workout-stats","sessions":[{"id":"alice-workout-1","started_at":"2026-06-28T05:00:00Z","local_date":`+practiceToday+`,"topic":"0","activity":6,"source":"test","rounds_hash":"workout-1","deleted_at":0,"updated_at":"2026-06-28T05:00:00Z","rounds":[{"round_index":0,"breaths":0,"hold_seconds":480}]}]}`))
+	res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice=workout&metric=streak", bob, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("workout streak status = %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Rows) != 2 || stats.Rows[0].UserIDHash != alice.UserID || stats.Rows[0].Value != 1 ||
+		stats.Rows[1].UserIDHash != bob.UserID || stats.Rows[1].Value != 0 {
+		t.Fatalf("unexpected workout streak stats: %#v", stats.Rows)
+	}
+	for _, practice := range []string{"tai_chi", "astral_projection", "workout"} {
 		res = friendJSONRequest(t, handler, http.MethodGet, "/api/v1/friends/stats?app=inbe&practice="+practice+"&metric=avg_hold", bob, nil)
 		if res.Code != http.StatusBadRequest {
 			t.Fatalf("%s avg hold should be rejected, status = %d body=%s", practice, res.Code, res.Body.String())

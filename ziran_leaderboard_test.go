@@ -61,7 +61,7 @@ func TestZiranLeaderboardAgainstBaseline(t *testing.T) {
 	seedLeaderboard(t, actual.Store, users, now)
 	seedLeaderboard(t, expected.Store, users, now)
 	for _, user := range append(users, "missing", "' OR 1=1 --") {
-		for _, practice := range []string{"whm", "meditation", "sun_salutation", "patterns", "tai_chi", "astral_projection", "unknown"} {
+		for _, practice := range []string{"whm", "meditation", "sun_salutation", "patterns", "tai_chi", "astral_projection", "workout", "unknown"} {
 			for _, metric := range []string{"streak", "avg_hold", "avg_time", "unknown"} {
 				compareLeaderboard(t, actual.Store, expected.Store, t.Context(), user, practice, metric)
 				compareLeaderboard(t, actual.Store, expected.Store, t.Context(), user, practice, metric)

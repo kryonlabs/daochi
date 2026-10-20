@@ -149,6 +149,9 @@ func Leaderboard_Activity(practice string) int {
 	if practice == "astral_projection" {
 		return int(5)
 	}
+	if practice == "workout" {
+		return int(6)
+	}
 	return int(0)
 }
 

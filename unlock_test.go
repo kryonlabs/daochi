@@ -158,7 +158,7 @@ func TestUnlockTrialPrice(t *testing.T) {
 		price      int64
 		shown      int64
 	}{
-		{now + 3600, 1000000, now + 3600},
+		{now + 3600, 6000000, now + 3600},
 		{now - 1, 10000000, 0},
 		{0, 10000000, 0},
 	} {
@@ -192,7 +192,7 @@ func TestUnlockTrialPrice(t *testing.T) {
 			t.Fatalf("listed unlocks: %v", unlocks)
 		}
 	}
-	if Unlock_Price(TaiChi, 99, 100) != 1000000 || Unlock_Price(TaiChi, 100, 100) != 10000000 {
+	if Unlock_Price(TaiChi, 99, 100) != 6000000 || Unlock_Price(TaiChi, 100, 100) != 10000000 {
 		t.Fatal("trial ends at trial_until")
 	}
 }

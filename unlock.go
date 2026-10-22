@@ -52,7 +52,7 @@ type Offer struct {
 }
 
 const TaiChi = "inbe.practice.taichi"
-const TrialDivisor = 10
+const TrialDiscountPercent = 40
 
 var Catalog [1]string = [1]string{TaiChi}
 
@@ -102,7 +102,7 @@ func Unlock_RegularPrice(product string) int64 {
 func Unlock_Price(product string, now int64, trialUntil int64) int64 {
 	regular := Unlock_RegularPrice(product)
 	if now < trialUntil {
-		return regular / 10
+		return (regular * 60) / 100
 	}
 	return regular
 }

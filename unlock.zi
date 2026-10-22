@@ -14,8 +14,8 @@ go_strings :: #system_library "go:strings";
 builtin :: #system_library "go:builtin";
 
 TaiChi :: "inbe.practice.taichi";
-// A launch trial takes 90% off until the node's configured trial end.
-TrialDivisor :: 10
+// The launch offer takes 40% off until the node's configured trial end.
+TrialDiscountPercent :: 40
 
 AccountUnlock :: struct {
     product: string #go_tag "json:\"product\""
@@ -121,7 +121,7 @@ RegularPrice :: (product: string) -> s64 {
 Price :: (product: string, now: s64, trialUntil: s64) -> s64 {
     regular := RegularPrice(product)
     if now < trialUntil {
-        return regular / TrialDivisor
+        return regular * (100 - TrialDiscountPercent) / 100
     }
     return regular
 }

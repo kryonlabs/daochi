@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -274,6 +275,27 @@ func TestGatedPackNeedsAGrantForItsProduct(t *testing.T) {
 		}
 		return res
 	}
+	wire := httptest.NewServer(handler)
+	t.Cleanup(wire.Close)
+	head := func(path string, status int) *http.Response {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodHead, wire.URL+"/api/v2/packages/inbe/"+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := wire.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { response.Body.Close() })
+		if response.StatusCode != status {
+			t.Fatalf("HEAD %s: %d", path, response.StatusCode)
+		}
+		if data, err := io.ReadAll(response.Body); err != nil || len(data) != 0 {
+			t.Fatalf("HEAD returned bytes: %q, %v", data, err)
+		}
+		return response
+	}
 
 	requestGrant(t, handler, owner.Token, TaiChi, 403)
 	requestGrant(t, handler, owner.Token, "inbe.practice.unknown", 403)
@@ -289,6 +311,7 @@ func TestGatedPackNeedsAGrantForItsProduct(t *testing.T) {
 	requestGrant(t, handler, other.Token, TaiChi, 403)
 
 	get(gated, 403)
+	head(gated, 403)
 	get(gated+"/", 404)
 	get("latest/"+issued.Grant, 404)
 	expired := PackGrant_Issue(private, TaiChi, now-1, errTokenIssuerReadOnly)
@@ -301,10 +324,16 @@ func TestGatedPackNeedsAGrantForItsProduct(t *testing.T) {
 	for _, grant := range []string{expired.Grant, forged.Grant, otherProduct.Grant, tampered, padded,
 		"garbage", parts[0], parts[0] + "." + parts[1] + "." + parts[1]} {
 		get(gated+"/"+grant, 403)
+		head(gated+"/"+grant, 403)
 	}
 	served := get(gated+"/"+issued.Grant, 200)
 	if !bytes.Equal(served.Body.Bytes(), pack) || served.Header().Get("Cache-Control") != "private, no-store" {
 		t.Fatalf("gated pack: %q %v", served.Body.String(), served.Header())
+	}
+	checked := head(gated+"/"+issued.Grant, 200)
+	if checked.Header.Get("ETag") != `"`+release.Artifacts[0].SHA256+`"` ||
+		checked.Header.Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("HEAD authorization lost the verified identity or privacy: %v", checked.Header)
 	}
 
 	for _, path := range []string{plain, plain + "/" + issued.Grant, plain + "/garbage"} {
@@ -336,6 +365,7 @@ func TestGatedPackNeedsAGrantForItsProduct(t *testing.T) {
 		t.Fatal(err)
 	}
 	get(gated+"/"+issued.Grant, 403)
+	head(gated+"/"+issued.Grant, 403)
 	if err := os.Remove(filepath.Join(root, gated+".product")); err != nil {
 		t.Fatal(err)
 	}

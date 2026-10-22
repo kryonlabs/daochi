@@ -24,6 +24,12 @@ not change the parent release. Signature, registry status and active publisher
 key checks apply to the latest descriptor and to archived artifacts alike.
 These APIs serve releases; they do not register publishers or grant approval.
 
+The optional [package delivery cache](../cdn/README.md) keeps large immutable
+artifacts in a private R2 bucket and a named edge cache. Every request still
+passes the node's existing access and integrity checks before cached bytes are
+returned. Metadata and release approval remain on the node, and clients retain
+their signed-hash verification. Missing cache entries use direct node delivery.
+
 To stage this format, pass `--format-version 2`, `--host-api N` and
 `--module-api N` to `scripts/stage-zib-release.py`. Add `--standalone FILE`
 for a separate standalone artifact and `--dependency RELEASE.json` for each

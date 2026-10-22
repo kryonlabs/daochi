@@ -239,12 +239,29 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 			return Outcome{Error: lookupError}
 		}
 		if owner != user {
-			return SharedLists_Failure(int(403), "only the owner may invite")
+			var joined bool = false
+			var value_18 [1]Any
+			value_18[0] = &(joined)
+			access := value_18
+			_ = access
+			var value_19 string = "SELECT EXISTS(SELECT 1 FROM server_list_invitations WHERE list_id=?1 AND target=?2 AND status='accepted')"
+			membership := StdSqlGo_QueryRowTx(transaction, context, value_19, arguments[0:2:2])
+			_ = membership
+			var value_20 Error = StdSqlGo_ScanRow(membership, access[0:1:1])
+			var value_21 bool = value_20 != nil || !joined
+			var value_22 bool = value_21
+			if !value_22 {
+				var value_23 bool = FriendStore_AreFriends(transaction, context, owner, command.Target)
+				value_22 = !value_23
+			}
+			if value_22 {
+				return SharedLists_Failure(int(403), "only the owner or a member may invite the owner's friends")
+			}
 		}
 		arguments[1] = command.Target
 		arguments[2] = command.RequestId
-		var value_18 string = "INSERT INTO server_list_invitations(id,list_id,target,status) VALUES(?3,?1,?2,'pending') ON CONFLICT(list_id,target) DO UPDATE SET id=excluded.id,status='pending',updated_at=CURRENT_TIMESTAMP WHERE server_list_invitations.status='declined'"
-		changed := StdSqlGo_ExecTx(transaction, context, value_18, arguments[0:3:3])
+		var value_24 string = "INSERT INTO server_list_invitations(id,list_id,target,status) VALUES(?3,?1,?2,'pending') ON CONFLICT(list_id,target) DO UPDATE SET id=excluded.id,status='pending',updated_at=CURRENT_TIMESTAMP WHERE server_list_invitations.status='declined'"
+		changed := StdSqlGo_ExecTx(transaction, context, value_24, arguments[0:3:3])
 		_ = changed
 		return Outcome{Error: changed.Error}
 	}
@@ -253,20 +270,21 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 	}
 	if owner != user {
 		var allowed bool = false
-		var value_19 string = "SELECT EXISTS(SELECT 1 FROM server_list_invitations WHERE list_id=?1 AND target=?2 AND status='accepted')"
-		membership := StdSqlGo_QueryRowTx(transaction, context, value_19, arguments[0:2:2])
-		var value_20 [1]Any
-		value_20[0] = &(allowed)
-		access := value_20
+		var value_25 string = "SELECT EXISTS(SELECT 1 FROM server_list_invitations WHERE list_id=?1 AND target=?2 AND status='accepted')"
+		membership := StdSqlGo_QueryRowTx(transaction, context, value_25, arguments[0:2:2])
+		_ = membership
+		var value_26 [1]Any
+		value_26[0] = &(allowed)
+		access := value_26
 		_ = access
-		var value_21 Error = StdSqlGo_ScanRow(membership, access[0:1:1])
-		var value_22 bool = value_21 != nil || !allowed
-		var value_23 bool = value_22
-		if !value_23 {
-			var value_24 bool = FriendStore_AreFriends(transaction, context, owner, user)
-			value_23 = !value_24
+		var value_27 Error = StdSqlGo_ScanRow(membership, access[0:1:1])
+		var value_28 bool = value_27 != nil || !allowed
+		var value_29 bool = value_28
+		if !value_29 {
+			var value_30 bool = FriendStore_AreFriends(transaction, context, owner, user)
+			value_29 = !value_30
 		}
-		if value_23 {
+		if value_29 {
 			return SharedLists_Failure(int(404), "shared list not found")
 		}
 	}
@@ -278,24 +296,24 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 		_ = changed
 		return Outcome{Error: changed.Error}
 	}
-	var value_25 bool = command.Action != "save"
-	if !value_25 {
-		var value_26 bool = SharedLists_ValidList(command.List)
-		value_25 = !value_26
+	var value_31 bool = command.Action != "save"
+	if !value_31 {
+		var value_32 bool = SharedLists_ValidList(command.List)
+		value_31 = !value_32
 	}
-	if value_25 {
+	if value_31 {
 		return SharedLists_Failure(int(400), "invalid list change")
 	}
 	if command.List.Revision != revision {
 		return SharedLists_Failure(int(409), "list changed; refresh before saving")
 	}
-	var value_27 bool = SharedLists_HasCapacity(transaction, context, owner, command.List.ID, int64(len(command.List.Items)))
-	var value_28 bool = !value_27
-	if !value_28 {
-		var value_29 bool = SharedLists_HasCapacity(transaction, context, user, command.List.ID, int64(len(command.List.Items)))
-		value_28 = !value_29
+	var value_33 bool = SharedLists_HasCapacity(transaction, context, owner, command.List.ID, int64(len(command.List.Items)))
+	var value_34 bool = !value_33
+	if !value_34 {
+		var value_35 bool = SharedLists_HasCapacity(transaction, context, user, command.List.ID, int64(len(command.List.Items)))
+		value_34 = !value_35
 	}
-	if value_28 {
+	if value_34 {
 		return SharedLists_Failure(int(409), "shared list limit reached")
 	}
 	members := StdSqlGo_QueryTx(transaction, context, "SELECT target FROM server_list_invitations WHERE list_id=?1 AND status='accepted'", arguments[0:1:1])
@@ -306,9 +324,9 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 	for StdSqlGo_Next(members.Value) {
 		var member string = ""
 		_ = member
-		var value_30 [1]Any
-		value_30[0] = &(member)
-		destination := value_30
+		var value_36 [1]Any
+		value_36[0] = &(member)
+		destination := value_36
 		_ = destination
 		error := StdSqlGo_ScanRows(members.Value, destination[0:1:1])
 		if error != nil {
@@ -323,13 +341,10 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 		return Outcome{Error: memberError}
 	}
 	for _, member := range memberIDs {
-		var value_31 bool = SharedLists_HasCapacity(transaction, context, member, command.List.ID, int64(len(command.List.Items)))
-		if !value_31 {
+		var value_37 bool = SharedLists_HasCapacity(transaction, context, member, command.List.ID, int64(len(command.List.Items)))
+		if !value_37 {
 			return SharedLists_Failure(int(409), "shared list limit reached")
 		}
-	}
-	if owner != user && command.List.Title != title {
-		return SharedLists_Failure(int(403), "only the owner may rename")
 	}
 	payload := StdJsonGo_Marshal(command.List.Items)
 	_ = payload
@@ -337,8 +352,8 @@ func SharedLists_Execute(transaction *Transaction, context Context, user string,
 		return Outcome{Error: payload.Error}
 	}
 	arguments[1] = command.List.Title
-	var value_32 string = StdTextGo_FromBytes(payload.Value)
-	arguments[2] = value_32
+	var value_38 string = StdTextGo_FromBytes(payload.Value)
+	arguments[2] = value_38
 	changed := StdSqlGo_ExecTx(transaction, context, "UPDATE server_shared_lists SET title=?2,items=?3,revision=revision+1 WHERE id=?1", arguments[0:3:3])
 	_ = changed
 	return Outcome{Error: changed.Error}
@@ -390,7 +405,7 @@ func SharedLists_Read(database *Database, context Context, user string) Snapshot
 	if result.Error != nil {
 		return result
 	}
-	var value_3 string = "SELECT i.id,l.id,l.title,l.owner,COALESCE(u.alias,''),i.target,COALESCE(t.alias,''),i.status FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id JOIN server_users u ON u.user_id_hash=l.owner JOIN server_users t ON t.user_id_hash=i.target WHERE l.deleted=0 AND (l.owner=?1 OR (i.target=?1 AND i.status='pending')) ORDER BY i.updated_at DESC,i.id"
+	var value_3 string = "SELECT i.id,l.id,l.title,l.owner,COALESCE(u.alias,''),i.target,COALESCE(t.alias,''),i.status FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id JOIN server_users u ON u.user_id_hash=l.owner JOIN server_users t ON t.user_id_hash=i.target WHERE l.deleted=0 AND (l.owner=?1 OR (i.target=?1 AND i.status='pending') OR (EXISTS(SELECT 1 FROM server_list_invitations member WHERE member.list_id=l.id AND member.target=?1 AND member.status='accepted') AND EXISTS(SELECT 1 FROM server_friendships f WHERE (f.user_id_a=?1 AND f.user_id_b=l.owner) OR (f.user_id_b=?1 AND f.user_id_a=l.owner)))) ORDER BY i.updated_at DESC,i.id"
 	queried = StdSqlGo_Query(database, context, value_3, arguments[0:1:1])
 	result.Error = queried.Error
 	if result.Error != nil {

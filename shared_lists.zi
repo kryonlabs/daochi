@@ -183,7 +183,16 @@ Execute :: (transaction: *sql.Transaction, context: ctx.Context,
             return Outcome.{error = lookupError}
         }
         if owner != user {
-            return Failure(cast(isize)403, "only the owner may invite")
+            // A person the list was shared with may invite too, but only a
+            // friend of the owner, who can then accept it.
+            joined: bool
+            access: [1]Any = .[*joined]
+            membership := sql.QueryRowTx(transaction, context,
+                "SELECT EXISTS(SELECT 1 FROM server_list_invitations WHERE list_id=?1 AND target=?2 AND status='accepted')", arguments[0:2])
+            if sql.ScanRow(membership, access[:]) != null || !joined ||
+            !friendships.AreFriends(transaction, context, owner, command.target) {
+                return Failure(cast(isize)403, "only the owner or a member may invite the owner's friends")
+            }
         }
         arguments[1] = command.target
         arguments[2] = command.request_id
@@ -246,9 +255,6 @@ Execute :: (transaction: *sql.Transaction, context: ctx.Context,
         if !HasCapacity(transaction, context, member, command.list.id, command.list.items.count) {
             return Failure(cast(isize)409, "shared list limit reached")
         }
-    }
-    if owner != user && command.list.title != title {
-        return Failure(cast(isize)403, "only the owner may rename")
     }
     payload := json.Marshal(command.list.items)
     if payload.error != null {
@@ -313,7 +319,7 @@ Read :: (database: *sql.Database, context: ctx.Context, user: string) -> Snapsho
         return result
     }
     queried = sql.Query(database, context,
-        "SELECT i.id,l.id,l.title,l.owner,COALESCE(u.alias,''),i.target,COALESCE(t.alias,''),i.status FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id JOIN server_users u ON u.user_id_hash=l.owner JOIN server_users t ON t.user_id_hash=i.target WHERE l.deleted=0 AND (l.owner=?1 OR (i.target=?1 AND i.status='pending')) ORDER BY i.updated_at DESC,i.id", arguments[:])
+        "SELECT i.id,l.id,l.title,l.owner,COALESCE(u.alias,''),i.target,COALESCE(t.alias,''),i.status FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id JOIN server_users u ON u.user_id_hash=l.owner JOIN server_users t ON t.user_id_hash=i.target WHERE l.deleted=0 AND (l.owner=?1 OR (i.target=?1 AND i.status='pending') OR (EXISTS(SELECT 1 FROM server_list_invitations member WHERE member.list_id=l.id AND member.target=?1 AND member.status='accepted') AND EXISTS(SELECT 1 FROM server_friendships f WHERE (f.user_id_a=?1 AND f.user_id_b=l.owner) OR (f.user_id_b=?1 AND f.user_id_a=l.owner)))) ORDER BY i.updated_at DESC,i.id", arguments[:])
     result.error = queried.error
     if result.error != null {
         return result

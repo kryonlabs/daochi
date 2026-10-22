@@ -69,7 +69,7 @@ func TestSharedListsInvitationsAndCollaboration(t *testing.T) {
 	call(1, &stolen, 404)
 	call(2, &stolen, 404)
 	accepted := call(1, &accept, 200)
-	if len(accepted.Lists) != 1 || len(accepted.Invitations) != 0 || accepted.Lists[0].Items[0].Title != "Pack bag" {
+	if len(accepted.Lists) != 1 || len(accepted.Invitations) != 1 || accepted.Lists[0].Items[0].Title != "Pack bag" {
 		t.Fatalf("accept did not grant content: %+v", accepted)
 	}
 	call(1, &accept, 200)
@@ -88,9 +88,42 @@ func TestSharedListsInvitationsAndCollaboration(t *testing.T) {
 	stale := edit
 	stale.RequestId = "stale-0001"
 	call(1, &stale, 409)
-	rename := Command{RequestId: "rename-0001", Action: "save", List: owner.Lists[0]}
-	rename.List.Title = "Stolen list"
-	call(1, &rename, 403)
+	// A person the list was shared with may rename it; only the owner deletes.
+	current := call(1, nil, 200)
+	rename := Command{RequestId: "rename-0001", Action: "save", List: current.Lists[0]}
+	rename.List.Title = "Renamed by a member"
+	renamed := call(1, &rename, 200)
+	if renamed.Lists[0].Title != "Renamed by a member" {
+		t.Fatal("a member could not rename the list")
+	}
+	// Accepted members see collaborator states and can share with mutual friends.
+	for _, pair := range [][2]string{{users[0], users[2]}, {users[1], users[2]}} {
+		if _, err := server.Store.Database.Exec("INSERT INTO server_friendships VALUES(?,?,CURRENT_TIMESTAMP)", pair[0], pair[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	memberInvite := Command{RequestId: "member-invite", Action: "invite", Target: users[2], List: renamed.Lists[0]}
+	memberView := call(1, &memberInvite, 200)
+	if len(memberView.Invitations) != 2 {
+		t.Fatal("member cannot see existing accepted and pending collaborators")
+	}
+	inviteOwner := memberInvite
+	inviteOwner.RequestId = "invite-owner"
+	inviteOwner.Target = users[0]
+	call(1, &inviteOwner, 403)
+	third := call(2, nil, 200)
+	if len(third.Lists) != 0 || len(third.Invitations) != 1 {
+		t.Fatal("pending invite reveals another person's collaborators or list content")
+	}
+	call(2, &Command{RequestId: "third-accept", Action: "accept", InvitationId: third.Invitations[0].ID}, 200)
+	memberView = call(1, nil, 200)
+	if len(memberView.Invitations) != 2 || memberView.Invitations[0].Status != "accepted" || memberView.Invitations[1].Status != "accepted" {
+		t.Fatal("accepted collaborator state is missing")
+	}
+	if _, err := server.Store.Database.Exec("DELETE FROM server_friendships WHERE (user_id_a=?1 AND user_id_b=?2) OR (user_id_b=?1 AND user_id_a=?2)", users[0], users[2]); err != nil {
+		t.Fatal(err)
+	}
+	owner = call(0, nil, 200)
 	remove := Command{RequestId: "delete-0001", Action: "delete", List: owner.Lists[0]}
 	call(1, &remove, 403)
 	call(2, &remove, 404)

@@ -41,6 +41,8 @@ SELECT
    FROM server_shared_lists WHERE owner=?1)
 + (SELECT COALESCE(SUM(LENGTH(i.id)+LENGTH(i.target)+LENGTH(i.status)),0)
    FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id WHERE l.owner=?1)
++ (SELECT COALESCE(SUM(LENGTH(p.access)),0)
+   FROM server_list_permissions p JOIN server_shared_lists l ON l.id=p.list_id WHERE l.owner=?1)
 + (SELECT COALESCE(SUM(LENGTH(request_id)+LENGTH(body)),0)
    FROM server_list_commands WHERE user_id=?1)
 + (SELECT COALESCE(SUM(LENGTH(id)+LENGTH(format)+LENGTH(title)+LENGTH(document)),0)

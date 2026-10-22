@@ -226,3 +226,121 @@ func TestSharedListsQuotaRollbackAndFriendRevocation(t *testing.T) {
 		t.Fatal("removed friend retained access")
 	}
 }
+
+func TestSharedListAccessRolesAndRemoval(t *testing.T) {
+	server, users := socialHTTPFixture(t)
+	call := func(user int, command *Command, want int) Snapshot {
+		t.Helper()
+		method := "GET"
+		var encoded []byte
+		if command != nil {
+			method = "POST"
+			encoded, _ = json.Marshal(command)
+		}
+		request := httptest.NewRequest(method, "/api/v1/lists", bytes.NewReader(encoded))
+		request.Header.Set("X-Daochi-User", users[user])
+		request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+		result := httptest.NewRecorder()
+		SharedLists_Handle(server.accounts(), result, request)
+		if result.Code != want {
+			t.Fatalf("%s: got %d %s, want %d", encoded, result.Code, result.Body, want)
+		}
+		var snapshot Snapshot
+		if want == 200 {
+			if err := json.Unmarshal(result.Body.Bytes(), &snapshot); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return snapshot
+	}
+	for _, pair := range [][2]string{{users[0], users[2]}, {users[1], users[2]}} {
+		if _, err := server.Store.Database.Exec("INSERT INTO server_friendships VALUES(?,?,CURRENT_TIMESTAMP)", pair[0], pair[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := List{ID: "role-list", Title: "Shared", Items: []Item{{ID: "role-task", Title: "Keep this", Comment: "Keep the comment"}}}
+	invite := Command{RequestId: "role-invite", Action: "invite", Target: users[1], Access: "viewer", List: list}
+	owner := call(0, &invite, 200)
+	if owner.Lists[0].Access != "owner" || owner.Invitations[0].Access != "viewer" {
+		t.Fatal("owner and pending viewer permissions missing")
+	}
+	accepted := call(1, &Command{RequestId: "role-accept", Action: "accept", InvitationId: owner.Invitations[0].ID}, 200)
+	if accepted.Lists[0].Access != "viewer" || accepted.Invitations[0].Access != "viewer" {
+		t.Fatal("viewer cannot inspect its access")
+	}
+	edit := Command{RequestId: "viewer-save", Action: "save", List: accepted.Lists[0]}
+	edit.List.Title = "Forbidden rename"
+	call(1, &edit, 403)
+	call(1, &Command{RequestId: "viewer-invite", Action: "invite", Target: users[2], List: accepted.Lists[0]}, 403)
+	call(1, &Command{RequestId: "viewer-delete", Action: "delete", List: accepted.Lists[0]}, 403)
+	permission := Command{RequestId: "permission-edit", Action: "access", Target: users[1], Access: "editor", List: List{ID: list.ID}}
+	call(1, &permission, 403)
+	call(2, &permission, 403)
+	call(0, &permission, 200)
+	call(0, &permission, 200)
+	permission.Access = "viewer"
+	call(0, &permission, 409)
+	current := call(1, nil, 200)
+	if current.Lists[0].Access != "editor" || current.Lists[0].Title != "Shared" {
+		t.Fatal("permissions changed the document or failed to promote")
+	}
+	edit.RequestId = "editor-save"
+	edit.List = current.Lists[0]
+	edit.List.Items[0].Done = 1
+	call(1, &edit, 200)
+	call(0, &Command{RequestId: "invalid-role", Action: "access", Target: users[1], Access: "admin", List: List{ID: list.ID}}, 400)
+	call(0, &Command{RequestId: "owner-remove", Action: "remove", Target: users[0], List: List{ID: list.ID}}, 400)
+	permission.RequestId = "permission-read"
+	call(0, &permission, 200)
+	edit.RequestId = "downgraded-save"
+	edit.List.Revision++
+	call(1, &edit, 403)
+	remove := Command{RequestId: "member-remove", Action: "remove", Target: users[1], List: List{ID: list.ID}}
+	call(1, &remove, 403)
+	call(0, &remove, 200)
+	if revoked := call(1, nil, 200); len(revoked.Lists) != 0 || len(revoked.Invitations) != 0 {
+		t.Fatal("removed collaborator can still read content or collaborators")
+	}
+	edit.RequestId = "removed-save"
+	call(1, &edit, 404)
+	invite.RequestId = "role-reinvite"
+	invite.Access = ""
+	owner = call(0, &invite, 200)
+	accepted = call(1, &Command{RequestId: "role-reaccept", Action: "accept", InvitationId: owner.Invitations[0].ID}, 200)
+	if accepted.Lists[0].Access != "editor" || accepted.Lists[0].Items[0].Comment != "Keep the comment" || accepted.Lists[0].Items[0].Done != 1 {
+		t.Fatal("re-invite lost content or inherited revoked permissions")
+	}
+	// Owners share full list authority, including permissions and deletion.
+	call(1, &Command{RequestId: "editor-promotes-self", Action: "access", Target: users[1], Access: "owner", List: List{ID: list.ID}}, 403)
+	call(1, &Command{RequestId: "editor-invites-owner", Action: "invite", Target: users[2], Access: "owner", List: accepted.Lists[0]}, 403)
+	call(0, &Command{RequestId: "grant-owner", Action: "access", Target: users[1], Access: "owner", List: List{ID: list.ID}}, 200)
+	current = call(1, nil, 200)
+	if current.Lists[0].Access != "owner" {
+		t.Fatal("granted owner cannot inspect ownership")
+	}
+	call(1, &Command{RequestId: "coowner-invite", Action: "invite", Target: users[2], Access: "viewer", List: current.Lists[0]}, 200)
+	call(1, &Command{RequestId: "coowner-promote", Action: "access", Target: users[2], Access: "owner", List: List{ID: list.ID}}, 200)
+	call(1, &Command{RequestId: "coowner-remove", Action: "remove", Target: users[2], List: List{ID: list.ID}}, 200)
+	edit.RequestId = "coowner-rename"
+	edit.List = current.Lists[0]
+	edit.List.Title = "Renamed by an owner"
+	call(1, &edit, 200)
+	// Starting an existing database creates the new permission table without
+	// rewriting its lists or accepted invitations. Legacy members are editors.
+	if _, err := server.Store.Database.Exec("DROP TABLE server_list_permissions"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.Store.Database.Exec(SharedLists_SchemaSQL()); err != nil {
+		t.Fatal(err)
+	}
+	legacy := call(1, nil, 200)
+	if legacy.Lists[0].Access != "editor" || len(legacy.Lists[0].Items) != 1 {
+		t.Fatal("legacy membership did not survive the schema extension")
+	}
+	call(0, &Command{RequestId: "grant-owner-again", Action: "access", Target: users[1], Access: "owner", List: List{ID: list.ID}}, 200)
+	call(1, &Command{RequestId: "coowner-delete", Action: "delete", List: List{ID: list.ID}}, 200)
+	if remaining := call(0, nil, 200); len(remaining.Lists) != 1 || remaining.Lists[0].Deleted != 1 {
+		t.Fatal("an owner's deletion was not visible to the original owner")
+	}
+
+}

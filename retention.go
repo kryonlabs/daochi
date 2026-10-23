@@ -2,6 +2,7 @@
 package main
 
 import (
+	context "context"
 	sql "database/sql"
 	slog "log/slog"
 	time "time"
@@ -16,6 +17,11 @@ type TableResult struct {
 const ChatUsageDays = 30
 const Interval = 3600000000000
 const Day = 86400000000000
+
+func Retention_Stopped(value Context) bool {
+	var value_0 Error = (context.Context).Err(value)
+	return value_0 != nil
+}
 
 func Retention_LumiTables(database *Database, context Context) TableResult {
 	var result TableResult = TableResult{}
@@ -101,7 +107,7 @@ func Retention_Run(database *Database, context Context, interval Duration) {
 		var value_2 bool = error != nil
 		var value_3 bool = value_2
 		if value_3 {
-			var value_4 bool = StdErrorsGo_Is(error, StdContextGo_Canceled())
+			var value_4 bool = Retention_Stopped(context)
 			value_3 = !value_4
 		}
 		if value_3 {

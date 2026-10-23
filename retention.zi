@@ -12,6 +12,7 @@ errors :: #import "std/errors_go";
 go_time :: #system_library "go:time";
 go_slog :: #system_library "go:log/slog";
 go_sql :: #system_library "go:database/sql";
+go_context :: #system_library "go:context";
 
 // Chat allowances count requests per UTC day; those counts are kept this long.
 ChatUsageDays :: 30
@@ -27,6 +28,10 @@ TableResult :: struct {
 StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
 RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
 LogWarning :: (message: string, key: string, error: Error) #foreign go_slog "Warn";
+ContextError :: (value: ctx.Context) -> Error #foreign go_context "Context.Err";
+Stopped :: (value: ctx.Context) -> bool {
+    return ContextError(value) != null
+}
 
 // Lumi creates its tables on first use, so a node that never used Lumi's
 // Telegram input has none.
@@ -95,7 +100,9 @@ Run :: (database: *sql.Database, context: ctx.Context, interval: clock.Duration)
     cases[1] = selection.Receive(clock.TickerChannel(ticker))
     while true {
         error := Prune(database, context, clock.Now())
-        if error != null && !errors.Is(error, ctx.Canceled()) {
+        // Stopping ends the context and rolls back a prune in progress, which
+        // then fails with an error of its own; that is not a failure.
+        if error != null && !Stopped(context) {
             LogWarning("data retention failed", "error", error)
         }
         if selection.Select(cases[:]).chosen == cast(isize)0 {

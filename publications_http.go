@@ -32,6 +32,11 @@ type UnpublishedResponse struct {
 	Deleted bool "json:\"deleted\""
 }
 
+type ReaderAccess struct {
+	User    string
+	Allowed bool
+}
+
 const PublicationPath = "/api/v1/publications/"
 
 func PublicationsHttp_Bearer(service Publications, writer ResponseWriter, request *Request) string {
@@ -42,6 +47,28 @@ func PublicationsHttp_Bearer(service Publications, writer ResponseWriter, reques
 		return ""
 	}
 	return user.Value
+}
+
+func PublicationsHttp_Reader(service Publications, writer ResponseWriter, request *Request) ReaderAccess {
+	var access ReaderAccess = ReaderAccess{}
+	if strings.TrimSpace(StdHttpGo_HeaderValue(StdHttpGo_Headers(request), "Authorization")) != "" {
+		access.User = PublicationsHttp_Bearer(service, writer, request)
+		if access.User == "" {
+			return access
+		}
+		access.Allowed = PublicationsHttp_Allow(service, writer, access.User, false)
+		return access
+	}
+	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "public, max-age=15")
+	var value_0 [2]string
+	value_0[0] = "address:"
+	var value_1 string = ClientAddress_FromRequest(request)
+	value_0[1] = value_1
+	parts := value_0
+	_ = parts
+	var value_2 string = strings.Join(parts[0:2:2], "")
+	access.Allowed = PublicationsHttp_Allow(service, writer, value_2, false)
+	return access
 }
 
 func PublicationsHttp_Allow(service Publications, writer ResponseWriter, user string, writing bool) bool {
@@ -147,24 +174,20 @@ func PublicationsHttp_Unpublish(service Publications, writer ResponseWriter, req
 }
 
 func PublicationsHttp_List(service Publications, writer ResponseWriter, request *Request) {
-	user := PublicationsHttp_Bearer(service, writer, request)
-	var value_0 bool = user == ""
-	if !value_0 {
-		var value_1 bool = PublicationsHttp_Allow(service, writer, user, false)
-		value_0 = !value_1
-	}
-	if value_0 {
+	reader := PublicationsHttp_Reader(service, writer, request)
+	if !reader.Allowed {
 		return
 	}
+	user := reader.User
 	query := StdUrlGo_Query(StdHttpGo_RequestURL(request))
 	format := strings.TrimSpace(StdUrlGo_Value(query, "format"))
 	author := strings.TrimSpace(StdUrlGo_Value(query, "author"))
-	var value_2 bool = format != ""
-	if value_2 {
-		var value_3 bool = Publications_ValidFormat(format)
-		value_2 = !value_3
+	var value_0 bool = format != ""
+	if value_0 {
+		var value_1 bool = Publications_ValidFormat(format)
+		value_0 = !value_1
 	}
-	if value_2 {
+	if value_0 {
 		Response_Error(writer, int(400), "invalid format")
 		return
 	}
@@ -205,15 +228,11 @@ func PublicationsHttp_List(service Publications, writer ResponseWriter, request 
 }
 
 func PublicationsHttp_Read(service Publications, writer ResponseWriter, request *Request) {
-	user := PublicationsHttp_Bearer(service, writer, request)
-	var value_0 bool = user == ""
-	if !value_0 {
-		var value_1 bool = PublicationsHttp_Allow(service, writer, user, false)
-		value_0 = !value_1
-	}
-	if value_0 {
+	reader := PublicationsHttp_Reader(service, writer, request)
+	if !reader.Allowed {
 		return
 	}
+	user := reader.User
 	fetched := Publications_Fetch(service.Database, StdHttpGo_Context(request), user, PublicationsHttp_PathID(request))
 	if PublicationsHttp_Refused(writer, fetched) {
 		return

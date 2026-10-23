@@ -351,7 +351,10 @@ the `document`, a JSON object of at most 256 KiB that the node keeps as it is. A
 anyone else it answers 404. An account keeps at most 100 publications, and
 their documents count toward its storage. `GET /api/v1/publications` lists the
 newest public ones, or with `author` (an alias or account ID) the ones that
-author lets you see; `format` keeps one kind. `GET /api/v1/publications/{id}`
+author lets you see; `format` keeps one kind. Reads need no account: without
+an `Authorization` header they see public publications only, limited per
+address and cacheable for 15 seconds, so a game can load its published levels
+for every player. `GET /api/v1/publications/{id}`
 returns a visible publication with its document, and its author removes it
 with `DELETE`. Each publication reports its `levels`, the length of the
 document's top-level `levels` array. An account may publish or unpublish 60

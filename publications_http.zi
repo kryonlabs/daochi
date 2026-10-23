@@ -1,5 +1,7 @@
 // Publication endpoints: authors publish collections of game levels, and the
-// people they allow find and play them. Every answer is private to the caller.
+// people they allow find and play them. Anyone may read public publications
+// without an account, so a game can load its published levels for every
+// player; signed-in readers also see what friends and they themselves share.
 #import "std/go_types"
 #import "sync_types"
 publications :: #import "publications";
@@ -7,6 +9,7 @@ auth :: #import "http_auth";
 body :: #import "http_body";
 response :: #import "response";
 lookup :: #import "account_lookup";
+address :: #import "client_address";
 quota :: #import "account_storage";
 requests :: #import "request_rate";
 limits :: #import "rate_limit";
@@ -43,6 +46,10 @@ PublicationListResponse :: struct {
 UnpublishedResponse :: struct {
     deleted: bool #go_tag "json:\"deleted\""
 }
+ReaderAccess :: struct {
+    user: string
+    allowed: bool
+}
 
 PublicationPath :: "/api/v1/publications/"
 
@@ -63,8 +70,27 @@ Bearer :: (service: Publications, writer: http.ResponseWriter, request: *http.Re
     return user.value
 }
 
+// A reader with an Authorization header must sign in; one without reads
+// public publications only, limited per address. The answer is "" and false
+// after the request has been answered.
+Reader :: (service: Publications, writer: http.ResponseWriter, request: *http.Request) -> ReaderAccess {
+    access: ReaderAccess
+    if TrimSpace(http.HeaderValue(http.Headers(request), "Authorization")) != "" {
+        access.user = Bearer(service, writer, request)
+        if access.user == "" {
+            return access
+        }
+        access.allowed = Allow(service, writer, access.user, false)
+        return access
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "public, max-age=15")
+    parts: [2]string = .["address:", address.FromRequest(request)]
+    access.allowed = Allow(service, writer, Join(parts[:], ""), false)
+    return access
+}
+
 // Publishing and unpublishing share one hourly allowance per account, and
-// reads one per minute.
+// reads one per minute, per account or per anonymous address.
 Allow :: (service: Publications, writer: http.ResponseWriter, user: string, writing: bool) -> bool {
     parts: [2]string = .["publications:read:", user]
     limit: isize = 120
@@ -150,10 +176,11 @@ Unpublish :: (service: Publications, writer: http.ResponseWriter, request: *http
 // @alias or public ID) that author's publications the caller may see.
 // `format` keeps one kind of document.
 List :: (service: Publications, writer: http.ResponseWriter, request: *http.Request) {
-    user := Bearer(service, writer, request)
-    if user == "" || !Allow(service, writer, user, false) {
+    reader := Reader(service, writer, request)
+    if !reader.allowed {
         return
     }
+    user := reader.user
     query := url.Query(http.RequestURL(request))
     format := TrimSpace(url.Value(query, "format"))
     author := TrimSpace(url.Value(query, "author"))
@@ -199,10 +226,11 @@ List :: (service: Publications, writer: http.ResponseWriter, request: *http.Requ
 // GET /{id} returns a publication and its document when the caller may see
 // it; otherwise 404.
 Read :: (service: Publications, writer: http.ResponseWriter, request: *http.Request) {
-    user := Bearer(service, writer, request)
-    if user == "" || !Allow(service, writer, user, false) {
+    reader := Reader(service, writer, request)
+    if !reader.allowed {
         return
     }
+    user := reader.user
     fetched := publications.Fetch(service.database, http.Context(request), user, PathID(request))
     if Refused(writer, fetched) {
         return

@@ -58,7 +58,13 @@ func (c *publicationClient) call(user, method, path string, body any, want int) 
 	if res.Code != want {
 		c.t.Fatalf("%s %s %.200s: got %d %s, want %d", method, path, raw, res.Code, c.last, want)
 	}
-	if res.Header().Get("Cache-Control") != "private, no-store" {
+	// Anonymous reads of public publications may be cached briefly; every
+	// other answer is private to the caller.
+	cache := "private, no-store"
+	if user == "" && method == http.MethodGet {
+		cache = "public, max-age=15"
+	}
+	if res.Header().Get("Cache-Control") != cache {
 		c.t.Fatalf("%s %s cache control: %q", method, path, res.Header().Get("Cache-Control"))
 	}
 	var reply publicationReply
@@ -289,19 +295,42 @@ func TestPublicationsShareLevelCollectionsByVisibility(t *testing.T) {
 		t.Fatalf("author has %d publications after unpublishing, want 3", count)
 	}
 
-	// Every endpoint needs an account.
+	// Publishing and unpublishing need an account.
 	for _, request := range []struct {
 		method string
 		path   string
 		body   any
 	}{
 		{http.MethodPost, "/api/v1/publications", publicationDraft("pushy.levels", "Classic", "public", map[string]any{})},
-		{http.MethodGet, "/api/v1/publications", nil},
-		{http.MethodGet, "/api/v1/publications?author=user0", nil},
-		{http.MethodGet, "/api/v1/publications/" + other.ID, nil},
 		{http.MethodDelete, "/api/v1/publications/" + other.ID, nil},
 	} {
 		client.call("", request.method, request.path, request.body, 401)
+	}
+
+	// Anyone may read public publications, and only those.
+	if got := publicationTitles(client.list("", "", 200)); got != "Stranger's|Other" {
+		t.Fatalf("anonymous newest public: %q", got)
+	}
+	anonymous := client.list("", "author=user0", 200)
+	if got := publicationTitles(anonymous); got != "Other" {
+		t.Fatalf("anonymous author listing: %q", got)
+	}
+	for _, meta := range anonymous {
+		if meta.Mine || meta.Visibility != "public" {
+			t.Fatalf("anonymous listing metadata: %+v", meta)
+		}
+	}
+	if reply := client.fetch("", other.ID, 200); reply.Publication.ID != other.ID || reply.Publication.Mine {
+		t.Fatalf("anonymous fetch: %+v", reply.Publication)
+	}
+	for _, id := range []string{friendsOnly.ID, private.ID} {
+		if reply := client.fetch("", id, 404); reply.Error != "publication not found" {
+			t.Fatalf("anonymous fetch of a hidden publication: %+v", reply)
+		}
+	}
+	// A reader who sends credentials must still sign in.
+	if res := tokenJSONRequest(t, client.handler, http.MethodGet, "/api/v1/publications", "not-a-token", nil); res.Code != 401 {
+		t.Fatalf("invalid token read: %d", res.Code)
 	}
 	expired := Token_IssueAuthToken(client.server.Cfg.TokenSecret, author, time.Now().Add(-time.Hour).Unix()).Value
 	if res := tokenJSONRequest(t, client.handler, http.MethodDelete, "/api/v1/publications/"+other.ID, expired, nil); res.Code != 401 {

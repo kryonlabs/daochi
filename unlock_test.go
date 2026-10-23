@@ -287,7 +287,11 @@ func TestGatedPackNeedsAGrantForItsProduct(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { response.Body.Close() })
+		t.Cleanup(func() {
+			if err := response.Body.Close(); err != nil {
+				t.Error(err)
+			}
+		})
 		if response.StatusCode != status {
 			t.Fatalf("HEAD %s: %d", path, response.StatusCode)
 		}

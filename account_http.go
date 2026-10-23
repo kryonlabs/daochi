@@ -57,7 +57,13 @@ func AccountHttp_NormalizeAlias(value string) string {
 }
 
 func AccountHttp_ValidIcon(value int) bool {
-	return value >= int(0) && value <= int(11)
+	if value >= int(0) && value <= int(11) {
+		return true
+	}
+	if value >= int(41) && value <= int(65) {
+		return true
+	}
+	return value >= int(124) && value <= int(126)
 }
 
 func AccountHttp_Alias(accounts Accounts, writer ResponseWriter, request *Request) {

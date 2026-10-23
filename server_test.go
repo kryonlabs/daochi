@@ -2441,6 +2441,44 @@ func TestAccountAliasRegistersAndSyncs(t *testing.T) {
 	}
 }
 
+// Apps offer the profile pictures of Kryon's icon set by their icon number;
+// numbers between the two sets stay invalid.
+func TestAccountProfileIconAcceptsKryonPictures(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	publicKey := bytes.Repeat([]byte{0x5d}, mlDSA44PublicKeySize)
+	userHash := sha256.Sum256(publicKey)
+	userID := hex.EncodeToString(userHash[:])
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x7d}, mlDSA44SignatureSize))
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	cases := []struct {
+		icon   int
+		status int
+	}{
+		{41, http.StatusOK},
+		{55, http.StatusOK},
+		{65, http.StatusOK},
+		{124, http.StatusOK},
+		{126, http.StatusOK},
+		{12, http.StatusBadRequest},
+		{40, http.StatusBadRequest},
+		{66, http.StatusBadRequest},
+		{127, http.StatusBadRequest},
+	}
+	for _, test := range cases {
+		iconBody := []byte(`{"user_id_hash":"` + userID + `","profile_icon":` + strconv.Itoa(test.icon) + `}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/account/profile-icon", bytes.NewReader(iconBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Ksync-User", userID)
+		req.Header.Set("Authorization", "Bearer "+token)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != test.status {
+			t.Fatalf("profile icon %d status = %d body=%s", test.icon, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestAccountProfileIconRegistersAndSyncs(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()

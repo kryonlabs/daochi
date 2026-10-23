@@ -211,16 +211,17 @@ func Middleware_AllowedOrigin(origin string) string {
 		return ""
 	}
 	var value_11 bool = origin == "https://daochi.pages.dev" || origin == "https://daochi.kryonlabs.com" || origin == "https://daochi.net"
-	if value_11 || origin == "https://www.daochi.net" || origin == "https://inbe.waozi.xyz" || origin == "https://uku.waozi.xyz" {
+	var value_12 bool = value_11 || origin == "https://www.daochi.net" || origin == "https://inbe.waozi.xyz" || origin == "https://uku.waozi.xyz"
+	if value_12 || origin == "https://shovey.waozi.xyz" {
 		return origin
 	}
-	var value_12 bool = StdUrlGo_Scheme(value) == "chrome-extension"
-	var value_13 bool = value_12
-	if value_13 {
-		var value_14 bool = Middleware_ValidExtensionID(StdUrlGo_Host(value))
-		value_13 = value_14
+	var value_13 bool = StdUrlGo_Scheme(value) == "chrome-extension"
+	var value_14 bool = value_13
+	if value_14 {
+		var value_15 bool = Middleware_ValidExtensionID(StdUrlGo_Host(value))
+		value_14 = value_15
 	}
-	if value_13 {
+	if value_14 {
 		return origin
 	}
 	if StdUrlGo_Scheme(value) != "http" {

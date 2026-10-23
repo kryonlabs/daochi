@@ -384,10 +384,74 @@ Friends :: (database: *sql.Database, context: ctx.Context, userID: string,
                 return result
             }
         }
+        // Clients that sync only encrypted records publish their own figures;
+        // a recent one stands in for the plaintext sessions the node lacks.
+        published := PublishedPractice(database, context, user.UserIDHash, app, practice, metric)
+        result.error = published.error
+        if result.error != null {
+            return result
+        }
+        if published.found {
+            row.value.Value = published.value.Value
+            row.value.Label = published.value.Label
+            row.value.LocalDate = published.value.LocalDate
+            row.value.UpdatedAt = published.value.UpdatedAt
+        }
         items = AppendRow(items, row.value)
     }
     SortRows(items)
     result.value = items
+    return result
+}
+
+// A practice figure its owner published in the last 30 days, bounded and
+// labelled here as the node labels its own. A published streak counts only
+// while its day is today or yesterday.
+PublishedPractice :: (database: *sql.Database, context: ctx.Context, userID: string,
+    app: string, practice: string, metric: string) -> LeaderboardRowResult {
+    result: LeaderboardRowResult
+    arguments: [5]Any
+    arguments[0] = userID
+    arguments[1] = app
+    arguments[2] = practice
+    arguments[3] = metric
+    arguments[4] = clock.Format(AddDate(clock.UTC(clock.Now()), cast(isize)0, cast(isize)0, cast(isize)-30), "2006-01-02T15:04:05Z07:00")
+    value: float64
+    destinations: [3]Any
+    destinations[0] = *value
+    destinations[1] = *result.value.LocalDate
+    destinations[2] = *result.value.UpdatedAt
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "\nSELECT value,local_date,updated_at FROM server_profile_stats\nWHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4\n  AND julianday(updated_at)>=julianday(?5)", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null {
+        return result
+    }
+    limit := 100000.0
+    if metric == "avg_hold" {
+        limit = 3600.0
+    } else if metric == "avg_time" {
+        limit = 86400.0
+    }
+    if value < 0.0 || value > limit {
+        return result
+    }
+    if metric == "streak" {
+        yesterday := DateInteger(clock.Format(AddDate(clock.UTC(clock.Now()), cast(isize)0, cast(isize)0, cast(isize)-1), "20060102")).value
+        if result.value.LocalDate < yesterday {
+            value = 0.0
+        }
+        result.value.Label = IntegerFormat("%d", cast(isize)value)
+    } else if metric == "avg_hold" {
+        result.value.Label = FloatFormat("%.0f", value)
+    } else {
+        result.value.Label = TimeLabel(cast(isize)(value + 0.5))
+    }
+    result.value.Value = value
+    result.found = true
     return result
 }
 

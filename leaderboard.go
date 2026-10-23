@@ -431,12 +431,78 @@ func Leaderboard_Friends(database *Database, context Context, userID string, app
 					return result
 				}
 			}
+			published := Leaderboard_PublishedPractice(database, context, user.UserIDHash, app, practice, metric)
+			result.Error = published.Error
+			if result.Error != nil {
+				return result
+			}
+			if published.Found {
+				row.Value.Value = published.Value.Value
+				row.Value.Label = published.Value.Label
+				row.Value.LocalDate = published.Value.LocalDate
+				row.Value.UpdatedAt = published.Value.UpdatedAt
+			}
 			items = append(items, row.Value)
 			loop_cursor_7++
 		}
 	}
 	Leaderboard_SortRows(items)
 	result.Value = items
+	return result
+}
+
+func Leaderboard_PublishedPractice(database *Database, context Context, userID string, app string, practice string, metric string) LeaderboardRowResult {
+	var result LeaderboardRowResult = LeaderboardRowResult{}
+	var arguments [5]Any
+	arguments[0] = userID
+	arguments[1] = app
+	arguments[2] = practice
+	arguments[3] = metric
+	var value_0 string = StdTimeGo_Format((time.Time).AddDate(StdTimeGo_UTC(StdTimeGo_Now()), int(int(0)), int(int(0)), int(int(-30))), "2006-01-02T15:04:05Z07:00")
+	arguments[4] = value_0
+	var value float64 = 0
+	var destinations [3]Any
+	destinations[0] = &(value)
+	destinations[1] = &(result.Value.LocalDate)
+	destinations[2] = &(result.Value.UpdatedAt)
+	var value_1 string = "\nSELECT value,local_date,updated_at FROM server_profile_stats\nWHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4\n  AND julianday(updated_at)>=julianday(?5)"
+	var value_2 *Row = StdSqlGo_QueryRow(database, context, value_1, arguments[0:5:5])
+	var value_3 Error = StdSqlGo_ScanRow(value_2, destinations[0:3:3])
+	result.Error = value_3
+	var value_4 Error = result.Error
+	if StdErrorsGo_Is(value_4, StdSqlGo_NoRows()) {
+		result.Error = nil
+		return result
+	}
+	if result.Error != nil {
+		return result
+	}
+	var limit float64 = 100000.0
+	if metric == "avg_hold" {
+		limit = 3600.0
+	} else if metric == "avg_time" {
+		limit = 86400.0
+	}
+	if value < 0.0 || value > limit {
+		return result
+	}
+	if metric == "streak" {
+		var value_5 zir_6eb4a12e7d5dd633_IntegerResult = Leaderboard_DateInteger(StdTimeGo_Format((time.Time).AddDate(StdTimeGo_UTC(StdTimeGo_Now()), int(int(0)), int(int(0)), int(int(-1))), "20060102"))
+		yesterday := value_5.Value
+		if result.Value.LocalDate < yesterday {
+			value = 0.0
+		}
+		var value_6 string = fmt.Sprintf("%d", int(int(value)))
+		result.Value.Label = value_6
+	} else if metric == "avg_hold" {
+		var value_7 string = fmt.Sprintf("%.0f", float64(value))
+		result.Value.Label = value_7
+	} else {
+		var value_8 string = Leaderboard_TimeLabel(int((value + 0.5)))
+		result.Value.Label = value_8
+	}
+	result.Value.Value = value
+	result.Found = true
 	return result
 }
 

@@ -140,3 +140,83 @@ func TestGameLevelBoardsStaySeparate(t *testing.T) {
 		t.Fatalf("levels leaked into achievements: %#v", rows)
 	}
 }
+
+func TestPublishedPracticeFiguresReplaceMissingSessions(t *testing.T) {
+	server, users := socialHTTPFixture(t)
+	seedLeaderboard(t, server.Store, users, time.Now())
+	// Freshness is the point here, so published rows keep their real time.
+	for _, event := range []string{"INSERT", "UPDATE"} {
+		if _, err := server.Store.Database.Exec("DROP TRIGGER IF EXISTS clock_server_profile_stats_" + event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := func(method, path, body string, user int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+		r.Header.Set("X-Daochi-User", users[user])
+		w := httptest.NewRecorder()
+		if method == "PUT" {
+			SocialHttp_PutStats(server.social(), w, r)
+		} else {
+			SocialHttp_FriendStats(server.social(), w, r)
+		}
+		return w
+	}
+	today := time.Now().UTC().Format("20060102")
+	put := func(practice, metric string, value int, date string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"app":"inbe","metrics":[{"practice":%q,"metric":%q,"value":%d,"label":"untrusted","local_date":%s}]}`, practice, metric, value, date)
+		if w := request("PUT", "/api/v1/profile/stats", body, 1); w.Code != 200 {
+			t.Fatalf("publish %s %s: %d %s", practice, metric, w.Code, w.Body)
+		}
+	}
+	friend := func(practice, metric string) FriendStatRow {
+		t.Helper()
+		w := request("GET", "/api/v1/friends/stats?app=inbe&practice="+practice+"&metric="+metric, "", 0)
+		if w.Code != 200 {
+			t.Fatalf("read %s %s: %d %s", practice, metric, w.Code, w.Body)
+		}
+		var body FriendStatsResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range body.Rows {
+			if row.UserIDHash == users[1] {
+				return row
+			}
+		}
+		t.Fatalf("%s %s lacks the friend: %#v", practice, metric, body.Rows)
+		return FriendStatRow{}
+	}
+	computed := friend("whm", "avg_hold").Value
+	put("whm", "avg_hold", 150, today)
+	put("meditation", "avg_time", 1800, today)
+	put("whm", "streak", 9, today)
+	if row := friend("whm", "avg_hold"); row.Value != 150 || row.Label != "150" {
+		t.Fatalf("published hold was not used: %#v", row)
+	}
+	if row := friend("meditation", "avg_time"); row.Value != 1800 || row.Label != "0:30" {
+		t.Fatalf("published meditation time was not used: %#v", row)
+	}
+	if row := friend("whm", "streak"); row.Value != 9 || row.Label != "9" {
+		t.Fatalf("published streak was not used: %#v", row)
+	}
+	// A streak last practised long ago is broken; an impossible hold is ignored.
+	put("whm", "streak", 9, "20200101")
+	if row := friend("whm", "streak"); row.Value != 0 {
+		t.Fatalf("an old streak still counts: %#v", row)
+	}
+	put("whm", "avg_hold", 99999, today)
+	if row := friend("whm", "avg_hold"); row.Value != computed {
+		t.Fatalf("an out-of-range hold replaced the node's figure: %#v", row)
+	}
+	// Figures not published for a month give way to the node's own.
+	put("whm", "avg_hold", 150, today)
+	if _, err := server.Store.Database.Exec("UPDATE server_profile_stats SET updated_at='2025-01-01T00:00:00Z'"); err != nil {
+		t.Fatal(err)
+	}
+	if row := friend("whm", "avg_hold"); row.Value != computed {
+		t.Fatalf("a stale published hold was used: %#v", row)
+	}
+}

@@ -53,8 +53,8 @@ def main():
             c in args.version for c in '\r\n'):
         parser.error('release needs a positive sequence and version')
     data = args.bundle.read_bytes()
-    if len(data) < 8 or not data.startswith(b'ZIB\0'):
-        parser.error('input is not a ZIB bundle')
+    if app_release.bundle_suffix(data) is None:
+        parser.error('input is not a ZX portable executable')
     key = serialization.load_pem_private_key(args.key.read_bytes(), password=None)
     if not isinstance(key, Ed25519PrivateKey):
         parser.error('publisher key must be Ed25519')
@@ -67,6 +67,9 @@ def main():
         return
     if args.standalone or args.dependency:
         parser.error('standalone variants and dependencies require --format-version 2')
+    # Release format 1 is the legacy route of hosts from before the ZX format.
+    if app_release.bundle_suffix(data) != '.zib':
+        parser.error('release format 1 carries only legacy .zib bundles; use --format-version 2')
     release = dict(app_id=args.app, sequence=args.sequence, version=args.version,
                    runtime='kryon-desktop-v1', sha256=sha256(data).hexdigest(),
                    size=len(data), key_id=args.key_id)

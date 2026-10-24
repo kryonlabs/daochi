@@ -30,14 +30,15 @@ Document :: #string JSON
       "summary": "Read an app's portable release for current hosts",
       "parameters": [
         {"name":"app_id","in":"path","required":true,"schema":{"type":"string"}},
-        {"name":"asset","in":"path","required":true,"description":"latest, history (up to three signed releases), or the release SHA-256 followed by .zib","schema":{"type":"string"}},
+        {"name":"asset","in":"path","required":true,"description":"latest, history (up to three signed releases), or the release SHA-256 followed by .zx (.zib for releases built before the ZX format)","schema":{"type":"string"}},
         {"name":"host_api","in":"query","description":"For latest/history: the newest host interface the app runs; an older archived release is served when the latest needs a newer one","schema":{"type":"integer","minimum":1,"maximum":65535}},
         {"name":"module_api","in":"query","description":"For latest/history: the module interface the app requires","schema":{"type":"integer","minimum":1,"maximum":65535}},
-        {"name":"bucket","in":"query","description":"For latest/history: the device's stable rollout bucket; a staged release reaches buckets below its share until it expires. Apps without a bucket count as 99","schema":{"type":"integer","minimum":0,"maximum":99}}
+        {"name":"bucket","in":"query","description":"For latest/history: the device's stable rollout bucket; a staged release reaches buckets below its share until it expires. Apps without a bucket count as 99","schema":{"type":"integer","minimum":0,"maximum":99}},
+        {"name":"format","in":"query","description":"For latest/history: zx for hosts that run ZX portable executables. Without it only .zib releases for hosts from before the ZX format are offered","schema":{"type":"string","enum":["zx"]}}
       ],
       "responses": {
         "200":{"description":"Signed release metadata or the portable bundle"},
-        "400":{"description":"Invalid interface version or bucket"},
+        "400":{"description":"Invalid interface version, format or bucket"},
         "403":{"description":"The artifact is gated; request it with a grant"},
         "404":{"description":"App or release is unavailable, or no release fits the app"}
       }
@@ -48,7 +49,7 @@ Document :: #string JSON
       "summary": "Read a gated portable artifact with a download grant",
       "parameters": [
         {"name":"app_id","in":"path","required":true,"schema":{"type":"string"}},
-        {"name":"asset","in":"path","required":true,"description":"The artifact SHA-256 followed by .zib","schema":{"type":"string"}},
+        {"name":"asset","in":"path","required":true,"description":"The artifact SHA-256 followed by .zx (.zib for releases built before the ZX format)","schema":{"type":"string"}},
         {"name":"grant","in":"path","required":true,"description":"An unexpired grant from POST /api/v1/unlocks/grant for the artifact's product. Artifacts that are not gated ignore it","schema":{"type":"string"}}
       ],
       "responses": {

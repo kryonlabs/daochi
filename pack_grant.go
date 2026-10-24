@@ -19,30 +19,30 @@ type PackGate struct {
 	Product string
 }
 
-type zir_deb038b2ddf5f257_Encoding = base64.Encoding
+type zir_03d4fd74fade0690_Encoding = base64.Encoding
 
-type zir_03d4fd74fade0690_BytesResult struct {
+type zir_24cf8e7c9c5a3591_BytesResult struct {
 	Value []uint8
 	Error Error
 }
 
-type zir_779651e17e15801c_Number struct {
+type zir_9890e2e91f91af1d_Number struct {
 	Value int64
 	Error Error
 }
 
-func PackGrant_RawURL() *zir_deb038b2ddf5f257_Encoding {
+func PackGrant_RawURL() *zir_03d4fd74fade0690_Encoding {
 	return base64.RawURLEncoding
 }
 
-func PackGrant_DecodeRaw(Encoding *zir_deb038b2ddf5f257_Encoding, Value string) zir_03d4fd74fade0690_BytesResult {
-	var result zir_03d4fd74fade0690_BytesResult
+func PackGrant_DecodeRaw(Encoding *zir_03d4fd74fade0690_Encoding, Value string) zir_24cf8e7c9c5a3591_BytesResult {
+	var result zir_24cf8e7c9c5a3591_BytesResult
 	result.Value, result.Error = (*base64.Encoding).DecodeString(Encoding, Value)
 	return result
 }
 
-func PackGrant_ParseInteger(Value string, Base int, Bits int) zir_779651e17e15801c_Number {
-	var result zir_779651e17e15801c_Number
+func PackGrant_ParseInteger(Value string, Base int, Bits int) zir_9890e2e91f91af1d_Number {
+	var result zir_9890e2e91f91af1d_Number
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }
@@ -61,7 +61,7 @@ func PackGrant_Payload(product string, expiresAt int64) string {
 	return strings.Join(fields[0:3:3], "\n")
 }
 
-func PackGrant_Decode(value string) zir_03d4fd74fade0690_BytesResult {
+func PackGrant_Decode(value string) zir_24cf8e7c9c5a3591_BytesResult {
 	result := PackGrant_DecodeRaw(PackGrant_RawURL(), value)
 	var value_0 bool = result.Error == nil
 	var value_1 bool = value_0

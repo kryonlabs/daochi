@@ -23,9 +23,10 @@ PackGrant :: struct {
     expires_at: s64 #go_tag "json:\"expires_at\""
     error: Error #go_tag "json:\"-\""
 }
-// A gated artifact has a node-side `<sha>.zib.product` file naming the product
-// that unlocks it. An unreadable or invalid file leaves the artifact gated
-// with no product, so no grant opens it.
+// A gated artifact has a node-side `<sha>.zx.product` (or legacy
+// `<sha>.zib.product`) file naming the product that unlocks it. An unreadable
+// or invalid file leaves the artifact gated with no product, so no grant
+// opens it.
 PackGate :: struct {
     gated: bool
     product: string

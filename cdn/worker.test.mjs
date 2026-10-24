@@ -3,11 +3,11 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { deliver } from "./worker.mjs";
 
-const bytes = new TextEncoder().encode("ZIB\0verified fixture");
+const bytes = new TextEncoder().encode("ZX\0\0verified fixture");
 const hash = createHash("sha256").update(bytes).digest("hex");
-const path = `/api/v2/packages/inbe.practices/${hash}.zib`;
 
-function fixture() {
+function fixture(suffix = "zx") {
+  const path = `/api/v2/packages/inbe.practices/${hash}.${suffix}`;
   const stored = new Map();
   const requests = [];
   const pending = [];
@@ -28,7 +28,7 @@ function fixture() {
     ARTIFACTS: {
       async get(key) {
         state.reads++;
-        assert.equal(key, `inbe.practices/${hash}.zib`);
+        assert.equal(key, `inbe.practices/${hash}.${suffix}`);
         if (state.missing) return null;
         return { size: bytes.length, body: new Blob([bytes]).stream() };
       },
@@ -90,6 +90,14 @@ for (const status of [403, 404, 503]) {
   });
 }
 
+test("legacy .zib artifacts keep their own key for hosts from before ZX", async () => {
+  const f = fixture("zib");
+  const response = await f.get();
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
+  assert.equal(f.state.reads, 1);
+  assert.equal([...f.stored.keys()].some(key => key.endsWith(`${hash}.zib`)), true);
+});
+
 test("public artifacts retain their immutable policy", async () => {
   const f = fixture();
   f.state.policy = "public, max-age=31536000, immutable";
@@ -107,7 +115,8 @@ test("CORS headers belong to the current request, including on an edge hit", asy
 });
 
 test("metadata and malformed or noncanonical artifact paths stay with the node", async () => {
-  for (const suffix of ["latest", "history", `${hash.toUpperCase()}.zib`, `${hash}.zib?grant=x`, `${hash}.zib/%2F`]) {
+  for (const suffix of ["latest", "history", `${hash.toUpperCase()}.zx`, `${hash}.zx?grant=x`, `${hash}.zx/%2F`,
+    `${hash}.ZX`, `${hash}.zx.zx`, `${hash}.zir`, `${hash.toUpperCase()}.zib`, `${hash}.zib?grant=x`]) {
     const f = fixture();
     const request = new Request(`https://api.waozi.xyz/api/v2/packages/inbe.practices/${suffix}`);
     await deliver(request, f.env, {}, f.origin, f.cache);

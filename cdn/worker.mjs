@@ -1,7 +1,7 @@
-// Cache immutable ZIB bytes, while the node remains the authority on every
-// request. The R2 bucket is private and only the reviewed mirror tool writes it.
+// Cache immutable ZX bytes (and legacy ZIB bytes), while the node remains the
+// authority on every request. The R2 bucket is private and only the reviewed mirror tool writes it.
 const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
-const ARTIFACT_PATH = /^\/api\/v2\/packages\/([a-z0-9][a-z0-9.-]{0,127})\/([a-f0-9]{64})\.zib(?:\/[A-Za-z0-9_.-]+)?$/;
+const ARTIFACT_PATH = /^\/api\/v2\/packages\/([a-z0-9][a-z0-9.-]{0,127})\/([a-f0-9]{64})\.(zx|zib)(?:\/[A-Za-z0-9_.-]+)?$/;
 
 function artifactRequest(request) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -17,8 +17,8 @@ function artifactRequest(request) {
   }
   return {
     hash: match[2],
-    key: `${match[1]}/${match[2]}.zib`,
-    cacheKey: new Request(`${url.origin}/.package-cache/${match[1]}/${match[2]}.zib`),
+    key: `${match[1]}/${match[2]}.${match[3]}`,
+    cacheKey: new Request(`${url.origin}/.package-cache/${match[1]}/${match[2]}.${match[3]}`),
   };
 }
 

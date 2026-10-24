@@ -329,9 +329,9 @@ and records the unlock in the same transaction. Setting
 `DAOCHI_UNLOCK_TRIAL_UNTIL` to a Unix time sells every unlock at 90% off until
 then. `POST /api/v1/unlocks/grant` returns a one-hour download grant, signed by
 the Dew issuer, for a product the account has unlocked. A package artifact
-with a `<sha256>.zib.product` file beside it naming a product is gated: it is
-served, uncached, only at `/api/v2/packages/<app>/<sha256>.zib/<grant>` with an
-unexpired grant for that product.
+with a `<sha256>.zx.product` file beside it naming a product is gated: it is
+served, uncached, only at `/api/v2/packages/<app>/<sha256>.zx/<grant>` with an
+unexpired grant for that product. Legacy `.zib` artifacts are gated the same way.
 
 An account can send Dew to a friend: `POST /api/v1/tokens/gifts` with the
 friend's `recipient` account ID, `units` (millionths of Dew) and a persistent

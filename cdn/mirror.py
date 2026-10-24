@@ -16,7 +16,8 @@ import tempfile
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 MAX_MIRROR_BYTES = 8 * 1024 * 1024 * 1024
 APP_ID = re.compile(r"[a-z0-9][a-z0-9.-]{0,127}\Z")
-ARTIFACT_NAME = re.compile(r"([a-f0-9]{64})\.zib\Z")
+# ZX portable executables, and legacy .zib bundles for hosts from before ZX.
+ARTIFACT_NAME = re.compile(r"([a-f0-9]{64})\.(?:zx|zib)\Z")
 INVENTORY = ".mirror.json"
 
 
@@ -34,7 +35,7 @@ def collect_artifacts(store):
             raise ValueError("package directories must not be symlinks")
         if not directory.is_dir() or not APP_ID.fullmatch(directory.name):
             continue
-        for path in sorted(directory.glob("*.zib")):
+        for path in sorted([*directory.glob("*.zx"), *directory.glob("*.zib")]):
             match = ARTIFACT_NAME.fullmatch(path.name)
             if not match or path.is_symlink() or not path.is_file():
                 raise ValueError(f"invalid immutable artifact: {path}")
@@ -110,7 +111,7 @@ def mirror(artifacts, bucket, command, directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--store", required=True, type=Path,
-                        help="The node's already published APP_ID/SHA256.zib store; never an unreviewed build")
+                        help="The node's already published APP_ID/SHA256.zx store; never an unreviewed build")
     parser.add_argument("--bucket", default="daochi-packages")
     parser.add_argument("--wrangler", default="npx --yes wrangler@4.141.0")
     parser.add_argument("--execute", action="store_true", help="Upload verified bytes into the private bucket")

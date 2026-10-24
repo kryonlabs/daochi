@@ -2,8 +2,12 @@
 // An app that cannot run the latest release names the newest host and module
 // interfaces it has and gets the newest archived release built for them. A
 // staged release reaches only the devices whose bucket is below its share.
-// An artifact with a `<sha>.zib.product` file next to it is gated: it is
-// served only at `<sha>.zib/<grant>` with an unexpired grant for that product.
+// Hosts that run ZX portable executables ask with `format=zx` and get only
+// `<sha>.zx` releases. Hosts released before that format ask without it and
+// get only their `<sha>.zib` releases, through 2027-10-23.
+// An artifact with a `<sha>.zx.product` file next to it is gated: it is
+// served only at `<sha>.zx/<grant>` with an unexpired grant for that product.
+// Legacy `<sha>.zib` artifacts are gated the same way.
 #import "std/go_types"
 http :: #import "std/http_go";
 url :: #import "std/url_go";
@@ -24,6 +28,7 @@ strconv :: #system_library "go:strconv";
 hex :: #system_library "go:encoding/hex";
 fmt :: #system_library "go:fmt";
 go_http :: #system_library "go:net/http";
+go_os :: #system_library "go:os";
 
 #scope_file
 Decoded :: struct {
@@ -38,9 +43,17 @@ Number :: struct {
     value: s64
     error: Error
 }
+PayloadInfo :: #type #foreign go_os "FileInfo";
+PayloadStatus :: struct {
+    info: PayloadInfo
+    error: Error
+}
 Interfaces :: struct {
     host: s64
     module: s64
+    // The artifact suffix the host runs: ".zx", or ".zib" for hosts released
+    // before the ZX format.
+    format: string
     valid: bool
 }
 Selected :: struct {
@@ -68,6 +81,19 @@ Split :: (value: string, separator: string) -> []string #foreign strings;
 Decode :: (value: string) -> Decoded #go_results #foreign hex "DecodeString";
 Join :: (a: string, b: string) -> string #foreign fmt "Sprint";
 Write :: (writer: http.ResponseWriter, bytes: []u8) -> WriteResult #go_results #foreign go_http "ResponseWriter.Write";
+Stat :: (path: string) -> PayloadStatus #go_results #foreign go_os "Stat";
+
+// The release hash of a `<sha>.zx` or legacy `<sha>.zib` artifact name.
+ArtifactHash :: (asset: string) -> string {
+    suffixes: [2]string = .[".zx", ".zib"]
+    for suffix: suffixes {
+        hash := TrimSuffix(asset, suffix)
+        if asset == Join(hash, suffix) && release.HashValid(hash) {
+            return hash
+        }
+    }
+    return ""
+}
 
 // Zero means the client did not name that interface and takes any release.
 Interface :: (value: string) -> s64 {
@@ -115,8 +141,24 @@ Wanted :: (request: *http.Request) -> Interfaces {
     result: Interfaces
     result.host = Interface(url.Value(query, "host_api"))
     result.module = Interface(url.Value(query, "module_api"))
-    result.valid = result.host >= 0 && result.module >= 0
+    format := url.Value(query, "format")
+    result.format = ".zib"
+    if format == "zx" {
+        result.format = ".zx"
+    }
+    result.valid = result.host >= 0 && result.module >= 0 && (format == "" || format == "zx")
     return result
+}
+
+// A release is in a host's format when its module artifact is stored with
+// the suffix that host runs.
+InFormat :: (root: string, value: release.ReleaseV2, wanted: Interfaces) -> bool {
+    for artifact: value.Artifacts {
+        if artifact.Variant == "module" {
+            return Stat(Join(root, Join(artifact.SHA256, wanted.format))).error == null
+        }
+    }
+    return false
 }
 
 // A host runs releases built for its interface or an older one; module
@@ -155,7 +197,8 @@ Older :: (context: registry.Registry, request: *http.Request, root: string,
             previous = value.Sequence
         }
         for value: history.Versions {
-            if value.Sequence < latest && Fits(value, wanted) && Trusted(context, request, value) &&
+            if value.Sequence < latest && Fits(value, wanted) && InFormat(root, value, wanted) &&
+            Trusted(context, request, value) &&
             !HeldBack(root, value.Sequence, Bucket(request)) {
                 result.value = value
                 result.found = true
@@ -170,7 +213,8 @@ Older :: (context: registry.Registry, request: *http.Request, root: string,
         if metadata.error == null && metadata.value.count <= 65536 {
             value: release.ReleaseV2
             if json.Unmarshal(metadata.value, *value) == null && value.Sequence == sequence &&
-            release.Valid(value, appID) && Fits(value, wanted) && Trusted(context, request, value) {
+            release.Valid(value, appID) && Fits(value, wanted) && InFormat(root, value, wanted) &&
+            Trusted(context, request, value) {
                 result.value = value
                 result.found = true
                 return result
@@ -186,7 +230,7 @@ History :: (context: registry.Registry, writer: http.ResponseWriter,
     wanted := Wanted(request)
     bucket := Bucket(request)
     if !wanted.valid || bucket < 0 {
-        response.Error(writer, 400, "invalid interface version or bucket")
+        response.Error(writer, 400, "invalid interface version, format or bucket")
         return
     }
     metadata := files.ReadFile(Join(root, "history-v2.json"))
@@ -217,7 +261,7 @@ History :: (context: registry.Registry, writer: http.ResponseWriter,
             return
         }
         previous = value.Sequence
-        if Fits(value, wanted) && Trusted(context, request, value) &&
+        if Fits(value, wanted) && InFormat(root, value, wanted) && Trusted(context, request, value) &&
         !HeldBack(root, value.Sequence, bucket) {
             selected[count] = value
             count += 1
@@ -278,8 +322,8 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
     filename := "latest-v2.json"
     hash := ""
     if parts[1] != "latest" {
-        hash = TrimSuffix(parts[1], ".zib")
-        if parts[1] != Join(hash, ".zib") || !release.HashValid(hash) {
+        hash = ArtifactHash(parts[1])
+        if hash == "" {
             response.Error(writer, 404, "package not found")
             return
         }
@@ -305,10 +349,11 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         wanted := Wanted(request)
         bucket := Bucket(request)
         if !wanted.valid || bucket < 0 {
-            response.Error(writer, 400, "invalid interface version or bucket")
+            response.Error(writer, 400, "invalid interface version, format or bucket")
             return
         }
-        if !Fits(value, wanted) || HeldBack(root, value.Sequence, bucket) {
+        if !Fits(value, wanted) || !InFormat(root, value, wanted) ||
+        HeldBack(root, value.Sequence, bucket) {
             older := Older(context, request, root, appID, value.Sequence, wanted)
             if !older.found {
                 response.Error(writer, 404, "no release for this app version")

@@ -348,3 +348,107 @@ func TestPackageReleaseDescriptorValidation(t *testing.T) {
 		t.Fatal("accepted an unknown channel")
 	}
 }
+
+func TestPortableExecutablesAndLegacyBundles(t *testing.T) {
+	server, database, _ := testServer(t)
+	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x65}, ed25519.SeedSize))
+	manifest := AppManifest{ManifestVersion: 1, AppID: "lists", DisplayName: "lists",
+		Status: "active", Keys: []AppKey{{KeyID: "release", Algorithm: "ed25519",
+			PublicKey: hex.EncodeToString(private.Public().(ed25519.PublicKey)), Status: "active"}}}
+	encoded, _ := json.Marshal(manifest)
+	if err := AppStore_UpsertSignedManifest(database.Database, context.Background(),
+		manifest, encoded, "lists-fixture", "fixture", "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	root := server.Cfg.DBPath + ".packages/lists"
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// ZX hosts ask with format=zx and read `.zx` releases. Hosts released
+	// before the ZX format ask without it and keep reading `.zib` releases.
+	publish := func(sequence int64, data []byte, suffix string) ReleaseV2 {
+		t.Helper()
+		hash := sha256.Sum256(data)
+		value := ReleaseV2{AppID: "lists", Sequence: sequence, Version: fmt.Sprintf("1.%d.0", sequence),
+			Runtime: "kryon-app-v1", HostAPI: 1, ModuleAPI: 2, KeyID: "release",
+			Artifacts: []Artifact{{Variant: "module", SHA256: hex.EncodeToString(hash[:]),
+				Size: int64(len(data))}}, Dependencies: []Dependency{}}
+		value.Signature = hex.EncodeToString(ed25519.Sign(private,
+			[]byte(PackageRelease_SigningMessage(value))))
+		metadata, _ := json.Marshal(value)
+		for name, content := range map[string][]byte{
+			"latest-v2.json":                                        metadata,
+			fmt.Sprintf("release-%d.json", sequence):                metadata,
+			value.Artifacts[0].SHA256 + suffix:                      data,
+			value.Artifacts[0].SHA256 + suffix + ".release-v2.json": metadata,
+		} {
+			if err := os.WriteFile(filepath.Join(root, name), content, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return value
+	}
+	legacyBytes := []byte("ZIB\x00lists legacy")
+	portableBytes := []byte("ZX\x00\x00lists portable")
+	legacy := publish(1, legacyBytes, ".zib")
+	portable := publish(2, portableBytes, ".zx")
+	routes := server.Routes()
+	get := func(path string, status int) *httptest.ResponseRecorder {
+		t.Helper()
+		response := httptest.NewRecorder()
+		routes.ServeHTTP(response, httptest.NewRequest("GET", "/api/v2/packages/lists/"+path, nil))
+		if response.Code != status {
+			t.Fatalf("%s: got %d: %s", path, response.Code, response.Body.String())
+		}
+		return response
+	}
+	latest := func(query string) ReleaseV2 {
+		t.Helper()
+		var value ReleaseV2
+		if err := json.Unmarshal(get("latest"+query, 200).Body.Bytes(), &value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	if latest("?module_api=2&format=zx").Sequence != portable.Sequence {
+		t.Fatal("a ZX host did not get the ZX release")
+	}
+	if latest("?module_api=2").Sequence != legacy.Sequence {
+		t.Fatal("a host from before the ZX format lost its last release")
+	}
+	get("latest?format=zib", 400)
+	get("history?format=ZX", 400)
+	encodedHistory, _ := json.Marshal(map[string][]ReleaseV2{"versions": {portable, legacy}})
+	if err := os.WriteFile(filepath.Join(root, "history-v2.json"), encodedHistory, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var history struct {
+		Versions []ReleaseV2 `json:"versions"`
+	}
+	for query, sequence := range map[string]int64{"?format=zx": portable.Sequence, "": legacy.Sequence} {
+		if err := json.Unmarshal(get("history"+query, 200).Body.Bytes(), &history); err != nil {
+			t.Fatal(err)
+		}
+		if len(history.Versions) != 1 || history.Versions[0].Sequence != sequence {
+			t.Fatalf("history%s offered releases in another format", query)
+		}
+	}
+	if latest("").Sequence != legacy.Sequence {
+		t.Fatal("the retained history lost the last legacy release")
+	}
+	if !bytes.Equal(get(portable.Artifacts[0].SHA256+".zx", 200).Body.Bytes(), portableBytes) {
+		t.Fatal("incorrect portable executable")
+	}
+	if !bytes.Equal(get(legacy.Artifacts[0].SHA256+".zib", 200).Body.Bytes(), legacyBytes) {
+		t.Fatal("incorrect legacy bundle")
+	}
+	get(portable.Artifacts[0].SHA256+".zib", 404)
+	get(legacy.Artifacts[0].SHA256+".zx", 404)
+	get(portable.Artifacts[0].SHA256+".zx.zx", 404)
+	get(portable.Artifacts[0].SHA256+".ZX", 404)
+	product := filepath.Join(root, portable.Artifacts[0].SHA256+".zx.product")
+	if err := os.WriteFile(product, []byte("practice-pack"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	get(portable.Artifacts[0].SHA256+".zx", 403)
+}

@@ -12,10 +12,10 @@ spec.loader.exec_module(mirror)
 
 
 class MirrorTests(unittest.TestCase):
-    def artifact(self, root, data=b"ZIB\0published fixture"):
+    def artifact(self, root, data=b"ZX\0\0published fixture", suffix=".zx"):
         app = root / "inbe.practices"
         app.mkdir(exist_ok=True)
-        name = hashlib.sha256(data).hexdigest() + ".zib"
+        name = hashlib.sha256(data).hexdigest() + suffix
         path = app / name
         path.write_bytes(data)
         return path
@@ -27,6 +27,14 @@ class MirrorTests(unittest.TestCase):
             artifacts = mirror.collect_artifacts(root)
             self.assertEqual(len(artifacts), 1)
             self.assertEqual(artifacts[0].key, "inbe.practices/" + path.name)
+
+    def test_legacy_bundles_stay_mirrored_beside_portable_executables(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            portable = self.artifact(root)
+            legacy = self.artifact(root, b"ZIB\0legacy fixture", ".zib")
+            keys = {artifact.key for artifact in mirror.collect_artifacts(root)}
+            self.assertEqual(keys, {"inbe.practices/" + portable.name, "inbe.practices/" + legacy.name})
 
     def test_corruption_is_rejected_before_any_upload(self):
         with tempfile.TemporaryDirectory() as temporary:

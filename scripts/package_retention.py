@@ -1,5 +1,9 @@
 """Retain three release choices and every blob referenced by retained apps.
 
+The choices always include the newest release in each artifact format, so
+hosts released before the ZX format keep their last .zib release while newer
+hosts move on to .zx releases.
+
 Called under the store publication lock. Unknown files and malformed metadata
 are never deletion candidates. No live store is modified by importing this.
 """
@@ -37,6 +41,32 @@ def read_release(path, app):
         return None
 
 
+def artifact_format(root, value):
+    """.zx or legacy .zib: the suffix the release's first artifact is stored with."""
+    digest = value['artifacts'][0]['sha256']
+    if (root / (digest + '.zib')).is_file() and not (root / (digest + '.zx')).is_file():
+        return '.zib'
+    return '.zx'
+
+
+def retained_choices(values):
+    """The newest release in each artifact format, then the newest others."""
+    kept = []
+    formats = set()
+    for item in values:
+        found = artifact_format(item[0].parent, item[1])
+        if found not in formats and len(kept) < RETAINED_RELEASES:
+            formats.add(found)
+            kept.append(item)
+    for item in values:
+        if len(kept) >= RETAINED_RELEASES:
+            break
+        if item not in kept:
+            kept.append(item)
+    kept.sort(key=lambda item: item[1]['sequence'], reverse=True)
+    return kept
+
+
 def retain(store, write):
     store = Path(store)
     releases = {}
@@ -56,9 +86,10 @@ def retain(store, write):
                 # Preserve the store until its references can be understood.
                 can_prune = False
         values.sort(key=lambda item: item[1]['sequence'], reverse=True)
-        releases[root.name] = values[:RETAINED_RELEASES]
-        history = [value for _, value in values[:RETAINED_RELEASES]]
-        candidates.extend(values[RETAINED_RELEASES:])
+        kept = retained_choices(values)
+        releases[root.name] = kept
+        history = [value for _, value in kept]
+        candidates.extend(item for item in values if item not in kept)
         # Keep the latest pointer's bytes even if an old store has no archive.
         latest = read_release(root / 'latest-v2.json', root.name)
         if (root / 'latest-v2.json').exists() and latest is None:
@@ -95,7 +126,7 @@ def retain(store, write):
             digest = artifact['sha256']
             if digest in protected.get(root.name, set()):
                 continue
-            for suffix in ('.zib', '.zib.release-v2.json'):
+            for suffix in ('.zx', '.zx.release-v2.json', '.zib', '.zib.release-v2.json'):
                 candidate = root / (digest + suffix)
                 if candidate.is_file() and not candidate.is_symlink():
                     candidate.unlink()

@@ -50,7 +50,7 @@
           "name": "asset",
           "in": "path",
           "required": true,
-          "description": "latest, history (up to three signed releases), or the release SHA-256 followed by .zib",
+          "description": "latest, history (up to three signed releases), or the release SHA-256 followed by .zx (.zib for releases built before the ZX format)",
           "schema": {
             "type": "string"
           }
@@ -84,6 +84,17 @@
             "minimum": 0,
             "maximum": 99
           }
+        },
+        {
+          "name": "format",
+          "in": "query",
+          "description": "For latest/history: zx for hosts that run ZX portable executables. Without it only .zib releases for hosts from before the ZX format are offered",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "zx"
+            ]
+          }
         }
       ],
       "responses": {
@@ -91,7 +102,7 @@
           "description": "Signed release metadata or the portable bundle"
         },
         "400": {
-          "description": "Invalid interface version or bucket"
+          "description": "Invalid interface version, format or bucket"
         },
         "403": {
           "description": "The artifact is gated; request it with a grant"
@@ -118,7 +129,7 @@
           "name": "asset",
           "in": "path",
           "required": true,
-          "description": "The artifact SHA-256 followed by .zib",
+          "description": "The artifact SHA-256 followed by .zx (.zib for releases built before the ZX format)",
           "schema": {
             "type": "string"
           }

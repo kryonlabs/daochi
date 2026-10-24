@@ -64,11 +64,31 @@ def publication_lock(root):
         yield
 
 
+# Portable executables are .zx files. Hosts released before the ZX format
+# keep reading .zib bundles through 2027-10-23.
+SUFFIXES = ((b"ZX\0\0", ".zx"), (b"ZIB\0", ".zib"))
+
+
+def bundle_suffix(data):
+    for signature, suffix in SUFFIXES:
+        if len(data) >= 8 and data.startswith(signature):
+            return suffix
+    return None
+
+
 def read_bundle(path):
     data = path.read_bytes()
-    if len(data) < 8 or not data.startswith(b"ZIB\0"):
-        raise ValueError(f"{path.name} is not a ZIB bundle")
+    if bundle_suffix(data) is None:
+        raise ValueError(f"{path.name} is not a ZX portable executable")
     return data
+
+
+def stored_bundle(root, digest):
+    for _, suffix in SUFFIXES:
+        path = root / (digest + suffix)
+        if path.is_file():
+            return path
+    return root / (digest + ".zx")
 
 
 def artifact(path, variant):
@@ -86,6 +106,8 @@ def stage(args, key):
     payloads = [module_bytes]
     if args.standalone:
         standalone, standalone_bytes = artifact(args.standalone, "standalone")
+        if bundle_suffix(standalone_bytes) != bundle_suffix(module_bytes):
+            raise ValueError("both variants must use the same portable format")
         artifacts.append(standalone)
         payloads.append(standalone_bytes)
     dependencies = []
@@ -99,10 +121,12 @@ def stage(args, key):
         digest = module_artifact["sha256"]
         if not HASH.fullmatch(digest):
             raise ValueError("invalid dependency hash")
-        installed = args.store / value["app_id"] / f"{digest}.zib"
+        installed = stored_bundle(args.store / value["app_id"], digest)
         data = read_bundle(installed)
         if len(data) != module_artifact["size"] or sha256(data).hexdigest() != digest:
             raise ValueError("dependency must be completely staged first")
+        if bundle_suffix(data) != bundle_suffix(module_bytes):
+            raise ValueError("a dependency must use the same portable format as the app")
         dependencies.append(dict(app_id=value["app_id"], version=value["version"],
                                  sha256=digest, size=len(data)))
     dependencies.sort(key=lambda dependency: dependency["app_id"])
@@ -121,7 +145,7 @@ def stage(args, key):
         # A concurrent publication may have pruned a dependency after it was
         # inspected above. Recheck under the same lock used by retention.
         for dependency in dependencies:
-            path = args.store / dependency['app_id'] / (dependency['sha256'] + '.zib')
+            path = stored_bundle(args.store / dependency['app_id'], dependency['sha256'])
             data = read_bundle(path)
             if len(data) != dependency['size'] or sha256(data).hexdigest() != dependency['sha256']:
                 raise ValueError('dependency changed before publication')
@@ -131,7 +155,7 @@ def stage(args, key):
             if previous != release and args.sequence <= previous["sequence"]:
                 raise ValueError("sequence must advance the existing component release")
         for descriptor, data in zip(artifacts, payloads):
-            path = root / f"{descriptor['sha256']}.zib"
+            path = root / (descriptor['sha256'] + bundle_suffix(data))
             if path.exists():
                 if path.read_bytes() != data:
                     raise ValueError("existing immutable package differs from its hash")

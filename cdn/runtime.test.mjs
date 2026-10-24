@@ -12,7 +12,7 @@ const bytes = process.env.CDN_TEST_ARTIFACT
   : Buffer.alloc(31 * 1024 * 1024, 90);
 const digest = value => createHash("sha256").update(value).digest("hex");
 const hash = digest(bytes);
-const key = `inbe.practices/${hash}.zib`;
+const key = `inbe.practices/${hash}.zx`;
 const route = `https://api.waozi.xyz/api/v2/packages/${key}`;
 let allowed = true;
 let checks = 0;

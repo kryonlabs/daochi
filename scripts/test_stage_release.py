@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from app_release import signing_message
 from package_retention import retain
 
-SCRIPT = Path(__file__).with_name('stage-zib-release.py')
+SCRIPT = Path(__file__).with_name('stage-release.py')
 
 
 class StageReleaseTest(unittest.TestCase):
@@ -111,8 +111,51 @@ class StageReleaseTest(unittest.TestCase):
             self.assertFalse((store / 'game' / (second + '.zib')).exists())
             self.assertEqual(json.loads((store / 'game/latest-v2.json').read_text())['sequence'], 5)
 
+    def test_portable_executables_keep_the_last_legacy_release(self):
+        with tempfile.TemporaryDirectory(prefix='stage-zx-') as temporary:
+            root = Path(temporary)
+            key = Ed25519PrivateKey.generate()
+            private = root / 'publisher.pem'
+            private.write_bytes(key.private_bytes(serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+            store = root / 'packages'
+
+            def stage(number, signature, suffix, expected=0):
+                bundle = root / ('lists' + suffix)
+                bundle.write_bytes(signature + b'lists ' + str(number).encode())
+                command = [sys.executable, SCRIPT, '--store', store, '--app', 'lists',
+                    '--key-id', 'release', '--key', private, '--format-version', '2',
+                    '--version', f'1.0.{number}', '--sequence', str(number),
+                    bundle]
+                result = subprocess.run(command, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, expected, result.stderr.decode())
+                return json.loads((store / 'lists/latest-v2.json').read_text())
+
+            legacy = stage(1, b'ZIB\0', '.zib')
+            for number in range(2, 6):
+                portable = stage(number, b'ZX\0\0', '.zx')
+            directory = store / 'lists'
+            self.assertTrue((directory / (portable['artifacts'][0]['sha256'] + '.zx')).is_file())
+            self.assertFalse((directory / (portable['artifacts'][0]['sha256'] + '.zib')).exists())
+            history = json.loads((directory / 'history-v2.json').read_text())['versions']
+            self.assertEqual([r['sequence'] for r in history], [5, 4, 1])
+            self.assertTrue((directory / (legacy['artifacts'][0]['sha256'] + '.zib')).is_file())
+            three = __import__('hashlib').sha256(b'ZX\0\0lists 3').hexdigest()
+            self.assertFalse((directory / (three + '.zx')).exists())
+            unknown = root / 'unknown.zx'
+            unknown.write_bytes(b'ZIR\0not portable')
+            result = subprocess.run([sys.executable, SCRIPT, '--store', store, '--app', 'lists',
+                '--key-id', 'release', '--key', private, '--format-version', '2',
+                '--version', '1.0.6', '--sequence', '6', unknown], capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 2, result.stderr.decode())
+            result = subprocess.run([sys.executable, SCRIPT, '--store', root / 'v1', '--app', 'lists',
+                '--key-id', 'release', '--key', private, '--version', '1.0.0', '--sequence', '1',
+                directory / (portable['artifacts'][0]['sha256'] + '.zx')],
+                capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 2, result.stderr.decode())
+
     def test_signed_immutable_release_and_monotonic_publication(self):
-        with tempfile.TemporaryDirectory(prefix='stage-zib-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='stage-v1-') as temporary:
             root = Path(temporary)
             key = Ed25519PrivateKey.generate()
             private = root / 'publisher.pem'

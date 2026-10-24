@@ -5,29 +5,38 @@ import (
 	hex "encoding/hex"
 	fmt "fmt"
 	http "net/http"
+	os "os"
 	strconv "strconv"
 	strings "strings"
 )
 
 // #import std_go_types
-type zir_9d9d51abad2885b9_Decoded struct {
+type zir_4f00c20146d92066_Decoded struct {
 	Value []uint8
 	Error Error
 }
 
-type zir_3205c4f6d276bb25_WriteResult struct {
+type zir_d315a5dd1b1bf7e2_WriteResult struct {
 	Count int
 	Error Error
 }
 
-type zir_b61aa8d2a6b992a1_Number struct {
+type zir_46d6fa499e53716e_Number struct {
 	Value int64
+	Error Error
+}
+
+type PayloadInfo = os.FileInfo
+
+type PayloadStatus struct {
+	Info  PayloadInfo
 	Error Error
 }
 
 type Interfaces struct {
 	Host   int64
 	Module int64
+	Format string
 	Valid  bool
 }
 
@@ -46,22 +55,48 @@ type ReleaseHistory struct {
 	Versions []ReleaseV2 "json:\"versions\""
 }
 
-func PackageHttp_ParseNumber(Value string, Base int, Bits int) zir_b61aa8d2a6b992a1_Number {
-	var result zir_b61aa8d2a6b992a1_Number
+func PackageHttp_ParseNumber(Value string, Base int, Bits int) zir_46d6fa499e53716e_Number {
+	var result zir_46d6fa499e53716e_Number
 	result.Value, result.Error = strconv.ParseInt(Value, Base, Bits)
 	return result
 }
 
-func PackageHttp_Decode(Value string) zir_9d9d51abad2885b9_Decoded {
-	var result zir_9d9d51abad2885b9_Decoded
+func PackageHttp_Decode(Value string) zir_4f00c20146d92066_Decoded {
+	var result zir_4f00c20146d92066_Decoded
 	result.Value, result.Error = hex.DecodeString(Value)
 	return result
 }
 
-func PackageHttp_Write(Writer ResponseWriter, Bytes []uint8) zir_3205c4f6d276bb25_WriteResult {
-	var result zir_3205c4f6d276bb25_WriteResult
+func PackageHttp_Write(Writer ResponseWriter, Bytes []uint8) zir_d315a5dd1b1bf7e2_WriteResult {
+	var result zir_d315a5dd1b1bf7e2_WriteResult
 	result.Count, result.Error = (http.ResponseWriter).Write(Writer, Bytes)
 	return result
+}
+
+func PackageHttp_Stat(Path string) PayloadStatus {
+	var result PayloadStatus
+	result.Info, result.Error = os.Stat(Path)
+	return result
+}
+
+func PackageHttp_ArtifactHash(asset string) string {
+	var value_0 [2]string
+	value_0[0] = ".zx"
+	value_0[1] = ".zib"
+	suffixes := value_0
+	for _, suffix := range suffixes {
+		hash := strings.TrimSuffix(asset, suffix)
+		var value_1 bool = asset == fmt.Sprint(hash, suffix)
+		var value_2 bool = value_1
+		if value_2 {
+			var value_3 bool = PackageRelease_HashValid(hash)
+			value_2 = value_3
+		}
+		if value_2 {
+			return hash
+		}
+	}
+	return ""
 }
 
 func PackageHttp_Interface(value string) int64 {
@@ -112,8 +147,35 @@ func PackageHttp_Wanted(request *Request) Interfaces {
 	var result Interfaces = Interfaces{}
 	result.Host = PackageHttp_Interface(StdUrlGo_Value(query, "host_api"))
 	result.Module = PackageHttp_Interface(StdUrlGo_Value(query, "module_api"))
-	result.Valid = result.Host >= 0 && result.Module >= 0
+	format := StdUrlGo_Value(query, "format")
+	result.Format = ".zib"
+	if format == "zx" {
+		result.Format = ".zx"
+	}
+	result.Valid = result.Host >= 0 && result.Module >= 0 && (format == "" || format == "zx")
 	return result
+}
+
+func PackageHttp_InFormat(root string, value ReleaseV2, wanted Interfaces) bool {
+	{
+		value_0 := value.Artifacts[:]
+		if int64(0) < 0 || int64(int64(len(value_0))) < int64(0) || int64(int64(len(value_0))) > int64(len(value_0)) {
+			panic("slice range out of bounds")
+		}
+		loop_view_0 := value_0[0:int64(len(value_0)):int64(len(value_0))]
+		loop_count_0 := int64(len(loop_view_0))
+		var loop_cursor_0 int64 = 0
+		for loop_cursor_0 < loop_count_0 {
+			loop_index_0 := loop_cursor_0
+			artifact := loop_view_0[loop_index_0]
+			if artifact.Variant == "module" {
+				var value_1 PayloadStatus = PackageHttp_Stat(fmt.Sprint(root, fmt.Sprint(artifact.SHA256, wanted.Format)))
+				return value_1.Error == nil
+			}
+			loop_cursor_0++
+		}
+	}
+	return false
 }
 
 func PackageHttp_Fits(value ReleaseV2, wanted Interfaces) bool {
@@ -204,17 +266,23 @@ func PackageHttp_Older(context Registry, request *Request, root string, appID st
 				var value_10 bool = value_8
 				var value_11 bool = value_10
 				if value_11 {
-					var value_12 bool = PackageHttp_Trusted(context, request, value)
+					var value_12 bool = PackageHttp_InFormat(root, value, wanted)
 					value_11 = value_12
 				}
 				var value_13 bool = value_11
 				var value_14 bool = value_13
 				if value_14 {
-					var value_15 int64 = value.Sequence
-					var value_16 bool = PackageHttp_HeldBack(root, value_15, PackageHttp_Bucket(request))
-					value_14 = !value_16
+					var value_15 bool = PackageHttp_Trusted(context, request, value)
+					value_14 = value_15
 				}
-				if value_14 {
+				var value_16 bool = value_14
+				var value_17 bool = value_16
+				if value_17 {
+					var value_18 int64 = value.Sequence
+					var value_19 bool = PackageHttp_HeldBack(root, value_18, PackageHttp_Bucket(request))
+					value_17 = !value_19
+				}
+				if value_17 {
 					result.Value = value
 					result.Found = true
 					return result
@@ -230,26 +298,32 @@ func PackageHttp_Older(context Registry, request *Request, root string, appID st
 		if metadata.Error == nil && int64(len(metadata.Value)) <= 65536 {
 			var value ReleaseV2 = ReleaseV2{}
 			_ = value
-			var value_17 Error = StdJsonGo_Unmarshal(metadata.Value, &(value))
-			var value_18 bool = value_17 == nil && value.Sequence == sequence
-			var value_19 bool = value_18
-			if value_19 {
-				var value_20 bool = PackageRelease_Valid(value, appID)
-				value_19 = value_20
-			}
-			var value_21 bool = value_19
+			var value_20 Error = StdJsonGo_Unmarshal(metadata.Value, &(value))
+			var value_21 bool = value_20 == nil && value.Sequence == sequence
 			var value_22 bool = value_21
 			if value_22 {
-				var value_23 bool = PackageHttp_Fits(value, wanted)
+				var value_23 bool = PackageRelease_Valid(value, appID)
 				value_22 = value_23
 			}
 			var value_24 bool = value_22
 			var value_25 bool = value_24
 			if value_25 {
-				var value_26 bool = PackageHttp_Trusted(context, request, value)
+				var value_26 bool = PackageHttp_Fits(value, wanted)
 				value_25 = value_26
 			}
-			if value_25 {
+			var value_27 bool = value_25
+			var value_28 bool = value_27
+			if value_28 {
+				var value_29 bool = PackageHttp_InFormat(root, value, wanted)
+				value_28 = value_29
+			}
+			var value_30 bool = value_28
+			var value_31 bool = value_30
+			if value_31 {
+				var value_32 bool = PackageHttp_Trusted(context, request, value)
+				value_31 = value_32
+			}
+			if value_31 {
 				result.Value = value
 				result.Found = true
 				return result
@@ -264,7 +338,7 @@ func PackageHttp_History(context Registry, writer ResponseWriter, request *Reque
 	wanted := PackageHttp_Wanted(request)
 	bucket := PackageHttp_Bucket(request)
 	if !wanted.Valid || bucket < 0 {
-		Response_Error(writer, 400, "invalid interface version or bucket")
+		Response_Error(writer, 400, "invalid interface version, format or bucket")
 		return
 	}
 	metadata := StdFileGo_ReadFile(fmt.Sprint(root, "history-v2.json"))
@@ -325,15 +399,20 @@ func PackageHttp_History(context Registry, writer ResponseWriter, request *Reque
 			var value_8 bool = PackageHttp_Fits(value, wanted)
 			var value_9 bool = value_8
 			if value_9 {
-				var value_10 bool = PackageHttp_Trusted(context, request, value)
+				var value_10 bool = PackageHttp_InFormat(root, value, wanted)
 				value_9 = value_10
 			}
 			var value_11 bool = value_9
 			if value_11 {
-				var value_12 bool = PackageHttp_HeldBack(root, value.Sequence, bucket)
-				value_11 = !value_12
+				var value_12 bool = PackageHttp_Trusted(context, request, value)
+				value_11 = value_12
 			}
-			if value_11 {
+			var value_13 bool = value_11
+			if value_13 {
+				var value_14 bool = PackageHttp_HeldBack(root, value.Sequence, bucket)
+				value_13 = !value_14
+			}
+			if value_13 {
 				selected[count] = value
 				count++
 			}
@@ -410,16 +489,8 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 	filename := "latest-v2.json"
 	hash := ""
 	if parts[1] != "latest" {
-		hash = strings.TrimSuffix(parts[1], ".zib")
-		var value_5 string = parts[1]
-		var value_6 bool = value_5 != fmt.Sprint(hash, ".zib")
-		var value_7 bool = value_6
-		var value_8 bool = value_7
-		if !value_8 {
-			var value_9 bool = PackageRelease_HashValid(hash)
-			value_8 = !value_9
-		}
-		if value_8 {
+		hash = PackageHttp_ArtifactHash(parts[1])
+		if hash == "" {
 			Response_Error(writer, 404, "package not found")
 			return
 		}
@@ -431,23 +502,23 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		return
 	}
 	var value ReleaseV2 = ReleaseV2{}
-	var value_10 bool = int64(len(metadata.Value)) > 65536
-	if !value_10 {
-		var value_11 Error = StdJsonGo_Unmarshal(metadata.Value, &(value))
-		value_10 = (value_11 != nil)
+	var value_5 bool = int64(len(metadata.Value)) > 65536
+	if !value_5 {
+		var value_6 Error = StdJsonGo_Unmarshal(metadata.Value, &(value))
+		value_5 = (value_6 != nil)
 	}
-	var value_12 bool = value_10
-	var value_13 bool = value_12
-	if !value_13 {
-		var value_14 bool = PackageRelease_Valid(value, appID)
-		value_13 = !value_14
+	var value_7 bool = value_5
+	var value_8 bool = value_7
+	if !value_8 {
+		var value_9 bool = PackageRelease_Valid(value, appID)
+		value_8 = !value_9
 	}
-	if value_13 {
+	if value_8 {
 		Response_Error(writer, 503, "invalid portable release")
 		return
 	}
-	var value_15 bool = PackageHttp_Trusted(context, request, value)
-	if !value_15 {
+	var value_10 bool = PackageHttp_Trusted(context, request, value)
+	if !value_10 {
 		Response_Error(writer, 503, "untrusted portable release")
 		return
 	}
@@ -455,16 +526,21 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		wanted := PackageHttp_Wanted(request)
 		bucket := PackageHttp_Bucket(request)
 		if !wanted.Valid || bucket < 0 {
-			Response_Error(writer, 400, "invalid interface version or bucket")
+			Response_Error(writer, 400, "invalid interface version, format or bucket")
 			return
 		}
-		var value_16 bool = PackageHttp_Fits(value, wanted)
-		var value_17 bool = !value_16
-		if !value_17 {
-			var value_18 bool = PackageHttp_HeldBack(root, value.Sequence, bucket)
-			value_17 = value_18
+		var value_11 bool = PackageHttp_Fits(value, wanted)
+		var value_12 bool = !value_11
+		if !value_12 {
+			var value_13 bool = PackageHttp_InFormat(root, value, wanted)
+			value_12 = !value_13
 		}
-		if value_17 {
+		var value_14 bool = value_12
+		if !value_14 {
+			var value_15 bool = PackageHttp_HeldBack(root, value.Sequence, bucket)
+			value_14 = value_15
+		}
+		if value_14 {
 			older := PackageHttp_Older(context, request, root, appID, value.Sequence, wanted)
 			if !older.Found {
 				Response_Error(writer, 404, "no release for this app version")
@@ -478,11 +554,11 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 	}
 	var expected int64 = 0
 	{
-		value_19 := value.Artifacts[:]
-		if int64(0) < 0 || int64(int64(len(value_19))) < int64(0) || int64(int64(len(value_19))) > int64(len(value_19)) {
+		value_16 := value.Artifacts[:]
+		if int64(0) < 0 || int64(int64(len(value_16))) < int64(0) || int64(int64(len(value_16))) > int64(len(value_16)) {
 			panic("slice range out of bounds")
 		}
-		loop_view_73 := value_19[0:int64(len(value_19)):int64(len(value_19))]
+		loop_view_73 := value_16[0:int64(len(value_16)):int64(len(value_16))]
 		loop_count_73 := int64(len(loop_view_73))
 		var loop_cursor_73 int64 = 0
 		for loop_cursor_73 < loop_count_73 {
@@ -499,24 +575,24 @@ func PackageHttp_Route(context Registry, writer ResponseWriter, request *Request
 		return
 	}
 	gate := PackGrant_Gate(fmt.Sprint(root, parts[1]))
-	var value_20 bool = gate.Gated
-	if value_20 {
-		var value_21 PublicKey = context.Configuration.WaoziIssuerPublicKey
-		var value_22 bool = PackGrant_Valid(value_21, grant, gate.Product, StdTimeGo_Unix(StdTimeGo_Now()))
-		value_20 = !value_22
+	var value_17 bool = gate.Gated
+	if value_17 {
+		var value_18 PublicKey = context.Configuration.WaoziIssuerPublicKey
+		var value_19 bool = PackGrant_Valid(value_18, grant, gate.Product, StdTimeGo_Unix(StdTimeGo_Now()))
+		value_17 = !value_19
 	}
-	if value_20 {
+	if value_17 {
 		Response_Error(writer, 403, "package grant required")
 		return
 	}
 	bundle := StdFileGo_ReadFile(fmt.Sprint(root, parts[1]))
-	var value_23 bool = bundle.Error != nil || int64(len(bundle.Value)) != expected
-	var value_24 bool = value_23
-	if !value_24 {
-		var value_25 bool = Signing_SHA256Hex(bundle.Value) != hash
-		value_24 = value_25
+	var value_20 bool = bundle.Error != nil || int64(len(bundle.Value)) != expected
+	var value_21 bool = value_20
+	if !value_21 {
+		var value_22 bool = Signing_SHA256Hex(bundle.Value) != hash
+		value_21 = value_22
 	}
-	if value_24 {
+	if value_21 {
 		Response_Error(writer, 503, "portable release bytes do not match")
 		return
 	}

@@ -163,24 +163,45 @@ func BlobHttp_Route(store Registry, writer ResponseWriter, request *Request) {
 		HttpAuth_Respond(writer, store.Counters, header.Authentication)
 		return
 	}
-	var value_9 Context = StdHttpGo_Context(request)
-	verified := SignedTx_Verify(store.Database, value_9, request, data, header.Value, user.Value, parts[0], store.Verify, store.ReplayError)
+	signer := parts[0]
+	if parts[0] == "entity" {
+		signer = header.Value.AppID
+		owner := AppStore_ByID(store.Database, StdHttpGo_Context(request), signer)
+		if owner.Error != nil {
+			Response_Error(writer, 500, "blob registry unavailable")
+			return
+		}
+		var value_9 bool = !owner.Found || owner.Value.Status != "active"
+		if !value_9 {
+			var value_10 bool = owner.Value.ManifestExpiresAt > 0
+			if value_10 {
+				var value_11 bool = owner.Value.ManifestExpiresAt <= StdTimeGo_Unix(StdTimeGo_Now())
+				value_10 = value_11
+			}
+			value_9 = value_10
+		}
+		if value_9 {
+			Response_Error(writer, 403, "active app required")
+			return
+		}
+	}
+	verified := SignedTx_Verify(store.Database, StdHttpGo_Context(request), request, data, header.Value, user.Value, signer, store.Verify, store.ReplayError)
 	if verified.Error != nil || verified.Status != 0 {
 		HttpAuth_Respond(writer, store.Counters, verified)
 		return
 	}
-	var value_10 [4]string
-	var value_11 string = fmt.Sprint(store.Configuration.DBPath, ".blobs")
-	value_10[0] = value_11
-	value_10[1] = user.Value
-	value_10[2] = parts[0]
-	value_10[3] = parts[1]
-	pathParts := value_10
-	var value_12 [3]string
-	value_12[0] = pathParts[0]
-	value_12[1] = pathParts[1]
-	value_12[2] = pathParts[2]
-	folderParts := value_12
+	var value_12 [4]string
+	var value_13 string = fmt.Sprint(store.Configuration.DBPath, ".blobs")
+	value_12[0] = value_13
+	value_12[1] = user.Value
+	value_12[2] = parts[0]
+	value_12[3] = parts[1]
+	pathParts := value_12
+	var value_14 [3]string
+	value_14[0] = pathParts[0]
+	value_14[1] = pathParts[1]
+	value_14[2] = pathParts[2]
+	folderParts := value_14
 	_ = folderParts
 	path := strings.Join(pathParts[0:4:4], "/")
 	folder := strings.Join(folderParts[0:3:3], "/")
@@ -235,12 +256,12 @@ func BlobHttp_Route(store Registry, writer ResponseWriter, request *Request) {
 		Response_Error(writer, 404, "blob not found")
 		return
 	}
-	var value_13 bool = int64(len(read.Value)) > 16777216
-	if !value_13 {
-		var value_14 string = Signing_SHA256Hex(read.Value)
-		value_13 = (value_14 != parts[1])
+	var value_15 bool = int64(len(read.Value)) > 16777216
+	if !value_15 {
+		var value_16 string = Signing_SHA256Hex(read.Value)
+		value_15 = (value_16 != parts[1])
 	}
-	if value_13 {
+	if value_15 {
 		Response_Error(writer, 503, "blob integrity failure")
 		return
 	}

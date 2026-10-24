@@ -29,7 +29,7 @@ Protocol clients may also sync `encrypted_records`: opaque per-account private r
 
 Clients that encrypt the whole sync payload may post an encrypted envelope to `POST /api/v1/sync` with JSON fields `v`, `nonce`, and `ciphertext`. Daochi authenticates the bearer token, stores the envelope bytes opaquely, assigns a normal `server_version`, and returns encrypted envelopes newer than `X-Daochi-Since-Version`. Existing typed clients keep using the same endpoint and JSON shape as before; the server only takes the envelope path when the request body has the explicit encrypted-envelope shape.
 
-Daochi keeps an app registry so data ownership is app-neutral and no product behavior is hard-coded into the service. Inbe is the sole built-in registration because its released sync formats are a compatibility contract. Every other app installs and maintains its own signed manifest, keys, collection scopes, and token policy. Registered apps can send `app_id` in v5 compatibility mode only when their manifest explicitly allows that protocol. Older shipped Inbe clients without `app_id` continue to sync during the compatibility window. A sync request may write only its own app's collections, and a request without `app_id` counts as Inbe, so a bearer token alone cannot reach another app's records. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections declared by that app.
+Daochi keeps an app registry so data ownership is app-neutral and no product behavior is hard-coded into the service. Inbe is a built-in registration because its released sync formats are a compatibility contract. The other built-in registration is `entity`, the account's own data (see [Entity data](docs/entity-data.md)). Every other app installs and maintains its own signed manifest, keys, collection scopes, and token policy. Registered apps can send `app_id` in v5 compatibility mode only when their manifest explicitly allows that protocol. Older shipped Inbe clients without `app_id` continue to sync during the compatibility window. A sync request may write only its own app's collections, and a request without `app_id` counts as Inbe, so a bearer token alone cannot reach another app's records. Protocol v6 requests must include a registered `app_id`, a signed transaction envelope, and encrypted record collections declared by that app.
 
 Protocol compatibility policy: protocol v1 through v5 are valid through **2027-09-01** for legacy clients covered by app policy. When a future protocol version is deprecated, the immediately previous version must remain valid for at least one additional year, and the current protocol version must always stay valid. App manifests declare their own compatibility windows through `compatibility_until` and `legacy_protocols`.
 
@@ -491,6 +491,8 @@ New v5 collection names use a dotted hierarchy:
 
 - `account.v1.manifest` for the per-account hierarchy manifest;
 - `private.<app>.v<version>.<collection>` for encrypted private app records;
+- `private.entity.v<version>.<kind>` for the account's own data, such as photos
+  or game levels, that every app of the account shares instead of keeping a copy;
 - `shared.<app>.v<version>.<collection>` for user-grantable cross-app records;
 - `friends.<app>.v<version>.<collection>` for friend-visible app records;
 - `public.<app>.v<version>.<collection>` for intentionally public encrypted/public-record namespaces.

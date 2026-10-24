@@ -109,8 +109,24 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         auth.Respond(writer, store.counters, header.authentication)
         return
     }
+    // Entity blobs belong to the account, so any of its active apps signs for
+    // them with its own device key.
+    signer := parts[0]
+    if parts[0] == apps.EntityAppID {
+        signer = header.value.appID
+        owner := apps.ByID(store.database, http.Context(request), signer)
+        if owner.error != null {
+            response.Error(writer, 500, "blob registry unavailable")
+            return
+        }
+        if !owner.found || owner.value.Status != "active" ||
+            (owner.value.ManifestExpiresAt > 0 && owner.value.ManifestExpiresAt <= clock.Unix(clock.Now())) {
+            response.Error(writer, 403, "active app required")
+            return
+        }
+    }
     verified := signed.Verify(store.database, http.Context(request), request, data,
-        header.value, user.value, parts[0], store.verify, store.replayError)
+        header.value, user.value, signer, store.verify, store.replayError)
     if verified.error != null || verified.status != 0 {
         auth.Respond(writer, store.counters, verified)
         return

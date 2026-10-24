@@ -47,7 +47,11 @@ Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
     if error != null {
         return error
     }
-    return apps.SeedBuiltin(database, context)
+    error = apps.SeedBuiltin(database, context)
+    if error != null {
+        return error
+    }
+    return apps.SeedEntity(database, context)
 }
 
 #scope_export

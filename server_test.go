@@ -1235,8 +1235,10 @@ func TestAppRegistrySeedsInbeAndExposesCollections(t *testing.T) {
 				}
 			}
 		}
-		if app.AppID != "inbe" {
-			t.Fatalf("only Inbe may be seeded by Daochi: %#v", registry.Apps)
+		// Inbe's released formats and the account's own entity data are the
+		// only registrations Daochi seeds; every other app registers itself.
+		if app.AppID != "inbe" && app.AppID != "entity" {
+			t.Fatalf("only Inbe and entity data may be seeded by Daochi: %#v", registry.Apps)
 		}
 	}
 	if !foundInbe {

@@ -143,8 +143,10 @@ func AppStore_QueryAll(Database *Database, Context Context, Query string) zir_84
 	return result
 }
 
+const EntityAppID = "entity"
+const EntityCollections = "private.entity.v1.*"
 const RegistryListSQL = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps ORDER BY app_id\n"
-const zir_d_628f6460c5cb42bd = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps WHERE app_id=?1\n"
+const zir_d_5ee3428c9816ec1e = "\nSELECT app_id,display_name,description,homepage_url,source_url,public_key,status,\n       app_schema_version,min_supported_client_version,current_client_version,\n       compatibility_until,features_json,legacy_protocols_json,created_at,updated_at\nFROM server_apps WHERE app_id=?1\n"
 const CollectionsSQL = "\nSELECT app_id,collection_prefix,visibility,schema_version,description,created_at\nFROM server_app_collections WHERE app_id=?1 ORDER BY collection_prefix\n"
 const CapabilitiesSQL = "SELECT capability FROM server_app_capabilities WHERE app_id=?1 ORDER BY capability"
 const AppInsertSQL = "\nINSERT INTO server_apps(app_id,display_name,description,homepage_url,source_url,public_key,status,app_schema_version,min_supported_client_version,current_client_version,compatibility_until,features_json,legacy_protocols_json)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)\nON CONFLICT(app_id) DO UPDATE SET\n display_name=excluded.display_name,\n description=excluded.description,\n homepage_url=excluded.homepage_url,\n source_url=excluded.source_url,\n public_key=excluded.public_key,\n status=excluded.status,\n app_schema_version=excluded.app_schema_version,\n min_supported_client_version=excluded.min_supported_client_version,\n current_client_version=excluded.current_client_version,\n compatibility_until=excluded.compatibility_until,\n features_json=excluded.features_json,\n legacy_protocols_json=excluded.legacy_protocols_json,\n updated_at=CURRENT_TIMESTAMP\n"
@@ -801,6 +803,40 @@ func AppStore_SeedBuiltin(database *Database, context Context) Error {
 	app.TokenPolicies[1] = value_16
 	var signed int = 0
 	row := (*sql.DB).QueryRowContext(database, context, "SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='inbe' AND status='active')")
+	error := (*sql.Row).Scan(row, &(signed))
+	if error != nil {
+		return error
+	}
+	if signed != 0 {
+		return nil
+	}
+	return AppStore_Upsert(database, context, app)
+}
+
+func AppStore_SeedEntity(database *Database, context Context) Error {
+	var app AppRegistration = AppRegistration{}
+	app.AppID = "entity"
+	app.DisplayName = "Entity"
+	app.Description = "The account's own data, shared by every app it uses."
+	app.SourceURL = "https://github.com/waozixyz/entity"
+	app.Status = "active"
+	app.AppSchemaVersion = 1
+	app.MinClientVersion = "0.0.0"
+	app.CurrentVersion = "next"
+	app.Collections = make([]AppCollection, int(1))
+	var value_0 AppCollection = AppCollection{CollectionPrefix: "private.entity.v1.*", Visibility: "private", SchemaVersion: 1, Description: "Private account data shared by the account's apps."}
+	app.Collections[0] = value_0
+	app.Capabilities = make([]string, int(2))
+	app.Capabilities[0] = "sync"
+	app.Capabilities[1] = "encrypted-records"
+	app.Features = make([]AppFeature, int(1))
+	(app.Features[0]).ID = "sync.entity_records"
+	(app.Features[0]).RequiresSignedTx = true
+	var value_1 []string = make([]string, int(1))
+	(app.Features[0]).Collections = value_1
+	(app.Features[0]).Collections[0] = "private.entity.v1.*"
+	var signed int = 0
+	row := (*sql.DB).QueryRowContext(database, context, "SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='entity' AND status='active')")
 	error := (*sql.Row).Scan(row, &(signed))
 	if error != nil {
 		return error

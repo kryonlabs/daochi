@@ -43,7 +43,11 @@ func StoreOpen_Initialize(database *Database, context Context) Error {
 	if error != nil {
 		return error
 	}
-	return AppStore_SeedBuiltin(database, context)
+	error = AppStore_SeedBuiltin(database, context)
+	if error != nil {
+		return error
+	}
+	return AppStore_SeedEntity(database, context)
 }
 
 func StoreOpen_Open(path string) StoreOpenResult {

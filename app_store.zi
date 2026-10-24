@@ -655,6 +655,45 @@ SeedBuiltin :: (database: *sql.Database, context: ctx.Context) -> Error {
     return Upsert(database, context, app)
 }
 
+// The account's own data: one private place for each kind of thing, such as
+// photos or game levels, that every app of the account reads and writes, so
+// no app keeps a copy of its own. Records and blobs are encrypted with keys
+// only the account holds. Requests sign as "entity" with the account key.
+EntityAppID :: "entity";
+EntityCollections :: "private.entity.v1.*";
+
+SeedEntity :: (database: *sql.Database, context: ctx.Context) -> Error {
+    app: AppRegistration
+    app.AppID = EntityAppID
+    app.DisplayName = "Entity"
+    app.Description = "The account's own data, shared by every app it uses."
+    app.SourceURL = "https://github.com/waozixyz/entity"
+    app.Status = "active"
+    app.AppSchemaVersion = 1
+    app.MinClientVersion = "0.0.0"
+    app.CurrentVersion = "next"
+    app.Collections = AllocateCollections(1)
+    app.Collections[0] = AppCollection.{CollectionPrefix = EntityCollections, Visibility = "private", SchemaVersion = 1, Description = "Private account data shared by the account's apps."}
+    app.Capabilities = AllocateStrings(2)
+    app.Capabilities[0] = "sync"
+    app.Capabilities[1] = "encrypted-records"
+    app.Features = AllocateFeatures(1)
+    app.Features[0].ID = "sync.entity_records"
+    app.Features[0].RequiresSignedTx = true
+    app.Features[0].Collections = AllocateStrings(1)
+    app.Features[0].Collections[0] = EntityCollections
+    signed: isize = 0
+    row := QuerySingle(database, context, "SELECT EXISTS(SELECT 1 FROM server_app_manifests WHERE app_id='entity' AND status='active')")
+    error := ScanCount(row, *signed)
+    if error != null {
+        return error
+    }
+    if signed != 0 {
+        return null
+    }
+    return Upsert(database, context, app)
+}
+
 #scope_file
 RegistryListSQL :: #string SQL_END
 

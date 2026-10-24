@@ -59,6 +59,15 @@ Validate :: (database: *sql.Database, context: ctx.Context, request: SyncRequest
         if !records.ValidForProtocol(record, request.ProtocolVersion) {
             return errors.New("invalid encrypted record")
         }
+        owner := scope.CollectionOwnerApp(record.Collection)
+        // Every app of the account shares its entity data, but only through
+        // requests the account itself signed.
+        if owner == apps.EntityAppID {
+            if request.ProtocolVersion < cast(isize)6 {
+                return errors.New("entity records need a signed request")
+            }
+            continue
+        }
         if request.AppID != "" {
             ownership := apps.OwnsCollection(database, context, request.AppID, record.Collection)
             if ownership.error != null {
@@ -72,7 +81,6 @@ Validate :: (database: *sql.Database, context: ctx.Context, request: SyncRequest
                     logs.LogText(request.AppID), "collection", logs.LogText(record.Collection), "mode", "compat")
             }
         }
-        owner := scope.CollectionOwnerApp(record.Collection)
         if owner != "" && owner != requestApp {
             return errors.New("encrypted record collection belongs to another app")
         }

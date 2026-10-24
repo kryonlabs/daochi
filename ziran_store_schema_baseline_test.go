@@ -38,6 +38,10 @@ func baselineSchemaOpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := AppStore_SeedEntity(store.Database, context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return store, nil
 }
 

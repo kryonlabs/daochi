@@ -62,6 +62,14 @@ func SyncValidation_Validate(database *Database, context Context, request SyncRe
 			if !value_5 {
 				return StdErrorsGo_New("invalid encrypted record")
 			}
+			owner := Scope_CollectionOwnerApp(record.Collection)
+			if owner == "entity" {
+				if request.ProtocolVersion < int(6) {
+					return StdErrorsGo_New("entity records need a signed request")
+				}
+				loop_cursor_34++
+				continue
+			}
 			if request.AppID != "" {
 				ownership := AppStore_OwnsCollection(database, context, request.AppID, record.Collection)
 				if ownership.Error != nil {
@@ -74,7 +82,6 @@ func SyncValidation_Validate(database *Database, context Context, request SyncRe
 					slog.Warn("sync request used unregistered app collection", "app_id", LogSafety_LogText(request.AppID), "collection", LogSafety_LogText(record.Collection), "mode", "compat")
 				}
 			}
-			owner := Scope_CollectionOwnerApp(record.Collection)
 			if owner != "" && owner != requestApp {
 				return StdErrorsGo_New("encrypted record collection belongs to another app")
 			}

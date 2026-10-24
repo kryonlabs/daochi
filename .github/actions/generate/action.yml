@@ -26,6 +26,10 @@ runs:
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: make -j2 -C .ziran
+    # Packages the build fetches stay outside the checkout, where go ./...
+    # would compile their files.
     - name: Generate the Go
       shell: bash
+      env:
+        XDG_CACHE_HOME: ${{ runner.temp }}/ziran-cache
       run: make generate ZIRAN="$GITHUB_WORKSPACE/.ziran/build/bin/ziran"

@@ -45,7 +45,7 @@ type RecordPage struct {
 	Error   Error
 }
 
-const PageSQL = "\nSELECT r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,\n       r.deleted_at,r.content_hash,r.schema_version,r.parent_id,r.server_version\nFROM server_encrypted_records r\nWHERE r.user_id_hash=?1 AND r.server_version<=?6\n  AND (r.server_version>?3 OR (r.server_version=?3 AND ?4!='' AND\n       (r.collection>?4 OR (r.collection=?4 AND r.id>?5))))\n  AND EXISTS (SELECT 1 FROM server_app_collections c WHERE c.app_id=?2\n       AND (r.collection=c.collection_prefix OR\n            (substr(c.collection_prefix,-2)='.*' AND\n             substr(r.collection,1,length(c.collection_prefix)-1)=\n             substr(c.collection_prefix,1,length(c.collection_prefix)-1))))\nORDER BY r.server_version,r.collection,r.id LIMIT ?7\n"
+const PageSQL = "\nSELECT r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,\n       r.deleted_at,r.content_hash,r.schema_version,r.parent_id,r.server_version\nFROM server_encrypted_records r\nWHERE r.user_id_hash=?1 AND r.server_version<=?6\n  AND (r.server_version>?3 OR (r.server_version=?3 AND ?4!='' AND\n       (r.collection>?4 OR (r.collection=?4 AND r.id>?5))))\n  AND EXISTS (SELECT 1 FROM server_app_collections c WHERE (c.app_id=?2 OR c.app_id='entity')\n       AND (r.collection=c.collection_prefix OR\n            (substr(c.collection_prefix,-2)='.*' AND\n             substr(r.collection,1,length(c.collection_prefix)-1)=\n             substr(c.collection_prefix,1,length(c.collection_prefix)-1))))\nORDER BY r.server_version,r.collection,r.id LIMIT ?7\n"
 
 func RecordSync_Read(bytes []uint8) RecordPageOptionsResult {
 	var result RecordPageOptionsResult = RecordPageOptionsResult{}
@@ -106,7 +106,7 @@ func RecordSync_Page(database *Database, context Context, input SyncRequest, opt
 	value_0[6] = limit + int(1)
 	arguments := value_0
 	_ = arguments
-	var value_1 string = "\nSELECT r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,\n       r.deleted_at,r.content_hash,r.schema_version,r.parent_id,r.server_version\nFROM server_encrypted_records r\nWHERE r.user_id_hash=?1 AND r.server_version<=?6\n  AND (r.server_version>?3 OR (r.server_version=?3 AND ?4!='' AND\n       (r.collection>?4 OR (r.collection=?4 AND r.id>?5))))\n  AND EXISTS (SELECT 1 FROM server_app_collections c WHERE c.app_id=?2\n       AND (r.collection=c.collection_prefix OR\n            (substr(c.collection_prefix,-2)='.*' AND\n             substr(r.collection,1,length(c.collection_prefix)-1)=\n             substr(c.collection_prefix,1,length(c.collection_prefix)-1))))\nORDER BY r.server_version,r.collection,r.id LIMIT ?7\n"
+	var value_1 string = "\nSELECT r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,\n       r.deleted_at,r.content_hash,r.schema_version,r.parent_id,r.server_version\nFROM server_encrypted_records r\nWHERE r.user_id_hash=?1 AND r.server_version<=?6\n  AND (r.server_version>?3 OR (r.server_version=?3 AND ?4!='' AND\n       (r.collection>?4 OR (r.collection=?4 AND r.id>?5))))\n  AND EXISTS (SELECT 1 FROM server_app_collections c WHERE (c.app_id=?2 OR c.app_id='entity')\n       AND (r.collection=c.collection_prefix OR\n            (substr(c.collection_prefix,-2)='.*' AND\n             substr(r.collection,1,length(c.collection_prefix)-1)=\n             substr(c.collection_prefix,1,length(c.collection_prefix)-1))))\nORDER BY r.server_version,r.collection,r.id LIMIT ?7\n"
 	queried := StdSqlGo_Query(database, context, value_1, arguments[0:7:7])
 	result.Error = queried.Error
 	if result.Error != nil {

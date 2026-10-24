@@ -152,3 +152,24 @@ func TestEntityBlobsBelongToTheAccount(t *testing.T) {
 		t.Fatalf("signer without a device key: %d %s", recorder.Code, recorder.Body)
 	}
 }
+
+// Paged pulls give every app the account's entity records beside its own,
+// and still no other app's records.
+func TestEntityRecordsArriveInEveryAppsPages(t *testing.T) {
+	_, store, identity, _ := recordPageFixture(t)
+	insertPageRecord(t, store, identity.UserID, "private.pageapp.v1.records.media", "own", "own", 5)
+	insertPageRecord(t, store, identity.UserID, "private.entity.v1.photos", "photo", "shared", 6)
+	insertPageRecord(t, store, identity.UserID, "private.foreign.v1.records.media", "foreign", "secret", 7)
+	page := RecordSync_Page(store.Database, t.Context(),
+		SyncRequest{ProtocolVersion: 6, AppID: "pageapp", UserIDHash: identity.UserID}, RecordPageOptions{}, 7)
+	if page.Error != nil {
+		t.Fatal(page.Error)
+	}
+	got := map[string]bool{}
+	for _, record := range page.Records {
+		got[record.ID] = true
+	}
+	if !got["own"] || !got["photo"] || got["foreign"] || len(page.Records) != 2 {
+		t.Fatalf("page records = %#v", page.Records)
+	}
+}

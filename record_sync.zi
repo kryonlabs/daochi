@@ -67,6 +67,8 @@ AllocateRecords :: (count: isize) -> []EncryptedRecord #foreign builtin "make";
 AppendRecord :: (values: []EncryptedRecord, record: EncryptedRecord) -> []EncryptedRecord #foreign builtin "append";
 AllocateCursor :: () -> *RecordCursor #foreign builtin "new";
 
+// A page holds the requesting app's records and the account's entity
+// records, which every app of the account shares.
 PageSQL :: #string SQL_END
 
 SELECT r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,
@@ -75,7 +77,7 @@ FROM server_encrypted_records r
 WHERE r.user_id_hash=?1 AND r.server_version<=?6
   AND (r.server_version>?3 OR (r.server_version=?3 AND ?4!='' AND
        (r.collection>?4 OR (r.collection=?4 AND r.id>?5))))
-  AND EXISTS (SELECT 1 FROM server_app_collections c WHERE c.app_id=?2
+  AND EXISTS (SELECT 1 FROM server_app_collections c WHERE (c.app_id=?2 OR c.app_id='entity')
        AND (r.collection=c.collection_prefix OR
             (substr(c.collection_prefix,-2)='.*' AND
              substr(r.collection,1,length(c.collection_prefix)-1)=

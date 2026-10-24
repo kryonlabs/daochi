@@ -1,0 +1,99 @@
+// Game rewards an account claims for itself, such as Shovey's secret chest.
+// The node keeps the catalog, which rewards exist and the Dew each gives; the
+// client names only the reward. token_reward gives a reward to an account
+// once, so claiming it again credits nothing and reports the balance.
+#import "std/go_types"
+service :: #import "account_http";
+rewards :: #import "token_reward";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+identity :: #import "identity";
+strict :: #import "strict_json";
+http :: #import "std/http_go";
+builtin :: #system_library "go:builtin";
+
+RewardCommand :: struct {
+    reward: string #go_tag "json:\"reward\""
+}
+
+RewardOffer :: struct {
+    reward: string #go_tag "json:\"reward\""
+    units: s64 #go_tag "json:\"units\""
+}
+
+RewardOffers :: struct {
+    rewards: []RewardOffer #go_tag "json:\"rewards\""
+}
+
+RewardClaim :: struct {
+    reward: string #go_tag "json:\"reward\""
+    units: s64 #go_tag "json:\"units\""
+    credited: bool #go_tag "json:\"credited\""
+    balance: s64 #go_tag "json:\"balance\""
+}
+
+// The rewards and their Dew, in integer millionths.
+RewardCount :: 2
+RewardNames: [2]string = .["shovey.secret-chest", "shovey.campaign-complete"];
+RewardUnits: [2]s64 = .[200000, 500000];
+
+MakeOffers :: (count: isize) -> []RewardOffer #foreign builtin "make";
+AppendOffer :: (values: []RewardOffer, value: RewardOffer) -> []RewardOffer #foreign builtin "append";
+
+// The Dew a reward gives, or 0 for a reward the node does not offer.
+Units :: (reward: string) -> s64 {
+    for index: cast(s32)0..RewardCount - 1 {
+        if RewardNames[index] == reward { return RewardUnits[index] }
+    }
+    return 0
+}
+
+#scope_file
+ReadCommand :: (writer: http.ResponseWriter, request: *http.Request) -> RewardCommand {
+    command: RewardCommand
+    read := body.ReadJSON(writer, request, 1024)
+    if read.error != null || strict.Decode(read.value, *command) != null ||
+    !identity.ValidNamespace(command.reward) {
+        command.reward = ""
+    }
+    return command
+}
+
+#scope_export
+// GET lists the rewards and their Dew; POST claims one for the account.
+Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    if http.Method(request) != "POST" {
+        offers: RewardOffers
+        offers.rewards = MakeOffers(cast(isize)0)
+        for index: cast(s32)0..RewardCount - 1 {
+            offers.rewards = AppendOffer(offers.rewards, RewardOffer.{.reward = RewardNames[index], .units = RewardUnits[index]})
+        }
+        response.JSON(writer, 200, offers)
+        return
+    }
+    command := ReadCommand(writer, request)
+    if command.reward == "" {
+        response.Error(writer, 400, "invalid reward")
+        return
+    }
+    units := Units(command.reward)
+    if units <= 0 {
+        response.Error(writer, 404, "unknown reward")
+        return
+    }
+    given := rewards.Give(accounts.database, http.Context(request), accounts.configuration.WaoziIssuerPrivateKey,
+        command.reward, user.value, units)
+    if given.error != null {
+        response.Error(writer, 503, "rewards unavailable")
+        return
+    }
+    claim := RewardClaim.{.reward = command.reward, .units = units, .credited = given.credited, .balance = given.balance}
+    response.JSON(writer, 200, claim)
+}

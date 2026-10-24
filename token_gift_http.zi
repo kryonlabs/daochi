@@ -26,6 +26,10 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         return
     }
     http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    if !accounts.configuration.DewGiftsEnabled {
+        response.Error(writer, 403, "gifts are paused")
+        return
+    }
     read := body.ReadJSON(writer, request, 1024)
     command: GiftCommand
     if read.error != null || strict.Decode(read.value, *command) != null ||

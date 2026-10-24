@@ -19,6 +19,7 @@ func TestDewGiftsMoveOnceBetweenFriends(t *testing.T) {
 	}
 	server.Cfg.WaoziIssuerPublicKey = public
 	server.Cfg.WaoziIssuerPrivateKey = private
+	server.Cfg.DewGiftsEnabled = true
 	handler := server.Routes()
 	ctx := context.Background()
 	database := server.Store.Database
@@ -164,5 +165,39 @@ func TestDewGiftsMoveOnceBetweenFriends(t *testing.T) {
 	send(sender, gift(friend, 1000000, "gift-request-7"), 503)
 	if balance(sender) != 3500000 || balance(friend) != 1500000 {
 		t.Fatal("balances changed without the issuer")
+	}
+}
+
+// Anyone can open accounts and claim game rewards with each, so gifts stay
+// paused unless the node turns them on: nothing moves and nothing is spent.
+func TestDewGiftsArePausedByDefault(t *testing.T) {
+	server, users := socialHTTPFixture(t)
+	public, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Cfg.WaoziIssuerPublicKey = public
+	server.Cfg.WaoziIssuerPrivateKey = private
+	handler := server.Routes()
+	ctx := context.Background()
+	database := server.Store.Database
+	sender, friend := users[0], users[1]
+	credit := TokenLedger_CreditPayment(database, ctx, private, "monero", "paused-fixture", TokenEventInput{
+		AccountID: sender, AppID: "inbe", EventType: "credit", AmountDelta: 2 * UnitsPerDew,
+		SourceType: "monero", SourceRef: "paused-fixture",
+	}, errTokenIssuerReadOnly)
+	if credit.Error != nil {
+		t.Fatal(credit.Error)
+	}
+	token := Token_IssueAuthToken(server.Cfg.TokenSecret, sender, time.Now().Add(time.Hour).Unix()).Value
+	body := `{"recipient":"` + friend + `","units":1000000,"request_id":"paused-request-1"}`
+	res := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/tokens/gifts", token, []byte(body))
+	if res.Code != 403 || !strings.Contains(res.Body.String(), "gifts are paused") {
+		t.Fatalf("paused gift: %d %s", res.Code, res.Body.String())
+	}
+	for account, want := range map[string]int64{sender: 2 * UnitsPerDew, friend: 0} {
+		if got := TokenLedger_Balance(database, ctx, account, AssetID); got.Error != nil || got.Value != want {
+			t.Fatalf("paused gift moved Dew: %s has %d, want %d", account, got.Value, want)
+		}
 	}
 }

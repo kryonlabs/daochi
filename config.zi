@@ -32,6 +32,9 @@ Config :: struct {
     EncryptedPayloadRetention: clock.Duration
     AccountStorageLimitBytes: s64
     StoragePlansEnabled: bool
+    // Dew gifts between accounts; paused unless set, since anyone can open
+    // accounts and claim rewards with each.
+    DewGiftsEnabled: bool
     // Unix seconds; unlocks cost a tenth of their price until then. Zero means no trial.
     UnlockTrialUntil: s64
     NodeRegistryPublicKey: PublicKey
@@ -279,6 +282,7 @@ Load :: () -> Config {
     // Zero keeps account storage unlimited; the public node sets its free allowance.
     result.AccountStorageLimitBytes = EnvInt64("DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES", cast(s64)0)
     result.StoragePlansEnabled = Bool(EnvString("DAOCHI_STORAGE_PLANS_ENABLED", ""), false)
+    result.DewGiftsEnabled = Bool(EnvString("DAOCHI_DEW_GIFTS_ENABLED", ""), false)
     result.UnlockTrialUntil = EnvInt64("DAOCHI_UNLOCK_TRIAL_UNTIL", cast(s64)0)
     result.NodeRegistryPublicKey = nodeRegistryPublic
     result.KnownNodes = Peers(EnvString("DAOCHI_KNOWN_NODES", ""))

@@ -1,5 +1,6 @@
 storage_plans :: #import "storage_plan_paths";
 unlock_paths :: #import "unlock_paths";
+reward_paths :: #import "reward_paths";
 gift_paths :: #import "token_gift_paths";
 publication_paths :: #import "publications_paths";
 exchange_rate_paths :: #import "exchange_rate_paths";
@@ -190,6 +191,8 @@ PAGE_SECTION_2;
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's token balance computed from signed ledger events.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits tokens with app policy and idempotency enforcement.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/gifts</code><p>Sends Dew to a friend; the debit and the friend's credit commit together.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/rewards</code><p>Lists the game rewards the node gives and their Dew.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/rewards</code><p>Claims a game reward for the account; each reward credits an account once.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/purchases/monero/invoices</code><p>Creates a bearer-authenticated invoice for a configured token product.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/invoices/{id}</code><p>Returns invoice status and settles a confirmed payment against the authenticated account.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/purchases/monero/address</code><p>Returns the authenticated account's permanent Monero purchase address.</p></section>
@@ -2133,6 +2136,8 @@ Paths :: () -> Map(string, Any) {
     gifts := gift_paths.Paths()
     MapSet(result, "/api/v1/tokens/gifts", MapGet(gifts, "/api/v1/tokens/gifts"))
     MapSet(result, "/api/v1/unlocks/products", MapGet(unlocks, "/api/v1/unlocks/products"))
+    game_rewards := reward_paths.Paths()
+    MapSet(result, "/api/v1/rewards", MapGet(game_rewards, "/api/v1/rewards"))
     rates := exchange_rate_paths.Paths()
     MapSet(result, "/api/v1/rates", MapGet(rates, "/api/v1/rates"))
     lists := shared_list_paths.Paths()

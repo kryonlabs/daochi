@@ -764,75 +764,79 @@ func Server_Routes(server *Server) Handler {
 	}
 	Server_Route(mux, "PUT /api/v1/blobs/", server, value_360)
 	var value_364 ServerHandler = func(value_361 *Server, value_362 ResponseWriter, value_363 *Request) {
-		Server_HandleDeleteAccount(value_361, value_362, value_363)
+		Server_HandleBlobHttpRoute(value_361, value_362, value_363)
 	}
-	Server_Route(mux, "DELETE /api/v1/account", server, value_364)
+	Server_Route(mux, "DELETE /api/v1/blobs/", server, value_364)
 	var value_368 ServerHandler = func(value_365 *Server, value_366 ResponseWriter, value_367 *Request) {
 		Server_HandleDeleteAccount(value_365, value_366, value_367)
 	}
-	Server_Route(mux, "POST /api/v1/account/delete", server, value_368)
+	Server_Route(mux, "DELETE /api/v1/account", server, value_368)
 	var value_372 ServerHandler = func(value_369 *Server, value_370 ResponseWriter, value_371 *Request) {
-		Server_HandleDeleteAccountWithKey(value_369, value_370, value_371)
+		Server_HandleDeleteAccount(value_369, value_370, value_371)
 	}
-	Server_Route(mux, "POST /api/v1/account/delete-with-key", server, value_372)
+	Server_Route(mux, "POST /api/v1/account/delete", server, value_372)
 	var value_376 ServerHandler = func(value_373 *Server, value_374 ResponseWriter, value_375 *Request) {
-		Server_HandleSocialHttpFriends(value_373, value_374, value_375)
+		Server_HandleDeleteAccountWithKey(value_373, value_374, value_375)
 	}
-	Server_Route(mux, "GET /api/v1/friends", server, value_376)
-	Server_Route(mux, "GET /api/v1/lists", server, func(value_377 *Server, value_378 ResponseWriter, value_379 *Request) {
-		Server_HandleLists(value_377, value_378, value_379)
-	})
-	Server_Route(mux, "POST /api/v1/lists", server, func(value_380 *Server, value_381 ResponseWriter, value_382 *Request) {
-		Server_HandleLists(value_380, value_381, value_382)
-	})
-	var value_386 ServerHandler = func(value_383 *Server, value_384 ResponseWriter, value_385 *Request) {
-		Server_HandlePublicationsList(value_383, value_384, value_385)
+	Server_Route(mux, "POST /api/v1/account/delete-with-key", server, value_376)
+	var value_380 ServerHandler = func(value_377 *Server, value_378 ResponseWriter, value_379 *Request) {
+		Server_HandleSocialHttpFriends(value_377, value_378, value_379)
 	}
-	Server_Route(mux, "GET /api/v1/publications", server, value_386)
+	Server_Route(mux, "GET /api/v1/friends", server, value_380)
+	Server_Route(mux, "GET /api/v1/lists", server, func(value_381 *Server, value_382 ResponseWriter, value_383 *Request) {
+		Server_HandleLists(value_381, value_382, value_383)
+	})
+	Server_Route(mux, "POST /api/v1/lists", server, func(value_384 *Server, value_385 ResponseWriter, value_386 *Request) {
+		Server_HandleLists(value_384, value_385, value_386)
+	})
 	var value_390 ServerHandler = func(value_387 *Server, value_388 ResponseWriter, value_389 *Request) {
-		Server_HandlePublicationsPublish(value_387, value_388, value_389)
+		Server_HandlePublicationsList(value_387, value_388, value_389)
 	}
-	Server_Route(mux, "POST /api/v1/publications", server, value_390)
+	Server_Route(mux, "GET /api/v1/publications", server, value_390)
 	var value_394 ServerHandler = func(value_391 *Server, value_392 ResponseWriter, value_393 *Request) {
-		Server_HandlePublicationsRead(value_391, value_392, value_393)
+		Server_HandlePublicationsPublish(value_391, value_392, value_393)
 	}
-	Server_Route(mux, "GET /api/v1/publications/", server, value_394)
+	Server_Route(mux, "POST /api/v1/publications", server, value_394)
 	var value_398 ServerHandler = func(value_395 *Server, value_396 ResponseWriter, value_397 *Request) {
-		Server_HandlePublicationsUnpublish(value_395, value_396, value_397)
+		Server_HandlePublicationsRead(value_395, value_396, value_397)
 	}
-	Server_Route(mux, "DELETE /api/v1/publications/", server, value_398)
+	Server_Route(mux, "GET /api/v1/publications/", server, value_398)
 	var value_402 ServerHandler = func(value_399 *Server, value_400 ResponseWriter, value_401 *Request) {
-		Server_HandleSocialHttpRemoveFriend(value_399, value_400, value_401)
+		Server_HandlePublicationsUnpublish(value_399, value_400, value_401)
 	}
-	Server_Route(mux, "DELETE /api/v1/friends/", server, value_402)
+	Server_Route(mux, "DELETE /api/v1/publications/", server, value_402)
 	var value_406 ServerHandler = func(value_403 *Server, value_404 ResponseWriter, value_405 *Request) {
-		Server_HandleSocialHttpRequests(value_403, value_404, value_405)
+		Server_HandleSocialHttpRemoveFriend(value_403, value_404, value_405)
 	}
-	Server_Route(mux, "GET /api/v1/friends/requests", server, value_406)
+	Server_Route(mux, "DELETE /api/v1/friends/", server, value_406)
 	var value_410 ServerHandler = func(value_407 *Server, value_408 ResponseWriter, value_409 *Request) {
-		Server_HandleSocialHttpCreateRequest(value_407, value_408, value_409)
+		Server_HandleSocialHttpRequests(value_407, value_408, value_409)
 	}
-	Server_Route(mux, "POST /api/v1/friends/requests", server, value_410)
+	Server_Route(mux, "GET /api/v1/friends/requests", server, value_410)
 	var value_414 ServerHandler = func(value_411 *Server, value_412 ResponseWriter, value_413 *Request) {
-		Server_HandleSocialHttpRequestAction(value_411, value_412, value_413)
+		Server_HandleSocialHttpCreateRequest(value_411, value_412, value_413)
 	}
-	Server_Route(mux, "POST /api/v1/friends/requests/", server, value_414)
+	Server_Route(mux, "POST /api/v1/friends/requests", server, value_414)
 	var value_418 ServerHandler = func(value_415 *Server, value_416 ResponseWriter, value_417 *Request) {
-		Server_HandleSocialHttpPutStats(value_415, value_416, value_417)
+		Server_HandleSocialHttpRequestAction(value_415, value_416, value_417)
 	}
-	Server_Route(mux, "PUT /api/v1/profile/stats", server, value_418)
+	Server_Route(mux, "POST /api/v1/friends/requests/", server, value_418)
 	var value_422 ServerHandler = func(value_419 *Server, value_420 ResponseWriter, value_421 *Request) {
-		Server_HandleSocialHttpFriendStats(value_419, value_420, value_421)
+		Server_HandleSocialHttpPutStats(value_419, value_420, value_421)
 	}
-	Server_Route(mux, "GET /api/v1/friends/stats", server, value_422)
+	Server_Route(mux, "PUT /api/v1/profile/stats", server, value_422)
 	var value_426 ServerHandler = func(value_423 *Server, value_424 ResponseWriter, value_425 *Request) {
-		Server_HandleBundleHttpRoute(value_423, value_424, value_425)
+		Server_HandleSocialHttpFriendStats(value_423, value_424, value_425)
 	}
-	Server_Route(mux, "GET /api/v1/packages/", server, value_426)
+	Server_Route(mux, "GET /api/v1/friends/stats", server, value_426)
 	var value_430 ServerHandler = func(value_427 *Server, value_428 ResponseWriter, value_429 *Request) {
-		Server_HandlePackageHttpRoute(value_427, value_428, value_429)
+		Server_HandleBundleHttpRoute(value_427, value_428, value_429)
 	}
-	Server_Route(mux, "GET /api/v2/packages/", server, value_430)
+	Server_Route(mux, "GET /api/v1/packages/", server, value_430)
+	var value_434 ServerHandler = func(value_431 *Server, value_432 ResponseWriter, value_433 *Request) {
+		Server_HandlePackageHttpRoute(value_431, value_432, value_433)
+	}
+	Server_Route(mux, "GET /api/v2/packages/", server, value_434)
 	return Server_WithCommonHeaders(server, Handler(mux))
 }
 

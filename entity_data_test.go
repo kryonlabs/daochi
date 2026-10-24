@@ -122,9 +122,11 @@ func TestEntityBlobsBelongToTheAccount(t *testing.T) {
 		t.Fatalf("get: %d %q", recorder.Code, recorder.Body)
 	}
 	// An app deletes a copy it no longer references, once; retries succeed.
+	// These go through the node's routes, which must accept DELETE.
+	routes := server.Routes()
 	for _, nonce := range []string{"entity-delete", "entity-delete-again"} {
 		recorder = httptest.NewRecorder()
-		Server_HandleBlobHttpRoute(server, recorder, request("target", "DELETE", nil, nonce))
+		routes.ServeHTTP(recorder, request("target", "DELETE", nil, nonce))
 		if recorder.Code != 204 {
 			t.Fatalf("delete: %d %s", recorder.Code, recorder.Body)
 		}

@@ -413,6 +413,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "GET /api/v1/blobs/", server, HandleBlobHttpRoute)
     Route(mux, "HEAD /api/v1/blobs/", server, HandleBlobHttpRoute)
     Route(mux, "PUT /api/v1/blobs/", server, HandleBlobHttpRoute)
+    Route(mux, "DELETE /api/v1/blobs/", server, HandleBlobHttpRoute)
     Route(mux, "DELETE /api/v1/account", server, HandleDeleteAccount)
     Route(mux, "POST /api/v1/account/delete", server, HandleDeleteAccount)
     Route(mux, "POST /api/v1/account/delete-with-key", server, HandleDeleteAccountWithKey)

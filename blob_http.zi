@@ -1,5 +1,7 @@
 // Private immutable ciphertext. Blobs stay on this node; mesh exports contain
 // only records. Clients hold content keys and put blob references in records.
+// An account deletes a blob it no longer references, such as an old copy it
+// moved into its entity data.
 #import "std/go_types"
 http :: #import "std/http_go";
 io :: #import "std/io_go";
@@ -14,6 +16,7 @@ signed :: #import "signed_tx";
 auth :: #import "http_auth";
 response :: #import "response";
 storage :: #import "account_storage";
+errors :: #import "std/errors_go";
 strings :: #system_library "go:strings";
 os :: #system_library "go:os";
 native_http :: #system_library "go:net/http";
@@ -85,7 +88,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         return
     }
     method := http.Method(request)
-    if method != "PUT" && method != "GET" && method != "HEAD" {
+    if method != "PUT" && method != "GET" && method != "HEAD" && method != "DELETE" {
         response.Error(writer, 405, "unsupported blob method")
         return
     }
@@ -178,6 +181,21 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
             unused files.Remove(path)
             signed.Forget(store.database, context, header.value)
             response.Error(writer, 507, "could not store blob")
+            return
+        }
+        http.WriteHeader(writer, 204)
+        return
+    }
+    if method == "DELETE" {
+        // Deleting is idempotent, so a retry after a lost reply succeeds.
+        removed := files.Remove(path)
+        if removed != null && !errors.Is(removed, files.NotExist()) {
+            response.Error(writer, 507, "could not delete blob")
+            return
+        }
+        error := storage.ForgetBlob(store.database, http.Context(request), user.value, parts[0], parts[1])
+        if error != null {
+            response.Error(writer, 500, "blob storage unavailable")
             return
         }
         http.WriteHeader(writer, 204)

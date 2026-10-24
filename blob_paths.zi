@@ -33,6 +33,12 @@ Document :: #string JSON
       "summary":"Check an account-private ciphertext blob before resuming upload",
       "security":[{"bearerAuth":[]}],
       "responses":{"200":{"description":"Blob available"},"401":{"description":"Authorization required"},"404":{"description":"Blob unavailable"}}
+    },
+    "delete": {
+      "summary":"Delete an account-private blob the account no longer references",
+      "description":"Bearer and account/device transaction signatures are required. The blob stops counting toward the account's storage. Deleting a missing blob also succeeds.",
+      "security":[{"bearerAuth":[]}],
+      "responses":{"204":{"description":"Deleted"},"401":{"description":"Missing or invalid authorization"},"403":{"description":"App inactive"},"409":{"description":"Replay rejected"},"507":{"description":"Storage unavailable"}}
     }
   }
 }

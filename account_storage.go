@@ -28,6 +28,7 @@ type BlobStoredResult struct {
 const UsageSQL = "\nSELECT\n  (SELECT COALESCE(SUM(LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+\n                       LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)),0)\n   FROM server_encrypted_records WHERE user_id_hash=?1)\n+ (SELECT COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)\n   FROM server_encrypted_payloads WHERE user_id_hash=?1)\n+ (SELECT COALESCE(SUM(size),0) FROM server_blobs WHERE user_id_hash=?1)\n+ (SELECT COALESCE(SUM(LENGTH(id)+LENGTH(title)+LENGTH(items)),0)\n   FROM server_shared_lists WHERE owner=?1)\n+ (SELECT COALESCE(SUM(LENGTH(i.id)+LENGTH(i.target)+LENGTH(i.status)),0)\n   FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id WHERE l.owner=?1)\n+ (SELECT COALESCE(SUM(LENGTH(p.access)),0)\n   FROM server_list_permissions p JOIN server_shared_lists l ON l.id=p.list_id WHERE l.owner=?1)\n+ (SELECT COALESCE(SUM(LENGTH(request_id)+LENGTH(body)),0)\n   FROM server_list_commands WHERE user_id=?1)\n+ (SELECT COALESCE(SUM(LENGTH(id)+LENGTH(format)+LENGTH(title)+LENGTH(document)),0)\n   FROM server_publications WHERE author=?1)\n"
 const BlobStoredSQL = "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3)"
 const BlobRecordSQL = "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)"
+const BlobForgetSQL = "DELETE FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3"
 
 var ErrStorageFull Error
 
@@ -138,6 +139,17 @@ func AccountStorage_RecordBlob(database *Database, context Context, userID strin
 	arguments := value_0
 	_ = arguments
 	written := StdSqlGo_Exec(database, context, "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)", arguments[0:4:4])
+	return written.Error
+}
+
+func AccountStorage_ForgetBlob(database *Database, context Context, userID string, appID string, hash string) Error {
+	var value_0 [3]Any
+	value_0[0] = userID
+	value_0[1] = appID
+	value_0[2] = hash
+	arguments := value_0
+	_ = arguments
+	written := StdSqlGo_Exec(database, context, "DELETE FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3", arguments[0:3:3])
 	return written.Error
 }
 

@@ -50,6 +50,7 @@ SELECT
 SQL_END;
 BlobStoredSQL :: "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3)";
 BlobRecordSQL :: "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)";
+BlobForgetSQL :: "DELETE FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3";
 RemoveAllRaw :: (path: string) -> Error #foreign go_os "RemoveAll";
 Concat :: (a: string, b: string) -> string #foreign go_fmt "Sprint";
 RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
@@ -141,6 +142,14 @@ RecordBlob :: (database: *sql.Database, context: ctx.Context, userID: string, ap
     hash: string, size: s64) -> Error {
     arguments: [4]Any = .[userID, appID, hash, size]
     written := sql.Exec(database, context, BlobRecordSQL, arguments[:])
+    return written.error
+}
+
+// A deleted blob no longer counts toward the account's storage.
+ForgetBlob :: (database: *sql.Database, context: ctx.Context, userID: string, appID: string,
+    hash: string) -> Error {
+    arguments: [3]Any = .[userID, appID, hash]
+    written := sql.Exec(database, context, BlobForgetSQL, arguments[:])
     return written.error
 }
 

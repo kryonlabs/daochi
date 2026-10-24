@@ -121,6 +121,23 @@ func TestEntityBlobsBelongToTheAccount(t *testing.T) {
 	if recorder.Code != 200 || !bytes.Equal(recorder.Body.Bytes(), data) {
 		t.Fatalf("get: %d %q", recorder.Code, recorder.Body)
 	}
+	// An app deletes a copy it no longer references, once; retries succeed.
+	for _, nonce := range []string{"entity-delete", "entity-delete-again"} {
+		recorder = httptest.NewRecorder()
+		Server_HandleBlobHttpRoute(server, recorder, request("target", "DELETE", nil, nonce))
+		if recorder.Code != 204 {
+			t.Fatalf("delete: %d %s", recorder.Code, recorder.Body)
+		}
+	}
+	recorder = httptest.NewRecorder()
+	Server_HandleBlobHttpRoute(server, recorder, request("target", "GET", nil, "entity-gone"))
+	if recorder.Code != 404 {
+		t.Fatalf("deleted blob still readable: %d", recorder.Code)
+	}
+	stored := AccountStorage_BlobStored(server.Store.Database, t.Context(), user, "entity", Signing_SHA256Hex(data))
+	if stored.Error != nil || stored.Value {
+		t.Fatalf("deleted blob still counts toward storage: %#v", stored)
+	}
 	// An app the node does not know, or one without the device key, cannot.
 	recorder = httptest.NewRecorder()
 	Server_HandleBlobHttpRoute(server, recorder, request("unknown", "GET", nil, "entity-unknown"))

@@ -137,7 +137,7 @@ func BlobHttp_Route(store Registry, writer ResponseWriter, request *Request) {
 		return
 	}
 	method := StdHttpGo_Method(request)
-	if method != "PUT" && method != "GET" && method != "HEAD" {
+	if method != "PUT" && method != "GET" && method != "HEAD" && method != "DELETE" {
 		Response_Error(writer, 405, "unsupported blob method")
 		return
 	}
@@ -235,6 +235,7 @@ func BlobHttp_Route(store Registry, writer ResponseWriter, request *Request) {
 			}
 		}
 		error := BlobHttp_Save(folder, path, data)
+		_ = error
 		if error != nil {
 			SignedTx_Forget(store.Database, context, header.Value)
 			Response_Error(writer, 507, "could not store blob")
@@ -250,18 +251,40 @@ func BlobHttp_Route(store Registry, writer ResponseWriter, request *Request) {
 		StdHttpGo_WriteHeader(writer, 204)
 		return
 	}
+	if method == "DELETE" {
+		removed := StdFileGo_Remove(path)
+		var value_15 bool = removed != nil
+		var value_16 bool = value_15
+		if value_16 {
+			var value_17 bool = StdErrorsGo_Is(removed, StdFileGo_NotExist())
+			value_16 = !value_17
+		}
+		if value_16 {
+			Response_Error(writer, 507, "could not delete blob")
+			return
+		}
+		var value_18 Context = StdHttpGo_Context(request)
+		error := AccountStorage_ForgetBlob(store.Database, value_18, user.Value, parts[0], parts[1])
+		_ = error
+		if error != nil {
+			Response_Error(writer, 500, "blob storage unavailable")
+			return
+		}
+		StdHttpGo_WriteHeader(writer, 204)
+		return
+	}
 	read := StdFileGo_ReadFile(path)
 	_ = read
 	if read.Error != nil {
 		Response_Error(writer, 404, "blob not found")
 		return
 	}
-	var value_15 bool = int64(len(read.Value)) > 16777216
-	if !value_15 {
-		var value_16 string = Signing_SHA256Hex(read.Value)
-		value_15 = (value_16 != parts[1])
+	var value_19 bool = int64(len(read.Value)) > 16777216
+	if !value_19 {
+		var value_20 string = Signing_SHA256Hex(read.Value)
+		value_19 = (value_20 != parts[1])
 	}
-	if value_15 {
+	if value_19 {
 		Response_Error(writer, 503, "blob integrity failure")
 		return
 	}

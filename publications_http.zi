@@ -125,6 +125,8 @@ Refused :: (writer: http.ResponseWriter, result: publications.PublicationResult)
     return true
 }
 
+PublicationRequestBytes :: 67108864
+
 PathID :: (request: *http.Request) -> string {
     return TrimPrefix(url.Path(http.RequestURL(request)), PublicationPath)
 }
@@ -137,7 +139,9 @@ Publish :: (service: Publications, writer: http.ResponseWriter, request: *http.R
     if user == "" || !Allow(service, writer, user, true) {
         return
     }
-    read := body.ReadJSON(writer, request, 300000)
+    // Only the author's storage limits a publication; this bound just keeps
+    // one request from holding the node's memory.
+    read := body.ReadJSON(writer, request, PublicationRequestBytes)
     if read.error != null && errors.Message(read.error) == "request body too large" {
         response.Error(writer, cast(isize)413, "publication too large")
         return

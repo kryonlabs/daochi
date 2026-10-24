@@ -386,54 +386,37 @@ func TestPublicationsRejectInvalidDrafts(t *testing.T) {
 			t.Fatalf("invalid draft answered %q", reply.Error)
 		}
 	}
-	// The longest format and title, multibyte text and a document at the
-	// size limit are accepted.
-	padding := strings.Repeat("x", MaximumPublicationBytes-len(`{"levels":[],"padding":""}`))
-	largest := map[string]any{"levels": []any{}, "padding": padding}
-	encoded, err := json.Marshal(largest)
-	if err != nil || len(encoded) != MaximumPublicationBytes {
-		t.Fatalf("largest document is %d bytes: %v", len(encoded), err)
-	}
+	// The longest format and title, multibyte text and a document of several
+	// megabytes are accepted: only the author's storage limits its size.
+	largest := map[string]any{"levels": []any{}, "padding": strings.Repeat("x", 4<<20)}
 	accepted := client.publish(user, publicationDraft(strings.Repeat("a", 64), strings.Repeat("é", 40), "public", largest), 200).Publication
 	if accepted.Title != strings.Repeat("é", 40) || accepted.Levels != 0 {
 		t.Fatalf("largest publication: %+v", accepted)
 	}
-	largest["padding"] = padding + "x"
-	if reply := client.publish(user, publicationDraft("pushy.levels", "Title", "public", largest), 413); reply.Error != "publication too large" {
-		t.Fatalf("oversized document answered %q", reply.Error)
-	}
-	largest["padding"] = strings.Repeat("x", 300000)
-	if reply := client.publish(user, publicationDraft("pushy.levels", "Title", "public", largest), 413); reply.Error != "publication too large" {
-		t.Fatalf("oversized body answered %q", reply.Error)
+	if fetched := client.fetch(user, accepted.ID, 200); fetched.Publication.Title != accepted.Title {
+		t.Fatalf("large publication read back as %+v", fetched.Publication)
 	}
 	if count := countPublications(t, client.server, user); count != 1 {
 		t.Fatalf("invalid drafts stored publications: %d", count)
 	}
 }
 
-func TestPublicationsLimitCountStorageAndRate(t *testing.T) {
+func TestPublicationsLimitStorageAndRate(t *testing.T) {
 	client, users := newPublicationClient(t)
 	author, other := users[1], users[2]
 	database := client.server.Store.Database
-	for index := 1; index <= MaximumPublications; index++ {
+	// An author keeps as many publications as their storage holds.
+	for index := 1; index <= 150; index++ {
 		if _, err := database.Exec("INSERT INTO server_publications(id,author,format,title,visibility,levels,document,created_at,updated_at) VALUES(?,?,'pushy.levels','Bulk','private',0,'{}',1,1)",
 			fmt.Sprintf("%032x", index), author); err != nil {
 			t.Fatal(err)
 		}
 	}
-	draft := publicationDraft("pushy.levels", "One too many", "public", map[string]any{"levels": []any{1}})
-	if reply := client.publish(author, draft, 413); reply.Error != "too many publications" || reply.Code != "" {
-		t.Fatalf("count limit answered %+v", reply)
+	draft := publicationDraft("pushy.levels", "One more", "public", map[string]any{"levels": []any{1}})
+	if added := client.publish(author, draft, 200).Publication; added.Title != "One more" || added.Levels != 1 {
+		t.Fatalf("publication past 150: %+v", added)
 	}
-	// At the limit an author still replaces and unpublishes.
-	draft["id"] = fmt.Sprintf("%032x", 1)
-	if replaced := client.publish(author, draft, 200).Publication; replaced.Title != "One too many" || replaced.Levels != 1 {
-		t.Fatalf("replace at the limit: %+v", replaced)
-	}
-	client.unpublish(author, fmt.Sprintf("%032x", 2), 200)
-	delete(draft, "id")
-	client.publish(author, draft, 200)
-	if count := countPublications(t, client.server, author); count != MaximumPublications {
+	if count := countPublications(t, client.server, author); count != 151 {
 		t.Fatalf("author has %d publications", count)
 	}
 

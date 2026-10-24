@@ -38,6 +38,7 @@ type ReaderAccess struct {
 }
 
 const PublicationPath = "/api/v1/publications/"
+const PublicationRequestBytes = 67108864
 
 func PublicationsHttp_Bearer(service Publications, writer ResponseWriter, request *Request) string {
 	StdHttpGo_SetHeader(StdHttpGo_ResponseHeaders(writer), "Cache-Control", "private, no-store")
@@ -122,7 +123,7 @@ func PublicationsHttp_Publish(service Publications, writer ResponseWriter, reque
 	if value_0 {
 		return
 	}
-	read := HttpBody_ReadJSON(writer, request, 300000)
+	read := HttpBody_ReadJSON(writer, request, 67108864)
 	var value_2 bool = read.Error != nil
 	var value_3 bool = value_2
 	if value_3 {

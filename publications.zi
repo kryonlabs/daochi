@@ -17,8 +17,6 @@ strings :: #system_library "go:strings";
 utf8 :: #system_library "go:unicode/utf8";
 builtin :: #system_library "go:builtin";
 
-MaximumPublications :: 100
-MaximumPublicationBytes :: 262144
 MaximumPublicationTitleBytes :: 80
 MaximumPublicationFormatBytes :: 64
 
@@ -142,10 +140,6 @@ ValidDocument :: (document: RawMessage) -> bool {
     return bytes.count > 0 && bytes[0] == cast(u8)123
 }
 
-DocumentTooLarge :: (document: RawMessage) -> bool {
-    return (cast([]u8)document).count > MaximumPublicationBytes
-}
-
 MetaDestinations :: (meta: *PublicationMeta) -> [8]Any {
     values: [8]Any
     values[0] = *meta.id
@@ -184,16 +178,6 @@ AuthorOf :: (transaction: *sql.Transaction, context: ctx.Context, id: string) ->
         return result
     }
     result.found = result.error == null
-    return result
-}
-
-Count :: (transaction: *sql.Transaction, context: ctx.Context, author: string) -> PublicationCount {
-    result: PublicationCount
-    arguments: [1]Any = .[author]
-    destinations: [1]Any = .[*result.value]
-    row := sql.QueryRowTx(transaction, context,
-        "SELECT COUNT(*) FROM server_publications WHERE author=?1", arguments[:])
-    result.error = sql.ScanRow(row, destinations[:])
     return result
 }
 
@@ -280,16 +264,13 @@ ValidFormat :: (value: string) -> bool {
 }
 
 // Creates a publication, or replaces the author's own one named by `id`. The
-// document counts toward the author's storage, and an author keeps at most
-// MaximumPublications.
+// document counts toward the author's storage, the only limit on its size and
+// on how many an author keeps.
 Publish :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
     author: string, draft: PublicationDraft) -> PublicationResult {
     if !ValidFormat(draft.format) || !ValidTitle(draft.title) ||
     !ValidVisibility(draft.visibility) || !ValidDocument(draft.document) {
         return Refusal(cast(isize)400, "invalid publication")
-    }
-    if DocumentTooLarge(draft.document) {
-        return Refusal(cast(isize)413, "publication too large")
     }
     replacing := draft.id != ""
     if replacing && !ValidPublicationID(draft.id) {
@@ -312,13 +293,6 @@ Publish :: (database: *sql.Database, context: ctx.Context, configuration: config
             return Refusal(cast(isize)404, "publication not found")
         }
     } else {
-        count := Count(transaction, context, author)
-        if count.error != null {
-            return Failed(count.error)
-        }
-        if count.value >= MaximumPublications {
-            return Refusal(cast(isize)413, "too many publications")
-        }
         generated := ids.New()
         if generated.error != null {
             return Failed(generated.error)

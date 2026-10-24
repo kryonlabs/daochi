@@ -56,8 +56,6 @@ type PublicationCount struct {
 	Error Error
 }
 
-const MaximumPublications = 100
-const MaximumPublicationBytes = 262144
 const MaximumPublicationTitleBytes = 80
 const MaximumPublicationFormatBytes = 64
 const PublicationColumns = "SELECT p.id,p.author,COALESCE(u.alias,''),p.format,p.title,p.levels,p.visibility,p.updated_at"
@@ -130,10 +128,6 @@ func Publications_ValidDocument(document RawMessage) bool {
 	return int64(len(bytes)) > 0 && bytes[0] == 123
 }
 
-func Publications_DocumentTooLarge(document RawMessage) bool {
-	return int64(len([]uint8(document))) > 262144
-}
-
 func Publications_MetaDestinations(meta *PublicationMeta) [8]Any {
 	var values [8]Any
 	values[0] = &(meta.ID)
@@ -176,22 +170,6 @@ func Publications_AuthorOf(transaction *Transaction, context Context, id string)
 		return result
 	}
 	result.Found = result.Error == nil
-	return result
-}
-
-func Publications_Count(transaction *Transaction, context Context, author string) PublicationCount {
-	var result PublicationCount = PublicationCount{}
-	var value_0 [1]Any
-	value_0[0] = author
-	arguments := value_0
-	_ = arguments
-	var value_1 [1]Any
-	value_1[0] = &(result.Value)
-	destinations := value_1
-	_ = destinations
-	row := StdSqlGo_QueryRowTx(transaction, context, "SELECT COUNT(*) FROM server_publications WHERE author=?1", arguments[0:1:1])
-	var value_2 Error = StdSqlGo_ScanRow(row, destinations[0:1:1])
-	result.Error = value_2
 	return result
 }
 
@@ -301,9 +279,6 @@ func Publications_Publish(database *Database, context Context, configuration Con
 	if value_5 {
 		return Publications_Refusal(int(400), "invalid publication")
 	}
-	if Publications_DocumentTooLarge(draft.Document) {
-		return Publications_Refusal(int(413), "publication too large")
-	}
 	replacing := draft.ID != ""
 	var value_7 bool = replacing
 	if value_7 {
@@ -332,44 +307,33 @@ func Publications_Publish(database *Database, context Context, configuration Con
 			return cleanup_return_1
 		}
 	} else {
-		count := Publications_Count(transaction, context, author)
-		if count.Error != nil {
-			cleanup_return_2 := Publications_Failed(count.Error)
-			StdSqlGo_Rollback(transaction)
-			return cleanup_return_2
-		}
-		if count.Value >= 100 {
-			cleanup_return_3 := Publications_Refusal(int(413), "too many publications")
-			StdSqlGo_Rollback(transaction)
-			return cleanup_return_3
-		}
 		generated := ResourceId_New()
 		if generated.Error != nil {
-			cleanup_return_4 := Publications_Failed(generated.Error)
+			cleanup_return_2 := Publications_Failed(generated.Error)
 			StdSqlGo_Rollback(transaction)
-			return cleanup_return_4
+			return cleanup_return_2
 		}
 		id = generated.Value
 	}
 	now := StdTimeGo_Unix(StdTimeGo_Now())
 	before := AccountStorage_UsedTx(transaction, context, author)
 	if before.Error != nil {
-		cleanup_return_5 := Publications_Failed(before.Error)
+		cleanup_return_3 := Publications_Failed(before.Error)
 		StdSqlGo_Rollback(transaction)
-		return cleanup_return_5
+		return cleanup_return_3
 	}
 	limit := StoragePlan_LimitTx(transaction, context, author, configuration.AccountStorageLimitBytes, configuration.StoragePlansEnabled, now)
 	if limit.Error != nil {
-		cleanup_return_6 := Publications_Failed(limit.Error)
+		cleanup_return_4 := Publications_Failed(limit.Error)
 		StdSqlGo_Rollback(transaction)
-		return cleanup_return_6
+		return cleanup_return_4
 	}
 	document := StdTextGo_FromBytes([]uint8(draft.Document))
 	levels := Publications_Levels(transaction, context, document)
 	if levels.Error != nil {
-		cleanup_return_7 := Publications_Refusal(int(400), "invalid publication")
+		cleanup_return_5 := Publications_Refusal(int(400), "invalid publication")
 		StdSqlGo_Rollback(transaction)
-		return cleanup_return_7
+		return cleanup_return_5
 	}
 	var value_9 [8]Any
 	value_9[0] = id
@@ -388,35 +352,35 @@ func Publications_Publish(database *Database, context Context, configuration Con
 	}
 	written := StdSqlGo_ExecTx(transaction, context, statement, arguments[0:8:8])
 	if written.Error != nil {
-		cleanup_return_8 := Publications_Failed(written.Error)
+		cleanup_return_6 := Publications_Failed(written.Error)
 		StdSqlGo_Rollback(transaction)
-		return cleanup_return_8
+		return cleanup_return_6
 	}
 	after := AccountStorage_UsedTx(transaction, context, author)
 	if after.Error != nil {
-		cleanup_return_9 := Publications_Failed(after.Error)
+		cleanup_return_7 := Publications_Failed(after.Error)
 		StdSqlGo_Rollback(transaction)
-		return cleanup_return_9
+		return cleanup_return_7
 	}
 	if AccountStorage_Exceeds(before.Value, after.Value, limit.Value) {
 		var refused PublicationResult = PublicationResult{}
 		refused.Status = int(413)
 		refused.Error = ErrStorageFull
 		refused.Storage = AccountStorage_Report(before.Value, limit.Value)
-		cleanup_return_10 := refused
+		cleanup_return_8 := refused
 		StdSqlGo_Rollback(transaction)
-		return cleanup_return_10
+		return cleanup_return_8
 	}
 	result := Publications_ReadMeta(transaction, context, author, id)
 	if result.Error != nil {
-		cleanup_return_11 := result
+		cleanup_return_9 := result
 		StdSqlGo_Rollback(transaction)
-		return cleanup_return_11
+		return cleanup_return_9
 	}
 	result.Error = StdSqlGo_Commit(transaction)
-	cleanup_return_12 := result
+	cleanup_return_10 := result
 	StdSqlGo_Rollback(transaction)
-	return cleanup_return_12
+	return cleanup_return_10
 }
 
 func Publications_Unpublish(database *Database, context Context, author string, id string) PublicationResult {

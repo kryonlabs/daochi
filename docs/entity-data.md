@@ -72,12 +72,22 @@ chunk's address and sealed size, in chunk order. The preview is content of its
 own under kind `photos`, keyed by its own hash. Optional fields that apps keep
 when they know them: `name` (original file name), `trashed` (true while in the
 trash), `day` (capture day `YYYY-MM-DD` on the camera's clock), `taken`
-(capture time as local ISO 8601 with its offset) and `capture` (true when the
-camera recorded the date). Readers keep fields they do not know when they write
+(capture time as local ISO 8601 with its offset), `capture` (true when the
+camera recorded the date), and what the person said about the photo:
+`favorite`, `hidden` and `archived` (true or false), `caption`, `tags` (an
+array of text) and `edits` (`{"crop": ..., "rotate": ...}`). Every app shows
+and changes these same fields. Data a program derives, such as a search or
+face index, stays in that app's own private collection, keyed by `H`, without
+bytes or blob references. Readers keep fields they do not know when they write
 a record back.
 
-Albums are `private.entity.v1.albums` records that list photo hashes. A Diary
-entry names a photo by its hash, `{"photo": "H"}`, and never stores the bytes.
+`private.entity.v1.albums`: one record per album, with a random 128-bit
+hexadecimal record ID and schema `entity.album.v1`: `name`, `description`,
+`cover` (a photo hash), `photos` (photo hashes in order), `pinned`, `archived`,
+`deleted`, `created_at`, `updated_at` and an optional smart `filter`.
+
+A Diary entry names a photo by its hash, `{"photo": "H"}`, and never stores the
+bytes.
 
 `private.entity.v1.levels`: one record per level collection, with a random
 128-bit hexadecimal record ID chosen when it is created and schema

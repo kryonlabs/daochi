@@ -40,13 +40,15 @@ ziran = "../../ziranlang/ziran"
 With a local override, run `ziran lock` after committing an upstream compiler
 change to record that checkout's exact commit. Run `ziran update ziran` to
 refresh the pin from the published toolchain ref.
-Generated Go is committed so ordinary Go and container builds work without
-having a compiler checkout installed. `make check-generated` detects drift.
-Generation retains the complete library surface and obtains `ziran_entry.go`
-from a separate executable build of `main:Main`. Both use the same canonical
+The Go is generated from the Zi sources and never committed: generated files
+end in `.zi.go` (tests `.zi_test.go`) and `.gitignore` leaves them out. `make
+build`, `make test` and `make run` regenerate them when a source or
+`ziran.lock` changes; CI and the deploy build the pinned Ziran and run `make
+generate` first. Generation retains the complete library surface and obtains
+`ziran_entry.zi.go` from a separate executable build of `main:Main`. Both use the same canonical
 modules; the saved-IR check follows the same path.
 
-`make test-ziran` checks generation, runs the existing server suite, saves all
+`make test-ziran` runs the existing server suite, saves all
 Ziran modules as checked `.zir`, regenerates Go from those saved modules, and
 runs the same suite through a Go overlay. No alternate source checkout is used.
 The existing Go tests remain regression oracles during the port; they have not

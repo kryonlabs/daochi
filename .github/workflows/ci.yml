@@ -26,6 +26,9 @@ jobs:
           go-version: "1.26.x"
           cache: true
 
+      - name: Generate the Go from the Zi sources
+        uses: ./.github/actions/generate
+
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake
 
@@ -64,6 +67,9 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
+      - name: Generate the Go from the Zi sources
+        uses: ./.github/actions/generate
+
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake
 
@@ -74,7 +80,7 @@ jobs:
           key: liboqs-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('vendor/liboqs/CMakeLists.txt') }}
 
       - name: Check formatting
-        run: test -z "$(gofmt -l .)"
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
 
       - name: Check generated diff hygiene
         run: git diff --check
@@ -101,6 +107,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+
+      - name: Generate the Go from the Zi sources
+        uses: ./.github/actions/generate
 
       - name: Build container image
         run: docker build --pull --build-arg VERSION=ci-${{ github.sha }} -t daochi:ci .

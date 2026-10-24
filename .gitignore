@@ -12,3 +12,7 @@ secrets/
 daochi
 monero-wallet-cli.log
 .wrangler/
+# Go generated from the Zi sources (make generate)
+*.zi.go
+*.zi_test.go
+.ziran/

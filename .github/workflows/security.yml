@@ -29,6 +29,9 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      - name: Generate the Go from the Zi sources
+        uses: ./.github/actions/generate
+
       - name: Run govulncheck
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         env:
@@ -71,6 +74,9 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      - name: Generate the Go from the Zi sources
+        uses: ./.github/actions/generate
+
       - name: Cache vendored liboqs build
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -97,6 +103,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+
+      - name: Generate the Go from the Zi sources
+        uses: ./.github/actions/generate
 
       - name: Build image
         run: docker build --pull -t daochi:security .

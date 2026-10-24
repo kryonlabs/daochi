@@ -22,6 +22,8 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.26"
+      - name: Generate the Go from the Zi sources
+        uses: ./.github/actions/generate
       - name: Install cmake
         run: sudo apt-get update && sudo apt-get install -y cmake
       - name: Cache vendored liboqs build
@@ -40,6 +42,13 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+
+      - name: Generate the Go from the Zi sources
+        uses: ./.github/actions/generate
+
       - name: Configure SSH
         run: |
           install -m 600 -D /dev/null ~/.ssh/id_ed25519
@@ -49,7 +58,7 @@ jobs:
       - name: Sync source and build on origin
         run: |
           REMOTE="${{ secrets.DAOCHI_USER }}@${{ secrets.DAOCHI_HOST }}"
-          tar --exclude='.git' --exclude='build' --exclude='*.db' \
+          tar --exclude='.git' --exclude='.ziran' --exclude='build' --exclude='*.db' \
               --exclude='vendor/liboqs' -czf - . | \
             ssh "$REMOTE" '
               set -e

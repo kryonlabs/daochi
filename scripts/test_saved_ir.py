@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from generate_go import generate_go, project_flags
+from generate_go import generate_go, project_flags, repo_name
 
 
 def main():
@@ -29,7 +29,7 @@ def main():
                         "-o", str(ir), *sources], cwd=repo, env=env, check=True)
         entries = [str(ir / Path(source).with_suffix(".zir")) for source in sources]
         generate_go(ziran, repo, entries, generated, env, source_root=ir)
-        replacement = {str(repo / path.name): str(path)
+        replacement = {str(repo / repo_name(path.name)): str(path)
                        for path in generated.glob("*.go")}
         overlay = work / "overlay.json"
         overlay.write_text(json.dumps({"Replace": replacement}))

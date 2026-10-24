@@ -14,22 +14,24 @@ CGO_ENV := CGO_ENABLED=1 \
 	CGO_CFLAGS="-I$(abspath $(LIBOQS_PREFIX))/include" \
 	CGO_LDFLAGS="-L$(abspath $(LIBOQS_PREFIX))/lib -loqs"
 
-.PHONY: all build test run clean liboqs generate check-generated test-ziran test-ziran-ir
+.PHONY: all build test run clean liboqs generate test-ziran test-ziran-ir
 
 all: build
 
-# Generated Go is committed so ordinary Go/container builds remain usable.
-# Resolve the pinned toolchain through Ziran's project package commands.
+# The Go is generated from the Zi sources and never committed; builds
+# regenerate it when a source or the pinned toolchain changes. CI and the
+# deploy generate it with the pinned Ziran before building.
 ZIRAN ?= ziran
+GENERATED := ziran_entry.zi.go
 generate:
 	ZIRAN="$(ZIRAN)" python3 scripts/generate_go.py
 
-check-generated:
-	ZIRAN="$(ZIRAN)" python3 scripts/generate_go.py --check
+$(GENERATED): $(wildcard *.zi) ziran.lock
+	ZIRAN="$(ZIRAN)" python3 scripts/generate_go.py
 
-test-ziran: check-generated test test-ziran-ir
+test-ziran: test test-ziran-ir
 
-test-ziran-ir: $(LIBOQS_A)
+test-ziran-ir: $(LIBOQS_A) $(GENERATED)
 	$(CGO_ENV) ZIRAN="$(ZIRAN)" GOCACHE=/tmp/daochi-gocache python3 scripts/test_saved_ir.py
 
 liboqs: $(LIBOQS_A)
@@ -44,14 +46,14 @@ $(LIBOQS_A): $(LIBOQS_DIR)/CMakeLists.txt
 		-DOQS_MINIMAL_BUILD=SIG_ml_dsa_44
 	$(CMAKE) --build $(LIBOQS_BUILD_DIR) --target install
 
-build: $(LIBOQS_A)
+build: $(LIBOQS_A) $(GENERATED)
 	$(CGO_ENV) $(GO) build -ldflags "-X main.BuildVersion=$(VERSION)" -o daochi .
 
-test: $(LIBOQS_A)
+test: $(LIBOQS_A) $(GENERATED)
 	$(CGO_ENV) GO="$(GO)" GOCACHE=/tmp/daochi-gocache python3 scripts/test_go.py
 
-run: $(LIBOQS_A)
+run: $(LIBOQS_A) $(GENERATED)
 	$(CGO_ENV) $(GO) run .
 
 clean:
-	rm -rf $(BUILD_DIR) daochi ksync
+	rm -rf $(BUILD_DIR) daochi ksync *.zi.go *.zi_test.go

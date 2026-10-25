@@ -16,6 +16,10 @@ response :: #import "response";
 hub :: #import "sync_hub";
 metrics :: #import "metrics";
 audit :: #import "sync_audit";
+profile :: #import "account_profile";
+friends :: #import "friend_store";
+node :: #import "node_info";
+packages :: #import "package_http";
 atomic :: #import "std/atomic_go";
 errors :: #import "std/errors_go";
 native :: #system_library "go:database/sql";
@@ -32,6 +36,8 @@ RecordPageOptions :: struct {
     EncryptedRecordsOnly: bool #go_tag "json:\"encrypted_records_only,omitempty\""
     RecordLimit: isize #go_tag "json:\"record_limit,omitempty\""
     RecordCursor: *RecordCursor #go_tag "json:\"record_cursor,omitempty\""
+    IncludeMetadata: bool #go_tag "json:\"include_metadata,omitempty\""
+    RecordEncoding: string #go_tag "json:\"record_encoding,omitempty\""
 }
 
 RecordPageOptionsResult :: struct {
@@ -53,6 +59,10 @@ RecordSyncResponse :: struct {
     LatestProtocol: isize #go_tag "json:\"latest_protocol\""
     ServerLatestProtocol: isize #go_tag "json:\"server_latest_protocol\""
     AccountStorage: *AccountStorage #go_tag "json:\"account_storage,omitempty\""
+    ServerCapabilities: []string #go_tag "json:\"server_capabilities,omitempty\""
+    AccountAlias: *string #go_tag "json:\"account_alias,omitempty\""
+    ProfileIcon: *isize #go_tag "json:\"profile_icon,omitempty\""
+    PackageSequence: s64 #go_tag "json:\"package_sequence,omitempty\""
 }
 
 RecordPage :: struct {
@@ -71,10 +81,15 @@ AllocateCursor :: () -> *RecordCursor #foreign builtin "new";
 // records, which every app of the account shares.
 PageSQL :: #string SQL_END
 
-SELECT r.collection,r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,
+SELECT r.collection,r.id,r.key_id,
+       CASE WHEN ?8='gzip-v1' AND p.nonce IS NOT NULL THEN p.nonce ELSE r.nonce END,
+       CASE WHEN ?8='gzip-v1' AND p.ciphertext IS NOT NULL THEN p.ciphertext ELSE r.ciphertext END,
+       r.updated_at,
        r.deleted_at,r.content_hash,r.schema_version,r.parent_id,r.server_version
 FROM server_encrypted_records r
-WHERE r.user_id_hash=?1 AND r.server_version<=?6
+LEFT JOIN server_record_packing p
+  ON p.user_id_hash=r.user_id_hash AND p.collection=r.collection AND p.id=r.id
+WHERE r.user_id_hash=?1 AND r.server_version>=?3 AND r.server_version<=?6
   AND (r.server_version>?3 OR (r.server_version=?3 AND ?4!='' AND
        (r.collection>?4 OR (r.collection=?4 AND r.id>?5))))
   AND EXISTS (SELECT 1 FROM server_app_collections c WHERE (c.app_id=?2 OR c.app_id='entity')
@@ -98,6 +113,7 @@ Valid :: (input: SyncRequest, options: RecordPageOptions) -> bool {
         options.RecordLimit > cast(isize)200 || input.EncryptedRecords.count > 200 ||
         input.IncludeLegacyData || input.FullSyncRequested || input.Bootstrap ||
         input.LastServerStateHash != "" || input.ClientStateHash != "" ||
+        (options.RecordEncoding != "" && options.RecordEncoding != "gzip-v1") ||
         input.Ops.count > 0 || input.Habits.count > 0 || input.HabitDays.count > 0 ||
         input.Sessions.count > 0 || input.MeditationLogs.count > 0 || input.SocialCache.count > 0 {
         return false
@@ -126,7 +142,7 @@ Page :: (database: *sql.Database, context: ctx.Context, input: SyncRequest,
     if limit == cast(isize)0 {
         limit = cast(isize)200
     }
-    arguments: [7]Any = .[input.UserIDHash, input.AppID, version, collection, id, through, limit + cast(isize)1]
+    arguments: [8]Any = .[input.UserIDHash, input.AppID, version, collection, id, through, limit + cast(isize)1, options.RecordEncoding]
     queried := sql.Query(database, context, PageSQL, arguments[:])
     result.error = queried.error
     if result.error != null {
@@ -168,7 +184,7 @@ Page :: (database: *sql.Database, context: ctx.Context, input: SyncRequest,
 Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notifications: *hub.SyncHub,
     missingUser: Error, writer: http.ResponseWriter, request: *http.Request,
     input: SyncRequest, options: RecordPageOptions, publicKey: []u8, storageLimit: s64,
-    committed: *bool) -> bool {
+    committed: *bool, dbPath: string) -> bool {
     if !Valid(input, options) {
         response.Error(writer, cast(isize)400, "invalid encrypted record page request")
         return false
@@ -223,6 +239,20 @@ Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notificati
     value.MinSupportedProtocol = MinSupportedProtocol
     value.LatestProtocol = input.ProtocolVersion
     value.ServerLatestProtocol = LatestProtocol
+    if options.IncludeMetadata && page.cursor == null {
+        alias := profile.Alias(database, context, input.UserIDHash)
+        icon := profile.Icon(database, context, input.UserIDHash)
+        social := friends.Authoritative(database, context, input.UserIDHash)
+        if alias.error != null || icon.error != null || social.error != null {
+            response.Error(writer, cast(isize)500, "record metadata failed")
+            return false
+        }
+        value.AccountAlias = *alias.value
+        value.ProfileIcon = *icon.value
+        value.Changes.SocialCache = social.value
+        value.ServerCapabilities = node.Capabilities()
+        value.PackageSequence = packages.LatestSequence(dbPath, input.AppID)
+    }
     accountStorage := storage.Report(used.value, storageLimit)
     value.AccountStorage = *accountStorage
     if applied.value.EncryptedRecords > cast(isize)0 {
@@ -239,6 +269,6 @@ Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notificati
     entry.ServerVersion = current.value
     entry.Applied = applied.value
     audit.Record(database, context, entry)
-    response.JSON(writer, cast(isize)200, value)
+    response.JSONRequest(writer, request, cast(isize)200, value)
     return true
 }

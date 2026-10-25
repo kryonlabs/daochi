@@ -28,26 +28,7 @@ StorageFullResponse :: struct {
 ErrStorageFull: Error = errors.New("account storage limit reached");
 
 #scope_file
-UsageSQL :: #string SQL_END
-
-SELECT
-  (SELECT COALESCE(SUM(LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+
-                       LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)),0)
-   FROM server_encrypted_records WHERE user_id_hash=?1)
-+ (SELECT COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0)
-   FROM server_encrypted_payloads WHERE user_id_hash=?1)
-+ (SELECT COALESCE(SUM(size),0) FROM server_blobs WHERE user_id_hash=?1)
-+ (SELECT COALESCE(SUM(LENGTH(id)+LENGTH(title)+LENGTH(items)),0)
-   FROM server_shared_lists WHERE owner=?1)
-+ (SELECT COALESCE(SUM(LENGTH(i.id)+LENGTH(i.target)+LENGTH(i.status)),0)
-   FROM server_list_invitations i JOIN server_shared_lists l ON l.id=i.list_id WHERE l.owner=?1)
-+ (SELECT COALESCE(SUM(LENGTH(p.access)),0)
-   FROM server_list_permissions p JOIN server_shared_lists l ON l.id=p.list_id WHERE l.owner=?1)
-+ (SELECT COALESCE(SUM(LENGTH(request_id)+LENGTH(body)),0)
-   FROM server_list_commands WHERE user_id=?1)
-+ (SELECT COALESCE(SUM(LENGTH(id)+LENGTH(format)+LENGTH(title)+LENGTH(document)),0)
-   FROM server_publications WHERE author=?1)
-SQL_END;
+UsageSQL :: "SELECT COALESCE((SELECT used_bytes FROM server_storage_usage WHERE user_id_hash=?1),0)";
 BlobStoredSQL :: "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3)";
 BlobRecordSQL :: "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)";
 BlobForgetSQL :: "DELETE FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3";

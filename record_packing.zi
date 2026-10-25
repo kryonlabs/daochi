@@ -1,0 +1,68 @@
+// An optional encrypted gzip-v1 representation of a released encrypted record.
+// The identity copy stays authoritative and available to every older reader.
+#import "std/go_types"
+#import "protocol"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+storage :: #import "account_storage";
+
+#scope_file
+SaveCurrentSQL :: #string SQL_END
+INSERT INTO server_record_packing(user_id_hash,collection,id,nonce,ciphertext)
+SELECT user_id_hash,collection,id,?4,?5 FROM server_encrypted_records
+WHERE user_id_hash=?1 AND collection=?2 AND id=?3 AND deleted_at=0
+  AND key_id=?9 AND schema_version=?10
+  AND ((nonce=?6 AND ciphertext=?7) OR (?8!='' AND content_hash=?8))
+ON CONFLICT(user_id_hash,collection,id)
+DO UPDATE SET nonce=excluded.nonce,ciphertext=excluded.ciphertext
+SQL_END;
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL_END
+CREATE TABLE IF NOT EXISTS server_record_packing (
+    user_id_hash TEXT NOT NULL,
+    collection TEXT NOT NULL,
+    id TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    ciphertext TEXT NOT NULL,
+    PRIMARY KEY(user_id_hash,collection,id),
+    FOREIGN KEY(user_id_hash,collection,id)
+        REFERENCES server_encrypted_records(user_id_hash,collection,id) ON DELETE CASCADE
+);
+CREATE TRIGGER IF NOT EXISTS server_record_packing_invalidate
+AFTER UPDATE OF user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
+ON server_encrypted_records
+BEGIN
+    DELETE FROM server_record_packing
+    WHERE user_id_hash=OLD.user_id_hash AND collection=OLD.collection AND id=OLD.id;
+END;
+SQL_END;
+}
+
+// Stale uploads cannot attach a packed body to a newer identity record. A
+// matching content hash also permits an upgraded device to seed the optional
+// copy of unchanged content without replacing its released ciphertext.
+SaveCurrent :: (transaction: *sql.Transaction, context: ctx.Context, user: string,
+    record: EncryptedRecord, storageLimit: s64) -> Error {
+    if record.PackedCiphertext == "" {
+        return null
+    }
+    if storageLimit > 0 {
+        used := storage.UsedTx(transaction, context, user)
+        if used.error != null {
+            return used.error
+        }
+        // Packing is best effort. It must never stop an identity update that
+        // fits the account's allowance, including an over-quota deletion.
+        additional := record.PackedNonce.count + record.PackedCiphertext.count
+        if used.value > storageLimit || additional > storageLimit - used.value {
+            return null
+        }
+    }
+    arguments: [10]Any = .[user, record.Collection, record.ID, record.PackedNonce,
+        record.PackedCiphertext, record.Nonce, record.Ciphertext, record.ContentHash,
+        record.KeyID, record.SchemaVersion]
+    written := sql.ExecTx(transaction, context, SaveCurrentSQL, arguments[:])
+    return written.error
+}

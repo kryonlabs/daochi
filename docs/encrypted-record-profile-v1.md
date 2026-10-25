@@ -74,3 +74,37 @@ Daochi may index record metadata and expose public or social projections by
 design, but this profile is for private app records. Anything that should be
 server-readable must use a separate public, friends, shared, or legacy surface
 with that choice made explicit by the app.
+
+
+## Optional packed record representation
+
+Protocol v6 uploads may attach `packed_nonce` and `packed_ciphertext` together.
+These carry a second, independently encrypted representation of the same JSON;
+the identity `nonce` and `ciphertext` remain authoritative. Nodes advertise
+`record-gzip-v1` and use the optional representation only for record pages with
+`record_encoding:"gzip-v1"`. The optional copy counts toward account storage,
+is skipped when it would exceed quota, and is invalidated by identity updates.
+It is a local cache: mesh replication and account export retain the identity
+copy, so losing the optional copy cannot lose account data.
+
+Before encryption, gzip-v1 is an eight-byte ASCII `DAOGZIP1` marker, a four-byte
+little-endian uncompressed length, and one complete gzip stream. The current
+client packs structured JSON of at least 512 bytes only when the whole frame
+saves at least 64 bytes. Authenticate the envelope and AAD before parsing this
+frame. Reject a claimed length above the app's record bound (absolute ceiling
+8 MiB), checksum failure, truncation, concatenated streams or trailing bytes.
+The uncompressed document and its content hash stay identical to the identity
+representation. Media blobs retain their content-addressed encryption.
+
+## HTTP compression and page metadata
+
+The node advertises `http-gzip-v1`, accepts `Content-Encoding: gzip` on JSON
+requests, and gzip-encodes sync responses when negotiated by `Accept-Encoding`.
+Both compressed wire bytes and decoded JSON must fit the existing request bound.
+Transaction body digests cover the decoded JSON bytes, before HTTP compression.
+Response `Vary` retains both the origin and encoding selectors.
+
+`record-pages-metadata-v1` permits `include_metadata:true` on a record page.
+The terminal page includes account profile/social metadata, capabilities,
+package sequence and quota. Intermediate pages retain the saved cursor and do
+not advance the account watermark. Older nodes can still use the full sync path.

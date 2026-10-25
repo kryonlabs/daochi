@@ -3,6 +3,7 @@ http :: #import "std/http_go";
 io :: #import "std/io_go";
 json :: #import "std/json_go";
 errors :: #import "std/errors_go";
+coding :: #import "content_coding";
 go_io :: #system_library "go:io";
 
 #scope_file
@@ -16,6 +17,18 @@ ReadJSON :: (writer: http.ResponseWriter, request: *http.Request, limit: s64) ->
     read := io.ReadAll(cast(io.Reader)http.MaxBytesReader(writer, body, limit))
     if read.error != null {
         result.error = errors.New("request body too large")
+        return result
+    }
+    encoding := coding.RequestEncoding(http.HeaderValue(http.Headers(request), "Content-Encoding"))
+    if encoding == "gzip" {
+        decoded := coding.DecodeGzip(read.value, limit)
+        if decoded.error != null {
+            result.error = decoded.error
+            return result
+        }
+        read.value = decoded.value
+    } else if encoding != "" && encoding != "identity" {
+        result.error = errors.New("unsupported content encoding")
         return result
     }
     if !json.Valid(read.value) {

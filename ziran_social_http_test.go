@@ -33,12 +33,12 @@ func socialHTTPFixture(t *testing.T) (*Server, []string) {
 	queries := []string{
 		"INSERT INTO server_friendships VALUES('" + users[0] + "','" + users[1] + "','2026-01-01T00:00:00Z')",
 		"INSERT INTO server_friend_requests VALUES('" + strings.Repeat("e", 32) + "','" + users[0] + "','" + users[2] + "','pending','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
-		"CREATE TRIGGER social_http_user_clock AFTER UPDATE ON server_users BEGIN UPDATE server_users SET last_seen_at='2026-01-01T00:00:00Z' WHERE user_id_hash=NEW.user_id_hash; END",
+		"CREATE TRIGGER social_http_user_clock AFTER UPDATE ON server_users WHEN NEW.last_seen_at!='2026-01-01T00:00:00Z' BEGIN UPDATE server_users SET last_seen_at='2026-01-01T00:00:00Z' WHERE user_id_hash=NEW.user_id_hash; END",
 		"CREATE TRIGGER social_http_friendship_clock AFTER INSERT ON server_friendships BEGIN UPDATE server_friendships SET created_at='2026-01-01T00:00:00Z' WHERE rowid=NEW.rowid; END",
 	}
 	for _, table := range []string{"server_friend_requests", "server_profile_stats", "server_social_snapshots"} {
 		for _, event := range []string{"INSERT", "UPDATE"} {
-			query := fmt.Sprintf("CREATE TRIGGER clock_%s_%s AFTER %s ON %s BEGIN UPDATE %s SET updated_at='2026-01-01T00:00:00Z' WHERE rowid=NEW.rowid; END", table, event, event, table, table)
+			query := fmt.Sprintf("CREATE TRIGGER clock_%s_%s AFTER %s ON %s WHEN NEW.updated_at!='2026-01-01T00:00:00Z' BEGIN UPDATE %s SET updated_at='2026-01-01T00:00:00Z' WHERE rowid=NEW.rowid; END", table, event, event, table, table)
 			if table == "server_friend_requests" {
 				query = strings.Replace(query, "SET updated_at=", "SET created_at='2026-01-01T00:00:00Z',updated_at=", 1)
 			}

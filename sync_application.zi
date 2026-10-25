@@ -13,6 +13,7 @@ identifiers :: #import "habit_id";
 writes :: #import "sync_writes";
 records :: #import "encrypted_record";
 storage :: #import "account_storage";
+packing :: #import "record_packing";
 timestamp :: #import "timestamp";
 native :: #system_library "go:database/sql";
 builtin :: #system_library "go:builtin";
@@ -341,6 +342,10 @@ ApplyWithinLimit :: (database: *sql.Database, context: ctx.Context, request: Syn
             return result
         }
         applied.EncryptedRecords += written.applied
+        result.error = packing.SaveCurrent(transaction, context, request.UserIDHash, item, storageLimit)
+        if result.error != null {
+            return result
+        }
     }
     operations := ApplyOperations(transaction, context, request.UserIDHash, request.Ops, *applied)
     result.error = operations.error

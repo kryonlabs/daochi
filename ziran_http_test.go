@@ -153,7 +153,7 @@ END;
 CREATE TRIGGER app_clock_insert AFTER INSERT ON server_apps BEGIN
  UPDATE server_apps SET created_at='fixture',updated_at='fixture' WHERE app_id=NEW.app_id;
 END;
-CREATE TRIGGER app_clock_update AFTER UPDATE ON server_apps BEGIN
+CREATE TRIGGER app_clock_update AFTER UPDATE ON server_apps WHEN NEW.updated_at!='fixture' BEGIN
  UPDATE server_apps SET updated_at='fixture' WHERE app_id=NEW.app_id;
 END;
 CREATE TRIGGER key_clock_insert AFTER INSERT ON server_app_keys BEGIN
@@ -162,7 +162,8 @@ END;
 CREATE TRIGGER grant_clock_insert AFTER INSERT ON server_app_grants BEGIN
  UPDATE server_app_grants SET created_at='fixture',updated_at='fixture' WHERE id=NEW.id;
 END;
-CREATE TRIGGER grant_clock_update AFTER UPDATE ON server_app_grants BEGIN
+CREATE TRIGGER grant_clock_update AFTER UPDATE ON server_app_grants
+WHEN NEW.updated_at!='fixture' OR (NEW.status='revoked' AND NEW.revoked_at!='revoked') BEGIN
  UPDATE server_app_grants SET updated_at='fixture',revoked_at=CASE WHEN NEW.status='revoked' THEN 'revoked' ELSE NEW.revoked_at END WHERE id=NEW.id;
 END;`); err != nil {
 		t.Fatal(err)

@@ -33,7 +33,8 @@ CREATE TRIGGER device_clock_insert AFTER INSERT ON server_device_keys BEGIN
  UPDATE server_device_keys SET created_at='fixture',last_used_at='fixture'
  WHERE account_id=NEW.account_id AND app_id=NEW.app_id AND device_key_id=NEW.device_key_id;
 END;
-CREATE TRIGGER device_clock_update AFTER UPDATE ON server_device_keys BEGIN
+CREATE TRIGGER device_clock_update AFTER UPDATE ON server_device_keys
+WHEN NEW.last_used_at!='fixture' OR (NEW.revoked_at!='' AND NEW.revoked_at!='revoked') BEGIN
  UPDATE server_device_keys SET last_used_at='fixture',
  revoked_at=CASE WHEN NEW.revoked_at='' THEN '' ELSE 'revoked' END
  WHERE account_id=NEW.account_id AND app_id=NEW.app_id AND device_key_id=NEW.device_key_id;

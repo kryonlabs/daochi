@@ -22,6 +22,7 @@ TableQuery :: struct {
     name: string
     query: string
     jsonField: string
+    skipEmpty: bool
 }
 ByteAssertion :: struct {
     value: []u8
@@ -115,7 +116,7 @@ Export :: (database: *sql.Database, context: ctx.Context, userID: string) -> Acc
     if sql.NullStringValid(alias) {
         response.AccountAlias = sql.NullStringValue(alias)
     }
-    queries: [19]TableQuery = .[
+    queries: [20]TableQuery = .[
         .{name = "users", query = "SELECT user_id_hash, alias, profile_icon, created_at, last_seen_at FROM server_users WHERE user_id_hash=?1"},
         .{name = "clients", query = "SELECT client_id, created_at, last_seen_at, last_login_at, last_sync_at, last_since_server_version, last_seen_server_version, protocol_version, last_client_clock FROM server_clients WHERE user_id_hash=?1 ORDER BY last_seen_at DESC, client_id"},
         .{name = "sync_state", query = "SELECT server_version FROM server_sync_state WHERE user_id_hash=?1"},
@@ -135,6 +136,7 @@ Export :: (database: *sql.Database, context: ctx.Context, userID: string) -> Acc
         .{name = "profile_stats", query = "SELECT app, practice, metric, value, label, local_date, updated_at FROM server_profile_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric"},
         .{name = "leaderboard_stats", query = "SELECT app, practice, metric, source_version, calc_version, value, label, local_date, updated_at FROM server_leaderboard_stats WHERE user_id_hash=?1 ORDER BY app, practice, metric"},
         .{name = "app_grants", query = "SELECT id, source_app_id, target_app_id, collection_prefix, permission, status, created_at, updated_at, revoked_at FROM server_app_grants WHERE user_id_hash=?1 ORDER BY updated_at DESC, id"},
+        .{name = "game_completions", query = "SELECT id, game, level, map_hash, moves, actions, trace, evidence_complete, payload, created_at FROM game_completions WHERE account_id=?1 ORDER BY created_at, id", jsonField = "payload", skipEmpty = true},
     ]
     for item: queries {
         fields: Map(string, bool)
@@ -146,7 +148,9 @@ Export :: (database: *sql.Database, context: ctx.Context, userID: string) -> Acc
         if result.error != null {
             return result
         }
-        MapSet(response.Tables, item.name, queried.value)
+        if !item.skipEmpty || queried.value.count > 0 {
+            MapSet(response.Tables, item.name, queried.value)
+        }
     }
     result.value = response
     return result

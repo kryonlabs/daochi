@@ -1,0 +1,182 @@
+// Transactional storage totals. The accounting expressions retain the released
+// quota definition; reading usage no longer walks encrypted account contents.
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+ReplaceAll :: (value: string, old: string, replacement: string) -> string #foreign strings;
+Concat :: (left: string, right: string) -> string {
+    parts: [2]string = .[left, right]
+    return Join(parts[:], "")
+}
+Join :: (values: []string, separator: string) -> string #foreign strings;
+
+CountedTable :: struct {
+    name: string
+    owner: string
+    size: string
+}
+
+// A list owns its invitations and permissions. Its BEFORE DELETE trigger
+// accounts for those children before SQLite cascades them: after the parent
+// row is gone, their own triggers cannot find an owner and subtract nothing.
+ListSize :: #string SQL_END
+LENGTH(ROW.id)+LENGTH(ROW.title)+LENGTH(ROW.items)+
+(SELECT COALESCE(SUM(LENGTH(id)+LENGTH(target)+LENGTH(status)),0) FROM server_list_invitations WHERE list_id=ROW.id)+
+(SELECT COALESCE(SUM(LENGTH(access)),0) FROM server_list_permissions WHERE list_id=ROW.id)
+SQL_END;
+
+Tables: [10]CountedTable = .[
+    .{"server_encrypted_records", "ROW.user_id_hash", "LENGTH(ROW.collection)+LENGTH(ROW.id)+LENGTH(ROW.key_id)+LENGTH(ROW.nonce)+LENGTH(ROW.ciphertext)+LENGTH(ROW.content_hash)+LENGTH(ROW.parent_id)"},
+    .{"server_encrypted_payloads", "ROW.user_id_hash", "LENGTH(ROW.client_id)+LENGTH(ROW.payload_json)"},
+    .{"server_blobs", "ROW.user_id_hash", "ROW.size"},
+    .{"server_shared_lists", "ROW.owner", ListSize},
+    .{"server_list_invitations", "(SELECT owner FROM server_shared_lists WHERE id=ROW.list_id)", "LENGTH(ROW.id)+LENGTH(ROW.target)+LENGTH(ROW.status)"},
+    .{"server_list_permissions", "(SELECT owner FROM server_shared_lists WHERE id=ROW.list_id)", "LENGTH(ROW.access)"},
+    .{"server_list_commands", "ROW.user_id", "LENGTH(ROW.request_id)+LENGTH(ROW.body)"},
+    .{"server_publications", "ROW.author", "LENGTH(ROW.id)+LENGTH(ROW.format)+LENGTH(ROW.title)+LENGTH(ROW.document)"},
+    .{"server_record_packing", "ROW.user_id_hash", "LENGTH(ROW.nonce)+LENGTH(ROW.ciphertext)"},
+    .{"game_completions", "ROW.account_id", "LENGTH(ROW.id)+LENGTH(ROW.game)+LENGTH(ROW.map_hash)+LENGTH(ROW.actions)+LENGTH(ROW.trace)+LENGTH(ROW.payload)"}
+];
+
+SchemaVersion :: 3
+
+Definition :: #string SQL_END
+CREATE TABLE IF NOT EXISTS server_storage_usage (
+    user_id_hash TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+    used_bytes INTEGER NOT NULL DEFAULT 0 CHECK(used_bytes>=0)
+);
+CREATE TABLE IF NOT EXISTS server_storage_usage_version (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    version INTEGER NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS server_storage_usage_account_insert
+AFTER INSERT ON server_users
+BEGIN
+    INSERT INTO server_storage_usage(user_id_hash,used_bytes) VALUES(NEW.user_id_hash,0);
+END;
+SQL_END;
+
+Triggers :: #string SQL_END
+CREATE TRIGGER IF NOT EXISTS server_storage_usage_TABLE_insert
+AFTER INSERT ON TABLE
+BEGIN
+    UPDATE server_storage_usage SET used_bytes=used_bytes+(NEW_SIZE) WHERE user_id_hash=NEW_OWNER;
+END;
+CREATE TRIGGER IF NOT EXISTS server_storage_usage_TABLE_before_update
+BEFORE UPDATE ON TABLE
+BEGIN
+    UPDATE server_storage_usage SET used_bytes=used_bytes-(OLD_SIZE) WHERE user_id_hash=OLD_OWNER;
+END;
+CREATE TRIGGER IF NOT EXISTS server_storage_usage_TABLE_after_update
+AFTER UPDATE ON TABLE
+BEGIN
+    UPDATE server_storage_usage SET used_bytes=used_bytes+(NEW_SIZE) WHERE user_id_hash=NEW_OWNER;
+END;
+CREATE TRIGGER IF NOT EXISTS server_storage_usage_TABLE_delete
+BEFORE DELETE ON TABLE
+BEGIN
+    UPDATE server_storage_usage SET used_bytes=used_bytes-(OLD_SIZE) WHERE user_id_hash=OLD_OWNER;
+END;
+SQL_END;
+
+Schema :: () -> string {
+    result := Definition
+    for table: Tables {
+        statements := ReplaceAll(Triggers, "TABLE", table.name)
+        statements = ReplaceAll(statements, "NEW_OWNER", ReplaceAll(table.owner, "ROW", "NEW"))
+        statements = ReplaceAll(statements, "OLD_OWNER", ReplaceAll(table.owner, "ROW", "OLD"))
+        statements = ReplaceAll(statements, "NEW_SIZE", ReplaceAll(table.size, "ROW", "NEW"))
+        statements = ReplaceAll(statements, "OLD_SIZE", ReplaceAll(table.size, "ROW", "OLD"))
+        result = Concat(result, statements)
+    }
+    return result
+}
+
+#scope_export
+// The full calculation is retained for one-time backfill and explicit repair.
+// Lists count only their own row here, since children have separate terms.
+ScanSQL :: () -> string {
+    result := "SELECT "
+    for table, index: Tables {
+        size := table.size
+        if table.name == "server_shared_lists" {
+            size = "LENGTH(ROW.id)+LENGTH(ROW.title)+LENGTH(ROW.items)"
+        }
+        if index > 0 {
+            result = Concat(result, "+")
+        }
+        term := "(SELECT COALESCE(SUM(SIZE),0) FROM TABLE AS item WHERE OWNER=?1)"
+        term = ReplaceAll(term, "SIZE", ReplaceAll(size, "ROW", "item"))
+        term = ReplaceAll(term, "TABLE", table.name)
+        term = ReplaceAll(term, "OWNER", ReplaceAll(table.owner, "ROW", "item"))
+        result = Concat(result, term)
+    }
+    return result
+}
+
+Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
+    empty: [0]Any
+    // REPLACE must run its delete triggers too, including on a new connection.
+    configured := sql.Exec(database, context, "PRAGMA recursive_triggers=ON", empty[:])
+    if configured.error != null {
+        return configured.error
+    }
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    tables: s32
+    destinations: [1]Any = .[*tables]
+    error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('server_storage_usage','server_storage_usage_version')", empty[:]), destinations[:])
+    if error != null {
+        return error
+    }
+    version: s32
+    if tables == 2 {
+        versions: [1]Any = .[*version]
+        error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT COALESCE(MAX(version),0) FROM server_storage_usage_version", empty[:]), versions[:])
+        if error != null {
+            return error
+        }
+    }
+    if version > SchemaVersion {
+        // A downgraded binary must not overwrite a newer accounting schema.
+        return sql.Commit(transaction)
+    }
+    created := sql.ExecTx(transaction, context, Schema(), empty[:])
+    if created.error != null {
+        return created.error
+    }
+    if version != SchemaVersion {
+        backfill := "INSERT INTO server_storage_usage(user_id_hash,used_bytes) SELECT account.user_id_hash,(SCAN) FROM server_users AS account WHERE true ON CONFLICT(user_id_hash) DO UPDATE SET used_bytes=excluded.used_bytes"
+        backfill = ReplaceAll(backfill, "SCAN", ReplaceAll(ScanSQL(), "?1", "account.user_id_hash"))
+        filled := sql.ExecTx(transaction, context, backfill, empty[:])
+        if filled.error != null {
+            return filled.error
+        }
+        versions: [1]Any = .[SchemaVersion]
+        recorded := sql.ExecTx(transaction, context,
+            "INSERT INTO server_storage_usage_version(singleton,version) VALUES(1,?1) ON CONFLICT(singleton) DO UPDATE SET version=excluded.version", versions[:])
+        if recorded.error != null {
+            return recorded.error
+        }
+    }
+    return sql.Commit(transaction)
+}
+
+Reconcile :: (database: *sql.Database, context: ctx.Context, user: string) -> Error {
+    arguments: [1]Any = .[user]
+    statement := "INSERT INTO server_storage_usage(user_id_hash,used_bytes) SELECT user_id_hash,(SCAN) FROM server_users WHERE user_id_hash=?1 ON CONFLICT(user_id_hash) DO UPDATE SET used_bytes=excluded.used_bytes"
+    statement = ReplaceAll(statement, "SCAN", ScanSQL())
+    written := sql.Exec(database, context, statement, arguments[:])
+    return written.error
+}

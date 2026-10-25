@@ -1,0 +1,113 @@
+// HTTP content coding is outside the signed JSON representation. Both wire
+// bytes and decoded bytes remain bounded; the signature covers decoded JSON.
+#import "std/go_types"
+io :: #import "std/io_go";
+errors :: #import "std/errors_go";
+gzip :: #system_library "go:compress/gzip";
+strings :: #system_library "go:strings";
+
+Encoder :: #type #foreign gzip "Writer";
+Decoder :: #type #foreign gzip "Reader";
+EncoderResult :: struct {
+    value: *Encoder
+    error: Error
+}
+DecoderResult :: struct {
+    value: *Decoder
+    error: Error
+}
+
+#scope_file
+Split :: (value: string, separator: string) -> []string #foreign strings;
+Trim :: (value: string) -> string #foreign strings "TrimSpace";
+EqualFold :: (left: string, right: string) -> bool #foreign strings;
+OpenDecoder :: (reader: io.Reader) -> DecoderResult #go_results #foreign gzip "NewReader";
+CloseDecoderAtReturn :: (decoder: *Decoder) #go_defer #foreign gzip "(*Reader).Close";
+NewEncoderRaw :: (writer: io.Writer, level: isize) -> EncoderResult #go_results #foreign gzip "NewWriterLevel";
+CloseEncoderRaw :: (encoder: *Encoder) -> Error #foreign gzip "(*Writer).Close";
+Lower :: (value: string) -> string #foreign strings "ToLower";
+
+Quality :: (value: string) -> s32 {
+    if value == "0" { return 0 }
+    if value == "1" { return 1000 }
+    if value.count < 2 || value.count > 5 || value[1] != 46 || (value[0] != 48 && value[0] != 49) {
+        return -1
+    }
+    result: s32 = 0
+    multiplier: s32 = 100
+    for index: cast(s64)2..value.count - 1 {
+        digit := value[index]
+        if digit < 48 || digit > 57 || (value[0] == 49 && digit != 48) {
+            return -1
+        }
+        result += cast(s32)(digit - 48) * multiplier
+        multiplier /= 10
+    }
+    return ifx value[0] == 49 then 1000 else result
+}
+
+#scope_export
+AcceptsGzip :: (header: string) -> bool {
+    if header.count == 0 || header.count > 4096 {
+        return false
+    }
+    named: s32 = -1
+    wildcard: s32 = -1
+    for entry: Split(header, ",") {
+        parts := Split(entry, ";")
+        if parts.count == 0 { continue }
+        name := Trim(parts[0])
+        if !EqualFold(name, "gzip") && name != "*" { continue }
+        quality: s32 = 1000
+        weight_seen := false
+        for index: cast(s64)1..parts.count - 1 {
+            parameter := Split(Trim(parts[index]), "=")
+            if parameter.count != 2 || !EqualFold(Trim(parameter[0]), "q") || weight_seen {
+                quality = 0
+                break
+            }
+            weight_seen = true
+            quality = Quality(Trim(parameter[1]))
+            if quality < 0 { quality = 0 }
+        }
+        if name == "*" {
+            if wildcard < 0 || quality < wildcard { wildcard = quality }
+        } else if named < 0 || quality < named {
+            named = quality
+        }
+    }
+    return ifx named >= 0 then named > 0 else wildcard > 0
+}
+
+NewEncoder :: (writer: io.Writer, level: isize) -> EncoderResult {
+    return NewEncoderRaw(writer, level)
+}
+
+CloseEncoder :: (encoder: *Encoder) -> Error {
+    return CloseEncoderRaw(encoder)
+}
+
+DecodeGzip :: (input: []u8, limit: s64) -> io.ReadAllResult {
+    result: io.ReadAllResult
+    if limit < 0 || limit >= 9223372036854775807 {
+        result.error = errors.New("invalid decoded body limit")
+        return result
+    }
+    opened := OpenDecoder(io.FromBytes(input))
+    if opened.error != null {
+        result.error = errors.New("invalid gzip body")
+        return result
+    }
+    CloseDecoderAtReturn(opened.value)
+    result = io.ReadAll(io.LimitReader(cast(io.Reader)opened.value, limit + 1))
+    if result.error != null {
+        result.error = errors.New("invalid gzip body")
+    } else if result.value.count > limit {
+        result.error = errors.New("decoded request body too large")
+    }
+    return result
+}
+
+RequestEncoding :: (value: string) -> string {
+    return Lower(Trim(value))
+}

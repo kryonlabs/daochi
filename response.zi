@@ -2,17 +2,48 @@
 http :: #import "std/http_go";
 io :: #import "std/io_go";
 json :: #import "std/json_go";
+coding :: #import "content_coding";
+strings :: #system_library "go:strings";
 
 #scope_file
 ErrorResponse :: struct {
     message: string #go_tag "json:\"error\""
 }
+Join :: (values: []string, separator: string) -> string #foreign strings;
 
 #scope_export
 JSON :: (writer: http.ResponseWriter, status: isize, value: Any) {
     http.SetHeader(http.ResponseHeaders(writer), "Content-Type", "application/json")
     http.WriteHeader(writer, status)
     json.Encode(json.NewEncoder(cast(io.Writer)writer), value)
+}
+
+// Sync replies stream through gzip without constructing a second full-account
+// JSON buffer. Callers without negotiated gzip keep the released JSON path.
+JSONRequest :: (writer: http.ResponseWriter, request: *http.Request, status: isize, value: Any) {
+    if http.Method(request) == "HEAD" || status == 204 || status == 304 ||
+        !coding.AcceptsGzip(http.HeaderValue(http.Headers(request), "Accept-Encoding")) {
+        JSON(writer, status, value)
+        return
+    }
+    encoder := coding.NewEncoder(cast(io.Writer)writer, cast(isize)1)
+    if encoder.error != null {
+        JSON(writer, status, value)
+        return
+    }
+    headers := http.ResponseHeaders(writer)
+    http.SetHeader(headers, "Content-Type", "application/json")
+    http.SetHeader(headers, "Content-Encoding", "gzip")
+    vary := http.HeaderValue(headers, "Vary")
+    if vary == "" {
+        http.SetHeader(headers, "Vary", "Accept-Encoding")
+    } else {
+        values: [2]string = .[vary, "Accept-Encoding"]
+        http.SetHeader(headers, "Vary", Join(values[:], ", "))
+    }
+    http.WriteHeader(writer, status)
+    json.Encode(json.NewEncoder(cast(io.Writer)encoder.value), value)
+    coding.CloseEncoder(encoder.value)
 }
 
 Error :: (writer: http.ResponseWriter, status: isize, message: string) {

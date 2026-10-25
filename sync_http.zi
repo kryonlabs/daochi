@@ -233,7 +233,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
     if pageInput.value.EncryptedRecordsOnly {
         completion.complete = pages.Handle(sync.database, sync.counters, sync.notifications,
             sync.missingUser, writer, request, input, pageInput.value, publicKey.value,
-            allowance.value, *completion.committed)
+            allowance.value, *completion.committed, sync.configuration.DBPath)
         return
     }
     base := hash.State(sync.database, context, input.UserIDHash)
@@ -499,7 +499,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
         LogClientError("record sync audit", "user", logs.LogText(input.UserIDHash), "client", logs.LogText(input.ClientID), "error", error)
     }
     completion.complete = true
-    response.JSON(writer, cast(isize)200, value)
+    response.JSONRequest(writer, request, cast(isize)200, value)
 }
 
 EncryptedEnvelope :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Request, bytes: []u8) -> bool {
@@ -653,6 +653,6 @@ EncryptedEnvelope :: (sync: Synchronization, writer: http.ResponseWriter, reques
         value.EncryptedPayloadsTruncated = true
         value.EncryptedPayloadsNextSinceVersion = loaded.value[loaded.value.count - 1].ServerVersion
     }
-    response.JSON(writer, cast(isize)200, value)
+    response.JSONRequest(writer, request, cast(isize)200, value)
     return true
 }

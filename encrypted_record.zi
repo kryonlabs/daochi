@@ -40,12 +40,20 @@ Valid :: (item: EncryptedRecord) -> bool {
     if item.DeletedAt == 0 && TrimSpace(item.Ciphertext) == "" {
         return false
     }
+    if (item.PackedNonce == "") != (item.PackedCiphertext == "") ||
+        item.PackedNonce.count > 256 || item.PackedCiphertext.count > 262144 ||
+        (item.DeletedAt != 0 && item.PackedCiphertext != "") {
+        return false
+    }
     return item.Ciphertext.count <= 262144 && item.Nonce.count <= 256 &&
         item.KeyID.count <= 128 && ValidMetadata(item)
 }
 
 ValidForProtocol :: (item: EncryptedRecord, version: isize) -> bool {
     if !Valid(item) {
+        return false
+    }
+    if version < cast(isize)6 && item.PackedCiphertext != "" {
         return false
     }
     if version >= cast(isize)5 {

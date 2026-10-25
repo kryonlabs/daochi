@@ -3,6 +3,8 @@ sql :: #import "std/sql_go";
 driver :: #import "sqlite_driver";
 ctx :: #import "std/context_go";
 schema :: #import "store_schema";
+usage :: #import "storage_usage";
+packing :: #import "record_packing";
 trust :: #import "trust_store";
 timestamps :: #import "store_timestamps";
 habits :: #import "habit_migration";
@@ -26,6 +28,20 @@ Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
     error := schema.Ensure(database, context)
     if error != null {
         return error
+    }
+    empty: [0]Any
+    packed := sql.Exec(database, context, packing.SchemaSQL(), empty[:])
+    if packed.error != null {
+        return packed.error
+    }
+    error = usage.Ensure(database, context)
+    if error != null {
+        return error
+    }
+    indexed := sql.Exec(database, context,
+        "CREATE INDEX IF NOT EXISTS server_record_page_order ON server_encrypted_records(user_id_hash,server_version,collection,id)", empty[:])
+    if indexed.error != null {
+        return indexed.error
     }
     error = schema.StorageSizes(database, context)
     if error != null {
@@ -57,7 +73,7 @@ Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
 #scope_export
 Open :: (path: string) -> StoreOpenResult {
     driver.Initialize()
-    parts: [2]string = .[path, "?_busy_timeout=5000&_foreign_keys=on"]
+    parts: [2]string = .[path, "?_busy_timeout=5000&_foreign_keys=on&_recursive_triggers=on"]
     opened := OpenRaw("sqlite3", Join(parts[:], ""))
     if opened.error != null {
         return opened

@@ -35,6 +35,9 @@ var baselineOpsCapabilities = []string{
 	"trust-space-names-v1",
 	"monero-account-addresses",
 	"monero-gifts",
+	"record-pages-metadata-v1",
+	"http-gzip-v1",
+	"record-gzip-v1",
 }
 
 func (s *Server) baselineOpsHandleHealth(w http.ResponseWriter, r *http.Request) {

@@ -125,6 +125,9 @@ func TestStorageUsageBackfillsLegacyDatabaseAndReconciles(t *testing.T) {
 	lifecycleExecute(t, store, `INSERT INTO server_list_permissions(list_id,target,access) VALUES('legacy-list',?1,'editor')`, user)
 	lifecycleExecute(t, store, `INSERT INTO server_list_commands(user_id,request_id,body) VALUES(?1,'legacy-command','legacy body')`, user)
 	lifecycleExecute(t, store, `INSERT INTO server_publications(id,author,format,title,visibility,document,created_at,updated_at) VALUES('legacy-publication',?1,'levels','Legacy','private','{}',1,1)`, user)
+	lifecycleExecute(t, store, `INSERT INTO server_record_packing(user_id_hash,collection,id,nonce,ciphertext) VALUES(?1,'private.inbe.v1.cells','legacy-record','packed nonce','packed body')`, user)
+	lifecycleExecute(t, store, `INSERT INTO game_maps(game,level,map_hash,map,created_at) VALUES('shovey.classic',1,'legacy-map','archived map',1)`)
+	lifecycleExecute(t, store, `INSERT INTO game_completions(account_id,id,game,level,map_hash,moves,actions,trace,evidence_complete,payload,created_at) VALUES(?1,'legacy-completion','shovey.classic',1,'legacy-map',10,'0123','001002',1,'{"moves":10}',1)`, user)
 	for i := 0; i < 2; i++ {
 		if err := StoreSchema_Ensure(store.Database, t.Context()); err != nil {
 			t.Fatal(err)

@@ -1,0 +1,337 @@
+// Completion evidence is retained against immutable, publisher-registered maps.
+// These are light geometry checks, independent of the puzzle engine.
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+sha :: #system_library "go:crypto/sha256";
+hex :: #system_library "go:encoding/hex";
+numbers :: #system_library "go:strconv";
+strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
+native :: #system_library "go:database/sql";
+
+MapRevision :: struct {
+    level: s32 #go_tag "json:\"level\""
+    map_hash: string #go_tag "json:\"map_hash\""
+    map: string #go_tag "json:\"map\""
+}
+MapRegistration :: struct {
+    game: string #go_tag "json:\"game\""
+    source_version: string #go_tag "json:\"source_version\""
+    maps: []MapRevision #go_tag "json:\"maps\""
+}
+Completion :: struct {
+    game: string #go_tag "json:\"game\""
+    level: s32 #go_tag "json:\"level\""
+    map_hash: string #go_tag "json:\"map_hash\""
+    moves: s32 #go_tag "json:\"moves\""
+    actions: string #go_tag "json:\"actions\""
+    trace: string #go_tag "json:\"trace\""
+    evidence_complete: bool #go_tag "json:\"evidence_complete\""
+}
+EvidenceResult :: struct {
+    id: string #go_tag "json:\"id\""
+    created: bool #go_tag "json:\"created\""
+    error: Error #go_tag "json:\"-\""
+}
+EvidenceHistory :: struct {
+    completions: []Completion #go_tag "json:\"completions\""
+    map: string #go_tag "json:\"map\""
+    next_offset: s32 #go_tag "json:\"next_offset\""
+    error: Error #go_tag "json:\"-\""
+}
+Eligibility :: struct {
+    eligible: bool
+    error: Error
+}
+
+#scope_file
+Sum :: (bytes: []u8) -> [32]u8 #foreign sha "Sum256";
+Encode :: (bytes: []u8) -> string #foreign hex "EncodeToString";
+Decimal :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+MakeCompletions :: (count: isize) -> []Completion #foreign builtin "make";
+AppendCompletion :: (values: []Completion, value: Completion) -> []Completion #foreign builtin "append";
+
+Digest :: (value: string) -> string {
+    sum := Sum(text.ToBytes(value))
+    return Encode(sum[:])
+}
+Digit :: (byte: u8) -> s32 {
+    if byte >= 48 && byte <= 57 {
+        return cast(s32)byte - 48
+    }
+    if byte >= 97 && byte <= 102 {
+        return cast(s32)byte - 87
+    }
+    return -1
+}
+ByteAt :: (value: string, offset: s32) -> s32 {
+    return Digit(value[offset]) * 16 + Digit(value[offset + 1])
+}
+HexText :: (value: string, size: s32) -> bool {
+    if value.count != cast(s64)size {
+        return false
+    }
+    for byte: value {
+        if Digit(byte) < 0 {
+            return false
+        }
+    }
+    return true
+}
+Solid :: (kind: s32) -> bool {
+    // Cracked walls, locks, gates, water and pushable objects can change.
+    return kind == 12 || kind == 63 || kind == 76 || kind == 84 ||
+        (kind >= 95 && kind <= 98) || kind == 106 || kind == 122 ||
+        (kind >= 139 && kind <= 142)
+}
+Movable :: (kind: s32) -> bool {
+    return (kind >= 1 && kind <= 3) || kind == 9 || kind == 19 || kind == 28 ||
+        (kind >= 36 && kind <= 38) || kind == 40 || (kind >= 44 && kind <= 46) ||
+        (kind >= 53 && kind <= 55) || kind == 72
+}
+Ground :: (map: string, cell: s32) -> s32 {
+    kind := ByteAt(map, cell * 2)
+    if kind != 0 && kind != 10 && !Movable(kind) {
+        return kind
+    }
+    return ByteAt(map, 480 + cell * 2)
+}
+Blocked :: (map: string, cell: s32) -> bool {
+    return Solid(Ground(map, cell)) || Solid(ByteAt(map, 960 + cell * 2))
+}
+Portal :: (kind: s32) -> bool {
+    return kind == 8 || (kind >= 85 && kind <= 87)
+}
+Adjacent :: (first: s32, second: s32) -> bool {
+    if first == second - 12 || first == second + 12 {
+        return true
+    }
+    return first / 12 == second / 12 && (first == second - 1 || first == second + 1)
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return Schema
+}
+MapHash :: (game: string, level: s32, map: string) -> string {
+    if game != "shovey.classic" || level < 1 || level > 4096 || !HexText(map, 1440) {
+        return ""
+    }
+    parts: [5]string = .[game, ".map.v1\n", Decimal(cast(s64)level, cast(isize)10), "\n", map]
+    return Digest(Join(parts[:], ""))
+}
+Register :: (database: *sql.Database, context: ctx.Context, registration: MapRegistration) -> Error {
+    if registration.game != "shovey.classic" || registration.source_version.count < 1 ||
+        registration.source_version.count > 128 || registration.maps.count < 1 || registration.maps.count > 512 {
+        return errors.New("invalid map registration")
+    }
+    for map: registration.maps {
+        if !HexText(map.map_hash, 64) || MapHash(registration.game, map.level, map.map) != map.map_hash {
+            return errors.New("map hash does not match its exact version")
+        }
+        players: s32 = 0
+        for cell: cast(s32)0..239 {
+            if ByteAt(map.map, cell * 2) == 10 {
+                players += 1
+            }
+        }
+        if players != 1 {
+            return errors.New("map must have one starting player")
+        }
+    }
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    for map: registration.maps {
+        arguments: [5]Any = .[registration.game, map.level, map.map_hash, map.map, clock.Unix(clock.Now())]
+        inserted := sql.ExecTx(transaction, context, InsertMap, arguments[:])
+        if inserted.error != null {
+            return inserted.error
+        }
+        existing: string
+        destinations: [1]Any = .[*existing]
+        error := sql.ScanRow(sql.QueryRowTx(transaction, context, ReadMap, arguments[:3]), destinations[:])
+        if error != null {
+            return error
+        }
+        if existing != map.map {
+            return errors.New("immutable map conflict")
+        }
+        source: [5]Any = .[registration.game, map.level, map.map_hash, registration.source_version, clock.Unix(clock.Now())]
+        written := sql.ExecTx(transaction, context, InsertSource, source[:])
+        if written.error != null {
+            return written.error
+        }
+    }
+    return sql.Commit(transaction)
+}
+
+Validate :: (completion: Completion, map: string) -> Error {
+    if completion.game != "shovey.classic" || completion.level < 1 || completion.level > 4096 ||
+        !HexText(completion.map_hash, 64) || MapHash(completion.game, completion.level, map) != completion.map_hash ||
+        completion.moves < 1 || completion.actions.count < 1 || completion.actions.count > 60000 ||
+        completion.trace.count < 2 || completion.trace.count > 240000 || completion.trace.count % 2 != 0 ||
+        !HexText(completion.trace, cast(s32)completion.trace.count) {
+        return errors.New("invalid completion evidence")
+    }
+    for action: completion.actions {
+        if action != 48 && action != 49 && action != 50 && action != 51 && action != 102 && action != 116 {
+            return errors.New("invalid completion action")
+        }
+    }
+    previous: s32 = -1
+    steps: s32 = 0
+    for offset: cast(s32)0..cast(s32)completion.trace.count / 2 - 1 {
+        cell := ByteAt(completion.trace, offset * 2)
+        if cell > 239 || Blocked(map, cell) {
+            return errors.New("completion crosses an immovable solid")
+        }
+        if previous < 0 {
+            if completion.evidence_complete && ByteAt(map, cell * 2) != 10 {
+                return errors.New("complete evidence must start at the original player")
+            }
+        } else {
+            kind := Ground(map, previous)
+            portal := Portal(kind) && Ground(map, cell) == kind && previous != cell
+            if !Adjacent(previous, cell) && !portal {
+                return errors.New("completion contains an impossible jump")
+            }
+            if !portal {
+                steps += 1
+            }
+        }
+        previous = cell
+    }
+    if completion.evidence_complete {
+        home := ByteAt(map, previous * 2)
+        if home != 7 && home != 148 {
+            return errors.New("complete evidence must finish at home")
+        }
+        // Slides add steps; aim-only inputs add none; portals add entrance
+        // and exit cells for one engine move. Do not equate these counts.
+        if completion.moves < steps || cast(s64)completion.moves > cast(s64)steps + completion.actions.count {
+            return errors.New("move count contradicts recorded actions and cells")
+        }
+    }
+    return null
+}
+
+Put :: (database: *sql.Database, context: ctx.Context, account: string, completion: Completion) -> EvidenceResult {
+    result: EvidenceResult
+    arguments: [3]Any = .[completion.game, completion.level, completion.map_hash]
+    map: string
+    destinations: [1]Any = .[*map]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, ReadMap, arguments[:]), destinations[:])
+    if result.error != null {
+        return result
+    }
+    result.error = Validate(completion, map)
+    if result.error != null {
+        return result
+    }
+    encoded := json.Marshal(completion)
+    result.error = encoded.error
+    if result.error != null {
+        return result
+    }
+    result.id = Digest(text.FromBytes(encoded.value))
+    values: [11]Any = .[account, result.id, completion.game, completion.level, completion.map_hash,
+        completion.moves, completion.actions, completion.trace, completion.evidence_complete,
+        text.FromBytes(encoded.value), clock.Unix(clock.Now())]
+    written := sql.Exec(database, context, InsertCompletion, values[:])
+    result.error = written.error
+    if result.error == null {
+        affected := sql.RowsAffected(written.value)
+        result.error = affected.error
+        result.created = affected.value > 0
+    }
+    return result
+}
+
+History :: (database: *sql.Database, context: ctx.Context, account: string, game: string,
+    level: s32, hash: string, offset: s32) -> EvidenceHistory {
+    result: EvidenceHistory
+    result.completions = MakeCompletions(cast(isize)0)
+    if game != "shovey.classic" || level < 1 || level > 4096 || !HexText(hash, 64) || offset < 0 {
+        result.error = errors.New("invalid history query")
+        return result
+    }
+    values: [5]Any = .[account, game, level, hash, offset]
+    queried := sql.Query(database, context, ReadHistory, values[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    while sql.Next(rows) {
+        payload: string
+        destinations: [2]Any = .[*payload, *result.map]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        completion: Completion
+        result.error = json.Unmarshal(text.ToBytes(payload), *completion)
+        if result.error != null {
+            return result
+        }
+        result.completions = AppendCompletion(result.completions, completion)
+    }
+    result.error = sql.RowsError(rows)
+    result.next_offset = offset + cast(s32)result.completions.count
+    return result
+}
+
+Eligible :: (database: *sql.Database, context: ctx.Context, account: string, reward: string) -> Eligibility {
+    result: Eligibility
+    required := ifx reward == "shovey.secret-chest" then 28 else ifx reward == "shovey.campaign-complete" then 175 else 0
+    if required == 0 {
+        return result
+    }
+    completed: s32
+    arguments: [2]Any = .[account, required]
+    destinations: [1]Any = .[*completed]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, ReadEligibility, arguments[:]), destinations[:])
+    result.eligible = result.error == null && completed == required
+    return result
+}
+
+#scope_file
+Schema :: #string SQL
+CREATE TABLE IF NOT EXISTS game_maps (
+ game TEXT NOT NULL, level INTEGER NOT NULL, map_hash TEXT NOT NULL, map TEXT NOT NULL,
+ created_at INTEGER NOT NULL, PRIMARY KEY(game,level,map_hash)
+);
+CREATE TABLE IF NOT EXISTS game_map_sources (
+ game TEXT NOT NULL, level INTEGER NOT NULL, map_hash TEXT NOT NULL, source_version TEXT NOT NULL,
+ created_at INTEGER NOT NULL, PRIMARY KEY(game,level,map_hash,source_version),
+ FOREIGN KEY(game,level,map_hash) REFERENCES game_maps(game,level,map_hash)
+);
+CREATE TABLE IF NOT EXISTS game_completions (
+ account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ id TEXT NOT NULL, game TEXT NOT NULL, level INTEGER NOT NULL, map_hash TEXT NOT NULL,
+ moves INTEGER NOT NULL, actions TEXT NOT NULL, trace TEXT NOT NULL,
+ evidence_complete INTEGER NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+ PRIMARY KEY(account_id,id), FOREIGN KEY(game,level,map_hash) REFERENCES game_maps(game,level,map_hash)
+);
+CREATE INDEX IF NOT EXISTS game_completion_best ON game_completions(account_id,game,level,map_hash,moves);
+CREATE INDEX IF NOT EXISTS game_completion_eligible ON game_completions(account_id,game,level,evidence_complete,moves);
+SQL
+InsertMap :: "INSERT INTO game_maps(game,level,map_hash,map,created_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING";
+ReadMap :: "SELECT map FROM game_maps WHERE game=?1 AND level=?2 AND map_hash=?3";
+InsertSource :: "INSERT INTO game_map_sources(game,level,map_hash,source_version,created_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING";
+InsertCompletion :: "INSERT INTO game_completions(account_id,id,game,level,map_hash,moves,actions,trace,evidence_complete,payload,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT DO NOTHING";
+ReadHistory :: "SELECT c.payload,m.map FROM game_completions c JOIN game_maps m USING(game,level,map_hash) WHERE c.account_id=?1 AND c.game=?2 AND c.level=?3 AND c.map_hash=?4 ORDER BY c.moves,c.created_at,c.id LIMIT 16 OFFSET ?5";
+ReadEligibility :: "SELECT COUNT(DISTINCT level) FROM game_completions WHERE account_id=?1 AND game='shovey.classic' AND level BETWEEN 1 AND ?2 AND evidence_complete=1 AND moves>=10";

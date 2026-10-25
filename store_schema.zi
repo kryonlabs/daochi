@@ -7,6 +7,7 @@ plans :: #import "storage_plan";
 unlocks :: #import "unlock";
 rescales :: #import "token_rescale";
 exchange_rates :: #import "exchange_rate";
+evidence :: #import "game_evidence";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 errors :: #import "std/errors_go";
@@ -129,9 +130,9 @@ Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     if pragmas.error != null {
         return pragmas.error
     }
-    definitions: [10]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
+    definitions: [11]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
         publications.SchemaSQL(), plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL(),
-        exchange_rates.SchemaSQL(), FeedbackReplies]
+        exchange_rates.SchemaSQL(), FeedbackReplies, evidence.SchemaSQL()]
     created := sql.Exec(database, context, Join(definitions[:], ""), empty[:])
     if created.error != null {
         return created.error

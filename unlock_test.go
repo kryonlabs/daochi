@@ -551,8 +551,13 @@ func TestDewRatioRaisesTheRatioOnce(t *testing.T) {
 		os.Stdout = writer
 		result := Startup_DewRatio(configuration, arguments)
 		os.Stdout = stdout
-		writer.Close()
-		printed, _ := io.ReadAll(reader)
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		printed, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return string(printed), result
 	}
 	balance := func(want int64) {

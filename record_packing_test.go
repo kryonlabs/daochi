@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +15,11 @@ func savePackingFixture(t *testing.T, store *Store, user string, record Encrypte
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer transaction.Rollback()
+	defer func() {
+		if err := transaction.Rollback(); err != nil && err != sql.ErrTxDone {
+			t.Error(err)
+		}
+	}()
 	if err := RecordPacking_SaveCurrent(transaction, t.Context(), user, record, limit); err != nil {
 		t.Fatal(err)
 	}

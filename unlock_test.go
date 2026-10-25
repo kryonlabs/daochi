@@ -69,11 +69,11 @@ func postUnlock(t *testing.T, handler http.Handler, token, body string, status i
 func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 	_, store, handler, private := unlockFixture(t)
 	owner := newTestIdentity(t, handler, 0x81)
-	creditDew(t, store, private, owner.UserID, "unlock-fixture", 30*UnitsPerDew)
+	creditDew(t, store, private, owner.UserID, "unlock-fixture", 300*UnitsPerDew)
 	ctx := context.Background()
 	first := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
-	if !first.Unlocked || first.Product != TaiChi || first.PriceUnits != 10000000 ||
-		first.Balance != 20000000 || first.ReceiptID == "" {
+	if !first.Unlocked || first.Product != TaiChi || first.PriceUnits != 100000000 ||
+		first.Balance != 200000000 || first.ReceiptID == "" {
 		t.Fatalf("first unlock: %+v", first)
 	}
 	again := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
@@ -81,7 +81,7 @@ func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 		t.Fatalf("repeat unlock: %+v, want %+v", again, first)
 	}
 	balance := TokenLedger_Balance(store.Database, ctx, owner.UserID, AssetID)
-	if balance.Error != nil || balance.Value != 20*UnitsPerDew {
+	if balance.Error != nil || balance.Value != 200*UnitsPerDew {
 		t.Fatalf("balance after unlocks: %+v", balance)
 	}
 	var debits int
@@ -90,7 +90,7 @@ func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 		t.Fatalf("unlock debits: %d, %v", debits, err)
 	}
 	receipt := TokenLedger_ByID(store.Database, ctx, first.ReceiptID)
-	if receipt.Error != nil || !receipt.Found || receipt.Value.AmountDelta != -10000000 || receipt.Value.AppID != "inbe" ||
+	if receipt.Error != nil || !receipt.Found || receipt.Value.AmountDelta != -100000000 || receipt.Value.AppID != "inbe" ||
 		!TokenReceipt_ValidSignature(private.Public().(ed25519.PublicKey), receipt.Value) {
 		t.Fatalf("unlock receipt: %+v", receipt)
 	}
@@ -99,7 +99,7 @@ func TestUnlockChargesTheServerPriceOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
-	if restored.ReceiptID != first.ReceiptID || restored.Balance != 20*UnitsPerDew {
+	if restored.ReceiptID != first.ReceiptID || restored.Balance != 200*UnitsPerDew {
 		t.Fatalf("restored unlock: %+v", restored)
 	}
 }
@@ -159,15 +159,15 @@ func TestUnlockTrialPrice(t *testing.T) {
 		price      int64
 		shown      int64
 	}{
-		{now + 3600, 6000000, now + 3600},
-		{now - 1, 10000000, 0},
-		{0, 10000000, 0},
+		{now + 3600, 60000000, now + 3600},
+		{now - 1, 100000000, 0},
+		{0, 100000000, 0},
 	} {
 		server.Cfg.UnlockTrialUntil = tc.trialUntil
 		owner := newTestIdentity(t, handler, byte(0x90+index))
 		unlocks, products := read(owner.Token)
 		want := map[string]any{"product": TaiChi, "price_units": float64(tc.price),
-			"regular_price_units": float64(10000000), "trial_until": float64(tc.shown)}
+			"regular_price_units": float64(100000000), "trial_until": float64(tc.shown)}
 		if len(unlocks) != 0 || !equalJSONMaps(products[0], want) {
 			t.Fatalf("trial until %d: %v %v", tc.trialUntil, unlocks, products)
 		}
@@ -182,9 +182,9 @@ func TestUnlockTrialPrice(t *testing.T) {
 			!equalJSONMaps(prices.Products[0], want) || strings.Contains(public.Body.String(), "receipt") {
 			t.Fatalf("public prices: %d %s", public.Code, public.Body.String())
 		}
-		creditDew(t, store, private, owner.UserID, "trial-fixture-"+owner.UserID[:8], 10*UnitsPerDew)
+		creditDew(t, store, private, owner.UserID, "trial-fixture-"+owner.UserID[:8], 100*UnitsPerDew)
 		unlocked := postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
-		if unlocked.PriceUnits != tc.price || unlocked.Balance != 10*UnitsPerDew-tc.price {
+		if unlocked.PriceUnits != tc.price || unlocked.Balance != 100*UnitsPerDew-tc.price {
 			t.Fatalf("trial until %d charged: %+v", tc.trialUntil, unlocked)
 		}
 		unlocks, _ = read(owner.Token)
@@ -193,7 +193,7 @@ func TestUnlockTrialPrice(t *testing.T) {
 			t.Fatalf("listed unlocks: %v", unlocks)
 		}
 	}
-	if Unlock_Price(TaiChi, 99, 100) != 6000000 || Unlock_Price(TaiChi, 100, 100) != 10000000 {
+	if Unlock_Price(TaiChi, 99, 100) != 60000000 || Unlock_Price(TaiChi, 100, 100) != 100000000 {
 		t.Fatal("trial ends at trial_until")
 	}
 }
@@ -305,7 +305,7 @@ func TestGatedPackNeedsAGrantForItsProduct(t *testing.T) {
 	requestGrant(t, handler, owner.Token, "inbe.practice.unknown", 403)
 	requestGrant(t, handler, "", TaiChi, 401)
 	requestGrant(t, handler, owner.Token, "tai chi", 400)
-	creditDew(t, store, private, owner.UserID, "pack-fixture", 10*UnitsPerDew)
+	creditDew(t, store, private, owner.UserID, "pack-fixture", 100*UnitsPerDew)
 	postUnlock(t, handler, owner.Token, `{"product":"inbe.practice.taichi"}`, 200)
 	issued := requestGrant(t, handler, owner.Token, TaiChi, 200)
 	now := time.Now().Unix()
@@ -423,8 +423,8 @@ func TestRescaleDewIsIdempotent(t *testing.T) {
 	rich := newTestIdentity(t, handler, 0x85)
 	spent := newTestIdentity(t, handler, 0x86)
 	empty := newTestIdentity(t, handler, 0x87)
-	creditDew(t, store, private, rich.UserID, "rescale-rich", 14*UnitsPerDew)
-	creditDew(t, store, private, spent.UserID, "rescale-spent", 10*UnitsPerDew)
+	creditDew(t, store, private, rich.UserID, "rescale-rich", 104*UnitsPerDew)
+	creditDew(t, store, private, spent.UserID, "rescale-spent", 100*UnitsPerDew)
 	postUnlock(t, handler, rich.Token, `{"product":"inbe.practice.taichi"}`, 200)
 	postUnlock(t, handler, spent.Token, `{"product":"inbe.practice.taichi"}`, 200)
 	for _, statement := range []string{
@@ -440,7 +440,7 @@ func TestRescaleDewIsIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	first := TokenRescale_Apply(store.Database, ctx, private, 20)
+	first := TokenRescale_Apply(store.Database, ctx, private, "rescale-v1", 20)
 	if first.Error != nil || !first.Applied || first.Accounts != 1 || first.UnitsBefore != 4*UnitsPerDew ||
 		first.UnitsAfter != 80*UnitsPerDew || first.Intents != 2 || first.Deposits != 1 {
 		t.Fatalf("rescale: %+v", first)
@@ -473,19 +473,121 @@ func TestRescaleDewIsIdempotent(t *testing.T) {
 		!TokenReceipt_ValidSignature(private.Public().(ed25519.PublicKey), last) {
 		t.Fatalf("rescale credit: %+v", last)
 	}
-	again := TokenRescale_Apply(store.Database, ctx, private, 20)
+	again := TokenRescale_Apply(store.Database, ctx, private, "rescale-v1", 20)
 	if again.Error != nil || again.Applied || again.Accounts != first.Accounts || again.UnitsAfter != first.UnitsAfter {
 		t.Fatalf("second rescale: %+v", again)
 	}
 	check()
-	if other := TokenRescale_Apply(store.Database, ctx, private, 30); other.Error == nil {
-		t.Fatal("a second, different rescale was accepted")
+	if other := TokenRescale_Apply(store.Database, ctx, private, "rescale-v1", 30); other.Error == nil {
+		t.Fatal("the same rescale was accepted with another factor")
 	}
-	if invalid := TokenRescale_Apply(store.Database, ctx, private, 1); invalid.Error == nil {
+	if invalid := TokenRescale_Apply(store.Database, ctx, private, "rescale-v3", 1); invalid.Error == nil {
 		t.Fatal("rescale factor 1 accepted")
+	}
+	for _, name := range []string{"", "rescale-", "v2", "Rescale-v2", "rescale-V2", "rescale-v 2", "rescale-" + strings.Repeat("x", 57)} {
+		if invalid := TokenRescale_Apply(store.Database, ctx, private, name, 10); invalid.Error == nil {
+			t.Fatalf("rescale name %q accepted", name)
+		}
+	}
+	// A later ratio change rescales again under a new name.
+	next := TokenRescale_Apply(store.Database, ctx, private, "rescale-v2", 10)
+	if next.Error != nil || !next.Applied || next.Accounts != 1 || next.UnitsBefore != 80*UnitsPerDew ||
+		next.UnitsAfter != 800*UnitsPerDew || next.Intents != 2 || next.Deposits != 1 {
+		t.Fatalf("second rescale: %+v", next)
+	}
+	if got := TokenLedger_Balance(store.Database, ctx, rich.UserID, AssetID); got.Error != nil || got.Value != 800*UnitsPerDew {
+		t.Fatalf("balance after the second rescale: %+v", got)
+	}
+	var units int64
+	if err := store.Database.QueryRow(`SELECT token_units FROM token_payment_intents WHERE id='pending'`).Scan(&units); err != nil || units != 1000000000 {
+		t.Fatalf("intent after the second rescale: %d, %v", units, err)
+	}
+	credits = TokenLedger_List(store.Database, ctx, rich.UserID, AssetID, 0)
+	last = credits.Value[len(credits.Value)-1]
+	if credits.Error != nil || last.SourceRef != "rescale-v2" || last.AmountDelta != 720*UnitsPerDew {
+		t.Fatalf("second rescale credit: %+v", last)
 	}
 	checkpoint := TokenCheckpoint_Create(store.Database, ctx, private, errTokenIssuerReadOnly)
 	if checkpoint.Error != nil || checkpoint.Value.LedgerSeq != last.LedgerSeq {
 		t.Fatalf("checkpoint: %+v", checkpoint)
 	}
+}
+
+func TestScaleTokenProducts(t *testing.T) {
+	for _, tc := range []struct {
+		raw, want string
+	}{
+		{"", ""},
+		{"dew_small:5000000:1000000000000", "dew_small:50000000:1000000000000"},
+		{"play_dew:2000000, dew_large:9000000:3000000000000", "play_dew:20000000,dew_large:90000000:3000000000000"},
+		{"broken,:7:1,odd:x:1", "broken,:7:1,odd:x:1"},
+	} {
+		got := TokenRescale_ScaleProducts(tc.raw, 10)
+		if got.Error != nil || got.Value != tc.want {
+			t.Fatalf("%q: %+v, want %q", tc.raw, got, tc.want)
+		}
+	}
+	if overflow := TokenRescale_ScaleProducts("big:4611686018427387904", 2); overflow.Error == nil {
+		t.Fatal("an overflowing product was scaled")
+	}
+}
+
+func TestDewRatioRaisesTheRatioOnce(t *testing.T) {
+	server, store, handler, private := unlockFixture(t)
+	ctx := context.Background()
+	owner := newTestIdentity(t, handler, 0x88)
+	creditDew(t, store, private, owner.UserID, "ratio-fixture", 3*UnitsPerDew)
+	configuration := server.Cfg
+	configuration.MoneroRateAtomicAmount = 1000000000000
+	configuration.MoneroRateTokenUnits = 1000 * UnitsPerDew
+	t.Setenv("DAOCHI_TOKEN_PRODUCTS", "dew_small:5000000:1000000000000")
+	run := func(arguments ...string) (string, Error) {
+		t.Helper()
+		reader, writer, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout := os.Stdout
+		os.Stdout = writer
+		result := Startup_DewRatio(configuration, arguments)
+		os.Stdout = stdout
+		writer.Close()
+		printed, _ := io.ReadAll(reader)
+		return string(printed), result
+	}
+	balance := func(want int64) {
+		t.Helper()
+		if got := TokenLedger_Balance(store.Database, ctx, owner.UserID, AssetID); got.Error != nil || got.Value != want {
+			t.Fatalf("balance: %+v, want %d", got, want)
+		}
+	}
+	for _, arguments := range [][]string{
+		{"rescale-v2", "1000000000000"},
+		{"rescale-v2", "1000000000000", "1500000000"},
+		{"rescale-v2", "2000000000000", "20000000000"},
+		{"rescale-v2", "1000000000000", "500000000"},
+		{"rescale-v2", "0", "10000000000"},
+		{"Rescale", "1000000000000", "10000000000"},
+	} {
+		if _, err := run(arguments...); err == nil {
+			t.Fatalf("dew-ratio %v accepted", arguments)
+		}
+	}
+	balance(3 * UnitsPerDew)
+	if printed, err := run("rescale-v2", "1000000000000", "1000000000"); err != nil || printed != "Dew ratio unchanged\n" {
+		t.Fatalf("unchanged ratio: %q, %v", printed, err)
+	}
+	balance(3 * UnitsPerDew)
+	printed, err := run("rescale-v2", "1000000000000", "10000000000")
+	if err != nil || !strings.HasSuffix(printed, "MONERO_RATE_ATOMIC_AMOUNT=1000000000000\n"+
+		"MONERO_RATE_TOKEN_UNITS=10000000000\nDAOCHI_TOKEN_PRODUCTS=dew_small:50000000:1000000000000\n") {
+		t.Fatalf("raised ratio: %q, %v", printed, err)
+	}
+	balance(30 * UnitsPerDew)
+	// A deploy that stopped before writing the environment finishes without a second credit.
+	if printed, err := run("rescale-v2", "1000000000000", "10000000000"); err != nil ||
+		!strings.Contains(printed, "already applied") || !strings.Contains(printed, "MONERO_RATE_TOKEN_UNITS=10000000000\n") {
+		t.Fatalf("repeated raise: %q, %v", printed, err)
+	}
+	balance(30 * UnitsPerDew)
 }

@@ -1,11 +1,13 @@
 // One-shot Dew rescale for a change of the node's Dew per XMR ratio. Existing
 // ledger rows are never rewritten: each positive balance gains (factor-1)×balance
-// through the signed payment-credit path, with the account as the payment ID.
-// Uncredited Monero invoices and deposits are scaled in the same transaction,
-// and a marker row makes a second run change nothing.
+// through the signed payment-credit path, with the rescale's name as the
+// provider and the account as the payment ID. Uncredited Monero invoices and
+// deposits are scaled in the same transaction, and a marker row under the name
+// makes a second run change nothing. Each ratio change needs a new name.
 #import "std/go_types"
 #import "protocol"
 ledger :: #import "token_ledger";
+tokens :: #import "token";
 receipts :: #import "token_receipt";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
@@ -14,8 +16,7 @@ errors :: #import "std/errors_go";
 native :: #system_library "go:database/sql";
 go_format :: #system_library "go:fmt";
 builtin :: #system_library "go:builtin";
-
-RescaleProvider :: "rescale-v1";
+go_strings :: #system_library "go:strings";
 
 RescaleResult :: struct {
     factor: s64
@@ -39,9 +40,34 @@ BalancesResult :: struct {
     error: Error
 }
 MaximumUnits :: 9223372036854775807
+MaximumNameLength :: 64
+NamePrefix :: "rescale-";
 RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
 AppendBalance :: (values: []RescaleBalance, value: RescaleBalance) -> []RescaleBalance #foreign builtin "append";
 FactorError :: (format: string, factor: s64) -> Error #foreign go_format "Errorf";
+TrimPrefix :: (value: string, prefix: string) -> string #foreign go_strings "TrimPrefix";
+TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";
+Split :: (value: string, separator: string) -> []string #foreign go_strings "Split";
+Join :: (values: []string, separator: string) -> string #foreign go_strings "Join";
+IntegerText :: (value: s64) -> string #foreign go_format "Sprint";
+
+// "rescale-" followed by lowercase letters, digits and hyphens.
+ValidName :: (name: string) -> bool {
+    rest := TrimPrefix(name, NamePrefix)
+    if rest.count == name.count || rest.count == 0 || name.count > MaximumNameLength {
+        return false
+    }
+    for byte: rest {
+        lower := byte >= cast(u8)97 && byte <= cast(u8)122
+        digit := byte >= cast(u8)48 && byte <= cast(u8)57
+        // '-'.
+        hyphen := byte == cast(u8)45
+        if !lower && !digit && !hyphen {
+            return false
+        }
+    }
+    return true
+}
 
 TotalTx :: (transaction: *sql.Transaction, context: ctx.Context) -> ledger.BalanceResult {
     result: ledger.BalanceResult
@@ -102,6 +128,37 @@ ScaleTx :: (transaction: *sql.Transaction, context: ctx.Context, query: string, 
 }
 
 #scope_export
+ProductsResult :: struct {
+    value: string
+    error: Error
+}
+
+// DAOCHI_TOKEN_PRODUCTS ("id:units[:atomic]" items joined by commas) with each
+// product's Dew multiplied by factor, so every product keeps its Monero price.
+// Items the node skips are kept as they are.
+ScaleProducts :: (raw: string, factor: s64) -> ProductsResult {
+    result: ProductsResult
+    items := Split(raw, ",")
+    for index: 0..items.count - 1 {
+        parts := Split(TrimSpace(items[index]), ":")
+        if parts.count < 2 || parts.count > 3 || parts[0] == "" {
+            continue
+        }
+        units := tokens.ParseInteger(parts[1])
+        if !units.is_ok || units.value <= 0 {
+            continue
+        }
+        if units.value > MaximumUnits / factor {
+            result.error = errors.New("rescale overflow")
+            return result
+        }
+        parts[1] = IntegerText(units.value * factor)
+        items[index] = Join(parts, ":")
+    }
+    result.value = Join(items, ",")
+    return result
+}
+
 SchemaSQL :: () -> string {
     return #string SQL
 CREATE TABLE IF NOT EXISTS token_rescales (
@@ -113,9 +170,13 @@ CREATE TABLE IF NOT EXISTS token_rescales (
 SQL;
 }
 
-Apply :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, factor: s64) -> RescaleResult {
+Apply :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, name: string, factor: s64) -> RescaleResult {
     result: RescaleResult
     result.factor = factor
+    if !ValidName(name) {
+        result.error = errors.New("rescale name must be rescale- and lowercase letters, digits or hyphens")
+        return result
+    }
     if factor < 2 {
         result.error = errors.New("rescale factor must be at least 2")
         return result
@@ -128,7 +189,7 @@ Apply :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, 
     transaction := opened.value
     RollbackAtReturn(transaction)
     previous: RescaleResult
-    markerArguments: [1]Any = .[RescaleProvider]
+    markerArguments: [1]Any = .[name]
     markerDestinations: [6]Any = .[*previous.factor, *previous.accounts, *previous.units_before,
         *previous.units_after, *previous.intents, *previous.deposits]
     marker := sql.ScanRow(sql.QueryRowTx(transaction, context,
@@ -136,7 +197,7 @@ Apply :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, 
         markerArguments[:]), markerDestinations[:])
     if marker == null {
         if previous.factor != factor {
-            result.error = FactorError("Dew was already rescaled by %d", previous.factor)
+            result.error = FactorError("this rescale already applied factor %d", previous.factor)
             return result
         }
         return previous
@@ -166,8 +227,8 @@ Apply :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, 
         event.EventType = "credit"
         event.AmountDelta = balance.units * (factor - 1)
         event.SourceType = "rescale"
-        event.SourceRef = RescaleProvider
-        credited := ledger.CreditPaymentTx(transaction, context, signer, RescaleProvider,
+        event.SourceRef = name
+        credited := ledger.CreditPaymentTx(transaction, context, signer, name,
             balance.account, event, errors.New("Dew issuer unavailable"))
         result.error = credited.error
         if result.error != null {
@@ -214,7 +275,7 @@ Apply :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, 
         return result
     }
     result.units_after = after.value
-    saveArguments: [7]Any = .[RescaleProvider, factor, result.accounts, result.units_before,
+    saveArguments: [7]Any = .[name, factor, result.accounts, result.units_before,
         result.units_after, result.intents, result.deposits]
     saved := sql.ExecTx(transaction, context,
         "INSERT INTO token_rescales(provider,factor,accounts,units_before,units_after,intents,deposits) VALUES(?1,?2,?3,?4,?5,?6,?7)",

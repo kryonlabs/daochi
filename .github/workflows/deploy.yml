@@ -110,8 +110,19 @@ jobs:
               printf '%s\n' '[Service]' 'Environment=DAOCHI_NODE_SYNC_TOKEN=$mesh_token' > /etc/systemd/system/daochi.service.d/20-daochi-mesh.conf
               systemctl daemon-reload
             fi
+            install -m 600 /etc/daochi/daochi.env \"/var/lib/daochi/backups/daochi.env.$STAMP\"
             python3 /opt/daochi-src/scripts/migrate-legacy-env.py /etc/daochi/daochi.env --apply --canonical-only
-            systemctl restart daochi.service
+            systemctl stop daochi.service
+            # A raised Dew ratio in deploy/dew-ratio.env rescales Dew and rewrites
+            # the environment; if that fails, the previous node comes back.
+            if ! sh /opt/daochi-src/deploy/apply-dew-ratio.sh /opt/daochi-src/deploy/dew-ratio.env /etc/daochi/daochi.env /opt/daochi/daochi /var/lib/daochi/daochi.db; then
+              cp \"/var/lib/daochi/backups/daochi.pre-upgrade.$STAMP\" /opt/daochi/daochi
+              cp \"/var/lib/daochi/backups/daochi.db.$STAMP\" /var/lib/daochi/daochi.db
+              cp \"/var/lib/daochi/backups/daochi.env.$STAMP\" /etc/daochi/daochi.env
+              systemctl start daochi.service
+              exit 1
+            fi
+            systemctl start daochi.service
             sleep 3
             systemctl is-active --quiet daochi.service
           "
@@ -129,7 +140,7 @@ jobs:
           echo "health check: $code"
           if [ "$code" != "200" ]; then
             echo "::error::health check failed ($code) - rolling back"
-            ssh "$REMOTE" "systemctl stop daochi.service && cp /var/lib/daochi/backups/daochi.pre-upgrade.$STAMP /opt/daochi/daochi && cp /var/lib/daochi/backups/daochi.db.$STAMP /var/lib/daochi/daochi.db && systemctl start daochi.service"
+            ssh "$REMOTE" "systemctl stop daochi.service && cp /var/lib/daochi/backups/daochi.pre-upgrade.$STAMP /opt/daochi/daochi && cp /var/lib/daochi/backups/daochi.db.$STAMP /var/lib/daochi/daochi.db && cp /var/lib/daochi/backups/daochi.env.$STAMP /etc/daochi/daochi.env && systemctl start daochi.service"
             exit 1
           fi
           pub=000
@@ -141,6 +152,6 @@ jobs:
           echo "public endpoint through Cloudflare: $pub"
           if [ "$pub" != "200" ]; then
             echo "::error::public health check failed ($pub) - rolling back"
-            ssh "$REMOTE" "systemctl stop daochi.service && cp /var/lib/daochi/backups/daochi.pre-upgrade.$STAMP /opt/daochi/daochi && cp /var/lib/daochi/backups/daochi.db.$STAMP /var/lib/daochi/daochi.db && systemctl start daochi.service"
+            ssh "$REMOTE" "systemctl stop daochi.service && cp /var/lib/daochi/backups/daochi.pre-upgrade.$STAMP /opt/daochi/daochi && cp /var/lib/daochi/backups/daochi.db.$STAMP /var/lib/daochi/daochi.db && cp /var/lib/daochi/backups/daochi.env.$STAMP /etc/daochi/daochi.env && systemctl start daochi.service"
             exit 1
           fi

@@ -36,7 +36,7 @@ RewardClaim :: struct {
 // The rewards and their Dew, in integer millionths.
 RewardCount :: 2
 RewardNames: [2]string = .["shovey.secret-chest", "shovey.campaign-complete"];
-RewardUnits: [2]s64 = .[200000, 500000];
+RewardUnits: [2]s64 = .[2000000, 5000000];
 
 MakeOffers :: (count: isize) -> []RewardOffer #foreign builtin "make";
 AppendOffer :: (values: []RewardOffer, value: RewardOffer) -> []RewardOffer #foreign builtin "append";

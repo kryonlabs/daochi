@@ -294,17 +294,17 @@ Inbe calls this account credit **Dew**. Its existing asset ID stays
 `waozi:token`, with 1,000,000 integer ledger units per Dew. Storage prices
 are fixed in **XMR**, with no dollar peg, exchange-rate feed, or fiat conversion.
 Choose how much Dew one XMR buys and express that ratio in integer units
-(1 XMR = 1,000,000,000,000 atomic units). For 1000 Dew per XMR, set
+(1 XMR = 1,000,000,000,000 atomic units). For 10,000 Dew per XMR, set
 `MONERO_RATE_ATOMIC_AMOUNT=1000000000000` and
-`MONERO_RATE_TOKEN_UNITS=1000000000`. One month of 1 GB storage costs 2 Dew
-(0.002 XMR at that ratio) and one year costs 20 Dew. The app shows
+`MONERO_RATE_TOKEN_UNITS=10000000000`. One month of 1 GB storage costs 20 Dew
+(0.002 XMR at that ratio) and one year costs 200 Dew. The app shows
 the node's Dew prices before purchase. Confirmed deposits retain their
 snapshotted fixed ratio, and existing Dew balances remain intact.
 
 Set `DAOCHI_STORAGE_PLANS_ENABLED=true` on a node offering prepaid storage.
 A valid fixed Monero ratio is required before upgrades can be purchased.
-The free allowance is the node's `DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES`. Two sizes are sold: 1 GiB costs 2 Dew a month
-or 20 Dew a year, and 5 GiB costs 6 Dew a month or 60 Dew a year.
+The free allowance is the node's `DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES`. Two sizes are sold: 1 GiB costs 20 Dew a month
+or 200 Dew a year, and 5 GiB costs 60 Dew a month or 600 Dew a year.
 Buying the current size extends an existing paid period or starts
 immediately, with calendar month/year expiry. Buying the other size starts
 now, and the unexpired time carries over converted by the monthly prices
@@ -324,7 +324,7 @@ The Inbe Play build has no Dew purchase or storage-upgrade UI.
 
 Unlocks are priced by the node, never by the client. `GET /api/v1/unlocks`
 lists the account's unlocks and each product's current and regular price;
-`POST` with `{"product":"inbe.practice.taichi"}` debits the price once (10 Dew)
+`POST` with `{"product":"inbe.practice.taichi"}` debits the price once (100 Dew)
 and records the unlock in the same transaction. Setting
 `DAOCHI_UNLOCK_TRIAL_UNTIL` to a Unix time sells every unlock at 90% off until
 then. `POST /api/v1/unlocks/grant` returns a one-hour download grant, signed by
@@ -372,10 +372,20 @@ empty. The USD rate is display only: it never sets a price, a charge or a
 Dew credit, which all follow the fixed funding ratio.
 
 When the node's Dew per XMR ratio changes, stop the service and run
-`daochi rescale-dew FACTOR` once with the node's environment. Every positive
-balance gains `(FACTOR-1)×balance` as a signed credit, so no ledger row is
-rewritten; uncredited Monero invoices and deposits are scaled in the same
-transaction, and a new checkpoint is signed. Running it again changes nothing.
+`daochi rescale-dew NAME FACTOR` once with the node's environment. NAME is
+`rescale-` and lowercase letters, digits or hyphens, new for each ratio change
+(`rescale-v1` was 5 to 100 Dew per XMR, `rescale-v2` 1000 to 10,000). Every
+positive balance gains `(FACTOR-1)×balance` as a signed credit, so no ledger
+row is rewritten; uncredited Monero invoices and deposits are scaled in the
+same transaction, and a new checkpoint is signed. Running it again changes
+nothing.
+
+The production node's ratio lives in `deploy/dew-ratio.env`. When a deploy
+finds it raised by a whole factor, `scripts/apply-dew-ratio.py` stops the
+service, runs `rescale-dew` under the file's `DEW_RESCALE` name and writes the
+new ratio and the scaled `DAOCHI_TOKEN_PRODUCTS` into the node environment
+before starting again. A failed deploy restores the previous binary, database
+and environment together.
 
 To reward one person with Dew, for example as thanks for a past donation, stop
 the service and run `daochi reward-dew REWARD ACCOUNT DEW` with the node's

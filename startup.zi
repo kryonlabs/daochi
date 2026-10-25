@@ -106,6 +106,10 @@ PrintRescale :: (format: string, status: string, factor: s64, accounts: s64, bef
     intents: s64, deposits: s64) #foreign go_format "Printf";
 PrintCheckpoint :: (format: string, sequence: s64, root: string) #foreign go_format "Printf";
 PrintReward :: (format: string, reward: string, status: string, dew: s64, account: string, balance: s64) #foreign go_format "Printf";
+PrintNote :: (format: string) #foreign go_format "Printf";
+PrintSetting :: (format: string, value: s64) #foreign go_format "Printf";
+PrintText :: (format: string, value: string) #foreign go_format "Printf";
+Getenv :: (key: string) -> string #foreign go_os "Getenv";
 Minute :: 60000000000;
 Second :: 1000000000;
 
@@ -254,16 +258,7 @@ WithNodeKey :: (configuration: config.Config) -> config.Config {
 }
 
 #scope_file
-// Run once with the service stopped, after the node's Dew per XMR ratio changes.
-RescaleDew :: (configuration: config.Config, arguments: []string) -> Error {
-    usage := errors.New("usage: daochi rescale-dew FACTOR")
-    if arguments.count != 1 {
-        return usage
-    }
-    factor := tokens.ParseInteger(arguments[0])
-    if !factor.is_ok {
-        return usage
-    }
+ApplyRescale :: (configuration: config.Config, name: string, factor: s64) -> Error {
     issuer := policy.Issuer(configuration, errors.New("rescaling needs the Dew issuer private key"))
     if issuer.error != null {
         return issuer.error
@@ -275,7 +270,7 @@ RescaleDew :: (configuration: config.Config, arguments: []string) -> Error {
     store := opened.value
     CloseAtReturn(CloseStore, store)
     context := ctx.Background()
-    result := rescales.Apply(store.database, context, issuer.value, factor.value)
+    result := rescales.Apply(store.database, context, issuer.value, name, factor)
     if result.error != null {
         return result.error
     }
@@ -293,6 +288,62 @@ RescaleDew :: (configuration: config.Config, arguments: []string) -> Error {
     }
     PrintCheckpoint("Dew checkpoint at ledger sequence %d, root %s\n",
         checkpoint.value.LedgerSeq, checkpoint.value.LedgerRoot)
+    return null
+}
+
+// Run once with the service stopped, after the node's Dew per XMR ratio changes.
+// NAME is new for each ratio change, so the same rescale never applies twice.
+RescaleDew :: (configuration: config.Config, arguments: []string) -> Error {
+    usage := errors.New("usage: daochi rescale-dew NAME FACTOR")
+    if arguments.count != 2 {
+        return usage
+    }
+    factor := tokens.ParseInteger(arguments[1])
+    if !factor.is_ok {
+        return usage
+    }
+    return ApplyRescale(configuration, arguments[0], factor.value)
+}
+
+// Run by the deploy with the service stopped, to move the node to ATOMIC Monero
+// atomic units per UNITS Dew units. A whole-factor raise rescales Dew once under
+// NAME and prints the node's new MONERO_RATE_* and DAOCHI_TOKEN_PRODUCTS lines;
+// the node's current ratio prints nothing to change.
+DewRatio :: (configuration: config.Config, arguments: []string) -> Error {
+    usage := errors.New("usage: daochi dew-ratio NAME ATOMIC UNITS")
+    if arguments.count != 3 {
+        return usage
+    }
+    atomic := tokens.ParseInteger(arguments[1])
+    units := tokens.ParseInteger(arguments[2])
+    if !atomic.is_ok || !units.is_ok || atomic.value <= 0 || units.value <= 0 {
+        return usage
+    }
+    currentAtomic := configuration.MoneroRateAtomicAmount
+    currentUnits := configuration.MoneroRateTokenUnits
+    if currentAtomic == atomic.value && currentUnits == units.value {
+        PrintNote("Dew ratio unchanged\n")
+        return null
+    }
+    if currentAtomic != atomic.value || currentUnits <= 0 || units.value % currentUnits != 0 ||
+    units.value / currentUnits < 2 {
+        return errors.New("the Dew ratio only rises by a whole factor at the same MONERO_RATE_ATOMIC_AMOUNT")
+    }
+    factor := units.value / currentUnits
+    rawProducts := Getenv("DAOCHI_TOKEN_PRODUCTS")
+    products := rescales.ScaleProducts(rawProducts, factor)
+    if products.error != null {
+        return products.error
+    }
+    error := ApplyRescale(configuration, arguments[0], factor)
+    if error != null {
+        return error
+    }
+    PrintSetting("MONERO_RATE_ATOMIC_AMOUNT=%d\n", atomic.value)
+    PrintSetting("MONERO_RATE_TOKEN_UNITS=%d\n", units.value)
+    if rawProducts != "" {
+        PrintText("DAOCHI_TOKEN_PRODUCTS=%s\n", products.value)
+    }
     return null
 }
 
@@ -359,6 +410,13 @@ RunPrepared :: (configuration: config.Config, arguments: []string, createVerifie
         error := RescaleDew(configuration, arguments[2:])
         if error != null {
             FatalError("rescale-dew: %v", error)
+        }
+        return
+    }
+    if arguments.count > 1 && arguments[1] == "dew-ratio" {
+        error := DewRatio(configuration, arguments[2:])
+        if error != null {
+            FatalError("dew-ratio: %v", error)
         }
         return
     }

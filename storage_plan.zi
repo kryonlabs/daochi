@@ -102,14 +102,14 @@ ActiveBytes :: (plan: Plan, now: s64, free: s64) -> s64 {
     return bytes
 }
 
-// At 1000 Dew per XMR: 1 GB costs 0.002 XMR a month or 0.02 XMR a year, and
+// At 10000 Dew per XMR: 1 GB costs 0.002 XMR a month or 0.02 XMR a year, and
 // 5 GB three times that.
 Price :: (size: string, period: string) -> s64 {
     monthly: s64 = 0
     if size == "1gb" {
-        monthly = 2 * UnitsPerDew
+        monthly = 20 * UnitsPerDew
     } else if size == "5gb" {
-        monthly = 6 * UnitsPerDew
+        monthly = 60 * UnitsPerDew
     }
     if period == "monthly" {
         return monthly

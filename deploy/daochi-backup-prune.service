@@ -4,4 +4,4 @@ ConditionPathIsDirectory=/var/lib/daochi/backups
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/find /var/lib/daochi/backups -type f ( -name daochi.pre-upgrade.* -o -name daochi.db.* ) -mtime +30 -delete
+ExecStart=/usr/bin/find /var/lib/daochi/backups -type f ( -name daochi.pre-upgrade.* -o -name daochi.db.* -o -name daochi.env.* ) -mtime +30 -delete

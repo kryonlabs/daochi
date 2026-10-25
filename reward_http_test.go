@@ -39,18 +39,18 @@ func TestGameRewardsCreditEachAccountOnce(t *testing.T) {
 		return value
 	}
 	first := claim(player.Token, `{"reward":"shovey.secret-chest"}`, 200)
-	if !first.Credited || first.Units != UnitsPerDew/5 || first.Balance != UnitsPerDew/5 {
+	if !first.Credited || first.Units != 2*UnitsPerDew || first.Balance != 2*UnitsPerDew {
 		t.Fatalf("first claim: %+v", first)
 	}
 	// Asking again, even many times, credits nothing more.
 	for range 3 {
 		again := claim(player.Token, `{"reward":"shovey.secret-chest"}`, 200)
-		if again.Credited || again.Balance != UnitsPerDew/5 {
+		if again.Credited || again.Balance != 2*UnitsPerDew {
 			t.Fatalf("repeated claim: %+v", again)
 		}
 	}
 	done := claim(player.Token, `{"reward":"shovey.campaign-complete"}`, 200)
-	if !done.Credited || done.Units != UnitsPerDew/2 || done.Balance != UnitsPerDew/5+UnitsPerDew/2 {
+	if !done.Credited || done.Units != 5*UnitsPerDew || done.Balance != 2*UnitsPerDew+5*UnitsPerDew {
 		t.Fatalf("second reward: %+v", done)
 	}
 	if got := TokenLedger_Balance(store.Database, ctx, other.UserID, AssetID); got.Error != nil || got.Value != 0 {
@@ -65,7 +65,7 @@ func TestGameRewardsCreditEachAccountOnce(t *testing.T) {
 	if res.Code != 401 {
 		t.Fatalf("unauthenticated claim: %d", res.Code)
 	}
-	if got := TokenLedger_Balance(store.Database, ctx, player.UserID, AssetID); got.Error != nil || got.Value != UnitsPerDew/5+UnitsPerDew/2 {
+	if got := TokenLedger_Balance(store.Database, ctx, player.UserID, AssetID); got.Error != nil || got.Value != 2*UnitsPerDew+5*UnitsPerDew {
 		t.Fatalf("refused claims changed the balance: %+v", got)
 	}
 	listed := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/rewards", player.Token, nil)

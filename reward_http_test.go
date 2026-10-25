@@ -38,6 +38,8 @@ func TestGameRewardsCreditEachAccountOnce(t *testing.T) {
 		}
 		return value
 	}
+	claim(player.Token, `{"reward":"shovey.secret-chest"}`, 403)
+	seedGameEvidence(t, store, player.UserID, 28)
 	first := claim(player.Token, `{"reward":"shovey.secret-chest"}`, 200)
 	if !first.Credited || first.Units != 2*UnitsPerDew || first.Balance != 2*UnitsPerDew {
 		t.Fatalf("first claim: %+v", first)
@@ -49,6 +51,8 @@ func TestGameRewardsCreditEachAccountOnce(t *testing.T) {
 			t.Fatalf("repeated claim: %+v", again)
 		}
 	}
+	claim(player.Token, `{"reward":"shovey.campaign-complete"}`, 403)
+	seedGameEvidence(t, store, player.UserID, 175)
 	done := claim(player.Token, `{"reward":"shovey.campaign-complete"}`, 200)
 	if !done.Credited || done.Units != 5*UnitsPerDew || done.Balance != 2*UnitsPerDew+5*UnitsPerDew {
 		t.Fatalf("second reward: %+v", done)

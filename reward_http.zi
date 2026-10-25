@@ -5,6 +5,7 @@
 #import "std/go_types"
 service :: #import "account_http";
 rewards :: #import "token_reward";
+evidence :: #import "game_evidence";
 auth :: #import "http_auth";
 body :: #import "http_body";
 response :: #import "response";
@@ -86,6 +87,15 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
     units := Units(command.reward)
     if units <= 0 {
         response.Error(writer, 404, "unknown reward")
+        return
+    }
+    eligibility := evidence.Eligible(accounts.database, http.Context(request), user.value, command.reward)
+    if eligibility.error != null {
+        response.Error(writer, 503, "completion archive unavailable")
+        return
+    }
+    if !eligibility.eligible {
+        response.Error(writer, 403, "sync complete evidence for every required level with at least 10 moves before claiming this reward")
         return
     }
     given := rewards.Give(accounts.database, http.Context(request), accounts.configuration.WaoziIssuerPrivateKey,

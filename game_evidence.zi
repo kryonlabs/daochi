@@ -36,6 +36,7 @@ Completion :: struct {
 EvidenceResult :: struct {
     id: string #go_tag "json:\"id\""
     created: bool #go_tag "json:\"created\""
+    invalid: bool #go_tag "json:\"-\""
     error: Error #go_tag "json:\"-\""
 }
 EvidenceHistory :: struct {
@@ -116,6 +117,19 @@ Adjacent :: (first: s32, second: s32) -> bool {
     }
     return first / 12 == second / 12 && (first == second - 1 || first == second + 1)
 }
+PortalPair :: (map: string, first: s32, second: s32) -> bool {
+    kind := Ground(map, first)
+    if first == second || !Portal(kind) || Ground(map, second) != kind {
+        return false
+    }
+    count: s32 = 0
+    for cell: cast(s32)0..239 {
+        if Ground(map, cell) == kind {
+            count += 1
+        }
+    }
+    return count == 2
+}
 
 #scope_export
 SchemaSQL :: () -> string {
@@ -128,7 +142,7 @@ MapHash :: (game: string, level: s32, map: string) -> string {
     parts: [5]string = .[game, ".map.v1\n", Decimal(cast(s64)level, cast(isize)10), "\n", map]
     return Digest(Join(parts[:], ""))
 }
-Register :: (database: *sql.Database, context: ctx.Context, registration: MapRegistration) -> Error {
+ValidateRegistration :: (registration: MapRegistration) -> Error {
     if registration.game != "shovey.classic" || registration.source_version.count < 1 ||
         registration.source_version.count > 128 || registration.maps.count < 1 || registration.maps.count > 512 {
         return errors.New("invalid map registration")
@@ -146,6 +160,13 @@ Register :: (database: *sql.Database, context: ctx.Context, registration: MapReg
         if players != 1 {
             return errors.New("map must have one starting player")
         }
+    }
+    return null
+}
+Register :: (database: *sql.Database, context: ctx.Context, registration: MapRegistration) -> Error {
+    validation := ValidateRegistration(registration)
+    if validation != null {
+        return validation
     }
     opened := sql.Begin(database, context, null)
     if opened.error != null {
@@ -202,8 +223,7 @@ Validate :: (completion: Completion, map: string) -> Error {
                 return errors.New("complete evidence must start at the original player")
             }
         } else {
-            kind := Ground(map, previous)
-            portal := Portal(kind) && Ground(map, cell) == kind && previous != cell
+            portal := PortalPair(map, previous, cell)
             if !Adjacent(previous, cell) && !portal {
                 return errors.New("completion contains an impossible jump")
             }
@@ -234,10 +254,12 @@ Put :: (database: *sql.Database, context: ctx.Context, account: string, completi
     destinations: [1]Any = .[*map]
     result.error = sql.ScanRow(sql.QueryRow(database, context, ReadMap, arguments[:]), destinations[:])
     if result.error != null {
+        result.invalid = errors.Is(result.error, sql.NoRows())
         return result
     }
     result.error = Validate(completion, map)
     if result.error != null {
+        result.invalid = true
         return result
     }
     encoded := json.Marshal(completion)

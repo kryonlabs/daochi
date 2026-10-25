@@ -14,20 +14,55 @@ Document :: #string JSON
       "summary": "List the game rewards the node gives",
       "description": "Requires the account bearer. Returns rewards [{reward,units}], each reward's Dew in integer millionths.",
       "responses": {
-        "200": {"description": "The rewards and their Dew; no-store"},
-        "401": {"description": "Account authentication required"}
+        "200": {
+          "description": "The rewards and their Dew; no-store"
+        },
+        "401": {
+          "description": "Account authentication required"
+        }
       }
     },
     "post": {
       "summary": "Claim a game reward for the account",
-      "description": "The node sets each reward's Dew; the client names only the reward. Returns {reward,units,credited,balance}. A reward credits an account once: claiming it again credits nothing, returns credited false and the current balance.",
-      "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["reward"], "properties": {"reward": {"type": "string", "maxLength": 64}}}}}},
+      "description": "The node sets each reward's Dew; the client names only the reward. Requires synced complete evidence with at least 10 actual moves for every preceding level: Classic 1-28 for the secret chest, 1-175 for campaign completion. Offline play remains available; never-synced or incomplete legacy routes do not grant rewards. Returns {reward,units,credited,balance}; each account is credited once.",
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "reward"
+              ],
+              "properties": {
+                "reward": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              }
+            }
+          }
+        }
+      },
       "responses": {
-        "200": {"description": "Claimed, or claimed before, with the current balance"},
-        "400": {"description": "Malformed request"},
-        "401": {"description": "Account authentication required"},
-        "404": {"description": "Unknown reward"},
-        "503": {"description": "Rewards unavailable"}
+        "200": {
+          "description": "Claimed, or claimed before, with the current balance"
+        },
+        "400": {
+          "description": "Malformed request"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "403": {
+          "description": "Required qualifying completion evidence has not synced"
+        },
+        "404": {
+          "description": "Unknown reward"
+        },
+        "503": {
+          "description": "Rewards unavailable"
+        }
       }
     }
   }

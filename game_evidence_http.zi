@@ -1,0 +1,85 @@
+#import "std/go_types"
+service :: #import "account_http";
+evidence :: #import "game_evidence";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+strict :: #import "strict_json";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+numbers :: #system_library "go:strconv";
+
+#scope_file
+IntegerResult :: struct {
+    value: isize
+    error: Error
+}
+Integer :: (text: string) -> IntegerResult #go_results #foreign numbers "Atoi";
+
+#scope_export
+RegisterMaps :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    if !auth.RequireAdmin(writer, request, accounts.configuration.AdminToken) {
+        return
+    }
+    read := body.ReadJSON(writer, request, 1048576)
+    registration: evidence.MapRegistration
+    if read.error != null || strict.Decode(read.value, *registration) != null ||
+        evidence.ValidateRegistration(registration) != null {
+        response.Error(writer, 400, "invalid map registration")
+        return
+    }
+    error := evidence.Register(accounts.database, http.Context(request), registration)
+    if error != null {
+        response.Error(writer, 503, "map archive unavailable")
+        return
+    }
+    response.JSON(writer, 200, registration)
+}
+
+Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    if http.Method(request) == "POST" {
+        read := body.ReadJSON(writer, request, 1048576)
+        completion: evidence.Completion
+        if read.error != null || strict.Decode(read.value, *completion) != null {
+            response.Error(writer, 400, "invalid completion evidence")
+            return
+        }
+        saved := evidence.Put(accounts.database, http.Context(request), user.value, completion)
+        if saved.error != null {
+            if saved.invalid {
+                response.Error(writer, 400, "invalid completion or unknown map version")
+            } else {
+                response.Error(writer, 503, "completion archive unavailable")
+            }
+            return
+        }
+        response.JSON(writer, 200, saved)
+        return
+    }
+    query := url.Query(http.RequestURL(request))
+    game := url.Value(query, "game")
+    level := Integer(url.Value(query, "level"))
+    offsetText := url.Value(query, "offset")
+    if offsetText == "" {
+        offsetText = "0"
+    }
+    offset := Integer(offsetText)
+    if game != "shovey.classic" || level.error != null || level.value < 1 || level.value > 4096 ||
+        offset.error != null || offset.value < 0 || offset.value > 2147483647 {
+        response.Error(writer, 400, "invalid completion history query")
+        return
+    }
+    history := evidence.History(accounts.database, http.Context(request), user.value, game,
+        cast(s32)level.value, url.Value(query, "map_hash"), cast(s32)offset.value)
+    if history.error != null {
+        response.Error(writer, 400, "completion history unavailable or invalid map version")
+        return
+    }
+    response.JSON(writer, 200, history)
+}

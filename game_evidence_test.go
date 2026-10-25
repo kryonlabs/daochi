@@ -130,6 +130,29 @@ func TestGameEvidenceRejectsSolidsJumpsAndInventedCount(t *testing.T) {
 	}
 }
 
+func TestGameEvidenceAllowsExactPortalPairWithoutInterpolatingWalls(t *testing.T) {
+	layers, err := hex.DecodeString(evidenceMap())
+	if err != nil {
+		t.Fatal(err)
+	}
+	layers[14] = 0
+	layers[25], layers[200], layers[199] = 8, 8, 7
+	layers[240+200], layers[240+199] = 0, 0
+	board := hex.EncodeToString(layers)
+	c := Completion{Game: "shovey.classic", Level: 1, MapHash: GameEvidence_MapHash("shovey.classic", 1, board),
+		Moves: 2, Actions: "30", Trace: "0d19c8c7", EvidenceComplete: true}
+	if err := GameEvidence_Validate(c, board); err != nil {
+		t.Fatalf("paired portal crossing rejected: %v", err)
+	}
+	// A third same-colour portal cannot license an arbitrary jump.
+	layers[40], layers[240+40] = 8, 0
+	board = hex.EncodeToString(layers)
+	c.MapHash = GameEvidence_MapHash("shovey.classic", 1, board)
+	if GameEvidence_Validate(c, board) == nil {
+		t.Fatal("ambiguous portal group permitted a jump")
+	}
+}
+
 func TestGameEvidenceActualCapturedRoutes(t *testing.T) {
 	folder := os.Getenv("SHOVEY_EVIDENCE_FIXTURES")
 	if folder == "" {

@@ -366,7 +366,9 @@ func (s *Server) baselineSyncHTTPHandleSync(w http.ResponseWriter, r *http.Reque
 		slog.Error("record sync audit", "user", LogSafety_LogText(req.UserIDHash), "client", LogSafety_LogText(req.ClientID), "error", err)
 	}
 	syncOK = true
-	Response_JSON(w, http.StatusOK, response)
+	// Content coding has its own interoperability and failure tests. Keep the
+	// historical sync logic on the current shared HTTP representation writer.
+	Response_JSONRequest(w, r, http.StatusOK, response)
 }
 
 func (s *Server) baselineSyncHTTPHandleEncryptedSyncEnvelope(w http.ResponseWriter, r *http.Request, body []byte) bool {
@@ -498,7 +500,7 @@ func (s *Server) baselineSyncHTTPHandleEncryptedSyncEnvelope(w http.ResponseWrit
 		response.EncryptedPayloadsTruncated = true
 		response.EncryptedPayloadsNextSinceVersion = payloads[len(payloads)-1].ServerVersion
 	}
-	Response_JSON(w, http.StatusOK, response)
+	Response_JSONRequest(w, r, http.StatusOK, response)
 	return true
 }
 

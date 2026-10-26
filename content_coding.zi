@@ -1,35 +1,77 @@
-// HTTP content coding is outside the signed JSON representation. Both wire
-// bytes and decoded bytes remain bounded; the signature covers decoded JSON.
+// Content coding is outside signed JSON. Wire and decoded bytes have independent
+// bounds; transaction signatures continue to cover the exact decoded JSON.
 #import "std/go_types"
 io :: #import "std/io_go";
+ctx :: #import "std/context_go";
+sync :: #import "std/sync_go";
+channels :: #import "std/channel_go";
+selection :: #import "std/select_go";
 errors :: #import "std/errors_go";
+zstd :: #import "std/zstd_go";
+values :: #import "config_values";
 gzip :: #system_library "go:compress/gzip";
 strings :: #system_library "go:strings";
+go_sync :: #system_library "go:sync";
+go_context :: #system_library "go:context";
+go_reflect :: #system_library "go:reflect";
+go_io :: #system_library "go:io";
+go_os :: #system_library "go:os";
+builtin :: #system_library "go:builtin";
 
-Encoder :: #type #foreign gzip "Writer";
-Decoder :: #type #foreign gzip "Reader";
-EncoderResult :: struct {
-    value: *Encoder
+GzipEncoder :: #type #foreign gzip "Writer";
+GzipDecoder :: #type #foreign gzip "Reader";
+GzipEncoderResult :: struct {
+    value: *GzipEncoder
     error: Error
 }
-DecoderResult :: struct {
-    value: *Decoder
+GzipDecoderResult :: struct {
+    value: *GzipDecoder
+    error: Error
+}
+EncoderLease :: struct {
+    slot: isize
+    encoding: string
+    writer: io.Writer
+    finished: bool
     error: Error
 }
 
 #scope_file
+EncoderSlot :: struct {
+    gzip: *GzipEncoder
+    zstd: *zstd.Encoder
+}
+// A permit owns one slot exclusively, including while encoding. Waiting for
+// capacity observes cancellation and never constructs an additional context.
+slots: [4]EncoderSlot;
+permits: channels.Channel;
+pool_ready: bool;
+pool_lock: sync.Mutex;
+
 Split :: (value: string, separator: string) -> []string #foreign strings;
 Trim :: (value: string) -> string #foreign strings "TrimSpace";
 EqualFold :: (left: string, right: string) -> bool #foreign strings;
-OpenDecoder :: (reader: io.Reader) -> DecoderResult #go_results #foreign gzip "NewReader";
-CloseDecoderAtReturn :: (decoder: *Decoder) #go_defer #foreign gzip "(*Reader).Close";
-NewEncoderRaw :: (writer: io.Writer, level: isize) -> EncoderResult #go_results #foreign gzip "NewWriterLevel";
-CloseEncoderRaw :: (encoder: *Encoder) -> Error #foreign gzip "(*Writer).Close";
 Lower :: (value: string) -> string #foreign strings "ToLower";
+Getenv :: (key: string) -> string #foreign go_os;
+OpenGzipDecoder :: (reader: io.Reader) -> GzipDecoderResult #go_results #foreign gzip "NewReader";
+CloseGzipDecoderAtReturn :: (decoder: *GzipDecoder) #go_defer #foreign gzip "(*Reader).Close";
+NewGzipEncoder :: (writer: io.Writer, level: isize) -> GzipEncoderResult #go_results #foreign gzip "NewWriterLevel";
+ResetGzipEncoder :: (encoder: *GzipEncoder, writer: io.Writer) #foreign gzip "(*Writer).Reset";
+CloseGzipEncoder :: (encoder: *GzipEncoder) -> Error #foreign gzip "(*Writer).Close";
+Discard :: () -> io.Writer #go_field #foreign go_io;
+UnlockAtReturn :: (mutex: *sync.Mutex) #go_defer #foreign go_sync "(*Mutex).Unlock";
+ContextError :: (value: ctx.Context) -> Error #foreign go_context "Context.Err";
+Integer :: (value: selection.Value) -> s64 #foreign go_reflect "Value.Int";
+PermitCleanup :: #type (slot: isize) -> void;
+ReturnPermitAtReturn :: (callback: PermitCleanup, slot: isize) #go_defer #foreign builtin "call";
 
 Quality :: (value: string) -> s32 {
-    if value == "0" { return 0 }
-    if value == "1" { return 1000 }
+    if value == "0" {
+        return 0
+    }
+    if value == "1" {
+        return 1000
+    }
     if value.count < 2 || value.count > 5 || value[1] != 46 || (value[0] != 48 && value[0] != 49) {
         return -1
     }
@@ -46,18 +88,15 @@ Quality :: (value: string) -> s32 {
     return ifx value[0] == 49 then 1000 else result
 }
 
-#scope_export
-AcceptsGzip :: (header: string) -> bool {
-    if header.count == 0 || header.count > 4096 {
-        return false
-    }
+EncodingQuality :: (header: string, encoding: string) -> s32 {
     named: s32 = -1
     wildcard: s32 = -1
     for entry: Split(header, ",") {
         parts := Split(entry, ";")
-        if parts.count == 0 { continue }
         name := Trim(parts[0])
-        if !EqualFold(name, "gzip") && name != "*" { continue }
+        if !EqualFold(name, encoding) && name != "*" {
+            continue
+        }
         quality: s32 = 1000
         weight_seen := false
         for index: cast(s64)1..parts.count - 1 {
@@ -68,23 +107,182 @@ AcceptsGzip :: (header: string) -> bool {
             }
             weight_seen = true
             quality = Quality(Trim(parameter[1]))
-            if quality < 0 { quality = 0 }
+            if quality < 0 {
+                quality = 0
+            }
         }
         if name == "*" {
-            if wildcard < 0 || quality < wildcard { wildcard = quality }
+            if wildcard < 0 || quality < wildcard {
+                wildcard = quality
+            }
         } else if named < 0 || quality < named {
             named = quality
         }
     }
-    return ifx named >= 0 then named > 0 else wildcard > 0
+    if named >= 0 {
+        return named
+    }
+    if encoding == "identity" {
+        return ifx wildcard == 0 then 0 else 1000
+    }
+    return ifx wildcard >= 0 then wildcard else 0
 }
 
-NewEncoder :: (writer: io.Writer, level: isize) -> EncoderResult {
-    return NewEncoderRaw(writer, level)
+PermitChannel :: () -> channels.Channel {
+    sync.Lock(*pool_lock)
+    UnlockAtReturn(*pool_lock)
+    if !pool_ready {
+        permits = channels.New(cast(isize)0, cast(isize)4)
+        for index: cast(isize)0..3 {
+            unused channels.TrySend(permits, index)
+        }
+        pool_ready = true
+    }
+    return permits
 }
 
-CloseEncoder :: (encoder: *Encoder) -> Error {
-    return CloseEncoderRaw(encoder)
+ReturnPermit :: (slot: isize) {
+    unused channels.TrySend(permits, slot)
+}
+
+#scope_export
+ZstdResponsesEnabled :: () -> bool {
+    return values.Bool(Getenv("DAOCHI_HTTP_ZSTD_RESPONSES"), true)
+}
+
+ZstdRequestsEnabled :: () -> bool {
+    return values.Bool(Getenv("DAOCHI_HTTP_ZSTD_REQUESTS"), true)
+}
+
+// Empty means no acceptable representation. Identity is the fallback unless
+// explicitly preferred; an explicit exclusion overrides wildcard acceptance.
+SelectEncoding :: (header: string) -> string {
+    if header.count > 4096 {
+        return ""
+    }
+    gzip_quality := EncodingQuality(header, "gzip")
+    zstd_quality := EncodingQuality(header, "zstd")
+    if !ZstdResponsesEnabled() {
+        zstd_quality = 0
+    }
+    selected := "identity"
+    quality: s32 = 0
+    if gzip_quality > 0 {
+        selected = "gzip"
+        quality = gzip_quality
+    }
+    if zstd_quality > 0 && zstd_quality >= quality {
+        selected = "zstd"
+        quality = zstd_quality
+    }
+    identity_quality := EncodingQuality(header, "identity")
+    for entry: Split(header, ",") {
+        parts := Split(entry, ";")
+        if EqualFold(Trim(parts[0]), "identity") && identity_quality > quality {
+            return "identity"
+        }
+    }
+    if quality == 0 && identity_quality == 0 {
+        return ""
+    }
+    return selected
+}
+
+AcceptsGzip :: (header: string) -> bool {
+    return header.count > 0 && header.count <= 4096 && EncodingQuality(header, "gzip") > 0
+}
+
+AcceptsIdentity :: (header: string) -> bool {
+    return header.count <= 4096 && EncodingQuality(header, "identity") > 0
+}
+
+AcquireEncoder :: (request_context: ctx.Context, writer: io.Writer, encoding: string) -> EncoderLease {
+    lease: EncoderLease
+    lease.slot = cast(isize)-1
+    lease.encoding = encoding
+    if encoding != "gzip" && encoding != "zstd" {
+        lease.error = errors.New("unsupported encoder")
+        return lease
+    }
+    channel := PermitChannel()
+    cases: [2]selection.Case = .[
+        selection.Receive(channels.Interface(channel)), selection.Receive(ctx.Done(request_context))]
+    chosen := selection.Select(cases[:])
+    if chosen.chosen == 1 {
+        lease.error = ContextError(request_context)
+        return lease
+    }
+    lease.slot = cast(isize)Integer(chosen.value)
+    lease.error = ContextError(request_context)
+    if lease.error != null {
+        ReturnPermit(lease.slot)
+        lease.slot = cast(isize)-1
+        return lease
+    }
+    slot := *slots[lease.slot]
+    if encoding == "gzip" {
+        slot.zstd = null
+        if slot.gzip == null {
+            opened := NewGzipEncoder(writer, cast(isize)1)
+            slot.gzip = opened.value
+            lease.error = opened.error
+        } else {
+            ResetGzipEncoder(slot.gzip, writer)
+        }
+        lease.writer = cast(io.Writer)slot.gzip
+    } else {
+        slot.gzip = null
+        if slot.zstd == null {
+            opened := zstd.NewEncoder(writer)
+            slot.zstd = opened.value
+            lease.error = opened.error
+        } else {
+            zstd.Reset(slot.zstd, writer)
+        }
+        lease.writer = cast(io.Writer)slot.zstd
+    }
+    if lease.error != null {
+        ReturnPermit(lease.slot)
+        lease.slot = cast(isize)-1
+    }
+    return lease
+}
+
+FinishEncoder :: (lease: *EncoderLease) -> Error {
+    if lease.slot < 0 || lease.finished {
+        return errors.New("inactive encoder")
+    }
+    slot := *slots[lease.slot]
+    error: Error
+    if lease.encoding == "gzip" {
+        error = CloseGzipEncoder(slot.gzip)
+    } else {
+        error = zstd.CloseEncoder(slot.zstd)
+    }
+    lease.finished = error == null
+    return error
+}
+
+// Schedule this in the owning response, including native panic unwinding.
+// An unfinished/erroring stream is discarded; its permit is always returned.
+ReleaseEncoder :: (lease: *EncoderLease) {
+    if lease.slot < 0 {
+        return
+    }
+    index := lease.slot
+    lease.slot = cast(isize)-1
+    ReturnPermitAtReturn(ReturnPermit, index)
+    slot := *slots[index]
+    if !lease.finished {
+        slot.gzip = null
+        slot.zstd = null
+        return
+    }
+    if lease.encoding == "gzip" {
+        ResetGzipEncoder(slot.gzip, Discard())
+    } else {
+        zstd.Reset(slot.zstd, Discard())
+    }
 }
 
 DecodeGzip :: (input: []u8, limit: s64) -> io.ReadAllResult {
@@ -93,19 +291,23 @@ DecodeGzip :: (input: []u8, limit: s64) -> io.ReadAllResult {
         result.error = errors.New("invalid decoded body limit")
         return result
     }
-    opened := OpenDecoder(io.FromBytes(input))
+    opened := OpenGzipDecoder(io.FromBytes(input))
     if opened.error != null {
         result.error = errors.New("invalid gzip body")
         return result
     }
-    CloseDecoderAtReturn(opened.value)
+    CloseGzipDecoderAtReturn(opened.value)
     result = io.ReadAll(io.LimitReader(cast(io.Reader)opened.value, limit + 1))
-    if result.error != null {
-        result.error = errors.New("invalid gzip body")
-    } else if result.value.count > limit {
-        result.error = errors.New("decoded request body too large")
+    if result.error != null || result.value.count > limit {
+        empty: []u8
+        result.value = empty
+        result.error = errors.New("invalid or oversized gzip body")
     }
     return result
+}
+
+DecodeZstd :: (input: []u8, limit: s64) -> io.ReadAllResult {
+    return zstd.DecodeLimited(input, limit, cast(u64)8388608)
 }
 
 RequestEncoding :: (value: string) -> string {

@@ -90,13 +90,20 @@ Call sync again with the last seen server version. Daochi returns records newer
 than that version and does not need to parse the ciphertext.
 
 ```sh
-curl -X POST "$DAOCHI/api/v1/sync" \
+curl --compressed -X POST "$DAOCHI/api/v1/sync" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "X-Daochi-User: $ACCOUNT_ID" \
   -H "X-Daochi-Since-Version: $SERVER_VERSION" \
   -d @sync.json
 ```
+
+`--compressed` negotiates a supported response encoding and decodes it for the
+caller. Daochi prefers Zstandard when accepted and retains gzip and identity
+for other clients. The node advertises `http-zstd-v1` when it also accepts
+compressed Zstandard request bodies. If compressing an upload, sign the exact
+uncompressed JSON bytes first, then compress and set `Content-Encoding`.
+See [HTTP compression](compression.md) for bounds and transport behavior.
 
 ## 7. Inspect Trust and Sync State
 

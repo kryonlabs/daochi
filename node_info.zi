@@ -1,6 +1,13 @@
 // The advertised capability order is shared by node and sync responses.
+coding :: #import "content_coding";
+builtin :: #system_library "go:builtin";
+#scope_file
+Append :: (values: []string, value: string) -> []string #foreign builtin "append";
 #scope_export
 Capabilities :: () -> []string {
+    if coding.ZstdRequestsEnabled() {
+        return Append(capabilities[:], "http-zstd-v1")
+    }
     return capabilities[:]
 }
 

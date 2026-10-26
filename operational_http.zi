@@ -144,7 +144,8 @@ Node :: (operations: Operations, writer: http.ResponseWriter, request: *http.Req
     MapSet(value, "usage", usage.value)
     MapSet(value, "storage", storage.value)
     MapSet(value, "protocol", protocol)
-    response.JSON(writer, cast(isize)200, value)
+    MapSet(value, "build_version", version.BuildVersion)
+    response.JSONRequest(writer, request, cast(isize)200, value)
 }
 
 Metrics :: (operations: Operations, writer: http.ResponseWriter, request: *http.Request) {

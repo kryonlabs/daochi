@@ -18,6 +18,8 @@ Its design rules are:
 - [Encrypted record profile v1](docs/encrypted-record-profile-v1.md) defines the recommended client-side envelope for private records.
 - [Developer quickstart](docs/developer-quickstart.md) shows the shortest path from account key to encrypted sync.
 - [Small node operations](docs/operations-small-node.md) records low-resource targets and trust inspection checks.
+- [HTTP compression](docs/compression.md) covers Zstandard/gzip negotiation, bounded codec reuse and measurements.
+- [Development](docs/development.md) describes canonical source, builds, tests and deployment verification.
 
 ## Privacy Model
 
@@ -214,13 +216,14 @@ of ciphertext. Clients must verify `encrypted_records_only` in the response;
 older nodes do not implement this mode. Full replacements, legacy writes,
 operations and state-hash reconciliation must use the existing sync mode.
 
-Daochi is being ported to Ziran. Canonical `.zi` modules and their generated Go
-are committed together. Run `make generate` after changing Ziran source and
+Daochi's server implementation is authored in Ziran. Go is generated from the
+canonical `.zi` modules and is not committed. Use Go 1.26. Run `make generate`
+after changing Ziran source and
 `make test-ziran` to check generated files and run the server suite against both
 source and saved Ziran IR. The default launcher is `ziran`, which resolves
 the pinned project toolchain; `ZIRAN` overrides the launcher. Local compiler
 checkouts belong in the ignored `ziran.local.toml` package overrides.
-See the [port inventory](docs/ziran-port.md) for completed modules and remaining work.
+See the [development guide](docs/development.md) for source ownership and the build and verification workflow.
 
 Inspect a production database offline with:
 

@@ -1,0 +1,210 @@
+{
+  "date": "2026-10-26",
+  "repository": "kryonlabs/daochi",
+  "go": "1.26.10",
+  "cpu": "AMD Ryzen 9 9950X",
+  "gomaxprocs": 1,
+  "method": "Local generated response path, JSON encoding and httptest response storage included; three 300 ms benchmark trials per profile, reported median trial. Fresh gzip baseline creates a level-1 writer per response. No network, TLS, database, device energy or production traffic.",
+  "groups": [
+    {
+      "raw_payload_bytes": 196608,
+      "json_response_bytes": 262162,
+      "profile": "gzip-fresh",
+      "runs": 3,
+      "median_ms": 0.613278,
+      "median_allocated_bytes": 1729978,
+      "median_allocations": 42
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "json_response_bytes": 262162,
+      "profile": "gzip",
+      "runs": 3,
+      "median_ms": 0.57315,
+      "median_allocated_bytes": 525345,
+      "median_allocations": 35
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "json_response_bytes": 262162,
+      "profile": "zstd",
+      "runs": 3,
+      "median_ms": 0.374457,
+      "median_allocated_bytes": 402739,
+      "median_allocations": 29
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "json_response_bytes": 4194322,
+      "profile": "gzip-fresh",
+      "runs": 3,
+      "median_ms": 10.072078,
+      "median_allocated_bytes": 9594261,
+      "median_allocations": 45
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "json_response_bytes": 4194322,
+      "profile": "gzip",
+      "runs": 3,
+      "median_ms": 9.588221,
+      "median_allocated_bytes": 8389724,
+      "median_allocations": 40
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "json_response_bytes": 4194322,
+      "profile": "zstd",
+      "runs": 3,
+      "median_ms": 6.887276,
+      "median_allocated_bytes": 7284060,
+      "median_allocations": 33
+    }
+  ],
+  "raw_trials": [
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "gzip-fresh",
+      "iterations": 580,
+      "ns_per_op": 613278,
+      "allocated_bytes_per_op": 1729978,
+      "allocations_per_op": 42
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "gzip-fresh",
+      "iterations": 604,
+      "ns_per_op": 597670,
+      "allocated_bytes_per_op": 1729978,
+      "allocations_per_op": 42
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "gzip-fresh",
+      "iterations": 584,
+      "ns_per_op": 759329,
+      "allocated_bytes_per_op": 1729978,
+      "allocations_per_op": 42
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "gzip",
+      "iterations": 560,
+      "ns_per_op": 567049,
+      "allocated_bytes_per_op": 525345,
+      "allocations_per_op": 35
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "gzip",
+      "iterations": 550,
+      "ns_per_op": 575440,
+      "allocated_bytes_per_op": 525345,
+      "allocations_per_op": 35
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "gzip",
+      "iterations": 597,
+      "ns_per_op": 573150,
+      "allocated_bytes_per_op": 525345,
+      "allocations_per_op": 35
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "zstd",
+      "iterations": 885,
+      "ns_per_op": 364737,
+      "allocated_bytes_per_op": 402739,
+      "allocations_per_op": 29
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "zstd",
+      "iterations": 960,
+      "ns_per_op": 374457,
+      "allocated_bytes_per_op": 402739,
+      "allocations_per_op": 29
+    },
+    {
+      "raw_payload_bytes": 196608,
+      "profile": "zstd",
+      "iterations": 915,
+      "ns_per_op": 390087,
+      "allocated_bytes_per_op": 402739,
+      "allocations_per_op": 29
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "gzip-fresh",
+      "iterations": 38,
+      "ns_per_op": 10072078,
+      "allocated_bytes_per_op": 9594261,
+      "allocations_per_op": 45
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "gzip-fresh",
+      "iterations": 34,
+      "ns_per_op": 10137821,
+      "allocated_bytes_per_op": 9594264,
+      "allocations_per_op": 45
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "gzip-fresh",
+      "iterations": 37,
+      "ns_per_op": 9758541,
+      "allocated_bytes_per_op": 9594255,
+      "allocations_per_op": 45
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "gzip",
+      "iterations": 34,
+      "ns_per_op": 9765430,
+      "allocated_bytes_per_op": 8389724,
+      "allocations_per_op": 40
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "gzip",
+      "iterations": 38,
+      "ns_per_op": 9588221,
+      "allocated_bytes_per_op": 8389724,
+      "allocations_per_op": 40
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "gzip",
+      "iterations": 40,
+      "ns_per_op": 9575492,
+      "allocated_bytes_per_op": 8389724,
+      "allocations_per_op": 40
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "zstd",
+      "iterations": 48,
+      "ns_per_op": 6659623,
+      "allocated_bytes_per_op": 7284061,
+      "allocations_per_op": 33
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "zstd",
+      "iterations": 58,
+      "ns_per_op": 6887276,
+      "allocated_bytes_per_op": 7284060,
+      "allocations_per_op": 33
+    },
+    {
+      "raw_payload_bytes": 3145728,
+      "profile": "zstd",
+      "iterations": 58,
+      "ns_per_op": 7036885,
+      "allocated_bytes_per_op": 7284060,
+      "allocations_per_op": 33
+    }
+  ]
+}

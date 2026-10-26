@@ -38,6 +38,7 @@ var baselineOpsCapabilities = []string{
 	"record-pages-metadata-v1",
 	"http-gzip-v1",
 	"record-gzip-v1",
+	"http-zstd-v1",
 }
 
 func (s *Server) baselineOpsHandleHealth(w http.ResponseWriter, r *http.Request) {
@@ -102,12 +103,13 @@ func (s *Server) baselineOpsHandleNodeInfo(w http.ResponseWriter, r *http.Reques
 		Response_Error(w, http.StatusInternalServerError, "node storage usage failed")
 		return
 	}
-	Response_JSON(w, http.StatusOK, map[string]any{
+	Response_JSONRequest(w, r, http.StatusOK, map[string]any{
 		"status":          "ok",
 		"node_id":         s.Node.ID,
 		"node_public_key": hex.EncodeToString(s.Node.PublicKey),
 		"node_name":       s.Cfg.NodeDisplayName,
 		"base_url":        strings.TrimSpace(s.Cfg.BaseURL),
+		"build_version":   BuildVersion,
 		"capabilities":    baselineOpsCapabilities,
 		"known_nodes":     knownNodes,
 		"usage":           usage,

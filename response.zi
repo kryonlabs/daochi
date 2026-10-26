@@ -4,12 +4,36 @@ io :: #import "std/io_go";
 json :: #import "std/json_go";
 coding :: #import "content_coding";
 strings :: #system_library "go:strings";
+native_http :: #system_library "go:net/http";
+builtin :: #system_library "go:builtin";
 
 #scope_file
 ErrorResponse :: struct {
     message: string #go_tag "json:\"error\""
 }
 Join :: (values: []string, separator: string) -> string #foreign strings;
+Split :: (value: string, separator: string) -> []string #foreign strings;
+Trim :: (value: string) -> string #foreign strings "TrimSpace";
+EqualFold :: (left: string, right: string) -> bool #foreign strings;
+DeleteHeader :: (headers: http.Header, name: string) #foreign native_http "Header.Del";
+HeaderValues :: (headers: http.Header, name: string) -> []string #foreign native_http "Header.Values";
+EncoderCleanup :: #type (lease: *coding.EncoderLease) -> void;
+ReleaseAtReturn :: (callback: EncoderCleanup, lease: *coding.EncoderLease) #go_defer #foreign builtin "call";
+
+VaryEncoding :: (headers: http.Header) {
+    vary := Join(HeaderValues(headers, "Vary"), ", ")
+    for item: Split(vary, ",") {
+        if Trim(item) == "*" || EqualFold(Trim(item), "Accept-Encoding") {
+            return
+        }
+    }
+    if vary == "" {
+        http.SetHeader(headers, "Vary", "Accept-Encoding")
+    } else {
+        values: [2]string = .[vary, "Accept-Encoding"]
+        http.SetHeader(headers, "Vary", Join(values[:], ", "))
+    }
+}
 
 #scope_export
 JSON :: (writer: http.ResponseWriter, status: isize, value: Any) {
@@ -18,32 +42,49 @@ JSON :: (writer: http.ResponseWriter, status: isize, value: Any) {
     json.Encode(json.NewEncoder(cast(io.Writer)writer), value)
 }
 
-// Sync replies stream through gzip without constructing a second full-account
-// JSON buffer. Callers without negotiated gzip keep the released JSON path.
+// Stream through a bounded reusable encoder without another account-sized
+// JSON buffer. Negotiation preserves gzip/identity for released clients.
 JSONRequest :: (writer: http.ResponseWriter, request: *http.Request, status: isize, value: Any) {
-    if http.Method(request) == "HEAD" || status == 204 || status == 304 ||
-        !coding.AcceptsGzip(http.HeaderValue(http.Headers(request), "Accept-Encoding")) {
-        JSON(writer, status, value)
-        return
-    }
-    encoder := coding.NewEncoder(cast(io.Writer)writer, cast(isize)1)
-    if encoder.error != null {
-        JSON(writer, status, value)
-        return
-    }
     headers := http.ResponseHeaders(writer)
-    http.SetHeader(headers, "Content-Type", "application/json")
-    http.SetHeader(headers, "Content-Encoding", "gzip")
-    vary := http.HeaderValue(headers, "Vary")
-    if vary == "" {
-        http.SetHeader(headers, "Vary", "Accept-Encoding")
-    } else {
-        values: [2]string = .[vary, "Accept-Encoding"]
-        http.SetHeader(headers, "Vary", Join(values[:], ", "))
+    VaryEncoding(headers)
+    if http.Method(request) == "HEAD" || status == 204 || status == 304 {
+        http.WriteHeader(writer, status)
+        return
     }
+    if http.HeaderValue(headers, "Content-Encoding") != "" {
+        JSON(writer, status, value)
+        return
+    }
+    accepted := Join(HeaderValues(http.Headers(request), "Accept-Encoding"), ",")
+    encoding := coding.SelectEncoding(accepted)
+    if encoding == "" {
+        Error(writer, cast(isize)406, "no acceptable content encoding")
+        return
+    }
+    // Partial representations and pre-encoded responses must retain their
+    // existing representation. A range is not a new compressed JSON document.
+    if status == 206 && !coding.AcceptsIdentity(accepted) {
+        Error(writer, cast(isize)406, "partial response requires identity encoding")
+        return
+    }
+    if status == 206 || encoding == "identity" {
+        JSON(writer, status, value)
+        return
+    }
+    encoder := coding.AcquireEncoder(http.Context(request), cast(io.Writer)writer, encoding)
+    if encoder.error != null {
+        Error(writer, cast(isize)503, "response encoder unavailable")
+        return
+    }
+    ReleaseAtReturn(coding.ReleaseEncoder, *encoder)
+    http.SetHeader(headers, "Content-Type", "application/json")
+    http.SetHeader(headers, "Content-Encoding", encoding)
+    DeleteHeader(headers, "Content-Length")
     http.WriteHeader(writer, status)
-    json.Encode(json.NewEncoder(cast(io.Writer)encoder.value), value)
-    coding.CloseEncoder(encoder.value)
+    error := json.Encode(json.NewEncoder(encoder.writer), value)
+    if error == null {
+        unused coding.FinishEncoder(*encoder)
+    }
 }
 
 Error :: (writer: http.ResponseWriter, status: isize, message: string) {

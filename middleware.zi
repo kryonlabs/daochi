@@ -141,7 +141,8 @@ AllowedOrigin :: (origin: string) -> string {
         origin == "https://www.daochi.net" ||
         origin == "https://inbe.waozi.xyz" ||
         origin == "https://uku.waozi.xyz" ||
-        origin == "https://shovey.waozi.xyz" {
+        origin == "https://shovey.waozi.xyz" ||
+        origin == "https://arcade.waozi.xyz" {
         return origin
     }
     if url.Scheme(value) == "chrome-extension" && ValidExtensionID(url.Host(value)) {

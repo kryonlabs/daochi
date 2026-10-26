@@ -4280,6 +4280,7 @@ func TestAllowedCORSOrigin(t *testing.T) {
 		"https://inbe.waozi.xyz",
 		"https://uku.waozi.xyz",
 		"https://shovey.waozi.xyz",
+		"https://arcade.waozi.xyz",
 		"http://localhost:8080",
 		"http://127.0.0.1",
 	}
@@ -4293,6 +4294,7 @@ func TestAllowedCORSOrigin(t *testing.T) {
 		"https://uku.waozi.xyz.evil.com",
 		"https://shovey.waozi.xyz.evil.com",
 		"https://shovey.waozi.xyz/path",
+		"https://arcade.waozi.xyz.evil.com",
 		"https://uku.waozi.xyz/path",
 		"",
 	}

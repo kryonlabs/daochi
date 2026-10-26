@@ -9,8 +9,10 @@ accounts :: #import "account_state";
 ids :: #import "resource_id";
 identity :: #import "identity";
 timestamp :: #import "timestamp";
+rates :: #import "exchange_rate";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
 ed :: #import "std/ed25519_go";
 errors :: #import "std/errors_go";
 go_sql :: #system_library "go:database/sql";
@@ -56,19 +58,20 @@ SQL;
 DepositSQL :: #string SQL
 SELECT tx_id,account_id,amount_atomic,token_units,block_height,confirmations,status,first_seen_at,
     confirmed_at,credited_at,receipt_id,account_index,address_index,unlock_time,locked,double_spend_seen,
-    rate_atomic_amount,rate_token_units
+    rate_atomic_amount,rate_token_units,usd_cents,usd_updated_at,usd_sources
 FROM monero_deposits WHERE tx_id=?1 AND account_index=?2 AND address_index=?3
 SQL;
 DepositsSQL :: #string SQL
 SELECT tx_id,account_id,amount_atomic,token_units,block_height,confirmations,status,first_seen_at,
     confirmed_at,credited_at,receipt_id,account_index,address_index,unlock_time,locked,double_spend_seen,
-    rate_atomic_amount,rate_token_units
+    rate_atomic_amount,rate_token_units,usd_cents,usd_updated_at,usd_sources
 FROM monero_deposits WHERE account_id=?1 ORDER BY first_seen_at DESC LIMIT ?2
 SQL;
 InsertDepositSQL :: #string SQL
 INSERT INTO monero_deposits(tx_id,account_index,address_index,account_id,amount_atomic,block_height,
-    confirmations,unlock_time,locked,double_spend_seen,status,rate_atomic_amount,rate_token_units,token_units)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+    confirmations,unlock_time,locked,double_spend_seen,status,rate_atomic_amount,rate_token_units,
+    usd_cents,usd_updated_at,usd_sources,token_units)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
 ON CONFLICT(tx_id,account_index,address_index) DO UPDATE SET
     amount_atomic=excluded.amount_atomic,
     block_height=excluded.block_height,
@@ -80,8 +83,8 @@ ON CONFLICT(tx_id,account_index,address_index) DO UPDATE SET
     updated_at=CURRENT_TIMESTAMP
 SQL;
 
-DepositDestinations :: (value: *MoneroDeposit) -> [18]Any {
-    destinations: [18]Any
+DepositDestinations :: (value: *MoneroDeposit) -> [21]Any {
+    destinations: [21]Any
     destinations[0] = *value.TxID
     destinations[1] = *value.AccountID
     destinations[2] = *value.AmountAtomic
@@ -100,6 +103,9 @@ DepositDestinations :: (value: *MoneroDeposit) -> [18]Any {
     destinations[15] = *value.DoubleSpendSeen
     destinations[16] = *value.RateAtomic
     destinations[17] = *value.RateTokenUnits
+    destinations[18] = *value.UsdCents
+    destinations[19] = *value.UsdUpdatedAt
+    destinations[20] = *value.UsdSources
     return destinations
 }
 
@@ -289,7 +295,11 @@ UpsertDeposit :: (database: *sql.Database, context: ctx.Context, accountID: stri
     transfer: wallet.WalletTransfer, status: string, configuration: config.Config) -> DepositResult {
     result: DepositResult
     conversion := wallet.TokenUnits(transfer.Amount, configuration.MoneroRateAtomicAmount, configuration.MoneroRateTokenUnits)
-    arguments: [14]Any
+    // The public XMR/USD display rate is snapshotted beside the funding ratio
+    // as an audit record of the fiat value at first observation. It stays
+    // zero when no fresh rate exists, and never changes the Dew amount.
+    quote := rates.Current(clock.Unix(clock.Now()))
+    arguments: [17]Any
     arguments[0] = transfer.TxID
     arguments[1] = transfer.SubaddrIndex.Major
     arguments[2] = transfer.SubaddrIndex.Minor
@@ -303,7 +313,10 @@ UpsertDeposit :: (database: *sql.Database, context: ctx.Context, accountID: stri
     arguments[10] = status
     arguments[11] = configuration.MoneroRateAtomicAmount
     arguments[12] = configuration.MoneroRateTokenUnits
-    arguments[13] = conversion.value
+    arguments[13] = quote.cents
+    arguments[14] = quote.updated_at
+    arguments[15] = Join(quote.sources, ",")
+    arguments[16] = conversion.value
     inserted := sql.Exec(database, context, InsertDepositSQL, arguments[:])
     result.error = inserted.error
     if result.error != null {

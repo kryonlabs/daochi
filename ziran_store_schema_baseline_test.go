@@ -536,6 +536,9 @@ CREATE TABLE IF NOT EXISTS monero_deposits (
 	status TEXT NOT NULL DEFAULT 'confirming',
 	rate_atomic_amount INTEGER NOT NULL,
 	rate_token_units INTEGER NOT NULL,
+	usd_cents INTEGER NOT NULL DEFAULT 0,
+	usd_updated_at INTEGER NOT NULL DEFAULT 0,
+	usd_sources TEXT NOT NULL DEFAULT '',
 	token_units INTEGER NOT NULL DEFAULT 0,
 	receipt_id TEXT NOT NULL DEFAULT '',
 	first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -648,6 +651,9 @@ WHERE NOT EXISTS (
 		`ALTER TABLE token_spend_nonces ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE monero_deposits ADD COLUMN usd_cents INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE monero_deposits ADD COLUMN usd_updated_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE monero_deposits ADD COLUMN usd_sources TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.Database.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err

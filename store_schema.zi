@@ -669,6 +669,9 @@ CREATE TABLE IF NOT EXISTS monero_deposits (
 	status TEXT NOT NULL DEFAULT 'confirming',
 	rate_atomic_amount INTEGER NOT NULL,
 	rate_token_units INTEGER NOT NULL,
+	usd_cents INTEGER NOT NULL DEFAULT 0,
+	usd_updated_at INTEGER NOT NULL DEFAULT 0,
+	usd_sources TEXT NOT NULL DEFAULT '',
 	token_units INTEGER NOT NULL DEFAULT 0,
 	receipt_id TEXT NOT NULL DEFAULT '',
 	first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -825,7 +828,7 @@ ColumnLookup :: "SELECT 1 FROM pragma_table_info(?1) WHERE name=?2";
 SocialExists :: "\nSELECT EXISTS(\n\tSELECT 1 FROM sqlite_master\n\tWHERE type='table' AND name='server_social_cache'\n)";
 SocialUpgrade :: "\nINSERT OR REPLACE INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)\nSELECT user_id_hash,kind,json,updated_at,server_version\nFROM server_social_cache;\nDROP TABLE server_social_cache;";
 
-Upgrades: [32]string = .[
+Upgrades: [35]string = .[
     "ALTER TABLE server_meditation_logs ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_habits ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_habits ADD COLUMN counter_enabled INTEGER NOT NULL DEFAULT 0",
@@ -857,7 +860,10 @@ Upgrades: [32]string = .[
     "ALTER TABLE token_app_permissions ADD COLUMN legacy_unsigned_until INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE token_spend_nonces ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE server_leaderboard_stats ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0"
+    "ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE monero_deposits ADD COLUMN usd_cents INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE monero_deposits ADD COLUMN usd_updated_at INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE monero_deposits ADD COLUMN usd_sources TEXT NOT NULL DEFAULT ''"
 ];
 
 Indexes: [18]string = .[

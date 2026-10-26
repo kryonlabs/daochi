@@ -296,6 +296,33 @@ TokenLedgerResponse :: struct {
     Events: []TokenReceipt #go_tag "json:\"events\""
 }
 
+TokenActivityMonero :: struct {
+    TxID: string #go_tag "json:\"tx_id,omitempty\""
+    AmountAtomic: s64 #go_tag "json:\"amount_atomic\""
+    UsdCents: s64 #go_tag "json:\"usd_cents,omitempty\""
+    UsdUpdatedAt: s64 #go_tag "json:\"usd_rate_time,omitempty\""
+    UsdSources: string #go_tag "json:\"usd_sources,omitempty\""
+}
+
+TokenActivityEvent :: struct {
+    Seq: s64 #go_tag "json:\"seq\""
+    ReceiptID: string #go_tag "json:\"receipt_id\""
+    EventType: string #go_tag "json:\"event_type\""
+    AppID: string #go_tag "json:\"app_id,omitempty\""
+    AmountDelta: s64 #go_tag "json:\"amount_delta\""
+    CreatedAt: string #go_tag "json:\"created_at\""
+    SourceType: string #go_tag "json:\"source_type\""
+    SourceRef: string #go_tag "json:\"source_ref,omitempty\""
+    Monero: *TokenActivityMonero #go_tag "json:\"monero,omitempty\""
+}
+
+TokenActivityResponse :: struct {
+    AccountID: string #go_tag "json:\"account_id\""
+    AssetID: string #go_tag "json:\"asset_id\""
+    Balance: s64 #go_tag "json:\"balance\""
+    Events: []TokenActivityEvent #go_tag "json:\"events\""
+}
+
 TokenReceipt :: struct {
     ReceiptID: string #go_tag "json:\"receipt_id\""
     IssuerID: string #go_tag "json:\"issuer_id\""
@@ -408,6 +435,9 @@ MoneroDeposit :: struct {
     DoubleSpendSeen: bool #go_tag "json:\"-\""
     RateAtomic: s64 #go_tag "json:\"-\""
     RateTokenUnits: s64 #go_tag "json:\"-\""
+    UsdCents: s64 #go_tag "json:\"usd_cents,omitempty\""
+    UsdUpdatedAt: s64 #go_tag "json:\"usd_rate_time,omitempty\""
+    UsdSources: string #go_tag "json:\"usd_sources,omitempty\""
     ReceiptID: string #go_tag "json:\"-\""
 }
 

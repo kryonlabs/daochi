@@ -7,6 +7,7 @@ policy :: #import "token_policy";
 requests :: #import "payment_request";
 receipts :: #import "token_receipt";
 ledger :: #import "token_ledger";
+activity :: #import "token_activity";
 assets :: #import "token_assets";
 checkpoints :: #import "token_checkpoint";
 apps :: #import "app_store";
@@ -190,6 +191,41 @@ Ledger :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) 
         return
     }
     value: TokenLedgerResponse
+    value.Events = listed.value
+    response.JSON(writer, cast(isize)200, value)
+}
+
+// The profile's Dew screen: balance plus the account's full activity, newest
+// first, across every app. Page older events with before_seq from the last
+// returned seq.
+Activity :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    user := Bearer(tokens, writer, request)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        return
+    }
+    context := http.Context(request)
+    parsed := ParseInt(TrimSpace(url.Value(url.Query(http.RequestURL(request)), "before_seq")), cast(isize)10, cast(isize)64)
+    before := parsed.value
+    if parsed.error != null || before <= 0 {
+        before = 9223372036854775807
+    }
+    limit := ParseInt(TrimSpace(url.Value(url.Query(http.RequestURL(request)), "limit")), cast(isize)10, cast(isize)64)
+    listed := activity.List(tokens.database, context, user.value, receipts.AssetID, before, cast(isize)limit.value)
+    if listed.error != null {
+        LogSubjectError("token activity", "user", logs.LogText(user.value), "error", listed.error)
+        response.Error(writer, cast(isize)500, "token activity failed")
+        return
+    }
+    balance := ledger.Balance(tokens.database, context, user.value, receipts.AssetID)
+    if balance.error != null {
+        LogSubjectError("token activity balance", "user", logs.LogText(user.value), "error", balance.error)
+        response.Error(writer, cast(isize)500, "token activity failed")
+        return
+    }
+    value: TokenActivityResponse
+    value.AccountID = user.value
+    value.AssetID = receipts.AssetID
+    value.Balance = balance.value
     value.Events = listed.value
     response.JSON(writer, cast(isize)200, value)
 }

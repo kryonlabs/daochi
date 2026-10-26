@@ -71,6 +71,7 @@ API access is scoped by account, with explicit shared surfaces:
 - `GET /api/v1/tokens/issuer`
 - `GET /api/v1/tokens/balance?app_id=<optional-app-id>`
 - `GET /api/v1/tokens/ledger?since=<optional-seq>&app_id=<optional-app-id>`
+- `GET /api/v1/tokens/activity?before_seq=<optional-seq>&limit=<optional-count>`
 - `POST /api/v1/tokens/spend`
 - `POST /api/v1/tokens/gifts` (Dew to a friend)
 - `POST /api/v1/tokens/purchases/google/verify`
@@ -291,7 +292,11 @@ the transfer reaches `MONERO_CONFIRMATIONS_REQUIRED`, is unlocked, has zero
 `unlock_time`, and has not been marked as a double spend. Looking up an alias or
 public ID returns the same address, so purchasing for yourself and gifting use
 the same payment flow. Rate values are snapshotted when a transfer is first
-observed. Existing product invoices remain available during migration.
+observed. Each deposit also snapshots the node's public XMR/USD display rate at
+first observation (`usd_cents`, `usd_rate_time`, `usd_sources`), so every
+credited deposit keeps the fiat value at receipt as an audit record; the
+snapshot stays zero while no fresh rate exists and never affects the Dew
+amount. Existing product invoices remain available during migration.
 
 Inbe calls this account credit **Dew**. Its existing asset ID stays
 `waozi:token`, with 1,000,000 integer ledger units per Dew. Storage prices
@@ -477,6 +482,15 @@ Daochi can issue signed token receipts for registered assets. The server verifie
 Self-hosted Daochi servers may use the same ledger shape for local assets later, but they cannot create receipts for an issuer without that issuer's private key. If only the issuer public key is configured, the server can expose and verify receipts but cannot credit or spend tokens.
 
 Token ledger and payment-intent rows are financial audit records. They are scoped by account for balance and receipt lookup, but they are not included in normal account data export and are not deleted by account-data cascade.
+
+`GET /api/v1/tokens/activity` serves the profile's Dew screen in every app. It
+returns the account's current balance plus its full activity history, newest
+first, across every app: deposits, purchases, spends, gifts, storage, unlocks
+and rewards. Each event carries its ledger seq, receipt id, event type, source
+and signed amount; Monero-backed credits additionally carry the paid atomic
+amount and the deposit's USD rate snapshot through a joined `monero` object.
+`before_seq` from the last returned seq pages older events, and `limit` caps a
+page (default 100, at most 500).
 
 Token purchases, spends, invoices, receipts, and spend nonces carry `app_id`, and spend or purchase flows validate that the app is registered. `GET /api/v1/tokens/balance` and `GET /api/v1/tokens/ledger` stay account-wide by default for compatibility; adding `?app_id=<app>` returns the app-scoped balance or ledger view for that account and asset.
 

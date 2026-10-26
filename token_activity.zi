@@ -1,0 +1,108 @@
+#import "protocol"
+#import "std/go_types"
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+go_sql :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+ActivityResult :: struct {
+    value: []TokenActivityEvent
+    error: Error
+}
+
+#scope_file
+NullInteger :: #type #foreign go_sql "NullInt64";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+AppendEvent :: (values: []TokenActivityEvent, value: TokenActivityEvent) -> []TokenActivityEvent #foreign builtin "append";
+IntegerValid :: (value: NullInteger) -> bool #go_field #foreign go_sql "NullInt64.Valid";
+IntegerValue :: (value: NullInteger) -> s64 #go_field #foreign go_sql "NullInt64.Int64";
+
+ActivitySQL :: #string SQL
+SELECT l.receipt_id,l.event_type,l.app_id,l.amount_delta,l.ledger_seq,l.created_at,
+    l.source_type,l.source_ref,
+    d.tx_id,d.amount_atomic,d.usd_cents,d.usd_updated_at,d.usd_sources
+FROM token_ledger l
+LEFT JOIN monero_deposits d ON d.receipt_id=l.receipt_id
+WHERE l.account_id=?1 AND l.asset_id=?2 AND l.ledger_seq<?3
+ORDER BY l.ledger_seq DESC
+LIMIT ?4
+SQL;
+
+ReadEvent :: (rows: *sql.Rows, event: *TokenActivityEvent) -> Error {
+    txID: sql.NullString
+    atomic: NullInteger
+    cents: NullInteger
+    updatedAt: NullInteger
+    sources: sql.NullString
+    destinations: [13]Any
+    destinations[0] = *event.ReceiptID
+    destinations[1] = *event.EventType
+    destinations[2] = *event.AppID
+    destinations[3] = *event.AmountDelta
+    destinations[4] = *event.Seq
+    destinations[5] = *event.CreatedAt
+    destinations[6] = *event.SourceType
+    destinations[7] = *event.SourceRef
+    destinations[8] = *txID
+    destinations[9] = *atomic
+    destinations[10] = *cents
+    destinations[11] = *updatedAt
+    destinations[12] = *sources
+    error := sql.ScanRows(rows, destinations[:])
+    if error != null {
+        return error
+    }
+    if sql.NullStringValid(txID) {
+        paid: TokenActivityMonero
+        paid.TxID = sql.NullStringValue(txID)
+        if IntegerValid(atomic) {
+            paid.AmountAtomic = IntegerValue(atomic)
+        }
+        if IntegerValid(cents) {
+            paid.UsdCents = IntegerValue(cents)
+        }
+        if IntegerValid(updatedAt) {
+            paid.UsdUpdatedAt = IntegerValue(updatedAt)
+        }
+        if sql.NullStringValid(sources) {
+            paid.UsdSources = sql.NullStringValue(sources)
+        }
+        event.Monero = *paid
+    }
+    return null
+}
+
+#scope_export
+// The account's full Dew history, newest first, across every app, for the
+// profile's Dew screen. Monero deposits join by receipt so each XMR credit
+// carries the paid atomic amount and its USD rate snapshot.
+List :: (database: *sql.Database, context: ctx.Context, accountID: string, assetID: string,
+    before: s64, limit: isize) -> ActivityResult {
+    result: ActivityResult
+    if limit <= cast(isize)0 || limit > cast(isize)500 {
+        limit = cast(isize)100
+    }
+    arguments: [4]Any
+    arguments[0] = accountID
+    arguments[1] = assetID
+    arguments[2] = before
+    arguments[3] = limit
+    query := sql.Query(database, context, ActivitySQL, arguments[:])
+    result.error = query.error
+    if result.error != null {
+        return result
+    }
+    CloseAtReturn(query.value)
+    values: []TokenActivityEvent
+    while sql.Next(query.value) {
+        event: TokenActivityEvent
+        result.error = ReadEvent(query.value, *event)
+        if result.error != null {
+            return result
+        }
+        values = AppendEvent(values, event)
+    }
+    result.value = values
+    result.error = sql.RowsError(query.value)
+    return result
+}

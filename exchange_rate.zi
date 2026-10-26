@@ -1,7 +1,9 @@
 // XMR/USD for display only. It never sets a price, a charge or a Dew credit;
 // those come from the node's fixed Dew per XMR ratio. Several keyless public
 // sources are read, a source more than 10% from the median is dropped, and
-// the median of at least two agreeing sources is kept and persisted.
+// the median of at least two agreeing sources is kept and persisted. Monero
+// deposits also snapshot the kept rate when a transfer is first observed, so
+// each credited deposit keeps its fiat value at receipt as an audit record.
 #import "std/go_types"
 config :: #import "config";
 response :: #import "response";

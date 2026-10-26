@@ -187,10 +187,11 @@ PAGE_SECTION_1;
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/node/mesh/export</code><p>Exports policy-filtered signed app manifests, encrypted records, deletion tombstones, and names to an authenticated peer node.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/node/mesh/import</code><p>Verifies and imports policy-filtered app manifests, encrypted records, deletion tombstones, and names from an authenticated peer node.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the configured token issuer key.</p></section>
-PAGE_SECTION_2;
-    parts[3] = #string PAGE_SECTION_3
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct payment prices when direct purchases are enabled.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's token balance computed from signed ledger events.</p></section>
+PAGE_SECTION_2;
+    parts[3] = #string PAGE_SECTION_3
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/activity</code><p>Returns the account's Dew balance and full newest-first activity history across every app for the profile's Dew screen.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits tokens with app policy and idempotency enforcement.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/gifts</code><p>Sends Dew to a friend; the debit and the friend's credit commit together.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/rewards</code><p>Lists the game rewards the node gives and their Dew.</p></section>
@@ -670,6 +671,52 @@ PathApiV1TokensLedger :: () -> Map(string, Any) {
     resultGetResponses200: Map(string, Any)
     MapInit(resultGetResponses200)
     MapSet(resultGetResponses200, "description", "Token ledger events")
+    MapSet(resultGetResponses, "200", resultGetResponses200)
+    MapSet(resultGet, "responses", resultGetResponses)
+    MapSet(result, "get", resultGet)
+    return result
+}
+
+PathApiV1TokensActivity :: () -> Map(string, Any) {
+    result: Map(string, Any)
+    MapInit(result)
+    resultGet: Map(string, Any)
+    MapInit(resultGet)
+    MapSet(resultGet, "summary", "List the account's full Dew activity for the profile screen")
+    resultGetSecurity := AllocateObjects(cast(isize)1)
+    resultGetSecurityItem0: Map(string, Any)
+    MapInit(resultGetSecurityItem0)
+    resultGetSecurityItem0BearerAuth := AllocateStrings(cast(isize)0)
+    MapSet(resultGetSecurityItem0, "bearerAuth", resultGetSecurityItem0BearerAuth)
+    resultGetSecurity[0] = resultGetSecurityItem0
+    MapSet(resultGet, "security", resultGetSecurity)
+    resultGetParameters := AllocateObjects(cast(isize)2)
+    resultGetParametersItem0: Map(string, Any)
+    MapInit(resultGetParametersItem0)
+    MapSet(resultGetParametersItem0, "name", "before_seq")
+    MapSet(resultGetParametersItem0, "in", "query")
+    MapSet(resultGetParametersItem0, "required", false)
+    resultGetParametersItem0Schema: Map(string, Any)
+    MapInit(resultGetParametersItem0Schema)
+    MapSet(resultGetParametersItem0Schema, "type", "integer")
+    MapSet(resultGetParametersItem0, "schema", resultGetParametersItem0Schema)
+    resultGetParameters[0] = resultGetParametersItem0
+    resultGetParametersItem1: Map(string, Any)
+    MapInit(resultGetParametersItem1)
+    MapSet(resultGetParametersItem1, "name", "limit")
+    MapSet(resultGetParametersItem1, "in", "query")
+    MapSet(resultGetParametersItem1, "required", false)
+    resultGetParametersItem1Schema: Map(string, Any)
+    MapInit(resultGetParametersItem1Schema)
+    MapSet(resultGetParametersItem1Schema, "type", "integer")
+    MapSet(resultGetParametersItem1, "schema", resultGetParametersItem1Schema)
+    resultGetParameters[1] = resultGetParametersItem1
+    MapSet(resultGet, "parameters", resultGetParameters)
+    resultGetResponses: Map(string, Any)
+    MapInit(resultGetResponses)
+    resultGetResponses200: Map(string, Any)
+    MapInit(resultGetResponses200)
+    MapSet(resultGetResponses200, "description", "Dew balance and newest-first activity events across every app")
     MapSet(resultGetResponses, "200", resultGetResponses200)
     MapSet(resultGet, "responses", resultGetResponses)
     MapSet(result, "get", resultGet)
@@ -2181,6 +2228,7 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/tokens/products", PathApiV1TokensProducts())
     MapSet(result, "/api/v1/tokens/balance", PathApiV1TokensBalance())
     MapSet(result, "/api/v1/tokens/ledger", PathApiV1TokensLedger())
+    MapSet(result, "/api/v1/tokens/activity", PathApiV1TokensActivity())
     MapSet(result, "/api/v1/tokens/spend", PathApiV1TokensSpend())
     MapSet(result, "/api/v1/tokens/purchases/google/verify", PathApiV1TokensPurchasesGoogleVerify())
     MapSet(result, "/api/v1/tokens/purchases/monero/invoices", PathApiV1TokensPurchasesMoneroInvoices())

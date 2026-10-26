@@ -118,6 +118,7 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/issuer</code><p>Returns the configured token issuer key.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/products</code><p>Lists configured token products and direct payment prices when direct purchases are enabled.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/balance</code><p>Returns the bearer-authenticated account's token balance computed from signed ledger events.</p></section>
+<section class="endpoint"><span class="method">GET</span><code>/api/v1/tokens/activity</code><p>Returns the account's Dew balance and full newest-first activity history across every app for the profile's Dew screen.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/spend</code><p>Debits tokens with app policy and idempotency enforcement.</p></section>
 <section class="endpoint"><span class="method">POST</span><code>/api/v1/tokens/gifts</code><p>Sends Dew to a friend; the debit and the friend's credit commit together.</p></section>
 <section class="endpoint"><span class="method">GET</span><code>/api/v1/rewards</code><p>Lists the game rewards the node gives and their Dew.</p></section>
@@ -365,6 +366,19 @@ func baselineOpenAPISpec() map[string]any {
 					},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Token ledger events"},
+					},
+				},
+			},
+			"/api/v1/tokens/activity": map[string]any{
+				"get": map[string]any{
+					"summary":  "List the account's full Dew activity for the profile screen",
+					"security": []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{"name": "before_seq", "in": "query", "required": false, "schema": map[string]any{"type": "integer"}},
+						{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer"}},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Dew balance and newest-first activity events across every app"},
 					},
 				},
 			},

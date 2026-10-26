@@ -392,6 +392,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "GET /api/v1/rates", server, HandleExchangeRate)
     Route(mux, "GET /api/v1/tokens/balance", server, HandleTokenHttpBalance)
     Route(mux, "GET /api/v1/tokens/ledger", server, HandleTokenHttpLedger)
+    Route(mux, "GET /api/v1/tokens/activity", server, HandleTokenHttpActivity)
     Route(mux, "POST /api/v1/tokens/spend", server, HandleTokenHttpSpend)
     Route(mux, "POST /api/v1/tokens/gifts", server, HandleTokenGift)
     Route(mux, "POST /api/v1/tokens/purchases/google/verify", server, HandleGooglePlayHttpVerify)
@@ -559,6 +560,10 @@ HandleTokenHttpBalance :: (server: *Server, writer: http.ResponseWriter, request
 
 HandleTokenHttpLedger :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     tokens.Ledger(Tokens(server), writer, request)
+}
+
+HandleTokenHttpActivity :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    tokens.Activity(Tokens(server), writer, request)
 }
 
 HandleTokenHttpSpend :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

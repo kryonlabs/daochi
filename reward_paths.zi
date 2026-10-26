@@ -24,7 +24,7 @@ Document :: #string JSON
     },
     "post": {
       "summary": "Claim a game reward for the account",
-      "description": "The node sets each reward's Dew; the client names only the reward. Requires synced complete evidence with at least 10 actual moves for every preceding level: Classic 1-28 for the secret chest, 1-175 for campaign completion. Offline play remains available; never-synced or incomplete legacy routes do not grant rewards. Returns {reward,units,credited,balance}; each account is credited once.",
+      "description": "The node sets each reward's Dew; the client names only the reward. Requires complete synced evidence with at least 10 moves for Classic 1-28 (chest) or 1-175 (campaign), or earned progress imported once from the immutable pre-upgrade account snapshot. New uploads cannot enlarge legacy eligibility. Returns {reward,units,credited,balance}; each account is credited once.",
       "requestBody": {
         "required": true,
         "content": {

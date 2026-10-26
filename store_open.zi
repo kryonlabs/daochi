@@ -5,6 +5,7 @@ ctx :: #import "std/context_go";
 schema :: #import "store_schema";
 usage :: #import "storage_usage";
 packing :: #import "record_packing";
+migration :: #import "reward_migration";
 trust :: #import "trust_store";
 timestamps :: #import "store_timestamps";
 habits :: #import "habit_migration";
@@ -26,6 +27,10 @@ Join :: (values: []string, separator: string) -> string #foreign strings;
 
 Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
     error := schema.Ensure(database, context)
+    if error != null {
+        return error
+    }
+    error = migration.Ensure(database, context)
     if error != null {
         return error
     }

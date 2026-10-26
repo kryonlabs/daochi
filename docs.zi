@@ -1,6 +1,7 @@
 storage_plans :: #import "storage_plan_paths";
 unlock_paths :: #import "unlock_paths";
 reward_paths :: #import "reward_paths";
+reward_migration_paths :: #import "reward_migration_paths";
 game_evidence_paths :: #import "game_evidence_paths";
 gift_paths :: #import "token_gift_paths";
 publication_paths :: #import "publications_paths";
@@ -2142,6 +2143,8 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/admin/game-maps", MapGet(game_history, "/api/v1/admin/game-maps"))
     MapSet(result, "/api/v1/game-completions", MapGet(game_history, "/api/v1/game-completions"))
     MapSet(result, "/api/v1/rewards", MapGet(game_rewards, "/api/v1/rewards"))
+    old_progress := reward_migration_paths.Paths()
+    MapSet(result, "/api/v1/rewards/migration", MapGet(old_progress, "/api/v1/rewards/migration"))
     rates := exchange_rate_paths.Paths()
     MapSet(result, "/api/v1/rates", MapGet(rates, "/api/v1/rates"))
     lists := shared_list_paths.Paths()

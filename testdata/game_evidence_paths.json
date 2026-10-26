@@ -1,0 +1,57 @@
+{
+  "/api/v1/admin/game-maps": {
+    "post": {
+      "summary": "Register immutable approved map revisions",
+      "description": "Requires the configured X-Daochi-Admin token. Body: {game,source_version,maps:[{level,map_hash,map}]}. Accepts at most 512 maps and 1 MiB. Classic map_hash is SHA256 of shovey.classic.map.v1, LF, decimal level, LF, and the exact lowercase 1440-character cells+tiles+decorations encoding, with no trailing LF. Solutions are excluded. Old revisions remain after map updates or package cleanup. Account clients cannot register maps.",
+      "responses": {
+        "200": {
+          "description": "Registered idempotently"
+        },
+        "400": {
+          "description": "Invalid map or hash"
+        },
+        "401": {
+          "description": "Admin token required"
+        },
+        "503": {
+          "description": "Archive unavailable"
+        }
+      }
+    }
+  },
+  "/api/v1/game-completions": {
+    "post": {
+      "summary": "Sync one completed attempt for the authenticated account",
+      "description": "Body: {game,level,map_hash,moves,actions,trace,evidence_complete}. Limit 1 MiB, 60000 accepted actions and 120000 visited cells. Actual engine moves are separate from actions and traced cells. Trace uses two lowercase hex digits per cell, includes slide cells and paired portal entrance/exit. Validates the registered exact map, unconditional solids, start/end and adjacency or exact portal pair; does not replay the puzzle engine. Repeated identical submissions are idempotent. Retains all attempts so a sub10 shortest route or incomplete legacy attempt cannot hide qualifying evidence. No per-move requests.",
+      "responses": {
+        "200": {
+          "description": "Stored with id and created flag; private, no-store"
+        },
+        "400": {
+          "description": "Invalid evidence or unregistered map"
+        },
+        "401": {
+          "description": "Account bearer required"
+        },
+        "503": {
+          "description": "Archive unavailable"
+        }
+      }
+    },
+    "get": {
+      "summary": "Read the account's completion history and exact played map",
+      "description": "Requires game, level and map_hash query fields; optional nonnegative offset. Returns completions, map and next_offset, ordered by fewest actual moves, 16 attempts per page. Account bearer required; another account's history is never returned. Incomplete legacy evidence remains non-eligible history.",
+      "responses": {
+        "200": {
+          "description": "Own-account history; private, no-store"
+        },
+        "400": {
+          "description": "Invalid history query"
+        },
+        "401": {
+          "description": "Account bearer required"
+        }
+      }
+    }
+  }
+}

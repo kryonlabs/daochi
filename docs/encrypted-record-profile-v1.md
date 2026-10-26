@@ -108,3 +108,21 @@ Response `Vary` retains both the origin and encoding selectors.
 The terminal page includes account profile/social metadata, capabilities,
 package sequence and quota. Intermediate pages retain the saved cursor and do
 not advance the account watermark. Older nodes can still use the full sync path.
+
+## One-time legacy reward migration
+
+The separate `/api/v1/rewards/migration` surface imports earned Shovey Classic
+progress when upgrading reward validation. At the first upgraded startup, the
+node atomically freezes existing canonical encrypted game-progress records. An
+immutable marker prevents later uploads or backdated timestamps from replacing
+that baseline. The authenticated client opens and validates its frozen record
+locally, then submits only its nonce-prefix HChaCha20 subkey, scoped to that
+random record version. Account private keys and reusable record keys stay local.
+
+This is an explicit, limited disclosure of the frozen progress document for
+reward eligibility, separate from opaque sync. The node authenticates the
+original associated data and ciphertext, retains only earned unlocks and
+completion marks plus provenance, and discards the opening key and plaintext.
+It never invents route evidence or credits Dew during migration. New progress
+still requires normal qualifying evidence; normal claims remain once per
+account. Frozen snapshots and imported progress are removed on account deletion.

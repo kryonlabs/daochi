@@ -14,7 +14,7 @@
     },
     "post": {
       "summary": "Claim a game reward for the account",
-      "description": "The node sets each reward's Dew; the client names only the reward. Requires synced complete evidence with at least 10 actual moves for every preceding level: Classic 1-28 for the secret chest, 1-175 for campaign completion. Offline play remains available; never-synced or incomplete legacy routes do not grant rewards. Returns {reward,units,credited,balance}; each account is credited once.",
+      "description": "The node sets each reward's Dew; the client names only the reward. Requires complete synced evidence with at least 10 moves for Classic 1-28 (chest) or 1-175 (campaign), or earned progress imported once from the immutable pre-upgrade account snapshot. New uploads cannot enlarge legacy eligibility. Returns {reward,units,credited,balance}; each account is credited once.",
       "requestBody": {
         "required": true,
         "content": {
@@ -56,57 +56,64 @@
       }
     }
   },
-  "/api/v1/admin/game-maps": {
-    "post": {
-      "summary": "Register immutable approved map revisions",
-      "description": "Requires the configured X-Daochi-Admin token. Body: {game,source_version,maps:[{level,map_hash,map}]}. Accepts at most 512 maps and 1 MiB. Classic map_hash is SHA256 of shovey.classic.map.v1, LF, decimal level, LF, and the exact lowercase 1440-character cells+tiles+decorations encoding, with no trailing LF. Solutions are excluded. Old revisions remain after map updates or package cleanup. Account clients cannot register maps.",
+  "/api/v1/rewards/migration": {
+    "get": {
+      "summary": "Read the account frozen legacy progress snapshot",
+      "description": "Bearer authenticated, private no-store. Returns status missing/done/available. Available includes the frozen ciphertext, its SHA-256 snapshot ID and 24-byte nonce_hex. Only the canonical pre-upgrade Shovey Classic record is eligible.",
       "responses": {
         "200": {
-          "description": "Registered idempotently"
-        },
-        "400": {
-          "description": "Invalid map or hash"
+          "description": "Frozen snapshot or migration state"
         },
         "401": {
-          "description": "Admin token required"
+          "description": "Authentication required"
         },
         "503": {
-          "description": "Archive unavailable"
-        }
-      }
-    }
-  },
-  "/api/v1/game-completions": {
-    "post": {
-      "summary": "Sync one completed attempt for the authenticated account",
-      "description": "Body: {game,level,map_hash,moves,actions,trace,evidence_complete}. Limit 1 MiB, 60000 accepted actions and 120000 visited cells. Actual engine moves are separate from actions and traced cells. Trace uses two lowercase hex digits per cell, includes slide cells and paired portal entrance/exit. Validates the registered exact map, unconditional solids, start/end and adjacency or exact portal pair; does not replay the puzzle engine. Repeated identical submissions are idempotent. Retains all attempts so a sub10 shortest route or incomplete legacy attempt cannot hide qualifying evidence. No per-move requests.",
-      "responses": {
-        "200": {
-          "description": "Stored with id and created flag; private, no-store"
-        },
-        "400": {
-          "description": "Invalid evidence or unregistered map"
-        },
-        "401": {
-          "description": "Account bearer required"
-        },
-        "503": {
-          "description": "Archive unavailable"
+          "description": "Snapshot unavailable"
         }
       }
     },
-    "get": {
-      "summary": "Read the account's completion history and exact played map",
-      "description": "Requires game, level and map_hash query fields; optional nonnegative offset. Returns completions, map and next_offset, ordered by fewest actual moves, 16 attempts per page. Account bearer required; another account's history is never returned. Incomplete legacy evidence remains non-eligible history.",
+    "post": {
+      "summary": "Import earned legacy progress once",
+      "description": "Bearer authenticated. Body {snapshot,key} identifies the frozen version and its 32-byte nonce-prefix HChaCha20 opening subkey in hex. Never submit an account key or reusable record key. The node authenticates the exact old record, stores earned unlocks/completion marks and discards opening material. No Dew is credited; use the normal claim endpoint.",
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "snapshot",
+                "key"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "snapshot": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
+                }
+              }
+            }
+          }
+        }
+      },
       "responses": {
         "200": {
-          "description": "Own-account history; private, no-store"
+          "description": "Migrated or already migrated"
         },
         "400": {
-          "description": "Invalid history query"
+          "description": "Malformed body"
         },
         "401": {
-          "description": "Account bearer required"
+          "description": "Authentication required"
+        },
+        "403": {
+          "description": "No matching frozen record or invalid proof"
         }
       }
     }

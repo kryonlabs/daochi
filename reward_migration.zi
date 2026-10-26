@@ -1,0 +1,283 @@
+// Grandfather earned progress from an immutable pre-upgrade account record.
+// A nonce-specific opening key discloses only that frozen version. Account
+// keys and the long-term game-progress key never reach or persist on the node.
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+service :: #import "account_http";
+auth :: #import "http_auth";
+body :: #import "http_body";
+response :: #import "response";
+strict :: #import "strict_json";
+http :: #import "std/http_go";
+sha :: #system_library "go:crypto/sha256";
+hex :: #system_library "go:encoding/hex";
+b64 :: #system_library "go:encoding/base64";
+cipher :: #system_library "go:crypto/cipher";
+chacha :: #system_library "go:golang.org/x/crypto/chacha20poly1305";
+native :: #system_library "go:database/sql";
+
+ProgressCollection :: "private.entity.v1.game-progress"
+ProgressRecordID :: "fd65a3d7ac3d5ceb2d4d96cc5224a740"
+
+MigrationAAD :: struct {
+    account_id: string #go_tag "json:\"account_id\""
+    app_id: string #go_tag "json:\"app_id\""
+    collection: string #go_tag "json:\"collection\""
+    id: string #go_tag "json:\"id\""
+    schema: string #go_tag "json:\"schema\""
+}
+MigrationEnvelope :: struct {
+    aad: MigrationAAD #go_tag "json:\"aad\""
+    alg: string #go_tag "json:\"alg\""
+    ciphertext: string #go_tag "json:\"ciphertext\""
+    key_id: string #go_tag "json:\"key_id\""
+    nonce: string #go_tag "json:\"nonce\""
+    profile: string #go_tag "json:\"profile\""
+}
+MigrationProgress :: struct {
+    game: string #go_tag "json:\"game\""
+    unlocked: s32 #go_tag "json:\"unlocked\""
+    completed: string #go_tag "json:\"completed\""
+}
+MigrationSnapshot :: struct {
+    status: string #go_tag "json:\"status\""
+    snapshot: string #go_tag "json:\"snapshot,omitempty\""
+    ciphertext: string #go_tag "json:\"ciphertext,omitempty\""
+    nonce_hex: string #go_tag "json:\"nonce_hex,omitempty\""
+}
+MigrationCommand :: struct {
+    snapshot: string #go_tag "json:\"snapshot\""
+    key: string #go_tag "json:\"key\""
+}
+MigrationBytesResult :: struct {
+    value: []u8
+    error: Error
+}
+MigrationEncoding :: #type #foreign b64 "Encoding";
+MigrationCipher :: #type #foreign cipher "AEAD";
+MigrationCipherResult :: struct {
+    value: MigrationCipher
+    error: Error
+}
+
+#scope_file
+Wipe :: (bytes: []u8) {
+    for index: cast(s64)0..bytes.count - 1 {
+        bytes[index] = 0
+    }
+}
+
+RawURL :: () -> *MigrationEncoding #go_field #foreign b64 "RawURLEncoding";
+Decode64 :: (encoding: *MigrationEncoding, value: string) -> MigrationBytesResult #go_results #foreign b64 "(*Encoding).DecodeString";
+DecodeHex :: (value: string) -> MigrationBytesResult #go_results #foreign hex "DecodeString";
+EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
+Sum :: (value: []u8) -> [32]u8 #foreign sha "Sum256";
+NewCipher :: (key: []u8) -> MigrationCipherResult #go_results #foreign chacha "New";
+OpenCipher :: (value: MigrationCipher, destination: []u8, nonce: []u8, sealed: []u8, aad: []u8) -> MigrationBytesResult #go_results #foreign cipher "AEAD.Open";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+
+Digest :: (value: string) -> string {
+    hash := Sum(text.ToBytes(value))
+    return EncodeHex(hash[:])
+}
+ReadEnvelope :: (account: string, ciphertext: string, envelope: *MigrationEnvelope) -> Error {
+    if ciphertext.count < 1 || ciphertext.count > 262144 {
+        return errors.New("invalid frozen progress size")
+    }
+    decoded := Decode64(RawURL(), ciphertext)
+    if decoded.error != null || json.Unmarshal(decoded.value, envelope) != null ||
+        envelope.profile != "daochi-record-v1" || envelope.alg != "xchacha20poly1305" ||
+        envelope.key_id != "entity-v1" || envelope.aad.account_id != account ||
+        envelope.aad.app_id != "entity" || envelope.aad.collection != ProgressCollection ||
+        envelope.aad.id != ProgressRecordID || envelope.aad.schema != "entity.game-progress.v1" {
+        return errors.New("frozen progress does not belong to this account and game")
+    }
+    return null
+}
+
+#scope_export
+Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
+    empty: [0]Any
+    created := sql.Exec(database, context, Schema, empty[:])
+    if created.error != null {
+        return created.error
+    }
+    return Freeze(database, context)
+}
+
+// This marker and the copy commit together exactly once. Later uploads,
+// backdated client timestamps and restarts can never enlarge the baseline.
+Freeze :: (database: *sql.Database, context: ctx.Context) -> Error {
+    started := sql.Begin(database, context, null)
+    if started.error != null {
+        return started.error
+    }
+    transaction := started.value
+    RollbackAtReturn(transaction)
+    empty: [0]Any
+    marker := sql.ExecTx(transaction, context, InsertMarker, empty[:])
+    if marker.error != null {
+        return marker.error
+    }
+    affected := sql.RowsAffected(marker.value)
+    if affected.error != null {
+        return affected.error
+    }
+    if affected.value == 1 {
+        copied := sql.ExecTx(transaction, context, FreezeRecords, empty[:])
+        if copied.error != null {
+            return copied.error
+        }
+    }
+    return sql.Commit(transaction)
+}
+
+Read :: (database: *sql.Database, context: ctx.Context, account: string) -> MigrationSnapshot {
+    result := MigrationSnapshot.{.status = "missing"}
+    migrated: s32
+    arguments: [1]Any = .[account]
+    counts: [1]Any = .[*migrated]
+    if sql.ScanRow(sql.QueryRow(database, context, ReadMigrated, arguments[:]), counts[:]) != null {
+        result.status = "failed"
+        return result
+    }
+    if migrated != 0 {
+        result.status = "done"
+        return result
+    }
+    destinations: [1]Any = .[*result.ciphertext]
+    error := sql.ScanRow(sql.QueryRow(database, context, ReadFrozen, arguments[:]), destinations[:])
+    if error == sql.NoRows() {
+        return result
+    }
+    if error != null {
+        result.status = "failed"
+        return result
+    }
+    envelope: MigrationEnvelope
+    if ReadEnvelope(account, result.ciphertext, *envelope) != null {
+        result.status = "failed"
+        result.ciphertext = ""
+        return result
+    }
+    nonce := Decode64(RawURL(), envelope.nonce)
+    if nonce.error != null || nonce.value.count != 24 {
+        result.status = "failed"
+        result.ciphertext = ""
+        return result
+    }
+    result.status = "available"
+    result.snapshot = Digest(result.ciphertext)
+    result.nonce_hex = EncodeHex(nonce.value)
+    return result
+}
+
+Migrate :: (database: *sql.Database, context: ctx.Context, account: string, command: MigrationCommand) -> Error {
+    snapshot := Read(database, context, account)
+    if snapshot.status == "done" {
+        return null
+    }
+    if snapshot.status != "available" || command.snapshot != snapshot.snapshot || command.key.count != 64 {
+        return errors.New("no matching pre-upgrade progress snapshot")
+    }
+    envelope: MigrationEnvelope
+    if ReadEnvelope(account, snapshot.ciphertext, *envelope) != null {
+        return errors.New("invalid frozen progress")
+    }
+    key := DecodeHex(command.key)
+    if key.error != null || key.value.count != 32 {
+        Wipe(key.value)
+        return errors.New("invalid snapshot opening key")
+    }
+    nonce := Decode64(RawURL(), envelope.nonce)
+    sealed := Decode64(RawURL(), envelope.ciphertext)
+    aad := json.Marshal(envelope.aad)
+    if nonce.error != null || nonce.value.count != 24 || sealed.error != null ||
+        sealed.value.count < 17 || sealed.value.count > 146448 || aad.error != null {
+        Wipe(key.value)
+        return errors.New("invalid frozen progress envelope")
+    }
+    short_nonce: [12]u8
+    for index: cast(s32)0..7 {
+        short_nonce[4 + index] = nonce.value[16 + index]
+    }
+    aead := NewCipher(key.value)
+    Wipe(key.value)
+    if aead.error != null {
+        return aead.error
+    }
+    empty: [0]u8
+    opened := OpenCipher(aead.value, empty[:], short_nonce[:], sealed.value, aad.value)
+    if opened.error != null {
+        return errors.New("snapshot proof did not authenticate")
+    }
+    progress: MigrationProgress
+    error := json.Unmarshal(opened.value, *progress)
+    for index: cast(s64)0..opened.value.count - 1 {
+        opened.value[index] = 0
+    }
+    if error != null || progress.game != "shovey.classic" || progress.unlocked < 1 ||
+        progress.unlocked > 4096 || progress.completed.count > 4096 {
+        return errors.New("invalid legacy game progress")
+    }
+    for mark: progress.completed {
+        if mark != #char "0" && mark != #char "1" {
+            return errors.New("invalid legacy completion marks")
+        }
+    }
+    values: [5]Any = .[account, progress.unlocked, progress.completed, snapshot.snapshot, clock.Unix(clock.Now())]
+    saved := sql.Exec(database, context, InsertProgress, values[:])
+    return saved.error
+}
+
+Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    if http.Method(request) == "GET" {
+        snapshot := Read(accounts.database, http.Context(request), user.value)
+        if snapshot.status == "failed" {
+            response.Error(writer, 503, "legacy progress unavailable")
+        } else {
+            response.JSON(writer, 200, snapshot)
+        }
+        return
+    }
+    read := body.ReadJSON(writer, request, 1024)
+    command: MigrationCommand
+    if read.error != null || strict.Decode(read.value, *command) != null {
+        response.Error(writer, 400, "invalid progress migration")
+        return
+    }
+    if Migrate(accounts.database, http.Context(request), user.value, command) != null {
+        response.Error(writer, 403, "legacy progress proof refused")
+        return
+    }
+    response.JSON(writer, 200, MigrationSnapshot.{.status = "done"})
+}
+
+#scope_file
+Schema :: #string SQL
+CREATE TABLE IF NOT EXISTS game_legacy_migration (id INTEGER PRIMARY KEY CHECK(id=1));
+CREATE TABLE IF NOT EXISTS game_legacy_snapshots (
+ account_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ ciphertext TEXT NOT NULL, server_version INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS game_legacy_progress (
+ account_id TEXT PRIMARY KEY REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ unlocked INTEGER NOT NULL, completed TEXT NOT NULL, snapshot TEXT NOT NULL, migrated_at INTEGER NOT NULL
+);
+SQL
+InsertMarker :: "INSERT INTO game_legacy_migration(id) VALUES(1) ON CONFLICT DO NOTHING";
+FreezeRecords :: "INSERT INTO game_legacy_snapshots(account_id,ciphertext,server_version) SELECT user_id_hash,ciphertext,server_version FROM server_encrypted_records WHERE collection='private.entity.v1.game-progress' AND id='fd65a3d7ac3d5ceb2d4d96cc5224a740' AND key_id='entity-v1' AND deleted_at=0 AND ciphertext<>'' ON CONFLICT DO NOTHING";
+ReadFrozen :: "SELECT ciphertext FROM game_legacy_snapshots WHERE account_id=?1";
+ReadMigrated :: "SELECT COUNT(*) FROM game_legacy_progress WHERE account_id=?1";
+InsertProgress :: "INSERT INTO game_legacy_progress(account_id,unlocked,completed,snapshot,migrated_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING";

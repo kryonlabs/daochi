@@ -20,6 +20,7 @@ storage_plans :: #import "storage_plan_http";
 unlocks :: #import "unlock_http";
 gifts :: #import "token_gift_http";
 game_rewards :: #import "reward_http";
+reward_migration :: #import "reward_migration";
 game_evidence :: #import "game_evidence_http";
 exchange_rates :: #import "exchange_rate";
 monero :: #import "monero_deposits";
@@ -382,6 +383,8 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/unlocks/grant", server, HandleUnlockGrant)
     Route(mux, "GET /api/v1/unlocks/products", server, HandleUnlockPrices)
     Route(mux, "GET /api/v1/rewards", server, HandleRewards)
+    Route(mux, "GET /api/v1/rewards/migration", server, HandleRewardMigration)
+    Route(mux, "POST /api/v1/rewards/migration", server, HandleRewardMigration)
     Route(mux, "POST /api/v1/rewards", server, HandleRewards)
     Route(mux, "POST /api/v1/admin/game-maps", server, HandleGameMaps)
     Route(mux, "POST /api/v1/game-completions", server, HandleGameCompletions)
@@ -867,6 +870,10 @@ HandleStoragePlan :: (server: *Server, writer: http.ResponseWriter, request: *ht
 
 HandleTokenGift :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     gifts.Handle(Accounts(server), writer, request)
+}
+
+HandleRewardMigration :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    reward_migration.Handle(Accounts(server), writer, request)
 }
 
 HandleRewards :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

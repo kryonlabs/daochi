@@ -1,0 +1,75 @@
+#import "std/go_types"
+#import "std/map_go"
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+Paths :: () -> Map(string, Any) {
+    paths: Map(string, Any)
+    json.Unmarshal(text.ToBytes(Document), *paths)
+    return paths
+}
+Document :: #string JSON
+{
+  "/api/v1/rewards/migration": {
+    "get": {
+      "summary": "Read the account frozen legacy progress snapshot",
+      "description": "Bearer authenticated, private no-store. Returns status missing/done/available. Available includes the frozen ciphertext, its SHA-256 snapshot ID and 24-byte nonce_hex. Only the canonical pre-upgrade Shovey Classic record is eligible.",
+      "responses": {
+        "200": {
+          "description": "Frozen snapshot or migration state"
+        },
+        "401": {
+          "description": "Authentication required"
+        },
+        "503": {
+          "description": "Snapshot unavailable"
+        }
+      }
+    },
+    "post": {
+      "summary": "Import earned legacy progress once",
+      "description": "Bearer authenticated. Body {snapshot,key} identifies the frozen version and its 32-byte nonce-prefix HChaCha20 opening subkey in hex. Never submit an account key or reusable record key. The node authenticates the exact old record, stores earned unlocks/completion marks and discards opening material. No Dew is credited; use the normal claim endpoint.",
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "snapshot",
+                "key"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "snapshot": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Migrated or already migrated"
+        },
+        "400": {
+          "description": "Malformed body"
+        },
+        "401": {
+          "description": "Authentication required"
+        },
+        "403": {
+          "description": "No matching frozen record or invalid proof"
+        }
+      }
+    }
+  }
+}
+JSON

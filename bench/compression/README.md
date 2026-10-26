@@ -84,7 +84,7 @@ harness. Use a new output directory for another run you want to preserve.
 - Dictionary training uses 256 separate synthetic records, disjoint IDs and a
   different seed. The 16 KiB dictionary and similar schemas are optimistic for
   cold or heterogeneous clients. Distribution, versioning, storage and missing
-  dictionary behavior remain upgrade-plan gates.
+  dictionary behavior require separate evaluation before introducing dictionaries.
 - Bandwidth exploration is a sequential encode + transfer + decode model. It
   excludes headers, TLS, RTT and overlap. Do not call it a measured network run.
 

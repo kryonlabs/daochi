@@ -309,6 +309,49 @@ func TestPackageReleaseForOlderHosts(t *testing.T) {
 	if value := latest("?host_api=5", 200); value.Sequence != forFive.Sequence {
 		t.Fatalf("retained compatible release lost across sequence gap: %d", value.Sequence)
 	}
+	// Ten retained releases still reach a host that only the oldest fits,
+	// while going back offers released apps at most the newest three.
+	ordered := []ReleaseV2{}
+	for sequence := int64(2009); sequence >= 2001; sequence-- {
+		ordered = append(ordered, publish(sequence, fmt.Sprintf("3.0.%d", sequence-2000), 8, 2))
+	}
+	writeHistory := func(versions []ReleaseV2) {
+		t.Helper()
+		encoded, _ := json.Marshal(struct {
+			Versions []ReleaseV2 `json:"versions"`
+		}{versions})
+		if err := os.WriteFile(filepath.Join(root, "history-v2.json"), encoded, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	offered := func(query string, status int) []ReleaseV2 {
+		t.Helper()
+		response := httptest.NewRecorder()
+		routes.ServeHTTP(response, httptest.NewRequest("GET", "/api/v2/packages/diary/history"+query, nil))
+		if response.Code != status {
+			t.Fatalf("history%s: got %d: %s", query, response.Code, response.Body.String())
+		}
+		var history struct {
+			Versions []ReleaseV2 `json:"versions"`
+		}
+		if status == 200 {
+			if err := json.Unmarshal(response.Body.Bytes(), &history); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return history.Versions
+	}
+	writeHistory(append(ordered, forFive))
+	if value := latest("?host_api=5", 200); value.Sequence != forFive.Sequence {
+		t.Fatalf("the tenth retained release did not reach an older host: %d", value.Sequence)
+	}
+	if versions := offered("?host_api=8", 200); len(versions) != 3 || versions[0].Sequence != 2009 ||
+		versions[2].Sequence != 2007 {
+		t.Fatalf("history offered %d releases, want the newest three", len(versions))
+	}
+	// Eleven, newest first, is more than the node keeps.
+	writeHistory(append(append(ordered, far), forFive))
+	offered("?host_api=8", 503)
 }
 
 func TestPackageReleaseDescriptorValidation(t *testing.T) {

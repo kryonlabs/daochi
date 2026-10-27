@@ -67,6 +67,12 @@ Rollout :: struct {
     Percent: s64 #go_tag "json:\"percent\""
     Until: s64 #go_tag "json:\"until\""
 }
+// The node keeps up to ten of an app's releases in its history, so a
+// device on an older host still finds one built for it. The history it
+// offers for going back lists at most three, the most released apps read.
+HistoryRetained :: 10
+HistoryOffered :: 3
+
 // Each entry remains a publisher-signed descriptor. The index itself grants
 // no trust; host interfaces and active publisher keys are checked per entry.
 ReleaseHistory :: struct {
@@ -190,7 +196,7 @@ Older :: (context: registry.Registry, request: *http.Request, root: string,
     if retained.error == null {
         history: ReleaseHistory
         if retained.value.count > 262144 || json.Unmarshal(retained.value, *history) != null ||
-        history.Versions.count == 0 || history.Versions.count > 3 { return result }
+        history.Versions.count == 0 || history.Versions.count > HistoryRetained { return result }
         previous: s64 = 9223372036854775807
         for value: history.Versions {
             if value.Sequence >= previous || !release.Valid(value, appID) { return result }
@@ -248,11 +254,11 @@ History :: (context: registry.Registry, writer: http.ResponseWriter,
         response.Error(writer, 503, "invalid portable history")
         return
     }
-    if history.Versions.count == 0 || history.Versions.count > 3 {
+    if history.Versions.count == 0 || history.Versions.count > HistoryRetained {
         response.Error(writer, 503, "invalid portable history")
         return
     }
-    selected: [3]release.ReleaseV2
+    selected: [HistoryOffered]release.ReleaseV2
     count: s64 = 0
     previous: s64 = 9223372036854775807
     for value: history.Versions {
@@ -261,8 +267,8 @@ History :: (context: registry.Registry, writer: http.ResponseWriter,
             return
         }
         previous = value.Sequence
-        if Fits(value, wanted) && InFormat(root, value, wanted) && Trusted(context, request, value) &&
-        !HeldBack(root, value.Sequence, bucket) {
+        if count < HistoryOffered && Fits(value, wanted) && InFormat(root, value, wanted) &&
+        Trusted(context, request, value) && !HeldBack(root, value.Sequence, bucket) {
             selected[count] = value
             count += 1
         }

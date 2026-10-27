@@ -363,7 +363,7 @@ Friends :: (database: *sql.Database, context: ctx.Context, userID: string,
     }
     items := MakeRows(cast(isize)0, cast(isize)users.value.count)
     for user: users.value {
-        if metric == "achievements" || metric == "levels" {
+        if metric == "achievements" || metric == "levels" || metric == "level" || metric == "score" {
             row := Published(database, context, user, app, practice, metric)
             result.error = row.error
             if result.error != null {
@@ -485,7 +485,7 @@ Published :: (database: *sql.Database, context: ctx.Context, user: VisibleStatsU
     if result.error != null {
         return result
     }
-    limit := ifx metric == "levels" then 100000.0 else 512.0
+    limit := ifx metric == "levels" || metric == "level" || metric == "score" then 100000.0 else 512.0
     if value >= 0.0 && value <= limit {
         result.value.Value = value
         result.value.Label = IntegerFormat("%d", cast(isize)value)

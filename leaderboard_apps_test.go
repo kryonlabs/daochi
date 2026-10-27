@@ -138,6 +138,26 @@ func TestGameLevelBoardsStaySeparate(t *testing.T) {
 	// Levels are their own board, never an achievements count.
 	if rows := read("arcade.shovey", "achievements"); rows[0].Value != 0 || rows[1].Value != 0 {
 		t.Fatalf("levels leaked into achievements: %#v", rows)
+	} // A run game ranks the level its best run reached and that run's score.
+	run := func(user int, game string, level, score int) {
+		t.Helper()
+		body := fmt.Sprintf(`{"app":"inbe","metrics":[{"practice":%q,"metric":"level","value":%d,"label":"x"},{"practice":%q,"metric":"score","value":%d,"label":"x"}]}`, game, level, game, score)
+		if w := request("PUT", "/api/v1/profile/stats", body, user); w.Code != 200 {
+			t.Fatalf("publish run: %d %s", w.Code, w.Body)
+		}
+	}
+	run(0, "wurm", 12, 340)
+	run(1, "wurm", 57, 4210)
+	for metric, want := range map[string][]float64{"level": {57, 12}, "score": {4210, 340}} {
+		rows := read("wurm", metric)
+		if len(rows) != 2 {
+			t.Fatalf("wurm %s rows: %#v", metric, rows)
+		}
+		for i, row := range rows {
+			if row.Value != want[i] || row.Metric != metric || row.Label != fmt.Sprint(int(want[i])) {
+				t.Fatalf("wurm %s board: %#v", metric, rows)
+			}
+		}
 	}
 }
 

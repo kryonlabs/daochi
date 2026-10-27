@@ -83,10 +83,15 @@ Cache :: (social: Social, context: ctx.Context, userID: string, kind: string, va
     }
 }
 
+GameMetric :: (metric: string) -> bool {
+    return metric == "achievements" || metric == "levels" || metric == "level" || metric == "score"
+}
+
 ValidMetric :: (practice: string, metric: string) -> bool {
-    // An app's own boards: earned achievements, or the levels a game such
-    // as Shovey has solved, named by the game.
-    if metric == "achievements" || metric == "levels" {
+    // An app's own boards: earned achievements, the levels a game such as
+    // Shovey has solved, or the best run of a game such as Apfelwurm, as
+    // the level it reached and its score, named by the game.
+    if GameMetric(metric) {
         return identity.ValidNamespace(practice)
     }
     if practice == "whm" {

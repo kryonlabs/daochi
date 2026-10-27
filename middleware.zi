@@ -142,6 +142,7 @@ AllowedOrigin :: (origin: string) -> string {
         origin == "https://inbe.waozi.xyz" ||
         origin == "https://uku.waozi.xyz" ||
         origin == "https://shovey.waozi.xyz" ||
+        origin == "https://wurm.waozi.xyz" ||
         origin == "https://arcade.waozi.xyz" {
         return origin
     }

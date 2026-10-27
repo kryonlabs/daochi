@@ -3658,6 +3658,32 @@ func TestChromeExtensionCORSPreflight(t *testing.T) {
 	}
 }
 
+func TestApfelwurmCORSPreflight(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	for _, path := range []string{
+		"/api/v1/sync/login",
+		"/api/v1/sync",
+		"/api/v1/tokens/spend",
+	} {
+		req := httptest.NewRequest(http.MethodOptions, path, nil)
+		req.Header.Set("Origin", "https://wurm.waozi.xyz")
+		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusNoContent {
+			t.Fatalf("%s preflight status = %d", path, res.Code)
+		}
+		if got := res.Header().Get("Access-Control-Allow-Origin"); got != "https://wurm.waozi.xyz" {
+			t.Fatalf("%s allow-origin = %q", path, got)
+		}
+		if !strings.Contains(res.Header().Get("Access-Control-Allow-Headers"), "Authorization") {
+			t.Fatalf("%s does not allow authenticated requests", path)
+		}
+	}
+}
+
 func TestUnknownOriginDoesNotGetCORS(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -4280,6 +4306,7 @@ func TestAllowedCORSOrigin(t *testing.T) {
 		"https://inbe.waozi.xyz",
 		"https://uku.waozi.xyz",
 		"https://shovey.waozi.xyz",
+		"https://wurm.waozi.xyz",
 		"https://arcade.waozi.xyz",
 		"http://localhost:8080",
 		"http://127.0.0.1",
@@ -4294,6 +4321,9 @@ func TestAllowedCORSOrigin(t *testing.T) {
 		"https://uku.waozi.xyz.evil.com",
 		"https://shovey.waozi.xyz.evil.com",
 		"https://shovey.waozi.xyz/path",
+		"https://wurm.waozi.xyz.evil.com",
+		"https://wurm.waozi.xyz/path",
+		"http://wurm.waozi.xyz",
 		"https://arcade.waozi.xyz.evil.com",
 		"https://uku.waozi.xyz/path",
 		"",

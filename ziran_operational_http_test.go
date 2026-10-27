@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"log"
 	"log/slog"
@@ -225,5 +226,49 @@ func TestZiranNodeCapabilitiesAndLiveUsageAgainstBaseline(t *testing.T) {
 	expected, err := server.baselineOpsNodeUsage(t.Context())
 	if actual != expected || expectedError != err || actual.ConnectedUsers != 2 || actual.ConnectedWebSocketClients != 3 {
 		t.Fatal("live usage connection counts or policy changed", actual, expected, expectedError, err)
+	}
+}
+
+func TestNodeAdvertisesGooglePlayPurchasesWithAVerifier(t *testing.T) {
+	server, _, _ := testServer(t)
+	capabilities := func() []string {
+		t.Helper()
+		writer := httptest.NewRecorder()
+		server.handleNodeInfo(writer, httptest.NewRequest(http.MethodGet, "/api/v1/node", nil))
+		var body struct {
+			Capabilities []string `json:"capabilities"`
+		}
+		if writer.Code != http.StatusOK || json.Unmarshal(writer.Body.Bytes(), &body) != nil {
+			t.Fatalf("node info: %d %s", writer.Code, writer.Body.String())
+		}
+		return body.Capabilities
+	}
+	withGoogle := append(NodeInfo_Capabilities(), "google-play-purchases")
+	for _, setup := range []struct {
+		name                   string
+		serviceAccount, client string
+		refreshToken           string
+		advertised             bool
+	}{
+		{"no verifier", "", "", "", false},
+		{"oauth client without refresh token", "", "{}", "", false},
+		{"refresh token without oauth client", "", "", "token", false},
+		{"service account", "{}", "", "", true},
+		{"oauth client and refresh token", "", "{}", "token", true},
+	} {
+		server.Cfg.GoogleServiceAccountJSON = setup.serviceAccount
+		server.Cfg.GoogleOAuthClientJSON = setup.client
+		server.Cfg.GoogleOAuthRefreshToken = setup.refreshToken
+		got := capabilities()
+		want := NodeInfo_Capabilities()
+		if setup.advertised {
+			want = withGoogle
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: capabilities %v, want %v", setup.name, got, want)
+		}
+	}
+	if !reflect.DeepEqual(NodeInfo_Capabilities(), withGoogle[:len(withGoogle)-1]) {
+		t.Fatal("advertising Google Play purchases changed the shared capabilities")
 	}
 }

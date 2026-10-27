@@ -309,11 +309,13 @@ RescaleDew :: (configuration: config.Config, arguments: []string) -> Error {
 
 // Run by the deploy with the service stopped, to move the node to ATOMIC Monero
 // atomic units per UNITS Dew units. A whole-factor raise rescales Dew once under
-// NAME and prints the node's new MONERO_RATE_* and DAOCHI_TOKEN_PRODUCTS lines;
-// the node's current ratio prints nothing to change.
+// NAME and prints the node's new MONERO_RATE_* and DAOCHI_TOKEN_PRODUCTS lines.
+// PRODUCTS ("id:Dew" items joined by commas) adds each product the node does
+// not sell yet at that ratio and prints the new DAOCHI_TOKEN_PRODUCTS line.
+// The node's current ratio and products print nothing to change.
 DewRatio :: (configuration: config.Config, arguments: []string) -> Error {
-    usage := errors.New("usage: daochi dew-ratio NAME ATOMIC UNITS")
-    if arguments.count != 3 {
+    usage := errors.New("usage: daochi dew-ratio NAME ATOMIC UNITS [PRODUCTS]")
+    if arguments.count != 3 && arguments.count != 4 {
         return usage
     }
     atomic := tokens.ParseInteger(arguments[1])
@@ -321,29 +323,45 @@ DewRatio :: (configuration: config.Config, arguments: []string) -> Error {
     if !atomic.is_ok || !units.is_ok || atomic.value <= 0 || units.value <= 0 {
         return usage
     }
+    wanted := ""
+    if arguments.count == 4 {
+        wanted = arguments[3]
+    }
     currentAtomic := configuration.MoneroRateAtomicAmount
     currentUnits := configuration.MoneroRateTokenUnits
-    if currentAtomic == atomic.value && currentUnits == units.value {
-        PrintNote("Dew ratio unchanged\n")
-        return null
+    raised := currentAtomic != atomic.value || currentUnits != units.value
+    factor: s64 = 1
+    if raised {
+        if currentAtomic != atomic.value || currentUnits <= 0 || units.value % currentUnits != 0 ||
+        units.value / currentUnits < 2 {
+            return errors.New("the Dew ratio only rises by a whole factor at the same MONERO_RATE_ATOMIC_AMOUNT")
+        }
+        factor = units.value / currentUnits
     }
-    if currentAtomic != atomic.value || currentUnits <= 0 || units.value % currentUnits != 0 ||
-    units.value / currentUnits < 2 {
-        return errors.New("the Dew ratio only rises by a whole factor at the same MONERO_RATE_ATOMIC_AMOUNT")
-    }
-    factor := units.value / currentUnits
     rawProducts := Getenv("DAOCHI_TOKEN_PRODUCTS")
-    products := rescales.ScaleProducts(rawProducts, factor)
+    products: rescales.ProductsResult
+    products.value = rawProducts
+    if raised {
+        products = rescales.ScaleProducts(rawProducts, factor)
+        if products.error != null {
+            return products.error
+        }
+    }
+    products = rescales.AddProducts(products.value, wanted, atomic.value, units.value)
     if products.error != null {
         return products.error
     }
-    error := ApplyRescale(configuration, arguments[0], factor)
-    if error != null {
-        return error
+    if raised {
+        error := ApplyRescale(configuration, arguments[0], factor)
+        if error != null {
+            return error
+        }
+        PrintSetting("MONERO_RATE_ATOMIC_AMOUNT=%d\n", atomic.value)
+        PrintSetting("MONERO_RATE_TOKEN_UNITS=%d\n", units.value)
+    } else {
+        PrintNote("Dew ratio unchanged\n")
     }
-    PrintSetting("MONERO_RATE_ATOMIC_AMOUNT=%d\n", atomic.value)
-    PrintSetting("MONERO_RATE_TOKEN_UNITS=%d\n", units.value)
-    if rawProducts != "" {
+    if products.value != rawProducts || (raised && rawProducts != "") {
         PrintText("DAOCHI_TOKEN_PRODUCTS=%s\n", products.value)
     }
     return null

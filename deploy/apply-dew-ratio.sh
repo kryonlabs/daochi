@@ -1,9 +1,10 @@
 #!/bin/sh
-# Moves the node to the Dew per XMR ratio in RATIO_FILE. The deploy runs it as
-# root with the service stopped. `daochi dew-ratio` runs with the service's
-# user and environment: it rescales Dew once for a raised ratio and prints the
-# node's new MONERO_RATE_* and DAOCHI_TOKEN_PRODUCTS lines, which replace the
-# old ones in ENVIRONMENT_FILE. The node's current ratio changes nothing.
+# Moves the node to the Dew per XMR ratio in RATIO_FILE and adds the file's
+# DEW_PRODUCTS the node lacks. The deploy runs it as root with the service
+# stopped. `daochi dew-ratio` runs with the service's user and environment: it
+# rescales Dew once for a raised ratio and prints the node's new MONERO_RATE_*
+# and DAOCHI_TOKEN_PRODUCTS lines, which replace the old ones in
+# ENVIRONMENT_FILE. The node's current ratio and products change nothing.
 #
 # Usage: apply-dew-ratio.sh RATIO_FILE ENVIRONMENT_FILE BINARY DATABASE
 set -eu
@@ -27,20 +28,9 @@ set -- systemd-run --wait --pipe --collect --quiet \
 if [ -n "$user" ]; then
     set -- "$@" -p User="$user"
 fi
-output=$("$@" "$binary" dew-ratio "$DEW_RESCALE" "$MONERO_RATE_ATOMIC_AMOUNT" "$MONERO_RATE_TOKEN_UNITS")
+output=$("$@" "$binary" dew-ratio "$DEW_RESCALE" "$MONERO_RATE_ATOMIC_AMOUNT" "$MONERO_RATE_TOKEN_UNITS" "${DEW_PRODUCTS:-}")
 printf '%s\n' "$output"
 
-settings=$(printf '%s\n' "$output" | grep -E '^(MONERO_RATE_ATOMIC_AMOUNT|MONERO_RATE_TOKEN_UNITS|DAOCHI_TOKEN_PRODUCTS)=' || true)
-if [ -z "$settings" ]; then
-    exit 0
-fi
-keys=$(printf '%s\n' "$settings" | cut -d= -f1 | paste -sd '|' -)
-updated=$(mktemp "$environment_file.XXXXXX")
-{
-    grep -Ev "^($keys)=" "$environment_file" || true
-    printf '%s\n' "$settings"
-} > "$updated"
-chown --reference="$environment_file" "$updated"
-chmod --reference="$environment_file" "$updated"
-mv "$updated" "$environment_file"
-echo "Node environment now has $(printf '%s\n' "$settings" | cut -d= -f1 | paste -sd ' ' -)"
+printf '%s\n' "$output" |
+    grep -E '^(MONERO_RATE_ATOMIC_AMOUNT|MONERO_RATE_TOKEN_UNITS|DAOCHI_TOKEN_PRODUCTS)=' |
+    sh "$(dirname "$0")/set-environment.sh" - "$environment_file"

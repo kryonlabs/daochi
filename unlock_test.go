@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -532,6 +533,116 @@ func TestScaleTokenProducts(t *testing.T) {
 	}
 }
 
+func TestAddTokenProducts(t *testing.T) {
+	const atomic, units = 1000000000000, 10000 * UnitsPerDew
+	const play = "dew_100:100,dew_500:500,dew_1000:1000,dew_5000:5000"
+	const sold = "waozi_tokens_small:10000000000:1000000000000"
+	for _, tc := range []struct {
+		raw, wanted, want string
+	}{
+		{sold, "", sold},
+		{sold, play, sold + ",dew_100:100000000:10000000000,dew_500:500000000:50000000000," +
+			"dew_1000:1000000000:100000000000,dew_5000:5000000000:500000000000"},
+		{"", " dew_100:100 , ", "dew_100:100000000:10000000000"},
+		// A product the node sells keeps its amounts, such as one a raised ratio scaled.
+		{"dew_100:1000000000:10000000000", "dew_100:100,dew_100:200", "dew_100:1000000000:10000000000"},
+		{"dew_100:x,dew_500:0:1", "dew_100:100,dew_500:500",
+			"dew_100:x,dew_500:0:1,dew_100:100000000:10000000000,dew_500:500000000:50000000000"},
+	} {
+		got := TokenRescale_AddProducts(tc.raw, tc.wanted, atomic, units)
+		if got.Error != nil || got.Value != tc.want {
+			t.Fatalf("%q + %q: %+v, want %q", tc.raw, tc.wanted, got, tc.want)
+		}
+		again := TokenRescale_AddProducts(got.Value, tc.wanted, atomic, units)
+		if again.Error != nil || again.Value != got.Value {
+			t.Fatalf("%q + %q added twice: %+v", tc.raw, tc.wanted, again)
+		}
+	}
+	products := ConfigValues_Products(TokenRescale_AddProducts(sold, play, atomic, units).Value)
+	for id, dew := range map[string]int64{"waozi_tokens_small": 10000, "dew_100": 100, "dew_500": 500, "dew_1000": 1000, "dew_5000": 5000} {
+		product, ok := products[id]
+		if !ok || product.TokenUnits != dew*UnitsPerDew || product.MoneroAtomicAmount != dew*100000000 {
+			t.Fatalf("%s: %+v, want %d Dew at 10,000 Dew per XMR", id, product, dew)
+		}
+	}
+	// The Monero price rounds up so it always funds the Dew.
+	if got := TokenRescale_AddProducts("", "dew_1:1", 7, 3); got.Error != nil || got.Value != "dew_1:1000000:2333334" {
+		t.Fatalf("rounded price: %+v", got)
+	}
+	for _, wanted := range []string{"dew_100", "dew_100:", "dew_100:0", "dew_100:-5", "dew_100:x",
+		"dew_100:1:2", ":100", "Dew_100:100", "_dew:100", "dew-100:100", "dew 100:100",
+		"dew_100:9223372036854775807"} {
+		if got := TokenRescale_AddProducts(sold, wanted, atomic, units); got.Error == nil {
+			t.Fatalf("accepted Dew product %q: %+v", wanted, got)
+		}
+	}
+	if got := TokenRescale_AddProducts("", "dew_5000:5000", math.MaxInt64, 1); got.Error == nil {
+		t.Fatalf("an overflowing price was accepted: %+v", got)
+	}
+}
+
+func runDewRatio(t *testing.T, configuration Config, arguments ...string) (string, Error) {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = writer
+	result := Startup_DewRatio(configuration, arguments)
+	os.Stdout = stdout
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	printed, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(printed), result
+}
+
+func TestDewRatioAddsMissingProducts(t *testing.T) {
+	server, store, handler, private := unlockFixture(t)
+	ctx := context.Background()
+	owner := newTestIdentity(t, handler, 0x89)
+	creditDew(t, store, private, owner.UserID, "products-fixture", 3*UnitsPerDew)
+	configuration := server.Cfg
+	configuration.MoneroRateAtomicAmount = 1000000000000
+	configuration.MoneroRateTokenUnits = 1000 * UnitsPerDew
+	balance := func(want int64) {
+		t.Helper()
+		if got := TokenLedger_Balance(store.Database, ctx, owner.UserID, AssetID); got.Error != nil || got.Value != want {
+			t.Fatalf("balance: %+v, want %d", got, want)
+		}
+	}
+	t.Setenv("DAOCHI_TOKEN_PRODUCTS", "dew_small:5000000:1000000000000")
+	printed, err := runDewRatio(t, configuration, "rescale-v2", "1000000000000", "1000000000", "dew_100:100")
+	if err != nil || printed != "Dew ratio unchanged\nDAOCHI_TOKEN_PRODUCTS=dew_small:5000000:1000000000000,dew_100:100000000:100000000000\n" {
+		t.Fatalf("added product: %q, %v", printed, err)
+	}
+	t.Setenv("DAOCHI_TOKEN_PRODUCTS", "dew_small:5000000:1000000000000,dew_100:100000000:100000000000")
+	if printed, err := runDewRatio(t, configuration, "rescale-v2", "1000000000000", "1000000000", "dew_100:100"); err != nil || printed != "Dew ratio unchanged\n" {
+		t.Fatalf("product already sold: %q, %v", printed, err)
+	}
+	for _, arguments := range [][]string{
+		{"rescale-v2", "1000000000000", "10000000000", "dew_100"},
+		{"rescale-v2", "1000000000000", "10000000000", "dew_100:100", "extra"},
+	} {
+		if printed, err := runDewRatio(t, configuration, arguments...); err == nil {
+			t.Fatalf("dew-ratio %v accepted: %q", arguments, printed)
+		}
+	}
+	balance(3 * UnitsPerDew)
+	// A raise scales the products the node sells and adds the rest at the new ratio.
+	printed, err = runDewRatio(t, configuration, "rescale-v2", "1000000000000", "10000000000", "dew_100:100,dew_500:500")
+	if err != nil || !strings.HasSuffix(printed, "MONERO_RATE_ATOMIC_AMOUNT=1000000000000\n"+
+		"MONERO_RATE_TOKEN_UNITS=10000000000\nDAOCHI_TOKEN_PRODUCTS=dew_small:50000000:1000000000000,"+
+		"dew_100:1000000000:100000000000,dew_500:500000000:50000000000\n") {
+		t.Fatalf("raised ratio: %q, %v", printed, err)
+	}
+	balance(30 * UnitsPerDew)
+}
+
 func TestDewRatioRaisesTheRatioOnce(t *testing.T) {
 	server, store, handler, private := unlockFixture(t)
 	ctx := context.Background()
@@ -543,22 +654,7 @@ func TestDewRatioRaisesTheRatioOnce(t *testing.T) {
 	t.Setenv("DAOCHI_TOKEN_PRODUCTS", "dew_small:5000000:1000000000000")
 	run := func(arguments ...string) (string, Error) {
 		t.Helper()
-		reader, writer, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		stdout := os.Stdout
-		os.Stdout = writer
-		result := Startup_DewRatio(configuration, arguments)
-		os.Stdout = stdout
-		if err := writer.Close(); err != nil {
-			t.Fatal(err)
-		}
-		printed, err := io.ReadAll(reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(printed), result
+		return runDewRatio(t, configuration, arguments...)
 	}
 	balance := func(want int64) {
 		t.Helper()

@@ -123,26 +123,7 @@ Price :: (size: string, period: string) -> s64 {
 // The fixed node ratio quotes storage directly in Monero, without fiat prices.
 // Round up to the smallest atomic amount that funds the complete purchase.
 MoneroPrice :: (size: string, period: string, atomic: s64, units: s64) -> wallet.TokenUnitsResult {
-    price := Price(size, period)
-    result := wallet.TokenUnits(price, units, atomic)
-    if result.error != null {
-        return result
-    }
-    credited: wallet.TokenUnitsResult
-    if result.value > 0 {
-        credited = wallet.TokenUnits(result.value, atomic, units)
-        if credited.error != null {
-            return credited
-        }
-    }
-    if credited.value < price {
-        if result.value == 9223372036854775807 {
-            result.error = errors.New("monero storage price overflow")
-            return result
-        }
-        result.value += 1
-    }
-    return result
+    return wallet.AtomicAmount(Price(size, period), atomic, units)
 }
 
 ConfigurationError :: (value: configuration.Config) -> Error {

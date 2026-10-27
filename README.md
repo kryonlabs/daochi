@@ -389,11 +389,21 @@ same transaction, and a new checkpoint is signed. Running it again changes
 nothing.
 
 The production node's ratio lives in `deploy/dew-ratio.env`. When a deploy
-finds it raised by a whole factor, `scripts/apply-dew-ratio.py` stops the
+finds it raised by a whole factor, `deploy/apply-dew-ratio.sh` stops the
 service, runs `rescale-dew` under the file's `DEW_RESCALE` name and writes the
 new ratio and the scaled `DAOCHI_TOKEN_PRODUCTS` into the node environment
-before starting again. A failed deploy restores the previous binary, database
-and environment together.
+before starting again. The file's `DEW_PRODUCTS` (`id:Dew` items) are added to
+`DAOCHI_TOKEN_PRODUCTS` at the ratio when the node lacks them; products the
+node sells keep their amounts until a raise scales them. A failed deploy
+restores the previous binary, database and environment together.
+
+`POST /api/v1/tokens/purchases/google/verify` credits a Google Play purchase of
+a `DAOCHI_TOKEN_PRODUCTS` product once per order and then consumes it, so Play
+and Monero buy the same Dew. `DAOCHI_GOOGLE_PACKAGE_NAMES` limits the Android
+apps it accepts. `GET /api/v1/node` lists the `google-play-purchases`
+capability while a Google Play verifier is configured. Production's package
+names live in `deploy/node.env`, and a deploy installs the service account
+from the optional `DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON` secret.
 
 To reward one person with Dew, for example as thanks for a past donation, stop
 the service and run `daochi reward-dew REWARD ACCOUNT DEW` with the node's

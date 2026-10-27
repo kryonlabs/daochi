@@ -5,10 +5,13 @@
 // deposits are scaled in the same transaction, and a marker row under the name
 // makes a second run change nothing. Each ratio change needs a new name.
 #import "std/go_types"
+#import "std/map_go"
 #import "protocol"
 ledger :: #import "token_ledger";
 tokens :: #import "token";
 receipts :: #import "token_receipt";
+plans :: #import "storage_plan";
+wallet :: #import "monero_wallet";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 ed :: #import "std/ed25519_go";
@@ -67,6 +70,41 @@ ValidName :: (name: string) -> bool {
         }
     }
     return true
+}
+
+// A Google Play product ID: lowercase letters, digits, underscores and periods,
+// starting with a letter or digit.
+ValidProductID :: (id: string) -> bool {
+    if id.count == 0 || id.count > MaximumNameLength {
+        return false
+    }
+    for byte, index: id {
+        lower := byte >= cast(u8)97 && byte <= cast(u8)122
+        digit := byte >= cast(u8)48 && byte <= cast(u8)57
+        // '_' and '.'.
+        separator := byte == cast(u8)95 || byte == cast(u8)46
+        if !lower && !digit && (!separator || index == 0) {
+            return false
+        }
+    }
+    return true
+}
+
+// The IDs of the DAOCHI_TOKEN_PRODUCTS items the node sells.
+ProductIDs :: (raw: string) -> Map(string, bool) {
+    result: Map(string, bool)
+    MapInit(result)
+    for item: Split(raw, ",") {
+        parts := Split(TrimSpace(item), ":")
+        if parts.count < 2 || parts.count > 3 || parts[0] == "" {
+            continue
+        }
+        units := tokens.ParseInteger(parts[1])
+        if units.is_ok && units.value > 0 {
+            MapSet(result, parts[0], true)
+        }
+    }
+    return result
 }
 
 TotalTx :: (transaction: *sql.Transaction, context: ctx.Context) -> ledger.BalanceResult {
@@ -156,6 +194,54 @@ ScaleProducts :: (raw: string, factor: s64) -> ProductsResult {
         items[index] = Join(parts, ":")
     }
     result.value = Join(items, ",")
+    return result
+}
+
+// DAOCHI_TOKEN_PRODUCTS with each "id:Dew" item of wanted that the node does not
+// sell yet added at rateAtomic Monero atomic units per rateTokens Dew units.
+// Products the node sells keep their amounts, which a raised ratio scales.
+AddProducts :: (raw: string, wanted: string, rateAtomic: s64, rateTokens: s64) -> ProductsResult {
+    result: ProductsResult
+    result.value = raw
+    selling := ProductIDs(raw)
+    for item: Split(wanted, ",") {
+        trimmed := TrimSpace(item)
+        if trimmed == "" {
+            continue
+        }
+        parts := Split(trimmed, ":")
+        if parts.count != 2 || !ValidProductID(parts[0]) {
+            result.error = errors.New("each Dew product is id:Dew")
+            return result
+        }
+        dew := tokens.ParseInteger(parts[1])
+        if !dew.is_ok || dew.value <= 0 || dew.value > MaximumUnits / plans.UnitsPerDew {
+            result.error = errors.New("each Dew product is id:Dew")
+            return result
+        }
+        if MapGet(selling, parts[0]) {
+            continue
+        }
+        units := dew.value * plans.UnitsPerDew
+        price := wallet.AtomicAmount(units, rateAtomic, rateTokens)
+        if price.error != null {
+            result.error = price.error
+            return result
+        }
+        product: [3]string
+        product[0] = parts[0]
+        product[1] = IntegerText(units)
+        product[2] = IntegerText(price.value)
+        added: [2]string
+        added[0] = result.value
+        added[1] = Join(product[:], ":")
+        if result.value == "" {
+            result.value = added[1]
+        } else {
+            result.value = Join(added[:], ",")
+        }
+        MapSet(selling, parts[0], true)
+    }
     return result
 }
 

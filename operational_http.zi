@@ -10,6 +10,7 @@ diagnostics :: #import "store_diagnostics";
 metrics :: #import "metrics";
 policy :: #import "token_policy";
 wallet :: #import "monero_wallet";
+google :: #import "google_play";
 auth :: #import "http_auth";
 response :: #import "response";
 logs :: #import "log_safety";
@@ -38,6 +39,7 @@ Operations :: struct {
 TrimSpace :: (value: string) -> string #foreign strings;
 EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
 AllocatePeers :: (count: isize) -> []NodePeer #foreign builtin "make";
+AppendCapability :: (values: []string, value: string) -> []string #foreign builtin "append";
 PeersNil :: (values: []NodePeer) -> bool #foreign builtin "is_nil";
 LogError :: (message: string, key: string, error: Error) #foreign logging "Error";
 LogAccountError :: (message: string, userKey: string, user: string, errorKey: string, error: Error) #foreign logging "Error";
@@ -133,13 +135,17 @@ Node :: (operations: Operations, writer: http.ResponseWriter, request: *http.Req
     protocol: Map(string, isize)
     MapSet(protocol, "min_supported", MinSupportedProtocol)
     MapSet(protocol, "latest", LatestProtocol)
+    capabilities := info.Capabilities()
+    if google.HasVerifier(configuration) {
+        capabilities = AppendCapability(capabilities, "google-play-purchases")
+    }
     value: Map(string, Any)
     MapSet(value, "status", "ok")
     MapSet(value, "node_id", operations.identity.ID)
     MapSet(value, "node_public_key", EncodeHex(cast([]u8)operations.identity.PublicKey))
     MapSet(value, "node_name", configuration.NodeDisplayName)
     MapSet(value, "base_url", TrimSpace(configuration.BaseURL))
-    MapSet(value, "capabilities", info.Capabilities())
+    MapSet(value, "capabilities", capabilities)
     MapSet(value, "known_nodes", knownNodes)
     MapSet(value, "usage", usage.value)
     MapSet(value, "storage", storage.value)

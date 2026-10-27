@@ -153,6 +153,30 @@ TokenUnits :: (amount: s64, rateAtomic: s64, rateTokens: s64) -> TokenUnitsResul
     return result
 }
 
+// The Monero atomic units that buy units Dew units at rateAtomic per rateTokens,
+// rounded up to the smallest amount that funds all of them.
+AtomicAmount :: (units: s64, rateAtomic: s64, rateTokens: s64) -> TokenUnitsResult {
+    result := TokenUnits(units, rateTokens, rateAtomic)
+    if result.error != null {
+        return result
+    }
+    credited: TokenUnitsResult
+    if result.value > 0 {
+        credited = TokenUnits(result.value, rateAtomic, rateTokens)
+        if credited.error != null {
+            return credited
+        }
+    }
+    if credited.value < units {
+        if result.value == 9223372036854775807 {
+            result.error = errors.New("monero price overflow")
+            return result
+        }
+        result.value += 1
+    }
+    return result
+}
+
 Request :: (context: ctx.Context, configuration: config.Config, method: string,
     parameters: Map(string, Any), output: Any, unavailable: Error) -> Error {
     envelope: Map(string, Any)

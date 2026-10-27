@@ -82,6 +82,37 @@ jobs:
               make build VERSION=${{ github.sha }}
             '
 
+      # Google Play purchases need a service account that Play Console lets view
+      # financial data and manage orders. Without the optional secret the node
+      # keeps the verifier it has.
+      - name: Install the Google Play service account
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "No DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON secret; the node keeps its Google Play verifier settings"
+            exit 0
+          fi
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" | python3 -I -c '
+          import json, sys
+          account = json.load(sys.stdin)
+          if account.get("type") != "service_account" or not account.get("client_email") or not account.get("private_key"):
+              sys.exit("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON is not a Google service account key")
+          print("Google Play service account:", account["client_email"])
+          '
+          REMOTE="${{ secrets.DAOCHI_USER }}@${{ secrets.DAOCHI_HOST }}"
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" | ssh "$REMOTE" '
+            set -e
+            account=/etc/daochi/google-play-service-account.json
+            umask 077
+            cat > "$account.new"
+            user=$(systemctl show daochi.service -p User --value)
+            if [ -n "$user" ]; then
+              chown "$user" "$account.new"
+            fi
+            mv "$account.new" "$account"
+          '
+
       - name: Swap binary and restart
         id: swap
         env:
@@ -112,9 +143,14 @@ jobs:
             fi
             install -m 600 /etc/daochi/daochi.env \"/var/lib/daochi/backups/daochi.env.$STAMP\"
             python3 /opt/daochi-src/scripts/migrate-legacy-env.py /etc/daochi/daochi.env --apply --canonical-only
+            sh /opt/daochi-src/deploy/set-environment.sh /opt/daochi-src/deploy/node.env /etc/daochi/daochi.env
+            if [ -s /etc/daochi/google-play-service-account.json ]; then
+              echo DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE=/etc/daochi/google-play-service-account.json |
+                sh /opt/daochi-src/deploy/set-environment.sh - /etc/daochi/daochi.env
+            fi
             systemctl stop daochi.service
-            # A raised Dew ratio in deploy/dew-ratio.env rescales Dew and rewrites
-            # the environment; if that fails, the previous node comes back.
+            # A raised Dew ratio or a new Dew product in deploy/dew-ratio.env
+            # rewrites the environment; if that fails, the previous node comes back.
             if ! sh /opt/daochi-src/deploy/apply-dew-ratio.sh /opt/daochi-src/deploy/dew-ratio.env /etc/daochi/daochi.env /opt/daochi/daochi /var/lib/daochi/daochi.db; then
               cp \"/var/lib/daochi/backups/daochi.pre-upgrade.$STAMP\" /opt/daochi/daochi
               cp \"/var/lib/daochi/backups/daochi.db.$STAMP\" /var/lib/daochi/daochi.db

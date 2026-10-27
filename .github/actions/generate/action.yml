@@ -6,7 +6,7 @@ runs:
     # Go ignores the dot folder, and the deploy and image leave it out.
     - name: Set up the pinned Ziran
       id: ziran
-      uses: ziranlang/ziran/.github/actions/setup@979159a55bcf1f9edb9eb8f26ea10aca421412e2
+      uses: ziranlang/ziran/.github/actions/setup@4c27b5a080a9596f5919ece1651e5a372be2142f
       with:
         path: .ziran
     # Packages the build fetches stay outside the checkout, where go ./...

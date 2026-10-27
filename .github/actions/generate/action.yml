@@ -1,35 +1,19 @@
 name: Generate the server's Go
-description: Builds the Ziran pinned in ziran.lock and generates the Go from the Zi sources. Run it after setup-go.
+description: Sets up the Ziran pinned in ziran.lock and generates the Go from the Zi sources. Run it after setup-go.
 runs:
   using: composite
   steps:
-    - name: Read the pinned Ziran
-      id: toolchain
-      shell: bash
-      run: |
-        python3 -c 'import json,os; r=json.load(open("ziran.lock")); open(os.environ["GITHUB_OUTPUT"],"a").write("commit="+r["toolchain"]["commit"]+"\n")'
     # Go ignores the dot folder, and the deploy and image leave it out.
-    - name: Restore the built Ziran
-      id: cache
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+    - name: Set up the pinned Ziran
+      id: ziran
+      uses: ziranlang/ziran/.github/actions/setup@79ca2f95c0e90e6c339e2921a198b4f946eb50bb
       with:
         path: .ziran
-        key: ziran-${{ runner.os }}-${{ steps.toolchain.outputs.commit }}
-    - name: Check out the pinned Ziran
-      if: steps.cache.outputs.cache-hit != 'true'
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      with:
-        repository: ziranlang/ziran
-        ref: ${{ steps.toolchain.outputs.commit }}
-        path: .ziran
-    - name: Build the pinned Ziran
-      if: steps.cache.outputs.cache-hit != 'true'
-      shell: bash
-      run: make -j2 -C .ziran
     # Packages the build fetches stay outside the checkout, where go ./...
     # would compile their files.
     - name: Generate the Go
       shell: bash
       env:
         XDG_CACHE_HOME: ${{ runner.temp }}/ziran-cache
-      run: make generate ZIRAN="$GITHUB_WORKSPACE/.ziran/build/bin/ziran"
+        ZIRAN: ${{ steps.ziran.outputs.ziran }}
+      run: make generate ZIRAN="$ZIRAN"

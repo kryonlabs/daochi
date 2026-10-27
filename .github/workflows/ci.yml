@@ -29,17 +29,8 @@ jobs:
       - name: Generate the Go from the Zi sources
         uses: ./.github/actions/generate
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake
-
-      - name: Cache vendored liboqs build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build/liboqs
-          key: liboqs-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('vendor/liboqs/CMakeLists.txt') }}
-
-      - name: Build liboqs
-        run: make liboqs
+      - name: Build the vendored liboqs
+        uses: ./.github/actions/liboqs
 
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
@@ -70,14 +61,8 @@ jobs:
       - name: Generate the Go from the Zi sources
         uses: ./.github/actions/generate
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake
-
-      - name: Cache vendored liboqs build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build/liboqs
-          key: liboqs-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('vendor/liboqs/CMakeLists.txt') }}
+      - name: Build the vendored liboqs
+        uses: ./.github/actions/liboqs
 
       - name: Check formatting
         run: test -z "$(gofmt -l $(git ls-files '*.go'))"

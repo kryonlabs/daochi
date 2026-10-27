@@ -1,0 +1,44 @@
+name: Build the vendored liboqs
+description: >
+  Restores the liboqs build of the vendored submodule commit, or builds it
+  with cmake and caches it. A restored build is made newer than the fresh
+  checkout, so make keeps it instead of building it again.
+runs:
+  using: composite
+  steps:
+    - name: Read the vendored liboqs commit
+      id: source
+      shell: bash
+      run: echo "commit=$(git rev-parse HEAD:vendor/liboqs)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the liboqs build
+      id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: build/liboqs
+        key: liboqs-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.commit }}
+
+    - name: Keep the restored build
+      if: steps.cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        stamp="$RUNNER_TEMP/liboqs-stamp"
+        touch "$stamp"
+        find build/liboqs -exec touch -r "$stamp" {} +
+        rm -f "$stamp"
+
+    # Only Ubuntu's own feeds and with time limits, so a slow mirror or
+    # third-party feed cannot hold the job.
+    - name: Install cmake
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        sources=/etc/apt/sources.list.d/ubuntu.sources
+        set -- -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 \
+          -o Dir::Etc::sourcelist="$sources" -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+        timeout 600 sudo apt-get "$@" update
+        timeout 600 sudo apt-get "$@" install -y --no-install-recommends cmake
+
+    - name: Build liboqs
+      shell: bash
+      run: make liboqs

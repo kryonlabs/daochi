@@ -2,6 +2,7 @@
 // The node keeps the catalog, which rewards exist and the Dew each gives; the
 // client names only the reward. token_reward gives a reward to an account
 // once, so claiming it again credits nothing and reports the balance.
+// Finishing Shovey's campaign pays by place: more Dew for the first finishers.
 #import "std/go_types"
 service :: #import "account_http";
 rewards :: #import "token_reward";
@@ -12,6 +13,9 @@ response :: #import "response";
 identity :: #import "identity";
 strict :: #import "strict_json";
 http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
 builtin :: #system_library "go:builtin";
 
 RewardCommand :: struct {
@@ -32,12 +36,26 @@ RewardClaim :: struct {
     units: s64 #go_tag "json:\"units\""
     credited: bool #go_tag "json:\"credited\""
     balance: s64 #go_tag "json:\"balance\""
+    // The account's finishing place, for a reward that pays by place.
+    place: s64 #go_tag "json:\"place,omitempty\""
 }
 
-// The rewards and their Dew, in integer millionths.
+// The rewards and their Dew, in integer millionths; the campaign's is its
+// Dew after the 100th finisher (see CampaignPlaces).
 RewardCount :: 2
 RewardNames: [2]string = .["shovey.secret-chest", "shovey.campaign-complete"];
 RewardUnits: [2]s64 = .[2000000, 5000000];
+
+// Finishing the campaign: the first 10 finishers get 100 Dew, the next 20 get
+// 50, those up to the 100th get 20, and everyone after 5.
+CampaignReward :: "shovey.campaign-complete";
+CampaignPlaces: [3]s64 = .[10, 30, 100];
+CampaignUnits: [4]s64 = .[100000000, 50000000, 20000000, 5000000];
+// Before places came on 2026-10-27, every finisher got a flat 5 Dew (0.5
+// before the 10-25 rescale, which multiplied it by ten). Credits from before
+// CampaignPlacesFrom (UTC) may be flat ones; later credits are all by place.
+CampaignFlatUnits :: 5000000
+CampaignPlacesFrom :: "2026-10-28 00:00:00";
 
 MakeOffers :: (count: isize) -> []RewardOffer #foreign builtin "make";
 AppendOffer :: (values: []RewardOffer, value: RewardOffer) -> []RewardOffer #foreign builtin "append";
@@ -48,6 +66,25 @@ Units :: (reward: string) -> s64 {
         if RewardNames[index] == reward { return RewardUnits[index] }
     }
     return 0
+}
+
+// The Dew the next claim of a reward gives.
+OfferUnits :: (database: *sql.Database, context: ctx.Context, reward: string) -> s64 {
+    if reward != CampaignReward {
+        return Units(reward)
+    }
+    next := rewards.NextPlaceUnits(database, context, reward, CampaignPlaces[:], CampaignUnits[:])
+    if next.error != null {
+        return 0
+    }
+    return next.value
+}
+
+// Finishers credited the flat 5 Dew get the rest of their place's Dew. Run at
+// start; each finisher is topped up once.
+SettleCampaign :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey) -> rewards.SettleResult {
+    return rewards.SettlePlaces(database, context, signer, CampaignReward, CampaignPlaces[:], CampaignUnits[:],
+        CampaignFlatUnits, CampaignPlacesFrom)
 }
 
 #scope_file
@@ -74,7 +111,12 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         offers: RewardOffers
         offers.rewards = MakeOffers(cast(isize)0)
         for index: cast(s32)0..RewardCount - 1 {
-            offers.rewards = AppendOffer(offers.rewards, RewardOffer.{.reward = RewardNames[index], .units = RewardUnits[index]})
+            units := OfferUnits(accounts.database, http.Context(request), RewardNames[index])
+            if units <= 0 {
+                response.Error(writer, 503, "rewards unavailable")
+                return
+            }
+            offers.rewards = AppendOffer(offers.rewards, RewardOffer.{.reward = RewardNames[index], .units = units})
         }
         response.JSON(writer, 200, offers)
         return
@@ -98,12 +140,19 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         response.Error(writer, 403, "sync complete evidence for every required level with at least 10 moves before claiming this reward")
         return
     }
-    given := rewards.Give(accounts.database, http.Context(request), accounts.configuration.WaoziIssuerPrivateKey,
-        command.reward, user.value, units)
+    given: rewards.RewardResult
+    if command.reward == CampaignReward {
+        given = rewards.GiveByPlace(accounts.database, http.Context(request), accounts.configuration.WaoziIssuerPrivateKey,
+            command.reward, user.value, CampaignPlaces[:], CampaignUnits[:])
+    } else {
+        given = rewards.Give(accounts.database, http.Context(request), accounts.configuration.WaoziIssuerPrivateKey,
+            command.reward, user.value, units)
+    }
     if given.error != null {
         response.Error(writer, 503, "rewards unavailable")
         return
     }
-    claim := RewardClaim.{.reward = command.reward, .units = units, .credited = given.credited, .balance = given.balance}
+    claim := RewardClaim.{.reward = command.reward, .units = given.units, .credited = given.credited,
+        .balance = given.balance, .place = given.place}
     response.JSON(writer, 200, claim)
 }

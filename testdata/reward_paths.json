@@ -2,7 +2,7 @@
   "/api/v1/rewards": {
     "get": {
       "summary": "List the game rewards the node gives",
-      "description": "Requires the account bearer. Returns rewards [{reward,units}], each reward's Dew in integer millionths.",
+      "description": "Requires the account bearer. Returns rewards [{reward,units}]: the Dew the next claim of each reward gives, in integer millionths.",
       "responses": {
         "200": {
           "description": "The rewards and their Dew; no-store"
@@ -14,7 +14,7 @@
     },
     "post": {
       "summary": "Claim a game reward for the account",
-      "description": "The node sets each reward's Dew; the client names only the reward. Requires complete synced evidence with at least 10 moves for Classic 1-28 (chest) or 1-175 (campaign), or earned progress imported once from the immutable pre-upgrade account snapshot. New uploads cannot enlarge legacy eligibility. Returns {reward,units,credited,balance}; each account is credited once.",
+      "description": "The node sets each reward's Dew; the client names only the reward. Requires complete synced evidence with at least 10 moves for Classic 1-28 (chest) or 1-175 (campaign), or earned progress imported once from the immutable pre-upgrade account snapshot. New uploads cannot enlarge legacy eligibility. The campaign pays by finishing place: 100 Dew for places 1-10, 50 for 11-30, 20 for 31-100 and 5 after. Returns {reward,units,credited,balance}, with place for the campaign; each account is credited once and keeps its place.",
       "requestBody": {
         "required": true,
         "content": {

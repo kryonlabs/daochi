@@ -12,6 +12,7 @@ type rewardClaimResponse struct {
 	Units    int64  `json:"units"`
 	Credited bool   `json:"credited"`
 	Balance  int64  `json:"balance"`
+	Place    int64  `json:"place"`
 }
 
 // A game reward is the node's to give: the client names it, the node sets its
@@ -53,9 +54,13 @@ func TestGameRewardsCreditEachAccountOnce(t *testing.T) {
 	}
 	claim(player.Token, `{"reward":"shovey.campaign-complete"}`, 403)
 	seedGameEvidence(t, store, player.UserID, 175)
+	// The first to finish the campaign gets the first place's 100 Dew.
 	done := claim(player.Token, `{"reward":"shovey.campaign-complete"}`, 200)
-	if !done.Credited || done.Units != 5*UnitsPerDew || done.Balance != 2*UnitsPerDew+5*UnitsPerDew {
+	if !done.Credited || done.Units != 100*UnitsPerDew || done.Place != 1 || done.Balance != 2*UnitsPerDew+100*UnitsPerDew {
 		t.Fatalf("second reward: %+v", done)
+	}
+	if again := claim(player.Token, `{"reward":"shovey.campaign-complete"}`, 200); again.Credited || again.Units != 100*UnitsPerDew || again.Place != 1 {
+		t.Fatalf("repeated campaign claim: %+v", again)
 	}
 	if got := TokenLedger_Balance(store.Database, ctx, other.UserID, AssetID); got.Error != nil || got.Value != 0 {
 		t.Fatalf("a reward reached another account: %+v", got)
@@ -69,7 +74,7 @@ func TestGameRewardsCreditEachAccountOnce(t *testing.T) {
 	if res.Code != 401 {
 		t.Fatalf("unauthenticated claim: %d", res.Code)
 	}
-	if got := TokenLedger_Balance(store.Database, ctx, player.UserID, AssetID); got.Error != nil || got.Value != 2*UnitsPerDew+5*UnitsPerDew {
+	if got := TokenLedger_Balance(store.Database, ctx, player.UserID, AssetID); got.Error != nil || got.Value != 2*UnitsPerDew+100*UnitsPerDew {
 		t.Fatalf("refused claims changed the balance: %+v", got)
 	}
 	listed := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/rewards", player.Token, nil)
@@ -81,5 +86,9 @@ func TestGameRewardsCreditEachAccountOnce(t *testing.T) {
 	}
 	if listed.Code != 200 || json.Unmarshal(listed.Body.Bytes(), &offers) != nil || len(offers.Rewards) != 2 {
 		t.Fatalf("listed rewards: %d %s", listed.Code, listed.Body.String())
+	}
+	// The list names what the next claim gives: the second place is still 100 Dew.
+	if offers.Rewards[0].Units != 2*UnitsPerDew || offers.Rewards[1].Units != 100*UnitsPerDew {
+		t.Fatalf("listed rewards: %+v", offers.Rewards)
 	}
 }

@@ -1,6 +1,7 @@
 // A Dew reward to one account, such as thanks for a past donation. The account
 // is credited through the signed payment-credit path with REWARD:account as
-// the payment ID, so the same reward never credits that account twice.
+// the payment ID, so the same reward never credits that account twice. A
+// reward can also pay by place, more Dew for the accounts credited first.
 #import "std/go_types"
 #import "protocol"
 ledger :: #import "token_ledger";
@@ -11,7 +12,9 @@ sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 ed :: #import "std/ed25519_go";
 errors :: #import "std/errors_go";
+go_sql :: #system_library "go:database/sql";
 go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
 
 RewardProvider :: "reward-v1";
 
@@ -22,11 +25,167 @@ RewardResult :: struct {
     units: s64
     balance: s64
     credited: bool
+    // The account's place among those credited the reward, for a reward
+    // that pays by place; 0 otherwise.
+    place: s64
+    error: Error
+}
+
+SettleResult :: struct {
+    // The accounts topped up by this run and the Dew they received.
+    accounts: s64
+    units: s64
+    error: Error
+}
+
+PlaceResult :: struct {
+    value: s64
     error: Error
 }
 
 #scope_file
+PaidPlace :: struct {
+    account: string
+    units: s64
+    // Credited before the reward paid by place.
+    early: bool
+}
+PaidPlacesResult :: struct {
+    value: []PaidPlace
+    error: Error
+}
+PaymentResult :: struct {
+    found: bool
+    units: s64
+    place: s64
+    error: Error
+}
 Join :: (values: []string, separator: string) -> string #foreign go_strings;
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+AppendPaidPlace :: (values: []PaidPlace, value: PaidPlace) -> []PaidPlace #foreign builtin "append";
+
+PaymentID :: (reward: string, account: string) -> string {
+    parts: [3]string = .[reward, ":", account]
+    return Join(parts[:], "")
+}
+
+// The payment IDs of one reward all start with this; the top-ups of
+// SettlePlaces do not.
+PaymentPrefix :: (reward: string) -> string {
+    parts: [2]string = .[reward, ":"]
+    return Join(parts[:], "")
+}
+
+// places rise, and units has one more entry for everyone after the last place.
+ValidPlaces :: (places: []s64, units: []s64) -> bool {
+    if places.count == 0 || units.count != places.count + 1 {
+        return false
+    }
+    previous: s64 = 0
+    for place: places {
+        if place <= previous {
+            return false
+        }
+        previous = place
+    }
+    for value: units {
+        if value <= 0 {
+            return false
+        }
+    }
+    return true
+}
+
+// The first places[0] get units[0], those up to places[1] get units[1], and so
+// on; every place after the last gets the last units.
+PlaceUnits :: (place: s64, places: []s64, units: []s64) -> s64 {
+    for index: 0..places.count - 1 {
+        if place <= places[index] {
+            return units[index]
+        }
+    }
+    return units[units.count - 1]
+}
+
+CountPlacesSQL :: #string SQL
+SELECT COUNT(*) FROM token_processed_payments
+WHERE provider=?1 AND substr(provider_payment_id,1,length(?2))=?2
+SQL;
+
+// Places follow the order the payments were written; they are never deleted.
+PaidSQL :: #string SQL
+SELECT paid.amount,
+ (SELECT COUNT(*) FROM token_processed_payments AS earlier
+  WHERE earlier.provider=paid.provider
+  AND substr(earlier.provider_payment_id,1,length(?3))=?3
+  AND earlier.rowid<=paid.rowid)
+FROM token_processed_payments AS paid
+WHERE paid.provider=?1 AND paid.provider_payment_id=?2
+SQL;
+
+PaidPlacesSQL :: #string SQL
+SELECT account_id,amount,created_at<?4 FROM token_processed_payments
+WHERE provider=?1 AND substr(provider_payment_id,1,length(?2))=?2
+ORDER BY rowid
+LIMIT ?3
+SQL;
+
+CountPlacesTx :: (transaction: *sql.Transaction, context: ctx.Context, reward: string) -> PlaceResult {
+    result: PlaceResult
+    arguments: [2]Any = .[RewardProvider, PaymentPrefix(reward)]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context, CountPlacesSQL, arguments[:]), destinations[:])
+    return result
+}
+
+PaidTx :: (transaction: *sql.Transaction, context: ctx.Context, reward: string, paymentID: string) -> PaymentResult {
+    result: PaymentResult
+    arguments: [3]Any = .[RewardProvider, paymentID, PaymentPrefix(reward)]
+    destinations: [2]Any = .[*result.units, *result.place]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context, PaidSQL, arguments[:]), destinations[:])
+    if result.error == null {
+        result.found = true
+        return result
+    }
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+    }
+    return result
+}
+
+// Read every row before writing, so no query stays open.
+PaidPlacesTx :: (transaction: *sql.Transaction, context: ctx.Context, reward: string, limit: s64,
+    before: string) -> PaidPlacesResult {
+    result: PaidPlacesResult
+    arguments: [4]Any = .[RewardProvider, PaymentPrefix(reward), limit, before]
+    queried := sql.QueryTx(transaction, context, PaidPlacesSQL, arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    defer sql.CloseRows(queried.value)
+    while sql.Next(queried.value) {
+        item: PaidPlace
+        destinations: [3]Any = .[*item.account, *item.units, *item.early]
+        result.error = sql.ScanRows(queried.value, destinations[:])
+        if result.error != null {
+            return result
+        }
+        result.value = AppendPaidPlace(result.value, item)
+    }
+    result.error = sql.RowsError(queried.value)
+    return result
+}
+
+RewardEvent :: (account: string, reward: string, units: s64) -> receipts.TokenEventInput {
+    event: receipts.TokenEventInput
+    event.AccountID = account
+    event.EventType = "credit"
+    event.AmountDelta = units
+    event.SourceType = "reward"
+    event.SourceRef = reward
+    return event
+}
 
 #scope_export
 // Reward one account, named by alias or account ID, with Dew units.
@@ -48,15 +207,9 @@ Give :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, r
         return result
     }
     result.account = found.value
-    event: receipts.TokenEventInput
-    event.AccountID = result.account
-    event.EventType = "credit"
-    event.AmountDelta = units
-    event.SourceType = "reward"
-    event.SourceRef = reward
-    paymentParts: [3]string = .[reward, ":", result.account]
     credited := ledger.CreditPayment(database, context, signer, RewardProvider,
-        Join(paymentParts[:], ""), event, errors.New("Dew issuer unavailable"))
+        PaymentID(reward, result.account), RewardEvent(result.account, reward, units),
+        errors.New("Dew issuer unavailable"))
     result.error = credited.error
     if result.error != null {
         return result
@@ -65,5 +218,135 @@ Give :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, r
     balance := ledger.Balance(database, context, result.account, receipts.AssetID)
     result.error = balance.error
     result.balance = balance.value
+    return result
+}
+
+// Reward one account by its place among the accounts credited this reward
+// (see PlaceUnits). Places go in the order of crediting, inside one
+// transaction, so two accounts never share a place. An account credited
+// before keeps its place and its Dew.
+GiveByPlace :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, reward: string,
+    reference: string, places: []s64, units: []s64) -> RewardResult {
+    result: RewardResult
+    if !identity.ValidNamespace(reward) || !ValidPlaces(places, units) {
+        result.error = errors.New("invalid reward")
+        return result
+    }
+    // Before the transaction: the node's one database connection is its.
+    found := accounts.Resolve(database, context, reference)
+    result.error = found.error
+    if result.error != null {
+        return result
+    }
+    if !found.found {
+        result.error = errors.New("unknown account")
+        return result
+    }
+    result.account = found.value
+    paymentID := PaymentID(reward, result.account)
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    paid := PaidTx(transaction, context, reward, paymentID)
+    result.error = paid.error
+    if result.error != null {
+        return result
+    }
+    if paid.found {
+        result.units = paid.units
+        result.place = paid.place
+    } else {
+        earlier := CountPlacesTx(transaction, context, reward)
+        result.error = earlier.error
+        if result.error != null {
+            return result
+        }
+        result.place = earlier.value + 1
+        result.units = PlaceUnits(result.place, places, units)
+    }
+    credited := ledger.CreditPaymentTx(transaction, context, signer, RewardProvider, paymentID,
+        RewardEvent(result.account, reward, result.units), errors.New("Dew issuer unavailable"))
+    result.error = credited.error
+    if result.error != null {
+        return result
+    }
+    result.credited = credited.created
+    balance := ledger.BalanceTx(transaction, context, result.account, receipts.AssetID)
+    result.error = balance.error
+    if result.error != null {
+        return result
+    }
+    result.balance = balance.value
+    result.error = sql.Commit(transaction)
+    return result
+}
+
+// The Dew the next account credited a reward by place would get.
+NextPlaceUnits :: (database: *sql.Database, context: ctx.Context, reward: string, places: []s64, units: []s64) -> PlaceResult {
+    result: PlaceResult
+    if !ValidPlaces(places, units) {
+        result.error = errors.New("invalid reward")
+        return result
+    }
+    earlier: s64
+    arguments: [2]Any = .[RewardProvider, PaymentPrefix(reward)]
+    destinations: [1]Any = .[*earlier]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, CountPlacesSQL, arguments[:]), destinations[:])
+    if result.error == null {
+        result.value = PlaceUnits(earlier + 1, places, units)
+    }
+    return result
+}
+
+// Accounts credited a reward before it paid by place, at a created_at before
+// `before`, took a place each but got its old Dew. Each gets the rest of its
+// place's Dew once, as REWARD.place:ACCOUNT; worth is what an old credit is
+// worth now, so a place worth no more than that gets nothing. Running it
+// again credits nothing.
+SettlePlaces :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, reward: string,
+    places: []s64, units: []s64, worth: s64, before: string) -> SettleResult {
+    result: SettleResult
+    if !identity.ValidNamespace(reward) || !ValidPlaces(places, units) || worth <= 0 {
+        result.error = errors.New("invalid reward")
+        return result
+    }
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    paid := PaidPlacesTx(transaction, context, reward, places[places.count - 1], before)
+    result.error = paid.error
+    if result.error != null {
+        return result
+    }
+    topUpParts: [2]string = .[reward, ".place"]
+    topUp := Join(topUpParts[:], "")
+    for index: 0..paid.value.count - 1 {
+        item := paid.value[index]
+        due := PlaceUnits(cast(s64)index + 1, places, units)
+        // Credited by place already, or the place is worth no more.
+        if !item.early || item.units >= due || due <= worth {
+            continue
+        }
+        credited := ledger.CreditPaymentTx(transaction, context, signer, RewardProvider,
+            PaymentID(topUp, item.account), RewardEvent(item.account, reward, due - worth),
+            errors.New("Dew issuer unavailable"))
+        result.error = credited.error
+        if result.error != null {
+            return result
+        }
+        if credited.created {
+            result.accounts += 1
+            result.units += due - worth
+        }
+    }
+    result.error = sql.Commit(transaction)
     return result
 }

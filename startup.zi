@@ -3,6 +3,7 @@ config :: #import "config";
 plans :: #import "storage_plan";
 rescales :: #import "token_rescale";
 rewards :: #import "token_reward";
+game_rewards :: #import "reward_http";
 checkpoints :: #import "token_checkpoint";
 policy :: #import "token_policy";
 tokens :: #import "token";
@@ -85,6 +86,7 @@ JoinHostPort :: (host: string, port: string) -> string #foreign go_net;
 FatalError :: (format: string, error: Error) #foreign go_log "Fatalf";
 FatalMessage :: (message: string) #foreign go_log "Fatal";
 LogError :: (message: string, key: string, error: Error) #foreign go_slog "Error";
+LogSettled :: (message: string, accountsKey: string, accounts: s64, unitsKey: string, units: s64) #foreign go_slog "Info";
 LogListening :: (message: string, urlKey: string, url: string, addressKey: string, address: string,
     baseURLKey: string, baseURL: string, databaseKey: string, database: string) #foreign go_slog "Info";
 AllocateHTTP :: () -> *HTTPServer #foreign builtin "new";
@@ -388,6 +390,24 @@ RewardDew :: (configuration: config.Config, arguments: []string) -> Error {
         checkpoint.value.LedgerSeq, checkpoint.value.LedgerRoot)
     return null
 }
+
+// Finishers paid before the campaign paid by place get the rest of their
+// place's Dew. A node without the Dew issuer gives no rewards to settle.
+SettleCampaign :: (configuration: config.Config, store: *storage.Store) {
+    issuer := policy.Issuer(configuration, errors.New("rewards need the Dew issuer private key"))
+    if issuer.error != null {
+        return
+    }
+    settled := game_rewards.SettleCampaign(store.database, ctx.Background(), issuer.value)
+    if settled.error != null {
+        LogError("settle campaign reward places", "error", settled.error)
+        return
+    }
+    if settled.accounts > 0 {
+        LogSettled("campaign reward places settled", "accounts", settled.accounts, "units", settled.units)
+    }
+}
+
 RunPrepared :: (configuration: config.Config, arguments: []string, createVerifier: VerifierFactory,
     signer: access.SignPrivateKey) {
     if arguments.count > 1 && arguments[1] == "inspect" {
@@ -430,6 +450,7 @@ RunPrepared :: (configuration: config.Config, arguments: []string, createVerifie
     }
     store := opened.value
     CloseAtReturn(CloseStore, store)
+    SettleCampaign(configuration, store)
     verifier := createVerifier()
     if verifier.error != null {
         if errors.Is(verifier.error, verification.ErrVerifierUnavailable) {

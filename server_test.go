@@ -3684,6 +3684,33 @@ func TestApfelwurmCORSPreflight(t *testing.T) {
 	}
 }
 
+func TestDewCORSPreflight(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	for _, path := range []string{
+		"/api/v1/sync/login",
+		"/api/v1/storage/plan",
+		"/api/v1/tokens/purchases/monero/address",
+		"/api/v1/tokens/purchases/monero/deposits",
+	} {
+		req := httptest.NewRequest(http.MethodOptions, path, nil)
+		req.Header.Set("Origin", "https://dew.waozi.xyz")
+		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+		req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusNoContent {
+			t.Fatalf("%s preflight status = %d", path, res.Code)
+		}
+		if got := res.Header().Get("Access-Control-Allow-Origin"); got != "https://dew.waozi.xyz" {
+			t.Fatalf("%s allow-origin = %q", path, got)
+		}
+		if !strings.Contains(res.Header().Get("Access-Control-Allow-Headers"), "Authorization") {
+			t.Fatalf("%s does not allow authenticated requests", path)
+		}
+	}
+}
+
 func TestUnknownOriginDoesNotGetCORS(t *testing.T) {
 	server, _, _ := testServer(t)
 	handler := server.Routes()
@@ -4307,6 +4334,7 @@ func TestAllowedCORSOrigin(t *testing.T) {
 		"https://uku.waozi.xyz",
 		"https://shovey.waozi.xyz",
 		"https://wurm.waozi.xyz",
+		"https://dew.waozi.xyz",
 		"https://arcade.waozi.xyz",
 		"http://localhost:8080",
 		"http://127.0.0.1",
@@ -4324,6 +4352,9 @@ func TestAllowedCORSOrigin(t *testing.T) {
 		"https://wurm.waozi.xyz.evil.com",
 		"https://wurm.waozi.xyz/path",
 		"http://wurm.waozi.xyz",
+		"https://dew.waozi.xyz.evil.com",
+		"https://dew.waozi.xyz/path",
+		"http://dew.waozi.xyz",
 		"https://arcade.waozi.xyz.evil.com",
 		"https://uku.waozi.xyz/path",
 		"",

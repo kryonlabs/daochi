@@ -29,7 +29,6 @@ Accounts :: struct {
 LogError :: (message: string, userKey: string, user: string, errorKey: string, error: Error) #foreign logging "Error";
 TrimSpace :: (value: string) -> string #foreign strings;
 ToLower :: (value: string) -> string #foreign strings;
-TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
 Contains :: (value: string, part: string) -> bool #foreign strings;
 HeaderMessage :: (format: string, header: string) -> string #foreign format "Sprintf";
 
@@ -70,10 +69,6 @@ Authenticate :: (accounts: Accounts, writer: http.ResponseWriter, request: *http
 }
 
 #scope_export
-NormalizeAlias :: (value: string) -> string {
-    return TrimPrefix(ToLower(TrimSpace(value)), "@")
-}
-
 // A profile picture is one of the node's own pictures, or one of the profile
 // pictures in Kryon's icon set by its icon number (41 to 65 and 124 to 126),
 // which apps such as Inner Breeze offer. Entity's three abstract pictures
@@ -100,7 +95,7 @@ Alias :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Reques
         return
     }
     decoded.UserIDHash = ToLower(TrimSpace(decoded.UserIDHash))
-    decoded.Alias = NormalizeAlias(decoded.Alias)
+    decoded.Alias = identity.NormalizeAccountAlias(decoded.Alias)
     user := HeaderUser(request, decoded.UserIDHash)
     if user.error != null {
         response.Error(writer, cast(isize)400, errors.Message(user.error))
@@ -109,7 +104,7 @@ Alias :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Reques
     if !Authenticate(accounts, writer, request, user.value) {
         return
     }
-    alias := NormalizeAlias(decoded.Alias)
+    alias := identity.NormalizeAccountAlias(decoded.Alias)
     if accounts.configuration.PremiumAliasesEnabled {
         http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
         claimed := pricing.Claim(accounts.database, http.Context(request),

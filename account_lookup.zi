@@ -3,18 +3,12 @@ identity :: #import "identity";
 ctx :: #import "std/context_go";
 sql :: #import "std/sql_go";
 errors :: #import "std/errors_go";
-strings :: #system_library "go:strings";
 
 AccountResult :: struct {
     value: string
     found: bool
     error: Error
 }
-
-#scope_file
-TrimSpace :: (value: string) -> string #foreign strings;
-TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
-ToLower :: (value: string) -> string #foreign strings;
 
 #scope_file
 ValidAliasReference :: (value: string) -> bool {
@@ -33,7 +27,7 @@ ValidAliasReference :: (value: string) -> bool {
 #scope_export
 Resolve :: (database: *sql.Database, context: ctx.Context, reference: string) -> AccountResult {
     result: AccountResult
-    reference = ToLower(TrimPrefix(TrimSpace(reference), "@"))
+    reference = identity.NormalizeAccountAlias(reference)
     arguments: [1]Any
     arguments[0] = reference
     destinations: [1]Any

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -138,6 +139,88 @@ func TestPremiumAliasConfigurationAndQuotes(t *testing.T) {
 		if res.Code != 200 || strings.Contains(res.Body.String(), "premium-usernames-v1") != enabled {
 			t.Fatalf("node rollout flag %t: %d %s", enabled, res.Code, res.Body.String())
 		}
+	}
+}
+
+func TestAliasCaseVariantsShareOwnershipPriceAndPayment(t *testing.T) {
+	server, users, handler := premiumAliasFixture(t)
+	user := users[0]
+	for _, spelling := range []string{"google", "GOOGLE", "GoOgLe", " @GOOGLE "} {
+		res := aliasRequest(server, handler, user, "GET", "/api/v1/account/alias?alias="+url.QueryEscape(spelling), "")
+		var quote AliasQuote
+		if err := json.Unmarshal(res.Body.Bytes(), &quote); err != nil {
+			t.Fatal(err)
+		}
+		if res.Code != 200 || quote.Alias != "google" || quote.PriceUnits != 1000*UnitsPerDew || !quote.Available {
+			t.Fatalf("case variant quote %q: %d %s", spelling, res.Code, res.Body.String())
+		}
+	}
+	for _, spelling := range []string{"GOOGLE", "gOoGlE"} {
+		res := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase",
+			aliasPurchaseBody(spelling, 1000*UnitsPerDew, "same-case-purchase"))
+		if res.Code != 200 {
+			t.Fatalf("case variant purchase: %d %s", res.Code, res.Body.String())
+		}
+	}
+	if alias, balance := aliasState(t, server, user); alias != "google" || balance != 1000*UnitsPerDew {
+		t.Fatal("case variant retry changed the name or charged twice")
+	}
+	for _, spelling := range []string{"google", "GOOGLE", " @GoOgLe "} {
+		owner, found, err := server.Store.ResolveAccountRef(context.Background(), spelling)
+		if err != nil || !found || owner != user {
+			t.Fatalf("case variant lookup %q: %q %t %v", spelling, owner, found, err)
+		}
+		res := aliasRequest(server, handler, users[1], "POST", "/api/v1/account/alias/purchase",
+			aliasPurchaseBody(spelling, 1000*UnitsPerDew, "taken-case-purchase"))
+		if res.Code != 409 {
+			t.Fatalf("case variant took an existing alias: %d %s", res.Code, res.Body.String())
+		}
+	}
+	if alias, balance := aliasState(t, server, users[1]); alias != "user1" || balance != 2000*UnitsPerDew {
+		t.Fatal("failed case variant claim changed the other account")
+	}
+}
+
+func TestAliasRejectsUnicodeLookalikesBeforeCaseFolding(t *testing.T) {
+	server, users, handler := premiumAliasFixture(t)
+	for index, alias := range []string{"kite", "iris"} {
+		if _, err := server.Store.Database.Exec("UPDATE server_users SET alias=? WHERE user_id_hash=?", alias, users[index+1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, enabled := range []bool{true, false} {
+		server.Cfg.PremiumAliasesEnabled = enabled
+		for _, alias := range []string{"Kite", "İris", "аbcd", "αbcd", "ａｂｃｄ", "ábcd", "ab\u0301cd",
+			"a\u200dbcd", "abcd\u2060", "\u00a0abcd", "abcd\u00a0", "\u202eabcd", "abc-d", "abc.d"} {
+			quote := aliasRequest(server, handler, users[0], "GET", "/api/v1/account/alias?alias="+url.QueryEscape(alias), "")
+			if quote.Code != 400 {
+				t.Fatalf("lookalike quote %q accepted: %d %s", alias, quote.Code, quote.Body.String())
+			}
+			for _, path := range []string{"/api/v1/account/alias", "/api/v1/account/alias/purchase"} {
+				res := aliasRequest(server, handler, users[0], "POST", path, aliasPurchaseBody(alias, 0, "invalid-lookalike"))
+				if res.Code != 400 {
+					t.Fatalf("lookalike %q accepted by %s: %d %s", alias, path, res.Code, res.Body.String())
+				}
+			}
+			if _, found, err := server.Store.ResolveAccountRef(context.Background(), alias); err != nil || found {
+				t.Fatalf("lookalike lookup %q resolved: %t %v", alias, found, err)
+			}
+		}
+	}
+	if alias, balance := aliasState(t, server, users[0]); alias != "user0" || balance != 2000*UnitsPerDew {
+		t.Fatal("invalid spelling changed an existing name or balance")
+	}
+	// Existing records are not rewritten or charged by stricter new claims.
+	server.Cfg.PremiumAliasesEnabled = true
+	if _, err := server.Store.Database.Exec("UPDATE server_users SET alias=? WHERE user_id_hash=?", "ábcd", users[0]); err != nil {
+		t.Fatal(err)
+	}
+	res := aliasRequest(server, handler, users[0], "POST", "/api/v1/account/alias", `{"alias":"ábcd"}`)
+	if res.Code != 200 {
+		t.Fatalf("grandfathered alias changed: %d %s", res.Code, res.Body.String())
+	}
+	if alias, balance := aliasState(t, server, users[0]); alias != "ábcd" || balance != 2000*UnitsPerDew {
+		t.Fatal("grandfathered alias or balance changed")
 	}
 }
 

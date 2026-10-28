@@ -2,6 +2,20 @@
 go_strings :: #system_library "go:strings";
 TrimSpace :: (value: string) -> string #foreign go_strings "TrimSpace";
 Split :: (value: string, separator: string) -> []string #foreign go_strings "Split";
+ToLower :: (value: string) -> string #foreign go_strings "ToLower";
+TrimPrefix :: (value: string, prefix: string) -> string #foreign go_strings "TrimPrefix";
+
+NormalizeAccountAlias :: (value: string) -> string {
+    // Unicode lowercasing can turn lookalikes such as the Kelvin sign or
+    // dotted capital I into ASCII. Keep non-ASCII input invalid, including
+    // invisible edge spaces, before folding the permitted ASCII case.
+    for byte: value {
+        if byte > cast(u8)127 {
+            return value
+        }
+    }
+    return TrimPrefix(ToLower(TrimSpace(value)), "@")
+}
 
 ValidUserID :: (value: string) -> bool {
     if value.count != 64 {

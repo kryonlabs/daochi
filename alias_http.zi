@@ -24,7 +24,7 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         return
     }
     if http.Method(request) == "GET" {
-        alias := service.NormalizeAlias(url.Value(url.Query(http.RequestURL(request)), "alias"))
+        alias := identity.NormalizeAccountAlias(url.Value(url.Query(http.RequestURL(request)), "alias"))
         quoted := pricing.Price(accounts.database, http.Context(request), user.value, alias,
             accounts.configuration.PremiumAliasesEnabled)
         if quoted.error != null {
@@ -42,7 +42,7 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         return
     }
     claimed := pricing.Claim(accounts.database, http.Context(request),
-        accounts.configuration.WaoziIssuerPrivateKey, user.value, service.NormalizeAlias(command.alias),
+        accounts.configuration.WaoziIssuerPrivateKey, user.value, identity.NormalizeAccountAlias(command.alias),
         accounts.configuration.PremiumAliasesEnabled, command.price_units, command.request_id)
     if claimed.error != null {
         status := pricing.Status(claimed.error)

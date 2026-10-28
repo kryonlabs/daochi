@@ -241,7 +241,12 @@ func TestZiranServerRoutesAgainstBaseline(t *testing.T) {
 	actualHandler, expectedHandler := actual.Routes(), expected.Routes()
 	actualMux := actualHandler.(*Middleware).Next.(*http.ServeMux)
 	expectedMux := expectedHandler.(*Middleware).Next.(*http.ServeMux)
+	// Add the intentional premium-name routes to the matching oracle. Their
+	// authentication, charging and dispatch are covered by the alias tests.
+	expectedMux.HandleFunc("GET /api/v1/account/alias", func(http.ResponseWriter, *http.Request) {})
+	expectedMux.HandleFunc("POST /api/v1/account/alias/purchase", func(http.ResponseWriter, *http.Request) {})
 	paths := []string{"/missing", "/api/v1", "/api/v1/apps", "/api/v1/apps/demo", "/api/v1/apps//demo", "/api/v1/apps/../node", "/api/v1/account/devices/", "/api/v1/friends/requests/42/action"}
+	paths = append(paths, "/api/v1/account/alias/purchase")
 	patterns := baselineRoutePatterns(t)
 	for _, pattern := range patterns {
 		path := strings.SplitN(pattern, " ", 2)[1]

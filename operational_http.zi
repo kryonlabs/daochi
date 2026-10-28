@@ -139,6 +139,9 @@ Node :: (operations: Operations, writer: http.ResponseWriter, request: *http.Req
     if google.HasVerifier(configuration) {
         capabilities = AppendCapability(capabilities, "google-play-purchases")
     }
+    if configuration.PremiumAliasesEnabled {
+        capabilities = AppendCapability(capabilities, "premium-usernames-v1")
+    }
     value: Map(string, Any)
     MapSet(value, "status", "ok")
     MapSet(value, "node_id", operations.identity.ID)

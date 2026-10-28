@@ -27,6 +27,7 @@ monero :: #import "monero_deposits";
 invoices :: #import "monero_invoices";
 google :: #import "google_play_http";
 accounts :: #import "account_http";
+aliases :: #import "alias_http";
 social :: #import "social_http";
 lists :: #import "shared_lists";
 publications :: #import "publications_http";
@@ -411,6 +412,8 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/sync/login", server, HandleLogin)
     Route(mux, "POST /api/v1/sync", server, HandleSync)
     Route(mux, "POST /api/v1/account/alias", server, HandleAccountHttpAlias)
+    Route(mux, "GET /api/v1/account/alias", server, HandleAliasQuoteOrPurchase)
+    Route(mux, "POST /api/v1/account/alias/purchase", server, HandleAliasQuoteOrPurchase)
     Route(mux, "POST /api/v1/account/profile-icon", server, HandleAccountHttpProfileIcon)
     Route(mux, "GET /api/v1/account/export", server, HandleAccountHttpExport)
     Route(mux, "GET /api/v1/account/devices", server, HandleDeviceHttpRoute)
@@ -608,6 +611,10 @@ HandleTokenHttpCreateCheckpoint :: (server: *Server, writer: http.ResponseWriter
 
 HandleAccountHttpAlias :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     accounts.Alias(Accounts(server), writer, request)
+}
+
+HandleAliasQuoteOrPurchase :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    aliases.Handle(Accounts(server), writer, request)
 }
 
 HandleAccountHttpProfileIcon :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

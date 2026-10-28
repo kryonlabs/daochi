@@ -1,0 +1,57 @@
+#import "std/go_types"
+service :: #import "account_http";
+pricing :: #import "alias_pricing";
+auth :: #import "http_auth";
+body :: #import "http_body";
+strict :: #import "strict_json";
+identity :: #import "identity";
+response :: #import "response";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+errors :: #import "std/errors_go";
+
+PurchaseCommand :: struct {
+    alias: string #go_tag "json:\"alias\""
+    price_units: s64 #go_tag "json:\"price_units\""
+    request_id: string #go_tag "json:\"request_id\""
+}
+
+Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    user := auth.BearerUser(accounts.database, request, accounts.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, accounts.counters, user.authentication)
+        return
+    }
+    if http.Method(request) == "GET" {
+        alias := service.NormalizeAlias(url.Value(url.Query(http.RequestURL(request)), "alias"))
+        quoted := pricing.Price(accounts.database, http.Context(request), user.value, alias,
+            accounts.configuration.PremiumAliasesEnabled)
+        if quoted.error != null {
+            response.Error(writer, pricing.Status(quoted.error), "alias quote unavailable")
+            return
+        }
+        response.JSON(writer, 200, quoted)
+        return
+    }
+    read := body.ReadJSON(writer, request, 2048)
+    command: PurchaseCommand
+    if read.error != null || strict.Decode(read.value, *command) != null ||
+    !identity.ValidID(command.request_id, 8, 128) || command.price_units < 0 {
+        response.Error(writer, 400, "invalid alias purchase")
+        return
+    }
+    claimed := pricing.Claim(accounts.database, http.Context(request),
+        accounts.configuration.WaoziIssuerPrivateKey, user.value, service.NormalizeAlias(command.alias),
+        accounts.configuration.PremiumAliasesEnabled, command.price_units, command.request_id)
+    if claimed.error != null {
+        status := pricing.Status(claimed.error)
+        if status == 503 {
+            response.Error(writer, status, "alias purchase unavailable")
+        } else {
+            response.Error(writer, status, errors.Message(claimed.error))
+        }
+        return
+    }
+    response.JSON(writer, 200, claimed)
+}

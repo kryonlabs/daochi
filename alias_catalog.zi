@@ -1,0 +1,92 @@
+// Exact normalized names only: adding a suffix does not inherit a price.
+// Sources and selection policy are documented in docs/premium-usernames.md.
+strings :: #system_library "go:strings";
+Fields :: (value: string) -> []string #foreign strings;
+
+DewUnits :: 1000000
+FourCharacterDew :: 100
+CommonDew :: 250
+BrandDew :: 1000
+
+CommonNames :: #string WORDS
+james michael john robert david william richard joseph thomas christopher
+charles daniel matthew anthony mark steven andrew donald joshua paul kevin
+kenneth brian timothy ronald jason george edward jeffrey jacob ryan nicholas
+gary eric jonathan stephen larry justin benjamin scott brandon samuel
+alexander gregory patrick jack frank raymond dennis aaron
+mary patricia jennifer linda elizabeth barbara susan jessica karen sarah
+lisa nancy sandra ashley emily kimberly michelle donna margaret carol betty
+amanda melissa deborah stephanie rebecca sharon cynthia laura kathleen
+angela emma shirley dorothy brenda nicole pamela samantha anna olivia
+katherine christine debra rachel maria carolyn janet heather diane
+adam alex alice carlos diego eduardo elena felipe gabriel helena hugo isabel
+joao jose juan julia lucas lucia luisa luis manuel marcos mario martin
+mateo miguel natalia pablo paola pedro rafael ricardo sofia santiago valentina
+WORDS;
+
+CommonWords :: #string WORDS
+angel artist aurora beauty bitcoin black blessed blue boss brave breeze
+builder business butterfly captain champion cloud coffee creator crypto
+crystal dance dark dream dragon earth energy explorer family fashion fire
+fitness flower forest freedom friend future galaxy gamer gaming garden
+ghost golden grace green happy harmony health heart hello hero home hope
+infinity island journey king legend light lion live love lucky magic master
+meditation money moon mountain music nature ninja ocean peace phoenix photo
+pixel planet player power prince princess queen rainbow rebel river rock
+royal shadow silver smile snow soul space spirit star storm story studio
+summer sunshine sweet tiger time travel tree universe violet water white
+wild wisdom wolf wonder world writer yellow yoga young zenith
+admin administrator anonymous community contact developer founder guest
+hacker moderator news nobody test tester user username
+official owner premium privacy private public security shop store support
+system team verified wallet welcome
+WORDS;
+
+BrandWords :: #string WORDS
+adidas adobe airbnb alibaba amazon android anthropic apple aramco asics
+asus atlassian audi baidu binance booking burberry bytedance canon cartier
+chanel chatgpt chrome cisco claude cocacola coinbase costco dell dior discord
+disney douyin dropbox ebay facebook fedex ferrari firefox ford github gmail
+google gucci hermes hilton honda hsbc huawei hyundai ikea instagram intel
+intuit krypton lego lenovo linkedin linux loreal louisvuitton mastercard
+mcdonalds mercedes meta microsoft netflix nike nintendo nissan notion nvidia
+openai oracle paypal pepsi pinterest playstation porsche prada qualcomm
+reddit rolex salesforce samsung sephora shopify siemens snapchat sony
+spotify starbucks steam stripe subaru tencent tesla tiktok toyota twitch
+uber uniqlo verizon visa volkswagen walmart whatsapp wikipedia windows xbox
+xiaomi yahoo youtube zara zoom
+daochi inbe kryon shovey waozi wurm ziran
+WORDS;
+
+AliasOffer :: struct {
+    category: string
+    units: s64
+}
+
+#scope_file
+Has :: (words: string, alias: string) -> bool {
+    for word: Fields(words) {
+        if word == alias {
+            return true
+        }
+    }
+    return false
+}
+
+#scope_export
+Find :: (alias: string) -> AliasOffer {
+    result: AliasOffer
+    if Has(BrandWords, alias) {
+        result.category = "brand"
+        result.units = BrandDew * DewUnits
+    } else if Has(CommonNames, alias) || Has(CommonWords, alias) {
+        result.category = "common"
+        result.units = CommonDew * DewUnits
+    } else if alias.count == 4 {
+        result.category = "four_character"
+        result.units = FourCharacterDew * DewUnits
+    } else {
+        result.category = "standard"
+    }
+    return result
+}

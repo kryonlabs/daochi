@@ -1229,7 +1229,7 @@ func baselineOpenAPISpec() map[string]any {
 					"required": []string{"user_id_hash", "alias"},
 					"properties": map[string]any{
 						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
-						"alias":        map[string]any{"type": "string", "description": "Account alias (3-24 chars, normalized lowercase)."},
+						"alias":        map[string]any{"type": "string", "description": "Account alias (4-32 characters from a-z, 0-9 and underscore; normalized lowercase)."},
 					},
 				},
 				"ProfileIconRequest": map[string]any{
@@ -1432,7 +1432,7 @@ func baselineOpenAPISpec() map[string]any {
 		},
 	}
 	paths := result["paths"].(map[string]any)
-	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json", "testdata/blob_paths.json", "testdata/telegram_paths.json", "testdata/authorization_paths.json", "testdata/device_link_paths.json", "testdata/shared_list_paths.json", "testdata/storage_plan_paths.json", "testdata/unlock_paths.json", "testdata/token_gift_paths.json", "testdata/reward_paths.json", "testdata/game_evidence_paths.json", "testdata/publications_paths.json", "testdata/exchange_rate_paths.json"} {
+	for _, fixture := range []string{"testdata/chat_paths.json", "testdata/package_paths.json", "testdata/blob_paths.json", "testdata/telegram_paths.json", "testdata/authorization_paths.json", "testdata/device_link_paths.json", "testdata/shared_list_paths.json", "testdata/storage_plan_paths.json", "testdata/unlock_paths.json", "testdata/token_gift_paths.json", "testdata/reward_paths.json", "testdata/game_evidence_paths.json", "testdata/publications_paths.json", "testdata/exchange_rate_paths.json", "testdata/alias_paths.json"} {
 		data, err := os.ReadFile(fixture)
 		if err != nil {
 			panic(err)

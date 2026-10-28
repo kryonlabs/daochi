@@ -85,6 +85,8 @@ API access is scoped by account, with explicit shared surfaces:
 - `POST /api/v1/admin/tokens/manual-credit`
 - `POST /api/v1/admin/tokens/checkpoint`
 - `POST /api/v1/account/alias`
+- `GET /api/v1/account/alias?alias=<name>` (authenticated availability and DEW quote)
+- `POST /api/v1/account/alias/purchase` (explicit premium username purchase)
 - `GET /api/v1/account/export`
 - `GET /api/v1/account/app-grants`
 - `POST /api/v1/account/app-grants`
@@ -329,6 +331,10 @@ uploads that grow an account above its allowance are refused, while reads
 and space-reducing changes remain available. Storage upgrades are opt-in on
 each node; nodes without them retain their configured storage-limit behavior.
 The Inbe Play build has no Dew purchase or storage-upgrade UI.
+
+The Waozi node prices new premium username claims in DEW. Existing usernames
+remain untouched. See [premium usernames](docs/premium-usernames.md) for the
+catalog, prices, availability quotes and explicit purchase API.
 
 Unlocks are priced by the node, never by the client. `GET /api/v1/unlocks`
 lists the account's unlocks and each product's current and regular price;

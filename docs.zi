@@ -1,3 +1,4 @@
+alias_paths :: #import "alias_paths";
 storage_plans :: #import "storage_plan_paths";
 unlock_paths :: #import "unlock_paths";
 reward_paths :: #import "reward_paths";
@@ -2257,7 +2258,9 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/account/export", PathApiV1AccountExport())
     MapSet(result, "/api/v1/account/devices", PathApiV1AccountDevices())
     MapSet(result, "/api/v1/account/delete-with-key", PathApiV1AccountDeleteWithKey())
-    MapSet(result, "/api/v1/account/alias", PathApiV1AccountAlias())
+    aliases := alias_paths.Paths()
+    MapSet(result, "/api/v1/account/alias", MapGet(aliases, "/api/v1/account/alias"))
+    MapSet(result, "/api/v1/account/alias/purchase", MapGet(aliases, "/api/v1/account/alias/purchase"))
     MapSet(result, "/api/v1/account/profile-icon", PathApiV1AccountProfileIcon())
     MapSet(result, "/api/v1/friends", PathApiV1Friends())
     MapSet(result, "/api/v1/friends/requests", PathApiV1FriendsRequests())
@@ -3345,7 +3348,7 @@ SchemaAliasRequest :: () -> Map(string, Any) {
     resultPropertiesAlias: Map(string, Any)
     MapInit(resultPropertiesAlias)
     MapSet(resultPropertiesAlias, "type", "string")
-    MapSet(resultPropertiesAlias, "description", "Account alias (3-24 chars, normalized lowercase).")
+    MapSet(resultPropertiesAlias, "description", "Account alias (4-32 characters from a-z, 0-9 and underscore; normalized lowercase).")
     MapSet(resultProperties, "alias", resultPropertiesAlias)
     MapSet(result, "properties", resultProperties)
     return result

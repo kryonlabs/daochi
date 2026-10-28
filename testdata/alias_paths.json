@@ -1,0 +1,150 @@
+{
+  "/api/v1/account/alias": {
+    "get": {
+      "summary": "Quote a username claim",
+      "description": "Requires the account bearer. Normalizes alias, reports availability, current ownership, category, price_units, units_per_dew and minimum/maximum length. Existing owners pay zero; a quote does not reserve the name. No-store.",
+      "parameters": [
+        {
+          "name": "alias",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Username quote"
+        },
+        "400": {
+          "description": "Invalid alias"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "503": {
+          "description": "Quote unavailable"
+        }
+      }
+    },
+    "post": {
+      "summary": "Set account alias",
+      "description": "Claims free usernames and retains the account's current username. On nodes with premium pricing, new premium claims require the explicit purchase endpoint and this endpoint never debits DEW.",
+      "parameters": [
+        {
+          "name": "Authorization",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Bearer token from /api/v1/sync/login."
+        },
+        {
+          "name": "X-Daochi-User",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Account ID matching the bearer."
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AliasRequest"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Alias stored"
+        },
+        "400": {
+          "description": "Invalid alias"
+        },
+        "401": {
+          "description": "Bearer token rejected"
+        },
+        "402": {
+          "description": "Premium alias requires an explicit purchase"
+        },
+        "404": {
+          "description": "Account not found"
+        },
+        "409": {
+          "description": "Alias taken"
+        },
+        "503": {
+          "description": "Alias unavailable"
+        }
+      }
+    }
+  },
+  "/api/v1/account/alias/purchase": {
+    "post": {
+      "summary": "Buy an available premium username with DEW",
+      "description": "Requires the account bearer and explicit confirmation of the current quote. A signed entity/username debit and the alias update commit together. Retry an uncertain paid claim with the same request_id, alias and price_units: it never charges twice. A retry after a later rename cannot restore the old name. Existing usernames remain untouched and retaining the current name is free.",
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "alias",
+                "price_units",
+                "request_id"
+              ],
+              "properties": {
+                "alias": {
+                  "type": "string"
+                },
+                "price_units": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Integer millionths of DEW from the quote"
+                },
+                "request_id": {
+                  "type": "string",
+                  "minLength": 8,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Claimed alias, price_units and optional signed receipt_id; no-store"
+        },
+        "400": {
+          "description": "Invalid input"
+        },
+        "401": {
+          "description": "Account authentication required"
+        },
+        "402": {
+          "description": "Insufficient DEW or premium price not confirmed"
+        },
+        "404": {
+          "description": "Account not found"
+        },
+        "409": {
+          "description": "Alias unavailable, price changed, or conflicting retry"
+        },
+        "503": {
+          "description": "Purchase unavailable; retain the request ID"
+        }
+      }
+    }
+  }
+}

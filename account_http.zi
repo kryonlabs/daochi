@@ -7,6 +7,7 @@ auth :: #import "http_auth";
 response :: #import "response";
 logs :: #import "log_safety";
 profile :: #import "account_profile";
+pricing :: #import "alias_pricing";
 identity :: #import "identity";
 body :: #import "http_body";
 json :: #import "std/json_go";
@@ -108,6 +109,25 @@ Alias :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Reques
         return
     }
     alias := NormalizeAlias(decoded.Alias)
+    if accounts.configuration.PremiumAliasesEnabled {
+        http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+        claimed := pricing.Claim(accounts.database, http.Context(request),
+            accounts.configuration.WaoziIssuerPrivateKey, user.value, alias, true, 0, "")
+        if claimed.error != null {
+            status := pricing.Status(claimed.error)
+            if status == 503 {
+                response.Error(writer, status, "alias unavailable")
+            } else {
+                response.Error(writer, status, errors.Message(claimed.error))
+            }
+            return
+        }
+        output: AliasResponse
+        output.Status = "ok"
+        output.Alias = alias
+        response.JSON(writer, 200, output)
+        return
+    }
     if !identity.ValidAccountAlias(alias) {
         response.Error(writer, cast(isize)400, "invalid alias")
         return

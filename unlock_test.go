@@ -535,13 +535,17 @@ func TestScaleTokenProducts(t *testing.T) {
 
 func TestAddTokenProducts(t *testing.T) {
 	const atomic, units = 1000000000000, 10000 * UnitsPerDew
-	const play = "dew_100:100,dew_500:500,dew_1000:1000,dew_5000:5000"
+	const play = "dew_10:10,dew_100:100,dew_500:500,dew_1000:1000,dew_5000:5000"
 	const sold = "waozi_tokens_small:10000000000:1000000000000"
 	for _, tc := range []struct {
 		raw, wanted, want string
 	}{
 		{sold, "", sold},
-		{sold, play, sold + ",dew_100:100000000:10000000000,dew_500:500000000:50000000000," +
+		// Adding the small pack preserves all existing credits and prices.
+		{"dew_100:100000000:10000000000,dew_500:500000000:50000000000",
+			"dew_10:10,dew_100:100,dew_500:500",
+			"dew_100:100000000:10000000000,dew_500:500000000:50000000000,dew_10:10000000:1000000000"},
+		{sold, play, sold + ",dew_10:10000000:1000000000,dew_100:100000000:10000000000,dew_500:500000000:50000000000," +
 			"dew_1000:1000000000:100000000000,dew_5000:5000000000:500000000000"},
 		{"", " dew_100:100 , ", "dew_100:100000000:10000000000"},
 		// A product the node sells keeps its amounts, such as one a raised ratio scaled.
@@ -559,7 +563,7 @@ func TestAddTokenProducts(t *testing.T) {
 		}
 	}
 	products := ConfigValues_Products(TokenRescale_AddProducts(sold, play, atomic, units).Value)
-	for id, dew := range map[string]int64{"waozi_tokens_small": 10000, "dew_100": 100, "dew_500": 500, "dew_1000": 1000, "dew_5000": 5000} {
+	for id, dew := range map[string]int64{"waozi_tokens_small": 10000, "dew_10": 10, "dew_100": 100, "dew_500": 500, "dew_1000": 1000, "dew_5000": 5000} {
 		product, ok := products[id]
 		if !ok || product.TokenUnits != dew*UnitsPerDew || product.MoneroAtomicAmount != dew*100000000 {
 			t.Fatalf("%s: %+v, want %d Dew at 10,000 Dew per XMR", id, product, dew)

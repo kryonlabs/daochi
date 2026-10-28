@@ -122,6 +122,7 @@ func TestZiranProtocolRecordsKeepReleasedLayout(t *testing.T) {
 				"NodeSyncPolicy":  {"Accounts": "[]string"},
 				"SyncResponse":    {"AccountStorage": "*main.AccountStorage", "PackageSequence": "int64"},
 				"EncryptedRecord": {"PackedNonce": "string", "PackedCiphertext": "string", "FreeBytes": "int64"},
+				"FriendStatRow":   {"GameIcon": "int"},
 			}
 			expectedExtensions := extensions[typ.Name()]
 			if !found || typ.NumField() != len(fields)+len(expectedExtensions) {

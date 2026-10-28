@@ -485,6 +485,7 @@ FriendStatRow :: struct {
     UserIDHash: string #go_tag "json:\"user_id_hash\""
     Alias: string #go_tag "json:\"alias,omitempty\""
     ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+    GameIcon: isize #go_tag "json:\"game_icon,omitempty\""
     App: string #go_tag "json:\"app\""
     Practice: string #go_tag "json:\"practice\""
     Metric: string #go_tag "json:\"metric\""

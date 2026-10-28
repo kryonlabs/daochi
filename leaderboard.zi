@@ -474,16 +474,24 @@ Published :: (database: *sql.Database, context: ctx.Context, user: VisibleStatsU
     arguments[2] = practice
     arguments[3] = metric
     value: float64
-    destinations: [1]Any
+    icon: float64
+    destinations: [2]Any
     destinations[0] = *value
+    destinations[1] = *icon
     result.error = sql.ScanRow(sql.QueryRow(database, context,
-        "SELECT value FROM server_profile_stats WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4", arguments[:]), destinations[:])
+        "SELECT value, COALESCE((SELECT appearance.value FROM server_profile_stats appearance WHERE appearance.user_id_hash=?1 AND appearance.app=?2 AND appearance.practice=?3 AND appearance.metric='appearance'),0) FROM server_profile_stats WHERE user_id_hash=?1 AND app=?2 AND practice=?3 AND metric=?4", arguments[:]), destinations[:])
     if errors.Is(result.error, sql.NoRows()) {
         result.error = null
         return result
     }
     if result.error != null {
         return result
+    }
+    // Cosmetic selectors are independent of rank, account-scoped, and never
+    // URLs or private records. Unknown, fractional and unbounded values stay
+    // absent so clients retain their neutral profile-picture fallback.
+    if icon >= 1.0 && icon <= 256.0 && icon == cast(float64)cast(isize)icon {
+        result.value.GameIcon = cast(isize)icon
     }
     limit := ifx metric == "levels" || metric == "level" || metric == "score" then 100000.0 else 512.0
     if value >= 0.0 && value <= limit {

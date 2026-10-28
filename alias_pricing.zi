@@ -53,7 +53,7 @@ Price :: (database: *sql.Database, context: ctx.Context, account: string, alias:
     arguments: [1]Any = .[alias]
     destinations: [1]Any = .[*owner]
     result.error = sql.ScanRow(sql.QueryRow(database, context,
-        "SELECT user_id_hash FROM server_users WHERE alias=?1", arguments[:]), destinations[:])
+        "SELECT user_id_hash FROM server_users WHERE alias=?1 COLLATE NOCASE", arguments[:]), destinations[:])
     if errors.Is(result.error, sql.NoRows()) {
         result.error = null
         result.available = true
@@ -126,7 +126,7 @@ Claim :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
                 return result
             }
             // Replaying an old purchase cannot take the name back after a rename.
-            if current != alias {
+            if identity.NormalizeAccountAlias(current) != alias {
                 result.error = errors.New("claim already completed; alias changed")
                 return result
             }
@@ -139,7 +139,7 @@ Claim :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
             return result
         }
     }
-    if current != "" && current == alias {
+    if current != "" && identity.NormalizeAccountAlias(current) == alias {
         return result
     }
     if !identity.ValidAccountAlias(alias) {
@@ -150,7 +150,7 @@ Claim :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
     ownerArguments: [1]Any = .[alias]
     ownerDestinations: [1]Any = .[*owner]
     taken := sql.ScanRow(sql.QueryRowTx(transaction, context,
-        "SELECT user_id_hash FROM server_users WHERE alias=?1", ownerArguments[:]), ownerDestinations[:])
+        "SELECT user_id_hash FROM server_users WHERE alias=?1 COLLATE NOCASE", ownerArguments[:]), ownerDestinations[:])
     if taken == null {
         result.error = errors.New("alias unavailable")
         return result

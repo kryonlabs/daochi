@@ -1,0 +1,117 @@
+// Canonical alias ownership: case never creates a second name. Upgrade old
+// databases before accepting requests, retaining the oldest account's claim.
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+identity :: #import "identity";
+errors :: #import "std/errors_go";
+
+DisplayResult :: struct {
+    saved: bool
+    alias: string
+    error: Error
+}
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+Join :: (values: []string, separator: string) -> string #foreign strings;
+TrimSpace :: (value: string) -> string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+
+Canonical :: "CASE WHEN length(alias)=length(CAST(alias AS BLOB)) THEN lower(trim(alias,char(9,10,11,12,13,32))) ELSE alias END";
+Ranked :: #string SQL
+WITH named AS (
+ SELECT user_id_hash,alias,created_at,rowid AS insertion_order,
+ CASE WHEN length(alias)=length(CAST(alias AS BLOB))
+ THEN lower(trim(alias,char(9,10,11,12,13,32))) ELSE alias END AS canonical
+ FROM server_users WHERE alias IS NOT NULL
+), ranked AS (
+ SELECT *, ROW_NUMBER() OVER (
+ PARTITION BY canonical ORDER BY COALESCE(julianday(created_at),0),insertion_order) AS position,
+ FIRST_VALUE(user_id_hash) OVER (
+ PARTITION BY canonical ORDER BY COALESCE(julianday(created_at),0),insertion_order) AS keeper
+ FROM named WHERE canonical<>''
+)
+SQL;
+Audit :: #string SQL
+CREATE TABLE IF NOT EXISTS server_alias_case_collisions (
+ account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ previous_alias TEXT NOT NULL,
+ normalized_alias TEXT NOT NULL,
+ retained_account_id TEXT NOT NULL,
+ account_created_at TEXT NOT NULL,
+ cleared_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(account_id,previous_alias)
+)
+SQL;
+Archive :: "INSERT OR IGNORE INTO server_alias_case_collisions(account_id,previous_alias,normalized_alias,retained_account_id,account_created_at) SELECT user_id_hash,alias,canonical,keeper,created_at FROM ranked WHERE position>1";
+Clear :: "UPDATE server_users SET alias=NULL WHERE user_id_hash IN (SELECT user_id_hash FROM ranked WHERE position>1)";
+#scope_export
+SaveDisplay :: (database: *sql.Database, context: ctx.Context, account: string, value: string) -> DisplayResult {
+    result: DisplayResult
+    for byte: value {
+        if byte > cast(u8)127 {
+            return result
+        }
+    }
+    display := TrimPrefix(TrimPrefix(TrimSpace(value), "@"), "@")
+    canonical := identity.NormalizeAccountAlias(display)
+    if canonical == "" {
+        return result
+    }
+    opened := sql.Begin(database, context, null)
+    result.error = opened.error
+    if result.error != null {
+        return result
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    current: string
+    arguments: [1]Any = .[account]
+    destinations: [1]Any = .[*current]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COALESCE(alias,'') FROM server_users WHERE user_id_hash=?1", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null || current == "" || identity.NormalizeAccountAlias(current) != canonical {
+        return result
+    }
+    values: [2]Any = .[account, display]
+    updated := sql.ExecTx(transaction, context,
+        "UPDATE server_users SET alias=?2 WHERE user_id_hash=?1", values[:])
+    result.error = updated.error
+    if result.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    result.saved = result.error == null
+    result.alias = display
+    return result
+}
+
+Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    // The name is case-insensitive; its chosen display capitals are retained.
+    normalize := "UPDATE server_users SET alias=NULLIF(trim(alias,char(9,10,11,12,13,32)),'') WHERE alias IS NOT NULL AND length(alias)=length(CAST(alias AS BLOB))"
+    unique: [3]string = .["CREATE UNIQUE INDEX IF NOT EXISTS server_users_alias_case_unique ON server_users(", Canonical, ") WHERE alias IS NOT NULL AND alias<>''"]
+    archive: [2]string = .[Ranked, Archive]
+    clear: [2]string = .[Ranked, Clear]
+    statements: [5]string = .[Audit, Join(archive[:], "\n"), Join(clear[:], "\n"), normalize, Join(unique[:], "")]
+    empty: [0]Any
+    for statement: statements {
+        written := sql.ExecTx(transaction, context, statement, empty[:])
+        if written.error != null {
+            return written.error
+        }
+    }
+    return sql.Commit(transaction)
+}

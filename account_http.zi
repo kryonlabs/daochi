@@ -9,6 +9,7 @@ logs :: #import "log_safety";
 profile :: #import "account_profile";
 pricing :: #import "alias_pricing";
 identity :: #import "identity";
+aliases :: #import "alias_case";
 body :: #import "http_body";
 json :: #import "std/json_go";
 strings :: #system_library "go:strings";
@@ -94,6 +95,7 @@ Alias :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Reques
         response.Error(writer, cast(isize)400, "invalid json")
         return
     }
+    displayAlias := decoded.Alias
     decoded.UserIDHash = ToLower(TrimSpace(decoded.UserIDHash))
     decoded.Alias = identity.NormalizeAccountAlias(decoded.Alias)
     user := HeaderUser(request, decoded.UserIDHash)
@@ -105,6 +107,18 @@ Alias :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Reques
         return
     }
     alias := identity.NormalizeAccountAlias(decoded.Alias)
+    display := aliases.SaveDisplay(accounts.database, http.Context(request), user.value, displayAlias)
+    if display.error != null {
+        response.Error(writer, 500, "alias failed")
+        return
+    }
+    if display.saved {
+        output: AliasResponse
+        output.Status = "ok"
+        output.Alias = display.alias
+        response.JSON(writer, 200, output)
+        return
+    }
     if accounts.configuration.PremiumAliasesEnabled {
         http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
         claimed := pricing.Claim(accounts.database, http.Context(request),

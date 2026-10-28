@@ -3,6 +3,7 @@ sql :: #import "std/sql_go";
 driver :: #import "sqlite_driver";
 ctx :: #import "std/context_go";
 schema :: #import "store_schema";
+aliases :: #import "alias_case";
 usage :: #import "storage_usage";
 packing :: #import "record_packing";
 migration :: #import "reward_migration";
@@ -27,6 +28,10 @@ Join :: (values: []string, separator: string) -> string #foreign strings;
 
 Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
     error := schema.Ensure(database, context)
+    if error != null {
+        return error
+    }
+    error = aliases.Ensure(database, context)
     if error != null {
         return error
     }

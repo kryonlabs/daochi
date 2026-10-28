@@ -16,6 +16,20 @@ TrimSpace :: (value: string) -> string #foreign strings;
 TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
 ToLower :: (value: string) -> string #foreign strings;
 
+#scope_file
+ValidAliasReference :: (value: string) -> bool {
+    if value.count < 1 || value.count > 32 {
+        return false
+    }
+    for byte: value {
+        if !(byte >= cast(u8)97 && byte <= cast(u8)122) &&
+            !(byte >= cast(u8)48 && byte <= cast(u8)57) && byte != cast(u8)95 {
+            return false
+        }
+    }
+    return true
+}
+
 #scope_export
 Resolve :: (database: *sql.Database, context: ctx.Context, reference: string) -> AccountResult {
     result: AccountResult
@@ -32,11 +46,11 @@ Resolve :: (database: *sql.Database, context: ctx.Context, reference: string) ->
         result.found = exists != cast(isize)0
         return result
     }
-    if !identity.ValidAccountAlias(reference) {
+    if !ValidAliasReference(reference) {
         return result
     }
     destinations[0] = *result.value
-    row := sql.QueryRow(database, context, "SELECT user_id_hash FROM server_users WHERE alias=?1", arguments[:])
+    row := sql.QueryRow(database, context, "SELECT user_id_hash FROM server_users WHERE alias=?1 COLLATE NOCASE ORDER BY julianday(created_at),rowid LIMIT 1", arguments[:])
     result.error = sql.ScanRow(row, destinations[:])
     if errors.Is(result.error, sql.NoRows()) {
         result.error = null

@@ -2462,10 +2462,13 @@ func TestAccountProfileIconAcceptsKryonPictures(t *testing.T) {
 		{65, http.StatusOK},
 		{124, http.StatusOK},
 		{126, http.StatusOK},
+		{127, http.StatusOK},
+		{128, http.StatusOK},
+		{129, http.StatusOK},
 		{12, http.StatusBadRequest},
 		{40, http.StatusBadRequest},
 		{66, http.StatusBadRequest},
-		{127, http.StatusBadRequest},
+		{130, http.StatusBadRequest},
 	}
 	for _, test := range cases {
 		iconBody := []byte(`{"user_id_hash":"` + userID + `","profile_icon":` + strconv.Itoa(test.icon) + `}`)

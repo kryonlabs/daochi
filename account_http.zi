@@ -76,7 +76,8 @@ NormalizeAlias :: (value: string) -> string {
 
 // A profile picture is one of the node's own pictures, or one of the profile
 // pictures in Kryon's icon set by its icon number (41 to 65 and 124 to 126),
-// which apps such as Inner Breeze offer.
+// which apps such as Inner Breeze offer. Entity's three abstract pictures
+// use the following selectors, 127 to 129.
 ValidIcon :: (value: isize) -> bool {
     if value >= cast(isize)ProfileIconNone && value <= cast(isize)ProfileIconTree5 {
         return true
@@ -84,7 +85,7 @@ ValidIcon :: (value: isize) -> bool {
     if value >= cast(isize)41 && value <= cast(isize)65 {
         return true
     }
-    return value >= cast(isize)124 && value <= cast(isize)126
+    return value >= cast(isize)124 && value <= cast(isize)129
 }
 
 Alias :: (accounts: Accounts, writer: http.ResponseWriter, request: *http.Request) {

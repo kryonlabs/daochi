@@ -63,7 +63,7 @@ ScanVisibility :: (row: *sql.Row, visibility: *string) -> Error #foreign go_sql 
 ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
 ScanGrant :: (row: *sql.Row, id: *string, userID: *string, source: *string, target: *string, prefix: *string, permission: *string, status: *string, created: *string, updated: *string, revoked: *string) -> Error #foreign go_sql "(*Row).Scan";
 ScanGrantRows :: (rows: *sql.Rows, id: *string, userID: *string, source: *string, target: *string, prefix: *string, permission: *string, status: *string, created: *string, updated: *string, revoked: *string) -> Error #foreign go_sql "(*Rows).Scan";
-ScanRecord :: (rows: *sql.Rows, collection: *string, id: *string, keyID: *string, nonce: *string, ciphertext: *string, updated: *string, deleted: *s64, hash: *string, schema: *isize, parent: *string) -> Error #foreign go_sql "(*Rows).Scan";
+ScanRecord :: (rows: *sql.Rows, collection: *string, id: *string, keyID: *string, nonce: *string, ciphertext: *string, updated: *string, deleted: *s64, hash: *string, schema: *isize, parent: *string, freeBytes: *s64) -> Error #foreign go_sql "(*Rows).Scan";
 AllocateGrants :: (count: isize) -> []AppGrant #foreign builtin "make";
 AllocateRecords :: (count: isize) -> []EncryptedRecord #foreign builtin "make";
 AppendGrant :: (values: []AppGrant, value: AppGrant) -> []AppGrant #foreign builtin "append";
@@ -286,7 +286,7 @@ Records :: (database: *sql.Database, context: ctx.Context, userID: string, prefi
         record: EncryptedRecord
         result.error = ScanRecord(rows, *record.Collection, *record.ID, *record.KeyID,
             *record.Nonce, *record.Ciphertext, *record.UpdatedAt, *record.DeletedAt,
-            *record.ContentHash, *record.SchemaVersion, *record.ParentID)
+            *record.ContentHash, *record.SchemaVersion, *record.ParentID, *record.FreeBytes)
         if result.error != null {
             return result
         }
@@ -326,11 +326,11 @@ SELECT EXISTS(
 SQL_END;
 VisibilitySQL :: "SELECT visibility FROM server_app_collections WHERE app_id=?1 AND collection_prefix=?2";
 ExactRecordsSQL :: #string SQL_END
-SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,free_bytes
 FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 ORDER BY collection,id
 SQL_END;
 PrefixRecordsSQL :: #string SQL_END
-SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,free_bytes
 FROM server_encrypted_records WHERE user_id_hash=?1 AND collection LIKE ?2 ESCAPE '\'
   AND substr(collection,1,length(?3))=?3 ORDER BY collection,id
 SQL_END;

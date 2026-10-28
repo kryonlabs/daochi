@@ -85,7 +85,7 @@ SELECT r.collection,r.id,r.key_id,
        CASE WHEN ?8='gzip-v1' AND p.nonce IS NOT NULL THEN p.nonce ELSE r.nonce END,
        CASE WHEN ?8='gzip-v1' AND p.ciphertext IS NOT NULL THEN p.ciphertext ELSE r.ciphertext END,
        r.updated_at,
-       r.deleted_at,r.content_hash,r.schema_version,r.parent_id,r.server_version
+       r.deleted_at,r.content_hash,r.schema_version,r.parent_id,r.server_version,r.free_bytes
 FROM server_encrypted_records r
 LEFT JOIN server_record_packing p
   ON p.user_id_hash=r.user_id_hash AND p.collection=r.collection AND p.id=r.id
@@ -155,9 +155,9 @@ Page :: (database: *sql.Database, context: ctx.Context, input: SyncRequest,
     while sql.Next(rows) {
         item: EncryptedRecord
         itemVersion: s64
-        destinations: [11]Any = .[*item.Collection, *item.ID, *item.KeyID, *item.Nonce,
+        destinations: [12]Any = .[*item.Collection, *item.ID, *item.KeyID, *item.Nonce,
             *item.Ciphertext, *item.UpdatedAt, *item.DeletedAt, *item.ContentHash,
-            *item.SchemaVersion, *item.ParentID, *itemVersion]
+        *item.SchemaVersion, *item.ParentID, *itemVersion, *item.FreeBytes]
         result.error = sql.ScanRows(rows, destinations[:])
         if result.error != null {
             return result

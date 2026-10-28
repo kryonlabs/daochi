@@ -152,8 +152,8 @@ func baselineWritesUpsertEncryptedRecord(ctx context.Context, tx *sql.Tx, userID
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version,free_bytes)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?14)
 ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
 	key_id=excluded.key_id,
 	nonce=excluded.nonce,
@@ -163,11 +163,12 @@ ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
 	content_hash=excluded.content_hash,
 	schema_version=excluded.schema_version,
 	parent_id=excluded.parent_id,
+	free_bytes=excluded.free_bytes,
 	server_version=excluded.server_version
 WHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13`,
 		userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
 		baselineWriteTime(item.UpdatedAt, now), item.DeletedAt, item.ContentHash,
-		item.SchemaVersion, item.ParentID, version, baselineWriteTimeLimit(now))
+		item.SchemaVersion, item.ParentID, version, baselineWriteTimeLimit(now), item.FreeBytes)
 	if err != nil {
 		return 0, err
 	}

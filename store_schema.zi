@@ -308,6 +308,7 @@ CREATE TABLE IF NOT EXISTS server_encrypted_records (
 	content_hash TEXT NOT NULL DEFAULT '',
 	schema_version INTEGER NOT NULL DEFAULT 0,
 	parent_id TEXT NOT NULL DEFAULT '',
+	free_bytes INTEGER NOT NULL DEFAULT 0,
 	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, collection, id)
 );
@@ -828,7 +829,7 @@ ColumnLookup :: "SELECT 1 FROM pragma_table_info(?1) WHERE name=?2";
 SocialExists :: "\nSELECT EXISTS(\n\tSELECT 1 FROM sqlite_master\n\tWHERE type='table' AND name='server_social_cache'\n)";
 SocialUpgrade :: "\nINSERT OR REPLACE INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)\nSELECT user_id_hash,kind,json,updated_at,server_version\nFROM server_social_cache;\nDROP TABLE server_social_cache;";
 
-Upgrades: [35]string = .[
+Upgrades: [36]string = .[
     "ALTER TABLE server_meditation_logs ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_habits ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_habits ADD COLUMN counter_enabled INTEGER NOT NULL DEFAULT 0",
@@ -850,6 +851,7 @@ Upgrades: [35]string = .[
     "ALTER TABLE server_encrypted_records ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE server_encrypted_records ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_encrypted_records ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''",
+"ALTER TABLE server_encrypted_records ADD COLUMN free_bytes INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_apps ADD COLUMN app_schema_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_apps ADD COLUMN min_supported_client_version TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE server_apps ADD COLUMN current_client_version TEXT NOT NULL DEFAULT ''",

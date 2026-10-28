@@ -621,7 +621,7 @@ ORDER BY server_version,kind`, userID, sinceVersion)
 
 func (s *Store) baselineViewsSnapshotEncryptedRecords(ctx context.Context, userID string, sinceVersion int64) ([]EncryptedRecord, error) {
 	rows, err := s.Database.QueryContext(ctx, `
-SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
+SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,free_bytes
 FROM server_encrypted_records
 WHERE user_id_hash=?1 AND server_version>?2
 ORDER BY server_version,collection,id`, userID, sinceVersion)
@@ -635,7 +635,7 @@ ORDER BY server_version,collection,id`, userID, sinceVersion)
 		var item EncryptedRecord
 		if err := rows.Scan(&item.Collection, &item.ID, &item.KeyID, &item.Nonce,
 			&item.Ciphertext, &item.UpdatedAt, &item.DeletedAt, &item.ContentHash,
-			&item.SchemaVersion, &item.ParentID); err != nil {
+			&item.SchemaVersion, &item.ParentID, &item.FreeBytes); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

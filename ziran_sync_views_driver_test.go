@@ -103,7 +103,7 @@ func TestZiranSyncViewsNativeFailuresAgainstBaseline(t *testing.T) {
 		"rounds":            {[]string{"column-0", "column-1", "column-2"}, []driver.Value{int64(2), int64(7), int64(-3)}},
 		"meditations":       {[]string{"column-0", "column-1", "column-2", "column-3"}, []driver.Value{"log", "session", int64(-3), "completed"}},
 		"social":            {[]string{"column-0", "column-1", "column-2"}, []driver.Value{"kind", "arbitrary\x00\xff", "updated"}},
-		"records":           {[]string{"column-0", "column-1", "column-2", "column-3", "column-4", "column-5", "column-6", "column-7", "column-8", "column-9"}, []driver.Value{"collection", "id", "key", "nonce", "cipher\x00\xff", "updated", int64(-3), "hash", int64(-4), "parent"}},
+		"records":           {[]string{"column-0", "column-1", "column-2", "column-3", "column-4", "column-5", "column-6", "column-7", "column-8", "column-9", "column-10"}, []driver.Value{"collection", "id", "key", "nonce", "cipher\x00\xff", "updated", int64(-3), "hash", int64(-4), "parent", int64(0)}},
 		"operations":        {[]string{"column-0", "column-1", "column-2", "column-3", "column-4", "column-5", "column-6", "column-7", "column-8"}, []driver.Value{"op", "client", int64(9), "habit", "id", int64(20261001), "upsert", "arbitrary\x00\xff", "created"}},
 		"clean habits":      {[]string{"column-0", "column-1", "column-2", "column-3", "column-4", "column-5", "column-6", "column-7", "column-8", "column-9", "column-10"}, []driver.Value{"id", "name", int64(-1), int64(2), int64(3), int64(4), int64(5), int64(6), int64(-7), int64(-8), "updated"}},
 		"clean days":        {[]string{"column-0", "column-1", "column-2", "column-3", "column-4", "column-5"}, []driver.Value{"habit", "name", int64(20261001), int64(-2), int64(-3), "updated"}},

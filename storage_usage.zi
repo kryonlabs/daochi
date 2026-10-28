@@ -1,9 +1,10 @@
-// Transactional storage totals. The accounting expressions retain the released
-// quota definition; reading usage no longer walks encrypted account contents.
+// Transactional billable storage totals. Basic tracking never consumes an
+// account allowance; custom text, media and documents retain their charges.
 #import "std/go_types"
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 native :: #system_library "go:database/sql";
+records :: #import "storage_record_usage";
 strings :: #system_library "go:strings";
 
 #scope_file
@@ -31,7 +32,7 @@ LENGTH(ROW.id)+LENGTH(ROW.title)+LENGTH(ROW.items)+
 SQL_END;
 
 Tables: [10]CountedTable = .[
-    .{"server_encrypted_records", "ROW.user_id_hash", "LENGTH(ROW.collection)+LENGTH(ROW.id)+LENGTH(ROW.key_id)+LENGTH(ROW.nonce)+LENGTH(ROW.ciphertext)+LENGTH(ROW.content_hash)+LENGTH(ROW.parent_id)"},
+.{"server_encrypted_records", "ROW.user_id_hash", "record"},
     .{"server_encrypted_payloads", "ROW.user_id_hash", "LENGTH(ROW.client_id)+LENGTH(ROW.payload_json)"},
     .{"server_blobs", "ROW.user_id_hash", "ROW.size"},
     .{"server_shared_lists", "ROW.owner", ListSize},
@@ -39,11 +40,11 @@ Tables: [10]CountedTable = .[
     .{"server_list_permissions", "(SELECT owner FROM server_shared_lists WHERE id=ROW.list_id)", "LENGTH(ROW.access)"},
     .{"server_list_commands", "ROW.user_id", "LENGTH(ROW.request_id)+LENGTH(ROW.body)"},
     .{"server_publications", "ROW.author", "LENGTH(ROW.id)+LENGTH(ROW.format)+LENGTH(ROW.title)+LENGTH(ROW.document)"},
-    .{"server_record_packing", "ROW.user_id_hash", "LENGTH(ROW.nonce)+LENGTH(ROW.ciphertext)"},
-    .{"game_completions", "ROW.account_id", "LENGTH(ROW.id)+LENGTH(ROW.game)+LENGTH(ROW.map_hash)+LENGTH(ROW.actions)+LENGTH(ROW.trace)+LENGTH(ROW.payload)"}
+.{"server_record_packing", "ROW.user_id_hash", "packing"},
+.{"game_completions", "ROW.account_id", "0"}
 ];
 
-SchemaVersion :: 3
+SchemaVersion :: 4
 
 Definition :: #string SQL_END
 CREATE TABLE IF NOT EXISTS server_storage_usage (
@@ -84,14 +85,24 @@ BEGIN
 END;
 SQL_END;
 
+TableSize :: (table: CountedTable) -> string {
+    if table.size == "record" {
+        return records.RecordSizeSQL()
+    }
+    if table.size == "packing" {
+        return records.PackingSizeSQL()
+    }
+    return table.size
+}
+
 Schema :: () -> string {
     result := Definition
     for table: Tables {
         statements := ReplaceAll(Triggers, "TABLE", table.name)
         statements = ReplaceAll(statements, "NEW_OWNER", ReplaceAll(table.owner, "ROW", "NEW"))
         statements = ReplaceAll(statements, "OLD_OWNER", ReplaceAll(table.owner, "ROW", "OLD"))
-        statements = ReplaceAll(statements, "NEW_SIZE", ReplaceAll(table.size, "ROW", "NEW"))
-        statements = ReplaceAll(statements, "OLD_SIZE", ReplaceAll(table.size, "ROW", "OLD"))
+        statements = ReplaceAll(statements, "NEW_SIZE", ReplaceAll(TableSize(table), "ROW", "NEW"))
+        statements = ReplaceAll(statements, "OLD_SIZE", ReplaceAll(TableSize(table), "ROW", "OLD"))
         result = Concat(result, statements)
     }
     return result
@@ -103,7 +114,7 @@ Schema :: () -> string {
 ScanSQL :: () -> string {
     result := "SELECT "
     for table, index: Tables {
-        size := table.size
+        size := TableSize(table)
         if table.name == "server_shared_lists" {
             size = "LENGTH(ROW.id)+LENGTH(ROW.title)+LENGTH(ROW.items)"
         }
@@ -151,6 +162,20 @@ Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     if version > SchemaVersion {
         // A downgraded binary must not overwrite a newer accounting schema.
         return sql.Commit(transaction)
+    }
+    if version != SchemaVersion {
+        // CREATE IF NOT EXISTS cannot replace old accounting expressions.
+        // Rebuild all owned triggers and totals together in this transaction.
+        for table: Tables {
+            suffixes: [4]string = .["insert", "before_update", "after_update", "delete"]
+            for suffix: suffixes {
+                drop := Concat("DROP TRIGGER IF EXISTS server_storage_usage_", Concat(table.name, Concat("_", suffix)))
+                removed := sql.ExecTx(transaction, context, drop, empty[:])
+                if removed.error != null {
+                    return removed.error
+                }
+            }
+        }
     }
     created := sql.ExecTx(transaction, context, Schema(), empty[:])
     if created.error != null {

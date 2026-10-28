@@ -55,9 +55,9 @@ ReadRecordsWithinBudget :: (rows: *sql.Rows) -> BoundedRecordsResult {
     responseBytes: s64 = 256
     while sql.Next(rows) {
         record: EncryptedRecord
-        destinations: [10]Any = .[*record.Collection, *record.ID, *record.KeyID,
+        destinations: [11]Any = .[*record.Collection, *record.ID, *record.KeyID,
             *record.Nonce, *record.Ciphertext, *record.UpdatedAt, *record.DeletedAt,
-            *record.ContentHash, *record.SchemaVersion, *record.ParentID]
+        *record.ContentHash, *record.SchemaVersion, *record.ParentID, *record.FreeBytes]
         result.error = sql.ScanRows(rows, destinations[:])
         if result.error != null {
             return result
@@ -196,7 +196,7 @@ Handle :: (authorizations: service.Authorizations, writer: http.ResponseWriter, 
     if input.read {
         arguments: [5]Any = .[grant.accountID, input.collection, keyID, input.sinceVersion, input.limit]
         queried := sql.QueryTx(transaction, context,
-            "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND key_id=?3 AND server_version>?4 ORDER BY server_version,id LIMIT ?5", arguments[:])
+            "SELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,free_bytes FROM server_encrypted_records WHERE user_id_hash=?1 AND collection=?2 AND key_id=?3 AND server_version>?4 ORDER BY server_version,id LIMIT ?5", arguments[:])
         if queried.error != null {
             response.Error(writer, 503, "delegated read unavailable")
             return

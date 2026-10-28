@@ -84,7 +84,9 @@ the identity `nonce` and `ciphertext` remain authoritative. Nodes advertise
 `record-gzip-v1` and use the optional representation only for record pages with
 `record_encoding:"gzip-v1"`. The optional copy counts toward account storage,
 is skipped when it would exceed quota, and is invalidated by identity updates.
-It is a local cache: mesh replication and account export retain the identity
+Basic tracking and mixed note records are exempt from this additional cache
+charge; notes are charged once in their identity record. It is a local cache:
+mesh replication and account export retain the identity
 copy, so losing the optional copy cannot lose account data.
 
 Before encryption, gzip-v1 is an eight-byte ASCII `DAOGZIP1` marker, a four-byte
@@ -95,6 +97,26 @@ frame. Reject a claimed length above the app's record bound (absolute ceiling
 8 MiB), checksum failure, truncation, concatenated streams or trailing bytes.
 The uncompressed document and its content hash stay identical to the identity
 representation. Media blobs retain their content-addressed encryption.
+
+## Account storage
+
+Nodes advertising `basic-storage-free-v1` exclude habit definitions, daily
+counts, settings history, rewards, coins, achievements, app preferences,
+account appearance, game progress and completion evidence from account usage.
+Custom level documents, Diary, images, blobs, chats and other opaque content
+continue to count. This policy applies to every account, including an account
+already above its allowance. Startup recalculates existing account totals.
+
+Session and habit-entry records mix basic fields with custom notes. Clients
+attach `free_bytes` to the signed record: its stored metadata and ciphertext
+length minus the UTF-8 bytes of custom notes (session note/tags, or habit
+answers of type `text`). Numeric, time and yes/no answers remain free. The
+node subtracts this bounded nonnegative value only for the declared session
+and habit-entry collections, never for arbitrary documents or media. It
+preserves the value through reads, account export and mesh replication.
+Existing mixed records without the field retain their charge until a client
+refreshes them; clients must requeue existing mixed records once on upgrade.
+The node never receives note plaintext.
 
 ## HTTP compression and page metadata
 

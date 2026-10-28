@@ -18,6 +18,9 @@ ValidateAccountKey :: (userID: string, publicKey: []u8) -> Error {
 }
 
 ValidMetadata :: (item: EncryptedRecord) -> bool {
+    if item.FreeBytes < 0 || item.FreeBytes > 524288 {
+        return false
+    }
     hash := TrimSpace(item.ContentHash)
     parent := TrimSpace(item.ParentID)
     if hash != "" && !identity.ValidUserID(hash) {

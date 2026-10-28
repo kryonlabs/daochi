@@ -1,5 +1,5 @@
-// An account's stored bytes on this node: encrypted records, encrypted
-// payloads, blobs, shared lists and publications. A node may limit them.
+// An account's billable content on this node. Basic tracking is free;
+// custom text, encrypted payloads, blobs, lists and publications may be limited.
 #import "std/go_types"
 #import "sync_types"
 sql :: #import "std/sql_go";

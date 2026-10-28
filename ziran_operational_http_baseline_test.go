@@ -38,6 +38,7 @@ var baselineOpsCapabilities = []string{
 	"record-pages-metadata-v1",
 	"http-gzip-v1",
 	"record-gzip-v1",
+	"basic-storage-free-v1",
 	"http-zstd-v1",
 }
 

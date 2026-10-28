@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS server_encrypted_records (
 	content_hash TEXT NOT NULL DEFAULT '',
 	schema_version INTEGER NOT NULL DEFAULT 0,
 	parent_id TEXT NOT NULL DEFAULT '',
+	free_bytes INTEGER NOT NULL DEFAULT 0,
 	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, collection, id)
 );

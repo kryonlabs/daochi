@@ -54,13 +54,13 @@ Begin :: (database: *sql.Database, context: ctx.Context, options: *sql.Transacti
 RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
 CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
 QueryExport :: (database: *sql.Database, context: ctx.Context, query: string, sequence: s64) -> RowsResult #go_results #foreign go_sql "(*DB).QueryContext";
-ScanExport :: (rows: *sql.Rows, sequence: *s64, operation: *string, userID: *string, collection: *string, id: *string, deleted: *string, recordID: *sql.NullString, keyID: *sql.NullString, nonce: *sql.NullString, ciphertext: *sql.NullString, updated: *sql.NullString, recordDeleted: *NullInteger, hash: *sql.NullString, schema: *NullInteger, parent: *sql.NullString, publicKey: *[]u8, created: *sql.NullString, seen: *sql.NullString) -> Error #foreign go_sql "(*Rows).Scan";
+ScanExport :: (rows: *sql.Rows, sequence: *s64, operation: *string, userID: *string, collection: *string, id: *string, deleted: *string, recordID: *sql.NullString, keyID: *sql.NullString, nonce: *sql.NullString, ciphertext: *sql.NullString, updated: *sql.NullString, recordDeleted: *NullInteger, hash: *sql.NullString, schema: *NullInteger, parent: *sql.NullString, freeBytes: *NullInteger, publicKey: *[]u8, created: *sql.NullString, seen: *sql.NullString) -> Error #foreign go_sql "(*Rows).Scan";
 QueryTombstone :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
 ScanCount :: (row: *sql.Row, count: *isize) -> Error #foreign go_sql "(*Row).Scan";
 QueryRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string) -> *sql.Row #foreign go_sql "(*Tx).QueryRowContext";
-ScanRecord :: (row: *sql.Row, keyID: *string, nonce: *string, ciphertext: *string, updated: *string, deleted: *s64, hash: *string, schema: *isize, parent: *string) -> Error #foreign go_sql "(*Row).Scan";
+ScanRecord :: (row: *sql.Row, keyID: *string, nonce: *string, ciphertext: *string, updated: *string, deleted: *s64, hash: *string, schema: *isize, parent: *string, freeBytes: *s64) -> Error #foreign go_sql "(*Row).Scan";
 DeleteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, deleted: string, latest: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
-WriteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, keyID: string, nonce: string, ciphertext: string, updated: string, deleted: s64, hash: string, schema: isize, parent: string, version: s64, latest: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
+WriteRecord :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, collection: string, id: string, keyID: string, nonce: string, ciphertext: string, updated: string, deleted: s64, hash: string, schema: isize, parent: string, version: s64, latest: string, freeBytes: s64) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
 WriteUser :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string, publicKey: []u8, created: string, seen: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
 EnsureSync :: (transaction: *sql.Transaction, context: ctx.Context, query: string, userID: string) -> ExecResult #go_results #foreign go_sql "(*Tx).ExecContext";
 QueryCursor :: (database: *sql.Database, context: ctx.Context, query: string, peerKey: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
@@ -203,12 +203,13 @@ ExportEncryptedRecords :: (database: *sql.Database, context: ctx.Context, meshPo
         hash: sql.NullString
         schema: NullInteger
         parent: sql.NullString
+        freeBytes: NullInteger
         publicKey: []u8
         created: sql.NullString
         seen: sql.NullString
         result.error = ScanExport(rows, *sequence, *operation, *userID, *collection,
             *id, *deleted, *recordID, *keyID, *nonce, *ciphertext, *updated,
-            *recordDeleted, *hash, *schema, *parent, *publicKey, *created, *seen)
+            *recordDeleted, *hash, *schema, *parent, *freeBytes, *publicKey, *created, *seen)
         if result.error != null {
             return result
         }
@@ -247,6 +248,7 @@ ExportEncryptedRecords :: (database: *sql.Database, context: ctx.Context, meshPo
         item.Record.ContentHash = sql.NullStringValue(hash)
         item.Record.SchemaVersion = cast(isize)IntegerValue(schema)
         item.Record.ParentID = sql.NullStringValue(parent)
+        item.Record.FreeBytes = IntegerValue(freeBytes)
         item.PublicKey = EncodeHex(publicKey)
         records = AppendRecord(records, item)
         lastSequence = sequence
@@ -445,7 +447,7 @@ UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: st
     row := QueryRecord(transaction, context, RecordSQL, userID, item.Collection, item.ID)
     error := ScanRecord(row, *existing.KeyID, *existing.Nonce, *existing.Ciphertext,
         *existing.UpdatedAt, *existing.DeletedAt, *existing.ContentHash,
-        *existing.SchemaVersion, *existing.ParentID)
+        *existing.SchemaVersion, *existing.ParentID, *existing.FreeBytes)
     if error != null && !errors.Is(error, sql.NoRows()) {
         result.error = error
         return result
@@ -465,7 +467,7 @@ UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: st
     }
     written := WriteRecord(transaction, context, RecordUpsertSQL, userID, item.Collection,
         item.ID, item.KeyID, item.Nonce, item.Ciphertext, updated, item.DeletedAt,
-        item.ContentHash, item.SchemaVersion, item.ParentID, version.value, timestamp.WriteTimeLimit(now))
+        item.ContentHash, item.SchemaVersion, item.ParentID, version.value, timestamp.WriteTimeLimit(now), item.FreeBytes)
     result.error = written.error
     if result.error == null {
         result.value = account.Affected(written.value)
@@ -477,7 +479,7 @@ UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: st
 ExportSQL :: #string SQL_END
 SELECT e.seq,e.op,e.user_id_hash,e.collection,e.record_id,e.deleted_at,
        r.id,r.key_id,r.nonce,r.ciphertext,r.updated_at,r.deleted_at,
-       r.content_hash,r.schema_version,r.parent_id,u.public_key,u.created_at,u.last_seen_at
+       r.content_hash,r.schema_version,r.parent_id,r.free_bytes,u.public_key,u.created_at,u.last_seen_at
 FROM server_mesh_changes e
 LEFT JOIN server_encrypted_records r
   ON e.op!='delete' AND r.user_id_hash=e.user_id_hash AND r.collection=e.collection AND r.id=e.record_id
@@ -506,13 +508,13 @@ ON CONFLICT(user_id_hash) DO UPDATE SET
 SQL_END;
 SyncSQL :: "INSERT OR IGNORE INTO server_sync_state(user_id_hash,server_version) VALUES(?1,0)";
 RecordSQL :: #string SQL_END
-SELECT key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id
+SELECT key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,free_bytes
 FROM server_encrypted_records
 WHERE user_id_hash=?1 AND collection=?2 AND id=?3
 SQL_END;
 RecordUpsertSQL :: #string SQL_END
-INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)
-VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+INSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version,free_bytes)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?14)
 ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
     key_id=excluded.key_id,
     nonce=excluded.nonce,
@@ -522,6 +524,7 @@ ON CONFLICT(user_id_hash,collection,id) DO UPDATE SET
     content_hash=excluded.content_hash,
     schema_version=excluded.schema_version,
     parent_id=excluded.parent_id,
+    free_bytes=excluded.free_bytes,
     server_version=excluded.server_version
 WHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13
 SQL_END;

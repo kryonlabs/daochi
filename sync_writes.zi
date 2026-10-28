@@ -148,13 +148,13 @@ UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: st
         return result
     }
     now := clock.Now()
-    arguments: [13]Any = .[
+    arguments: [14]Any = .[
         userID, item.Collection, item.ID, item.KeyID, item.Nonce, item.Ciphertext,
         timestamp.NormalizeWriteTime(item.UpdatedAt, now), item.DeletedAt, item.ContentHash,
-        item.SchemaVersion, item.ParentID, version.value, timestamp.WriteTimeLimit(now),
+    item.SchemaVersion, item.ParentID, version.value, timestamp.WriteTimeLimit(now), item.FreeBytes,
     ]
     written := sql.ExecTx(transaction, context,
-        "\nINSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n\tkey_id=excluded.key_id,\n\tnonce=excluded.nonce,\n\tciphertext=excluded.ciphertext,\n\tupdated_at=excluded.updated_at,\n\tdeleted_at=excluded.deleted_at,\n\tcontent_hash=excluded.content_hash,\n\tschema_version=excluded.schema_version,\n\tparent_id=excluded.parent_id,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13", arguments[:])
+        "\nINSERT INTO server_encrypted_records(user_id_hash,collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,server_version,free_bytes)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?14)\nON CONFLICT(user_id_hash,collection,id) DO UPDATE SET\n\tkey_id=excluded.key_id,\n\tnonce=excluded.nonce,\n\tciphertext=excluded.ciphertext,\n\tupdated_at=excluded.updated_at,\n\tdeleted_at=excluded.deleted_at,\n\tcontent_hash=excluded.content_hash,\n\tschema_version=excluded.schema_version,\n\tparent_id=excluded.parent_id,\n\tfree_bytes=excluded.free_bytes,\n\tserver_version=excluded.server_version\nWHERE excluded.updated_at >= server_encrypted_records.updated_at OR server_encrypted_records.updated_at > ?13", arguments[:])
     result.error = written.error
     if result.error == null {
         result.applied = state.Affected(written.value)

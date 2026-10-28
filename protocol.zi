@@ -110,6 +110,7 @@ EncryptedRecord :: struct {
     ContentHash: string #go_tag "json:\"content_hash,omitempty\""
     SchemaVersion: isize #go_tag "json:\"schema_version,omitempty\""
     ParentID: string #go_tag "json:\"parent_id,omitempty\""
+    FreeBytes: s64 #go_tag "json:\"free_bytes,omitempty\""
     PackedNonce: string #go_tag "json:\"packed_nonce,omitempty\""
     PackedCiphertext: string #go_tag "json:\"packed_ciphertext,omitempty\""
 }

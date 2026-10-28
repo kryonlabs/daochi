@@ -159,3 +159,52 @@ func TestAccountStorageLimitCoversDelegatedWrites(t *testing.T) {
 		t.Fatalf("delegated write within the limit failed: %d %s", result.Code, result.Body.String())
 	}
 }
+
+func TestBasicTrackingWorksAboveEveryAccountStorageLimit(t *testing.T) {
+	for _, pages := range []bool{false, true} {
+		fixture := authorizationSetup(t)
+		diary := accountStorageRecord("cell.diary.file.full", 400, "2026-10-10T00:00:00Z")
+		if result := fixture.ownerSync(t, pages, diary); result.Code != http.StatusOK {
+			t.Fatal(result.Body.String())
+		}
+		used := accountStorageBytes(diary)
+		fixture.server.Cfg.AccountStorageLimitBytes = 1
+		for _, collection := range []string{
+			"private.inbe.v1.habits", "private.inbe.v1.habit-days",
+			"private.inbe.v1.habit-settings", "private.inbe.v1.habit-changes",
+			"private.inbe.v1.habit-rewards", "private.inbe.v1.habit-coins",
+			"private.inbe.v1.achievements", "private.inbe.v1.app-preferences",
+			"private.entity.v1.game-progress", "private.entity.v1.profile",
+		} {
+			record := accountStorageRecord("basic", 500, "2026-10-10T00:00:00Z")
+			record.Collection = collection
+			if result := fixture.ownerSync(t, pages, record); result.Code != http.StatusOK {
+				t.Fatalf("free %s above quota: %d %s", collection, result.Code, result.Body.String())
+			}
+		}
+		for _, collection := range []string{"private.inbe.v1.sessions", "private.inbe.v1.habit-entries"} {
+			record := accountStorageRecord("tracking", 500, "2026-10-10T00:00:00Z")
+			record.Collection = collection
+			record.FreeBytes = accountStorageBytes(record)
+			if result := fixture.ownerSync(t, pages, record); result.Code != http.StatusOK {
+				t.Fatalf("free tracking above quota: %d %s", result.Code, result.Body.String())
+			}
+			// Only the note consumes bytes; growing the numeric portion is free.
+			record.Ciphertext += "note"
+			record.UpdatedAt = "2026-10-10T00:00:01Z"
+			expectStorageFull(t, fixture.ownerSync(t, pages, record), used, 1)
+			record.FreeBytes += 4
+			if result := fixture.ownerSync(t, pages, record); result.Code != http.StatusOK {
+				t.Fatalf("numeric growth was charged: %d %s", result.Code, result.Body.String())
+			}
+		}
+		// The metadata is never an exemption for arbitrary documents or photos.
+		for _, collection := range []string{"private.inbe.v1.cells", "private.inbe.v1.media", "private.inbe.v1.unknown"} {
+			record := accountStorageRecord("content", 500, "2026-10-10T00:00:00Z")
+			record.Collection = collection
+			record.FreeBytes = accountStorageBytes(record)
+			expectStorageFull(t, fixture.ownerSync(t, pages, record), used, 1)
+		}
+		assertStorageUsage(t, fixture.store, fixture.owner.UserID)
+	}
+}

@@ -183,6 +183,7 @@ CREATE TABLE IF NOT EXISTS server_encrypted_records (
 	content_hash TEXT NOT NULL DEFAULT '',
 	schema_version INTEGER NOT NULL DEFAULT 0,
 	parent_id TEXT NOT NULL DEFAULT '',
+	free_bytes INTEGER NOT NULL DEFAULT 0,
 	server_version INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, collection, id)
 );
@@ -640,6 +641,7 @@ WHERE NOT EXISTS (
 		`ALTER TABLE server_encrypted_records ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE server_encrypted_records ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_encrypted_records ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE server_encrypted_records ADD COLUMN free_bytes INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_apps ADD COLUMN app_schema_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE server_apps ADD COLUMN min_supported_client_version TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE server_apps ADD COLUMN current_client_version TEXT NOT NULL DEFAULT ''`,

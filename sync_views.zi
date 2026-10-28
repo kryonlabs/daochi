@@ -225,7 +225,7 @@ ReadRecords :: (rows: *sql.Rows) -> RecordsResult {
     values := AllocateRecords(cast(isize)0)
     while sql.Next(rows) {
         item: EncryptedRecord
-        destinations: [10]Any = .[*item.Collection, *item.ID, *item.KeyID, *item.Nonce, *item.Ciphertext, *item.UpdatedAt, *item.DeletedAt, *item.ContentHash, *item.SchemaVersion, *item.ParentID]
+        destinations: [11]Any = .[*item.Collection, *item.ID, *item.KeyID, *item.Nonce, *item.Ciphertext, *item.UpdatedAt, *item.DeletedAt, *item.ContentHash, *item.SchemaVersion, *item.ParentID, *item.FreeBytes]
         result.error = sql.ScanRows(rows, destinations[:])
         if result.error != null {
             return result
@@ -366,7 +366,7 @@ RecordsSince :: (database: *sql.Database, context: ctx.Context, userID: string, 
     arguments: [2]Any = .[userID, sinceVersion]
     result: RecordsResult
     queried := sql.Query(database, context,
-        "\nSELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id\nFROM server_encrypted_records\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,collection,id", arguments[:])
+        "\nSELECT collection,id,key_id,nonce,ciphertext,updated_at,deleted_at,content_hash,schema_version,parent_id,free_bytes\nFROM server_encrypted_records\nWHERE user_id_hash=?1 AND server_version>?2\nORDER BY server_version,collection,id", arguments[:])
     result.error = queried.error
     if result.error != null {
         return result

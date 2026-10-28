@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// Released quota calculation: independent of the new counter and its triggers.
+// Independent billable-content calculation, separate from counter SQL.
 const storageUsageReference = `SELECT
- (SELECT COALESCE(SUM(LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)),0) FROM server_encrypted_records WHERE user_id_hash=?1)
+ (SELECT COALESCE(SUM(CASE WHEN collection IN ('inbe.habits','inbe.habit_days','private.inbe.v1.habits','private.inbe.v1.habit-days','private.inbe.v1.habit-settings','private.inbe.v1.habit-changes','private.inbe.v1.habit-rewards','private.inbe.v1.habit-coins','private.inbe.v1.app-preferences','private.inbe.v1.app-order','private.inbe.v1.app-installs','private.inbe.v1.achievements','private.entity.v1.game-progress','private.entity.v1.profile') THEN 0 ELSE MAX(0,LENGTH(collection)+LENGTH(id)+LENGTH(key_id)+LENGTH(nonce)+LENGTH(ciphertext)+LENGTH(content_hash)+LENGTH(parent_id)-CASE WHEN collection IN ('inbe.sessions','private.inbe.v1.sessions','private.inbe.v1.habit-entries') THEN MIN(524288,MAX(0,free_bytes)) ELSE 0 END) END),0) FROM server_encrypted_records WHERE user_id_hash=?1)
 +(SELECT COALESCE(SUM(LENGTH(client_id)+LENGTH(payload_json)),0) FROM server_encrypted_payloads WHERE user_id_hash=?1)
 +(SELECT COALESCE(SUM(size),0) FROM server_blobs WHERE user_id_hash=?1)
 +(SELECT COALESCE(SUM(LENGTH(id)+LENGTH(title)+LENGTH(items)),0) FROM server_shared_lists WHERE owner=?1)
@@ -16,8 +16,7 @@ const storageUsageReference = `SELECT
 +(SELECT COALESCE(SUM(LENGTH(p.access)),0) FROM server_list_permissions p JOIN server_shared_lists l ON l.id=p.list_id WHERE l.owner=?1)
 +(SELECT COALESCE(SUM(LENGTH(request_id)+LENGTH(body)),0) FROM server_list_commands WHERE user_id=?1)
 +(SELECT COALESCE(SUM(LENGTH(id)+LENGTH(format)+LENGTH(title)+LENGTH(document)),0) FROM server_publications WHERE author=?1)
-+(SELECT COALESCE(SUM(LENGTH(nonce)+LENGTH(ciphertext)),0) FROM server_record_packing WHERE user_id_hash=?1)
-+(SELECT COALESCE(SUM(LENGTH(id)+LENGTH(game)+LENGTH(map_hash)+LENGTH(actions)+LENGTH(trace)+LENGTH(payload)),0) FROM game_completions WHERE account_id=?1)`
++(SELECT COALESCE(SUM(LENGTH(nonce)+LENGTH(ciphertext)),0) FROM server_record_packing WHERE user_id_hash=?1 AND collection NOT IN ('inbe.habits','inbe.habit_days','private.inbe.v1.habits','private.inbe.v1.habit-days','private.inbe.v1.habit-settings','private.inbe.v1.habit-changes','private.inbe.v1.habit-rewards','private.inbe.v1.habit-coins','private.inbe.v1.app-preferences','private.inbe.v1.app-order','private.inbe.v1.app-installs','private.inbe.v1.achievements','private.entity.v1.game-progress','private.entity.v1.profile','inbe.sessions','private.inbe.v1.sessions','private.inbe.v1.habit-entries'))`
 
 func assertStorageUsage(t *testing.T, store *Store, users ...string) {
 	t.Helper()
@@ -146,6 +145,38 @@ func TestStorageUsageBackfillsLegacyDatabaseAndReconciles(t *testing.T) {
 	var count int
 	if err := store.Database.QueryRow(`SELECT COUNT(*) FROM server_storage_usage`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("account deletion retained a counter: %d %v", count, err)
+	}
+}
+
+func TestStorageUsageUpgradeReplacesOldChargeTriggersForEveryAccount(t *testing.T) {
+	_, store, _ := testServer(t)
+	users := []string{strings.Repeat("1", 64), strings.Repeat("2", 64)}
+	for _, user := range users {
+		if err := store.RegisterUser(t.Context(), user, []byte("fixture")); err != nil {
+			t.Fatal(err)
+		}
+		lifecycleExecute(t, store, `INSERT INTO server_encrypted_records(user_id_hash,collection,id,ciphertext,updated_at) VALUES(?1,'private.entity.v1.game-progress','progress','encrypted progress','2026-10-25')`, user)
+		lifecycleExecute(t, store, `UPDATE server_storage_usage SET used_bytes=999 WHERE user_id_hash=?1`, user)
+	}
+	// Simulate an installed v3 counter and its old insert trigger.
+	lifecycleExecute(t, store, `UPDATE server_storage_usage_version SET version=3`)
+	lifecycleExecute(t, store, `DROP TRIGGER server_storage_usage_server_encrypted_records_insert`)
+	lifecycleExecute(t, store, `CREATE TRIGGER server_storage_usage_server_encrypted_records_insert AFTER INSERT ON server_encrypted_records BEGIN UPDATE server_storage_usage SET used_bytes=used_bytes+999 WHERE user_id_hash=NEW.user_id_hash; END`)
+	for i := 0; i < 2; i++ {
+		if err := StorageUsage_Ensure(store.Database, t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		for _, user := range users {
+			used := AccountStorage_Used(store.Database, t.Context(), user)
+			if used.Error != nil || used.Value != 0 {
+				t.Fatalf("upgrade retained a progress charge: %#v", used)
+			}
+		}
+	}
+	for _, user := range users {
+		lifecycleExecute(t, store, `INSERT INTO server_encrypted_records(user_id_hash,collection,id,ciphertext,updated_at) VALUES(?1,'private.inbe.v1.habit-days','day','more progress','2026-10-25')`, user)
+		lifecycleExecute(t, store, `UPDATE server_encrypted_records SET ciphertext='updated progress' WHERE user_id_hash=?1`, user)
+		assertStorageUsage(t, store, user)
 	}
 }
 

@@ -118,6 +118,11 @@ Existing mixed records without the field retain their charge until a client
 refreshes them; clients must requeue existing mixed records once on upgrade.
 The node never receives note plaintext.
 
+When the update time, content hash, key, schema, parent and deletion state
+match, mesh replication prefers a representation carrying accounting metadata
+over a legacy copy. This keeps another node from restoring the old charge
+when an unchanged record is re-sealed during the accounting upgrade.
+
 ## HTTP compression and page metadata
 
 The node advertises `http-gzip-v1`, accepts `Content-Encoding: gzip` on JSON

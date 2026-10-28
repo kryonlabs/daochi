@@ -70,6 +70,21 @@ DecodeHex :: (value: string) -> HexResult #go_results #foreign go_hex "DecodeStr
 EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
 TrimSpace :: (value: string) -> string #foreign go_strings;
 Compare :: (left: string, right: string) -> isize #foreign go_strings;
+
+CompareRecordRepresentation :: (left: EncryptedRecord, right: EncryptedRecord) -> isize {
+    sameContent := left.ContentHash != "" && left.ContentHash == right.ContentHash &&
+    left.KeyID == right.KeyID && left.SchemaVersion == right.SchemaVersion &&
+    left.ParentID == right.ParentID && left.DeletedAt == right.DeletedAt
+    // Accounting upgrades re-seal unchanged content at its original time.
+    // Prefer that metadata over a legacy copy, independent of nonce order.
+    if sameContent && left.FreeBytes > 0 && right.FreeBytes == 0 {
+        return cast(isize)1
+    }
+    if sameContent && left.FreeBytes == 0 && right.FreeBytes > 0 {
+        return cast(isize)(-1)
+    }
+    return Compare(record.ContentKey(left), record.ContentKey(right))
+}
 AllocateRecords :: (count: isize, capacity: isize) -> []MeshEncryptedRecord #foreign builtin "make";
 AllocateDeletions :: (count: isize) -> []MeshEncryptedRecordDeletion #foreign builtin "make";
 AppendRecord :: (values: []MeshEncryptedRecord, value: MeshEncryptedRecord) -> []MeshEncryptedRecord #foreign builtin "append";
@@ -456,7 +471,7 @@ UpsertRecord :: (transaction: *sql.Transaction, context: ctx.Context, userID: st
         existingUpdated := timestamp.NormalizeTime(existing.UpdatedAt, "")
         frozen := Compare(existingUpdated, timestamp.WriteTimeLimit(now)) > cast(isize)0
         if !frozen && (Compare(updated, existingUpdated) < cast(isize)0 ||
-            (updated == existingUpdated && Compare(record.ContentKey(item), record.ContentKey(existing)) <= cast(isize)0)) {
+            (updated == existingUpdated && CompareRecordRepresentation(item, existing) <= cast(isize)0)) {
             return result
         }
     }

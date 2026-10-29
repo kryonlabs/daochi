@@ -305,13 +305,13 @@ func TestAccountHoldPlainLoginStartsEmptyAndPurgesAfterThirtyDays(t *testing.T) 
 	file := server.Cfg.DBPath + ".held/" + account.userID + ".db"
 	blobs := server.Cfg.DBPath + ".held/" + account.userID + ".blobs"
 	early := time.Unix(login.HeldUntil-1, 0)
-	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, early); err != nil {
+	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, early, 30); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(file); err != nil {
 		t.Fatalf("hold purged before 30 days: %v", err)
 	}
-	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, time.Unix(login.HeldUntil, 0)); err != nil {
+	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, time.Unix(login.HeldUntil, 0), 30); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{file, blobs} {

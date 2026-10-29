@@ -25,7 +25,8 @@ Every node registers `entity` as a built-in app. Its collections are
 - `POST /api/v1/blobs/entity/<address>/trash` moves a blob to the trash, signed
   like `DELETE` with an empty body. It stays readable but stops counting
   toward the account's storage at once, and the node deletes it 30 days after
-  it was first trashed. `POST .../restore`, or storing the same blob again,
+  it was first trashed (`DAOCHI_TRASH_PURGE_DAYS`; a private node set to 0
+  keeps it). `POST .../restore`, or storing the same blob again,
   takes it back out and counts it again, so a full account is refused with
   `storage_full`. Neither the node nor any peer can read whether a photo is in
   the trash: apps trash its chunks and preview when the person does.

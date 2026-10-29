@@ -66,4 +66,7 @@ Before exposing a node publicly:
   and backups of deleted data must not outlive that. To delete a held account
   at once, set its `purge_after` in `server_account_holds` to 0; the hourly
   retention job removes it;
+- blobs an account moves to its trash stop counting toward its storage and are
+  deleted after `DAOCHI_TRASH_PURGE_DAYS` (30 by default); a private node that
+  archives the owner's photos sets it to 0 and keeps them;
 - restore has been tested on a separate machine or directory.

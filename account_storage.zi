@@ -21,8 +21,6 @@ UsageResult :: struct {
     error: Error
 }
 
-// A blob in the account's trash stays this long, then it is deleted.
-TrashDays :: 30
 
 StorageFullResponse :: struct {
     Message: string #go_tag "json:\"error\""
@@ -193,9 +191,14 @@ RestoreBlob :: (database: *sql.Database, context: ctx.Context, userID: string, a
     return written.error
 }
 
-// Deletes, file and row, every blob trashed at least TrashDays before now.
-PurgeTrashedBlobs :: (database: *sql.Database, context: ctx.Context, dbPath: string, now: s64) -> Error {
-    cutoff := now - cast(s64)(TrashDays * Day)
+// Deletes, file and row, every blob trashed at least `days` before now. A
+// node configured to keep trashed blobs passes zero and deletes none.
+PurgeTrashedBlobs :: (database: *sql.Database, context: ctx.Context, dbPath: string, now: s64,
+    days: isize) -> Error {
+    if days <= cast(isize)0 {
+        return null
+    }
+    cutoff := now - cast(s64)days * cast(s64)Day
     arguments: [1]Any = .[cutoff]
     queried := sql.Query(database, context, TrashedBlobsSQL, arguments[:])
     if queried.error != null {

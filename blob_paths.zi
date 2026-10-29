@@ -57,7 +57,7 @@ TrashDocument :: #string JSON
     ],
     "post": {
       "summary":"Move an account-private blob to the trash",
-      "description":"Bearer and account/device transaction signatures are required, with an empty body. A trashed blob stays readable but stops counting toward the account's storage at once. The node deletes it 30 days after it was first trashed unless it is restored or stored again. Trashing a blob already in the trash also succeeds.",
+      "description":"Bearer and account/device transaction signatures are required, with an empty body. A trashed blob stays readable but stops counting toward the account's storage at once. The node deletes it after its trash period, 30 days after it was first trashed by default, unless it is restored or stored again. Trashing a blob already in the trash also succeeds.",
       "security":[{"bearerAuth":[]}],
       "responses":{"204":{"description":"In the trash"},"401":{"description":"Missing or invalid authorization"},"403":{"description":"App inactive"},"404":{"description":"No blob in this account/app"},"409":{"description":"Replay rejected"}}
     }

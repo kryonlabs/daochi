@@ -161,13 +161,20 @@ func TestBlobTrashStopsChargingRestoresWithRoomAndPurgesAfterThirtyDays(t *testi
 	}
 
 	file := filepath.Join(AccountStorage_BlobAccountFolder(server.Cfg.DBPath, user), "target", hash)
-	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, time.Now().Add(29*24*time.Hour)); err != nil {
+	// A private node set to keep trashed blobs deletes none of them.
+	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, time.Now().Add(400*24*time.Hour), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Fatalf("a node keeping trashed blobs deleted one: %v", err)
+	}
+	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, time.Now().Add(29*24*time.Hour), 30); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(file); err != nil {
 		t.Fatalf("trashed blob deleted before 30 days: %v", err)
 	}
-	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, time.Now().Add(30*24*time.Hour+time.Minute)); err != nil {
+	if err := Retention_PruneFiles(store.Database, t.Context(), server.Cfg.DBPath, time.Now().Add(30*24*time.Hour+time.Minute), 30); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {

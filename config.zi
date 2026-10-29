@@ -31,6 +31,9 @@ Config :: struct {
     EncryptedPayloadMaxAccountBytes: s64
     EncryptedPayloadRetention: clock.Duration
     AccountStorageLimitBytes: s64
+    // Days a blob stays in an account's trash before the node deletes it;
+    // zero keeps trashed blobs, as private nodes that archive photos do.
+    TrashPurgeDays: isize
     StoragePlansEnabled: bool
     PremiumAliasesEnabled: bool
     // Dew gifts between accounts; paused unless set, since anyone can open
@@ -282,6 +285,7 @@ Load :: () -> Config {
     result.EncryptedPayloadRetention = EnvDurationDays("DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS", cast(clock.Duration)0)
     // Zero keeps account storage unlimited; the public node sets its free allowance.
     result.AccountStorageLimitBytes = EnvInt64("DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES", cast(s64)0)
+    result.TrashPurgeDays = EnvInt("DAOCHI_TRASH_PURGE_DAYS", cast(isize)30)
     result.StoragePlansEnabled = Bool(EnvString("DAOCHI_STORAGE_PLANS_ENABLED", ""), false)
     result.PremiumAliasesEnabled = Bool(EnvString("DAOCHI_PREMIUM_ALIASES_ENABLED", ""), false)
     result.DewGiftsEnabled = Bool(EnvString("DAOCHI_DEW_GIFTS_ENABLED", ""), false)

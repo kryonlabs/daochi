@@ -297,6 +297,7 @@ var configEnvironmentKeys = []string{
 	"DAOCHI_ENCRYPTED_PAYLOAD_MAX_RETURN",
 	"DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS",
 	"DAOCHI_ACCOUNT_STORAGE_LIMIT_BYTES",
+	"DAOCHI_TRASH_PURGE_DAYS",
 	"DAOCHI_GOOGLE_OAUTH_CLIENT_JSON",
 	"DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE",
 	"DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN",
@@ -351,7 +352,7 @@ func assertConfigurationMatchesBaseline(t *testing.T) Config {
 	expected := baselineLoadConfig()
 	actualType := reflect.TypeOf(actual)
 	expectedType := reflect.TypeOf(expected)
-	if actualType.NumField() != expectedType.NumField()+5 {
+	if actualType.NumField() != expectedType.NumField()+6 {
 		t.Fatal("configuration fields changed")
 	}
 	for i := 0; i < expectedType.NumField(); i++ {

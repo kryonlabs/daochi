@@ -91,17 +91,19 @@ Prune :: (database: *sql.Database, context: ctx.Context, now: clock.Time) -> Err
     return sql.Commit(transaction)
 }
 
-// Deletes the files of held accounts and trashed blobs whose time is up.
-PruneFiles :: (database: *sql.Database, context: ctx.Context, dbPath: string, now: clock.Time) -> Error {
+// Deletes the files of held accounts and of blobs `trashDays` in the trash.
+PruneFiles :: (database: *sql.Database, context: ctx.Context, dbPath: string, now: clock.Time,
+    trashDays: isize) -> Error {
     error := holds.Purge(database, context, dbPath, now)
     if error != null {
         return error
     }
-    return storage.PurgeTrashedBlobs(database, context, dbPath, clock.Unix(now))
+    return storage.PurgeTrashedBlobs(database, context, dbPath, clock.Unix(now), trashDays)
 }
 
 // Prunes once at start and then at every interval until the context ends.
-Run :: (database: *sql.Database, context: ctx.Context, interval: clock.Duration, dbPath: string) {
+Run :: (database: *sql.Database, context: ctx.Context, interval: clock.Duration, dbPath: string,
+    trashDays: isize) {
     if cast(s64)interval <= 0 {
         interval = cast(clock.Duration)Interval
     }
@@ -118,7 +120,7 @@ Run :: (database: *sql.Database, context: ctx.Context, interval: clock.Duration,
         if error != null && !Stopped(context) {
             LogWarning("data retention failed", "error", error)
         }
-        error = PruneFiles(database, context, dbPath, now)
+        error = PruneFiles(database, context, dbPath, now, trashDays)
         if error != null && !Stopped(context) {
             LogWarning("held data retention failed", "error", error)
         }

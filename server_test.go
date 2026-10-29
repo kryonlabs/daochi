@@ -2665,6 +2665,33 @@ func TestFriendRequestsRejectMismatchedHeaderUser(t *testing.T) {
 	}
 }
 
+func TestFriendRequestSenderCanWithdraw(t *testing.T) {
+	server, _, _ := testServer(t)
+	handler := server.Routes()
+	alice := newTestIdentity(t, handler, 0x27)
+	bob := newTestIdentity(t, handler, 0x28)
+	carol := newTestIdentity(t, handler, 0x29)
+
+	req := createFriendRequest(t, handler, alice, bob.UserID)
+	res := friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+req.ID+"/decline", carol, []byte(`{}`))
+	if res.Code == http.StatusOK {
+		t.Fatalf("outsider withdrew the request: body=%s", res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+req.ID+"/decline", alice, []byte(`{}`))
+	if res.Code != http.StatusOK {
+		t.Fatalf("sender withdraw status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = friendJSONRequest(t, handler, http.MethodPost, "/api/v1/friends/requests/"+req.ID+"/accept", bob, []byte(`{}`))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("accept withdrawn status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	again := createFriendRequest(t, handler, alice, bob.UserID)
+	if again.Status != "pending" {
+		t.Fatalf("request sent again after withdrawing: %#v", again)
+	}
+}
+
 func TestFriendDeclineAndStatsVisibility(t *testing.T) {
 	server, store, _ := testServer(t)
 	handler := server.Routes()

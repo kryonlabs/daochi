@@ -4,10 +4,14 @@ identity :: #import "identity";
 signing :: #import "signing";
 errors :: #import "std/errors_go";
 go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
 
 #scope_file
 TrimSpace :: (value: string) -> string #foreign go_strings;
 Join :: (values: []string, separator: string) -> string #foreign go_strings;
+HasPrefix :: (value: string, prefix: string) -> bool #foreign go_strings;
+AllocateRecords :: (count: isize, capacity: isize) -> []EncryptedRecord #foreign builtin "make";
+AppendRecord :: (values: []EncryptedRecord, value: EncryptedRecord) -> []EncryptedRecord #foreign builtin "append";
 
 #scope_export
 ValidateAccountKey :: (userID: string, publicKey: []u8) -> Error {
@@ -64,6 +68,33 @@ ValidForProtocol :: (item: EncryptedRecord, version: isize) -> bool {
             identity.ValidLegacyEncryptedCollection(item.Collection)
     }
     return true
+}
+
+// A client that reads a deleted record without content as a deletion says
+// so with this capability. Deleted records keep no content on the node, and
+// released clients read one of their app's own collections as a record they
+// cannot decrypt, then refuse the whole sync.
+ContentFreeDeletions :: "content-free-deletions"
+
+// The records a client can read: without the capability, deleted records of
+// apps' own collections that keep no content stay out, as their content is
+// gone anyway. Entity data always had such deletions, which every client
+// reads.
+ReadableBy :: (records: []EncryptedRecord, capabilities: []string) -> []EncryptedRecord {
+    for capability: capabilities {
+        if capability == ContentFreeDeletions {
+            return records
+        }
+    }
+    readable := AllocateRecords(cast(isize)0, cast(isize)records.count)
+    for item: records {
+        bare := item.DeletedAt != 0 && item.Nonce == "" && item.Ciphertext == ""
+        if bare && !HasPrefix(item.Collection, "private.entity.") {
+            continue
+        }
+        readable = AppendRecord(readable, item)
+    }
+    return readable
 }
 
 ContentKey :: (item: EncryptedRecord) -> string {

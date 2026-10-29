@@ -22,6 +22,7 @@ node :: #import "node_info";
 packages :: #import "package_http";
 atomic :: #import "std/atomic_go";
 errors :: #import "std/errors_go";
+readable :: #import "encrypted_record";
 native :: #system_library "go:database/sql";
 builtin :: #system_library "go:builtin";
 
@@ -234,7 +235,8 @@ Handle :: (database: *sql.Database, counters: *metrics.ServerMetrics, notificati
     value.RecordCursor = page.cursor
     value.ChangesComplete = page.cursor == null
     value.Changes = requests.EmptyChanges()
-    value.Changes.EncryptedRecords = page.records
+    // The cursor still moves past records this client cannot read.
+    value.Changes.EncryptedRecords = readable.ReadableBy(page.records, input.ClientCapabilities)
     value.Applied = applied.value
     value.MinSupportedProtocol = MinSupportedProtocol
     value.LatestProtocol = input.ProtocolVersion

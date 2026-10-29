@@ -9,6 +9,7 @@ validation :: #import "sync_validation";
 signed :: #import "signed_tx";
 application :: #import "sync_application";
 views :: #import "sync_views";
+readable :: #import "encrypted_record";
 clients :: #import "sync_clients";
 audit :: #import "sync_audit";
 migration :: #import "habit_migration";
@@ -330,6 +331,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
         return
     }
     changes := loaded.value
+    changes.EncryptedRecords = readable.ReadableBy(changes.EncryptedRecords, input.ClientCapabilities)
     serverVersion := loaded.version
     social := friends.Authoritative(sync.database, context, input.UserIDHash)
     if social.error != null {
@@ -442,6 +444,7 @@ Handle :: (sync: Synchronization, writer: http.ResponseWriter, request: *http.Re
             return
         }
         value.Data = clean.value
+        value.Data.EncryptedRecords = readable.ReadableBy(value.Data.EncryptedRecords, input.ClientCapabilities)
         ProjectClean(*value, input)
         logEntries := audit.Logs(sync.database, context, input.UserIDHash, input.ClientClock)
         if logEntries.error != null {

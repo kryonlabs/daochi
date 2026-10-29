@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -179,4 +181,66 @@ func TestBlobTrashStopsChargingRestoresWithRoomAndPurgesAfterThirtyDays(t *testi
 		t.Fatalf("purged blob still readable: %d", result.Code)
 	}
 	assertStorageUsage(t, store, user)
+}
+
+// The ids of the encrypted records a sync reply carries, in its changes and
+// in a full snapshot's data.
+func syncReplyRecordIDs(t *testing.T, body []byte) []string {
+	t.Helper()
+	var reply struct {
+		Changes struct {
+			EncryptedRecords []EncryptedRecord `json:"encrypted_records"`
+		} `json:"changes"`
+		Data struct {
+			EncryptedRecords []EncryptedRecord `json:"encrypted_records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &reply); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, record := range append(reply.Changes.EncryptedRecords, reply.Data.EncryptedRecords...) {
+		ids = append(ids, record.ID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// Released clients read a deletion without content as a record they cannot
+// decrypt and refuse the whole sync, so only clients that say they handle
+// one receive it.
+func TestContentFreeDeletionsReachOnlyClientsThatReadThem(t *testing.T) {
+	for _, pages := range []bool{false, true} {
+		fixture := authorizationSetup(t)
+		kept := accountStorageRecord("cell.diary.file.kept", 50, "2026-10-10T00:00:00Z")
+		gone := accountStorageRecord("cell.diary.file.gone", 50, "2026-10-10T00:00:00Z")
+		if result := fixture.ownerSync(t, pages, kept, gone); result.Code != http.StatusOK {
+			t.Fatalf("store records: %d %s", result.Code, result.Body.String())
+		}
+		deleted := gone
+		deleted.DeletedAt = 1760054400
+		deleted.UpdatedAt = "2026-10-10T00:00:01Z"
+		if result := fixture.ownerSync(t, pages, deleted); result.Code != http.StatusOK {
+			t.Fatalf("delete record: %d %s", result.Code, result.Body.String())
+		}
+		read := func(capabilities []string) []string {
+			t.Helper()
+			fields := map[string]any{"protocol_version": 6, "app_id": "inbe", "user_id_hash": fixture.owner.UserID,
+				"client_id": strings.Repeat("b", 64), "client_capabilities": capabilities}
+			if pages {
+				fields["encrypted_records_only"] = true
+			}
+			result := fixture.ownerCall(t, "/api/v1/sync", fields)
+			if result.Code != http.StatusOK {
+				t.Fatalf("read records (pages=%v): %d %s", pages, result.Code, result.Body.String())
+			}
+			return syncReplyRecordIDs(t, result.Body.Bytes())
+		}
+		if got := read(nil); fmt.Sprint(got) != "[cell.diary.file.kept]" {
+			t.Fatalf("a released client got %v (pages=%v)", got, pages)
+		}
+		if got := read([]string{"content-free-deletions"}); fmt.Sprint(got) != "[cell.diary.file.gone cell.diary.file.kept]" {
+			t.Fatalf("a client that reads deletions got %v (pages=%v)", got, pages)
+		}
+	}
 }

@@ -66,6 +66,54 @@ Save :: (folder: string, path: string, data: []u8) -> Error {
     return files.Rename(temporary, path)
 }
 
+// Takes a blob out of the trash when the account has room for it again.
+Restore :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.Request,
+    user: string, app: string, hash: string) {
+    context := http.Context(request)
+    trashed := storage.BlobTrashed(store.database, context, user, app, hash)
+    if trashed.error != null {
+        response.Error(writer, 500, "blob storage unavailable")
+        return
+    }
+    if !trashed.value {
+        stored := storage.BlobStored(store.database, context, user, app, hash)
+        if stored.error != null {
+            response.Error(writer, 500, "blob storage unavailable")
+            return
+        }
+        if !stored.value {
+            response.Error(writer, 404, "blob not found")
+            return
+        }
+        http.WriteHeader(writer, 204)
+        return
+    }
+    allowance := storage.Limit(store.database, context, user,
+        store.configuration.AccountStorageLimitBytes, store.configuration.StoragePlansEnabled)
+    if allowance.error != null {
+        response.Error(writer, 503, "storage unavailable")
+        return
+    }
+    if allowance.value > 0 {
+        used := storage.Used(store.database, context, user)
+        size := storage.BlobSize(store.database, context, user, app, hash)
+        if used.error != null || size.error != null {
+            response.Error(writer, 500, "blob storage unavailable")
+            return
+        }
+        if storage.Exceeds(used.value, used.value + size.value, allowance.value) {
+            storage.RespondFull(writer, storage.Report(used.value, allowance.value))
+            return
+        }
+    }
+    error := storage.RestoreBlob(store.database, context, user, app, hash)
+    if error != null {
+        response.Error(writer, 500, "blob storage unavailable")
+        return
+    }
+    http.WriteHeader(writer, 204)
+}
+
 Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.Request) {
     user := auth.BearerUser(store.database, request, store.configuration.TokenSecret)
     if user.authentication.error != null || user.authentication.status != 0 {
@@ -73,7 +121,13 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         return
     }
     parts := Split(TrimPrefix(url.Path(http.RequestURL(request)), "/api/v1/blobs/"), "/")
-    if parts.count != 2 || !identity.ValidNamespace(parts[0]) || !ValidHash(parts[1]) {
+    // POST <app>/<hash>/trash or /restore moves a blob in or out of the trash.
+    action := ""
+    if parts.count == 3 {
+        action = parts[2]
+    }
+    if (parts.count != 2 && parts.count != 3) || (parts.count == 3 && action != "trash" && action != "restore") ||
+        !identity.ValidNamespace(parts[0]) || !ValidHash(parts[1]) {
         response.Error(writer, 400, "invalid blob address")
         return
     }
@@ -88,7 +142,8 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         return
     }
     method := http.Method(request)
-    if method != "PUT" && method != "GET" && method != "HEAD" && method != "DELETE" {
+    if (action == "" && method != "PUT" && method != "GET" && method != "HEAD" && method != "DELETE") ||
+        (action != "" && method != "POST") {
         response.Error(writer, 405, "unsupported blob method")
         return
     }
@@ -149,6 +204,13 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
             response.Error(writer, 500, "blob storage unavailable")
             return
         }
+        // Storing a trashed blob again brings it back, so it is charged again.
+        trashed := storage.BlobTrashed(store.database, context, user.value, parts[0], parts[1])
+        if trashed.error != null {
+            signed.Forget(store.database, context, header.value)
+            response.Error(writer, 500, "blob storage unavailable")
+            return
+        }
         allowance := storage.Limit(store.database, context, user.value,
             store.configuration.AccountStorageLimitBytes, store.configuration.StoragePlansEnabled)
         if allowance.error != null {
@@ -157,7 +219,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
             return
         }
         limit := allowance.value
-        if !stored.value && limit > 0 {
+        if (!stored.value || trashed.value) && limit > 0 {
             used := storage.Used(store.database, context, user.value)
             if used.error != null {
                 signed.Forget(store.database, context, header.value)
@@ -184,6 +246,25 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
             return
         }
         http.WriteHeader(writer, 204)
+        return
+    }
+    if action == "trash" {
+        // Trashing is idempotent; the first time counts for the 30 days.
+        moved := storage.TrashBlob(store.database, http.Context(request), user.value, parts[0], parts[1],
+            clock.Unix(clock.Now()))
+        if moved.error != null {
+            response.Error(writer, 500, "blob storage unavailable")
+            return
+        }
+        if !moved.value {
+            response.Error(writer, 404, "blob not found")
+            return
+        }
+        http.WriteHeader(writer, 204)
+        return
+    }
+    if action == "restore" {
+        Restore(store, writer, request, user.value, parts[0], parts[1])
         return
     }
     if method == "DELETE" {

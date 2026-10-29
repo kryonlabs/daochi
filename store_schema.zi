@@ -8,6 +8,7 @@ unlocks :: #import "unlock";
 rescales :: #import "token_rescale";
 exchange_rates :: #import "exchange_rate";
 evidence :: #import "game_evidence";
+holds :: #import "account_hold";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 errors :: #import "std/errors_go";
@@ -130,9 +131,9 @@ Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     if pragmas.error != null {
         return pragmas.error
     }
-    definitions: [11]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
+    definitions: [13]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
         publications.SchemaSQL(), plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL(),
-        exchange_rates.SchemaSQL(), FeedbackReplies, evidence.SchemaSQL()]
+        exchange_rates.SchemaSQL(), FeedbackReplies, evidence.SchemaSQL(), holds.SchemaSQL(), TombstoneContent]
     created := sql.Exec(database, context, Join(definitions[:], ""), empty[:])
     if created.error != null {
         return created.error
@@ -464,6 +465,7 @@ CREATE TABLE IF NOT EXISTS server_blobs (
 	hash TEXT NOT NULL,
 	size INTEGER NOT NULL,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	trashed_at INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, app_id, hash)
 );
 
@@ -791,6 +793,24 @@ CREATE TABLE IF NOT EXISTS server_telegram_init_claims (
 );
 SQL_9;
 Tables: [9]string = .[Tables1, Tables2, Tables3, Tables4, Tables5, Tables6, Tables7, Tables8, Tables9];
+// A deleted record keeps only what devices need to delete their copies: its
+// content goes as soon as the deletion arrives, by any path that writes it.
+TombstoneContent :: #string SQL_END
+CREATE TRIGGER IF NOT EXISTS server_encrypted_records_tombstone_insert
+AFTER INSERT ON server_encrypted_records
+WHEN NEW.deleted_at<>0 AND (NEW.nonce<>'' OR NEW.ciphertext<>'')
+BEGIN
+    UPDATE server_encrypted_records SET nonce='',ciphertext=''
+    WHERE user_id_hash=NEW.user_id_hash AND collection=NEW.collection AND id=NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS server_encrypted_records_tombstone_update
+AFTER UPDATE OF deleted_at,nonce,ciphertext ON server_encrypted_records
+WHEN NEW.deleted_at<>0 AND (NEW.nonce<>'' OR NEW.ciphertext<>'')
+BEGIN
+    UPDATE server_encrypted_records SET nonce='',ciphertext=''
+    WHERE user_id_hash=NEW.user_id_hash AND collection=NEW.collection AND id=NEW.id;
+END;
+SQL_END;
 // Replies the developer adds to a report beside the first one, which stays
 // in server_app_feedback.reply. Each has its own ID, so apps show every reply
 // once and a retried reply is not repeated.
@@ -829,7 +849,7 @@ ColumnLookup :: "SELECT 1 FROM pragma_table_info(?1) WHERE name=?2";
 SocialExists :: "\nSELECT EXISTS(\n\tSELECT 1 FROM sqlite_master\n\tWHERE type='table' AND name='server_social_cache'\n)";
 SocialUpgrade :: "\nINSERT OR REPLACE INTO server_social_snapshots(user_id_hash,kind,json,updated_at,server_version)\nSELECT user_id_hash,kind,json,updated_at,server_version\nFROM server_social_cache;\nDROP TABLE server_social_cache;";
 
-Upgrades: [36]string = .[
+Upgrades: [38]string = .[
     "ALTER TABLE server_meditation_logs ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_habits ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE server_habits ADD COLUMN counter_enabled INTEGER NOT NULL DEFAULT 0",
@@ -865,7 +885,11 @@ Upgrades: [36]string = .[
     "ALTER TABLE server_leaderboard_stats ADD COLUMN calc_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE monero_deposits ADD COLUMN usd_cents INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE monero_deposits ADD COLUMN usd_updated_at INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE monero_deposits ADD COLUMN usd_sources TEXT NOT NULL DEFAULT ''"
+    "ALTER TABLE monero_deposits ADD COLUMN usd_sources TEXT NOT NULL DEFAULT ''",
+    // When the account moved the blob to its trash (Unix seconds), or 0.
+    "ALTER TABLE server_blobs ADD COLUMN trashed_at INTEGER NOT NULL DEFAULT 0",
+    // Deleted records written before tombstones dropped their content.
+    "UPDATE server_encrypted_records SET nonce='',ciphertext='' WHERE deleted_at<>0 AND (nonce<>'' OR ciphertext<>'')"
 ];
 
 Indexes: [18]string = .[

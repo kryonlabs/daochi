@@ -60,7 +60,8 @@ func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 			name == "server_state_hashes" || strings.HasPrefix(entry["name"].(string), "server_state_hashes") ||
 			strings.HasPrefix(name, "server_storage_usage") || strings.HasPrefix(entry["name"].(string), "server_storage_usage_") ||
 			entry["name"] == "server_record_page_order" || strings.HasPrefix(name, "server_record_packing") ||
-			strings.HasPrefix(entry["name"].(string), "server_record_packing_") {
+			strings.HasPrefix(entry["name"].(string), "server_record_packing_") ||
+			name == "server_account_holds" || strings.HasPrefix(entry["name"].(string), "server_encrypted_records_tombstone_") {
 			continue
 		}
 		legacy = append(legacy, entry)

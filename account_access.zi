@@ -13,7 +13,7 @@ address :: #import "client_address";
 identity :: #import "identity";
 accounts :: #import "account_keys";
 state :: #import "account_state";
-storage :: #import "account_storage";
+holds :: #import "account_hold";
 clients :: #import "sync_clients";
 profile :: #import "account_profile";
 token :: #import "token";
@@ -62,15 +62,6 @@ Allow :: (access: AccountAccess, prefix: string, subject: string, limit: isize,
     window: clock.Duration) -> bool {
     parts: [2]string = .[prefix, subject]
     return rate.Allow(access.limiter, access.counters, Join(parts[:], ""), limit, window)
-}
-
-// The account rows are gone; a failure to remove its blob files is logged
-// for the operator rather than reported as a failed deletion.
-RemoveBlobs :: (access: AccountAccess, userID: string) {
-    error := storage.RemoveBlobs(access.configuration.DBPath, userID)
-    if error != null {
-        LogAccountError("remove account blobs", "user", logs.LogText(userID), "error", error)
-    }
 }
 
 // A per-account bucket shared by everyone lets a stranger use up a victim's
@@ -158,6 +149,15 @@ Login :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Req
         return
     }
     context := http.Context(request)
+    if value.Restore {
+        // A failed restore must not leave a new empty account in its way.
+        restored := holds.Restore(access.database, context, access.configuration.DBPath, value.UserIDHash)
+        if restored.error != null {
+            LogAccountError("restore held account", "user", logs.LogText(value.UserIDHash), "error", restored.error)
+            response.Error(writer, cast(isize)500, "restore failed")
+            return
+        }
+    }
     error = state.Register(access.database, context, value.UserIDHash, authenticated.value)
     if error != null {
         LogAccountError("register sync user", "user", logs.LogText(value.UserIDHash), "error", error)
@@ -189,8 +189,13 @@ Login :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Req
         response.Error(writer, cast(isize)500, "profile icon failed")
         return
     }
+    held := holds.HeldUntil(access.database, context, value.UserIDHash)
+    if held.error != null {
+        LogAccountError("load account hold", "user", logs.LogText(value.UserIDHash), "error", held.error)
+    }
     result: LoginResponse
     result.Status = "ok"
+    result.HeldUntil = held.value
     result.AuthToken = issued.value
     result.ExpiresIn = cast(s64)Seconds(access.configuration.TokenTTL)
     result.ServerTime = clock.Unix(clock.Now())
@@ -216,13 +221,13 @@ Delete :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Re
         http_auth.Respond(writer, access.counters, authenticated.authentication)
         return
     }
-    error = state.Delete(access.database, http.Context(request), value.UserIDHash)
+    error = holds.Delete(access.database, http.Context(request), access.configuration.DBPath,
+        value.UserIDHash, clock.Now())
     if error != null {
         LogAccountError("delete account", "user", logs.LogText(value.UserIDHash), "error", error)
         response.Error(writer, cast(isize)500, "delete failed")
         return
     }
-    RemoveBlobs(access, value.UserIDHash)
     Deleted(writer)
 }
 
@@ -265,12 +270,12 @@ DeleteWithKey :: (access: AccountAccess, writer: http.ResponseWriter, request: *
         response.Error(writer, cast(isize)401, "exported key does not match sync account")
         return
     }
-    error := state.Delete(access.database, http.Context(request), value.UserIDHash)
+    error := holds.Delete(access.database, http.Context(request), access.configuration.DBPath,
+        value.UserIDHash, clock.Now())
     if error != null {
         LogAccountError("delete account with key", "user", logs.LogText(value.UserIDHash), "error", error)
         response.Error(writer, cast(isize)500, "delete failed")
         return
     }
-    RemoveBlobs(access, value.UserIDHash)
     Deleted(writer)
 }

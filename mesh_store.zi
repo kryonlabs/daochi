@@ -72,6 +72,14 @@ TrimSpace :: (value: string) -> string #foreign go_strings;
 Compare :: (left: string, right: string) -> isize #foreign go_strings;
 
 CompareRecordRepresentation :: (left: EncryptedRecord, right: EncryptedRecord) -> isize {
+    // A deletion keeps no content to compare, so it wins a tie: a copy from
+    // the same moment must not bring back what was deleted.
+    if (left.DeletedAt != 0) != (right.DeletedAt != 0) {
+        if left.DeletedAt != 0 {
+            return cast(isize)1
+        }
+        return cast(isize)(-1)
+    }
     sameContent := left.ContentHash != "" && left.ContentHash == right.ContentHash &&
     left.KeyID == right.KeyID && left.SchemaVersion == right.SchemaVersion &&
     left.ParentID == right.ParentID && left.DeletedAt == right.DeletedAt

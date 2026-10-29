@@ -133,9 +133,9 @@ a{color:#0b625d}
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/friends</code><p>Bearer-authenticated friend requests, accepted friends, and app-neutral shared profile stats.</p></section>
 <section class="endpoint"><span class="method">GET/POST</span><code>/api/v1/publications</code><p>Publishes level collections and finds the newest public ones or the ones an author lets the caller see.</p></section>
 <section class="endpoint"><span class="method">GET/DELETE</span><code>/api/v1/publications/{id}</code><p>Fetches a visible publication with its document, or lets its author unpublish it.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete</code><p>Deletes all remote data for the signed sync account without uploading the private key.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete</code><p>Deletes all remote data for the signed sync account without uploading the private key. It is kept on hold for 30 days, restorable with the same key, then deleted permanently.</p></section>
 <section class="endpoint"><span class="method">DELETE</span><code>/api/v1/account</code><p>Legacy signed deletion endpoint kept for older clients.</p></section>
-<section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text.</p></section>
+<section class="endpoint"><span class="method">POST</span><code>/api/v1/account/delete-with-key</code><p>Deletes all remote data for the sync account after verifying exported account key text, with the same 30-day hold.</p></section>
 <h2>Signed Message</h2>
 <pre>daochi-sync-v1
 &lt;HTTP_METHOD&gt;
@@ -711,7 +711,7 @@ func baselineOpenAPISpec() map[string]any {
 			"/api/v1/account/delete": map[string]any{
 				"post": map[string]any{
 					"summary":     "Delete remote account data",
-					"description": "Deletes server-side mirrored data for the signed account without uploading the private key.",
+					"description": "Deletes server-side mirrored data for the signed account without uploading the private key. The account stops syncing, counting toward storage and appearing to others at once; its data is kept on hold for 30 days and then deleted permanently. Logging in again with restore set brings it back while it is on hold.",
 					"parameters":  baselineSignedHeaderParameters(),
 					"requestBody": map[string]any{
 						"required": true,
@@ -786,7 +786,7 @@ func baselineOpenAPISpec() map[string]any {
 			"/api/v1/account/delete-with-key": map[string]any{
 				"post": map[string]any{
 					"summary":     "Delete remote account using exported key",
-					"description": "Accepts exported account key text. Current ksync-account-key-v1 keys and legacy account key export formats are supported.",
+					"description": "Accepts exported account key text. Current ksync-account-key-v1 keys and legacy account key export formats are supported. The account stops syncing, counting toward storage and appearing to others at once; its data is kept on hold for 30 days and then deleted permanently. Logging in again with restore set brings it back while it is on hold.",
 					"requestBody": map[string]any{
 						"required": true,
 						"content": map[string]any{
@@ -1130,6 +1130,7 @@ func baselineOpenAPISpec() map[string]any {
 						"user_id_hash": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"},
 						"client_id":    map[string]any{"type": "string"},
 						"public_key":   map[string]any{"type": "string", "description": "ML-DSA-44 public key as hex or base64; required on first login."},
+						"restore":      map[string]any{"type": "boolean", "description": "Bring back this key's deleted account while it is on hold, before any new data. Without it, a login during the hold starts an empty account and the held data is deleted when the hold ends."},
 					},
 				},
 				"SyncRequest": map[string]any{
@@ -1172,6 +1173,7 @@ func baselineOpenAPISpec() map[string]any {
 						"server_time":        map[string]any{"type": "integer", "description": "Unix seconds from the server clock. Clients can use it to compensate for local clock skew while caching bearer tokens."},
 						"account_alias":      map[string]any{"type": "string"},
 						"profile_icon":       map[string]any{"type": "integer"},
+						"held_until":         map[string]any{"type": "integer", "description": "Unix seconds when this key's deleted account, still on hold, is deleted permanently. Absent when nothing is on hold."},
 					},
 				},
 				"SyncResponse": map[string]any{

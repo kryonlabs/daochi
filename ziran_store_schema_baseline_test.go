@@ -335,6 +335,7 @@ CREATE TABLE IF NOT EXISTS server_blobs (
 	hash TEXT NOT NULL,
 	size INTEGER NOT NULL,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	trashed_at INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(user_id_hash, app_id, hash)
 );
 
@@ -656,6 +657,8 @@ WHERE NOT EXISTS (
 		`ALTER TABLE monero_deposits ADD COLUMN usd_cents INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE monero_deposits ADD COLUMN usd_updated_at INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE monero_deposits ADD COLUMN usd_sources TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE server_blobs ADD COLUMN trashed_at INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE server_encrypted_records SET nonce='',ciphertext='' WHERE deleted_at<>0 AND (nonce<>'' OR ciphertext<>'')`,
 	} {
 		if _, err := s.Database.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -93,7 +94,7 @@ func TestRetentionRunPrunesAtStartAndEachInterval(t *testing.T) {
 	finished := make(chan struct{})
 	retentionExecute(t, store, "INSERT INTO server_chat_usage(account_id,day,used) VALUES('node','2000-01-01',1)")
 	go func() {
-		Retention_Run(store.Database, context, 20*time.Millisecond)
+		Retention_Run(store.Database, context, 20*time.Millisecond, filepath.Join(t.TempDir(), "node.sqlite"))
 		close(finished)
 	}()
 	for _, day := range []string{"2000-01-01", "2000-01-02"} {

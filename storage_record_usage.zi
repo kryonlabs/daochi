@@ -1,4 +1,5 @@
-// Basic tracking is free for every account. Opaque custom content stays charged.
+// Basic tracking is free for every account. Opaque custom content stays
+// charged until it is deleted: a deleted record keeps no content.
 strings :: #system_library "go:strings";
 
 #scope_file
@@ -10,7 +11,7 @@ MixedCollectionsSQL :: "'inbe.sessions','private.inbe.v1.sessions','private.inbe
 
 RecordSizeSQL :: () -> string {
     parts: [5]string = .[
-    "CASE WHEN ROW.collection IN (", BasicCollectionsSQL,
+    "CASE WHEN ROW.deleted_at<>0 THEN 0 WHEN ROW.collection IN (", BasicCollectionsSQL,
     ") THEN 0 ELSE MAX(0,LENGTH(ROW.collection)+LENGTH(ROW.id)+LENGTH(ROW.key_id)+LENGTH(ROW.nonce)+LENGTH(ROW.ciphertext)+LENGTH(ROW.content_hash)+LENGTH(ROW.parent_id)-CASE WHEN ROW.collection IN (",
     MixedCollectionsSQL,
     ") THEN MIN(524288,MAX(0,ROW.free_bytes)) ELSE 0 END) END"

@@ -1,7 +1,9 @@
 [Unit]
-Description=Delete Daochi deploy backups older than 30 days
+Description=Delete Daochi deploy backups older than 28 days
+# Deleted accounts and data must be gone everywhere within 30 days: a daily
+# run that removes copies 28 days old keeps every backup inside that window.
 ConditionPathIsDirectory=/var/lib/daochi/backups
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/find /var/lib/daochi/backups -type f ( -name daochi.pre-upgrade.* -o -name daochi.db.* -o -name daochi.env.* ) -mtime +30 -delete
+ExecStart=/usr/bin/find /var/lib/daochi/backups -type f ( -name daochi.pre-upgrade.* -o -name daochi.db.* -o -name daochi.env.* ) -mtime +27 -delete

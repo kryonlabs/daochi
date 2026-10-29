@@ -3,9 +3,12 @@
 json :: #import "std/json_go";
 text :: #import "std/text_go";
 
+// Each #string stays within the compiler's line limit, so the trash actions
+// have a document of their own.
 Paths :: () -> Map(string, Any) {
     paths: Map(string, Any)
     json.Unmarshal(text.ToBytes(Document), *paths)
+    json.Unmarshal(text.ToBytes(TrashDocument), *paths)
     return paths
 }
 
@@ -39,6 +42,37 @@ Document :: #string JSON
       "description":"Bearer and account/device transaction signatures are required. The blob stops counting toward the account's storage. Deleting a missing blob also succeeds.",
       "security":[{"bearerAuth":[]}],
       "responses":{"204":{"description":"Deleted"},"401":{"description":"Missing or invalid authorization"},"403":{"description":"App inactive"},"409":{"description":"Replay rejected"},"507":{"description":"Storage unavailable"}}
+    }
+  }
+}
+JSON;
+
+TrashDocument :: #string JSON
+{
+  "/api/v1/blobs/{app_id}/{sha256}/trash": {
+    "parameters": [
+      {"name":"app_id","in":"path","required":true,"schema":{"type":"string"}},
+      {"name":"sha256","in":"path","required":true,"schema":{"type":"string","pattern":"^[0-9a-f]{64}$"}},
+      {"name":"X-Daochi-Tx","in":"header","required":true,"schema":{"type":"string"}}
+    ],
+    "post": {
+      "summary":"Move an account-private blob to the trash",
+      "description":"Bearer and account/device transaction signatures are required, with an empty body. A trashed blob stays readable but stops counting toward the account's storage at once. The node deletes it 30 days after it was first trashed unless it is restored or stored again. Trashing a blob already in the trash also succeeds.",
+      "security":[{"bearerAuth":[]}],
+      "responses":{"204":{"description":"In the trash"},"401":{"description":"Missing or invalid authorization"},"403":{"description":"App inactive"},"404":{"description":"No blob in this account/app"},"409":{"description":"Replay rejected"}}
+    }
+  },
+  "/api/v1/blobs/{app_id}/{sha256}/restore": {
+    "parameters": [
+      {"name":"app_id","in":"path","required":true,"schema":{"type":"string"}},
+      {"name":"sha256","in":"path","required":true,"schema":{"type":"string","pattern":"^[0-9a-f]{64}$"}},
+      {"name":"X-Daochi-Tx","in":"header","required":true,"schema":{"type":"string"}}
+    ],
+    "post": {
+      "summary":"Take an account-private blob out of the trash",
+      "description":"Bearer and account/device transaction signatures are required, with an empty body. The blob counts toward the account's storage again, so a full account is refused with storage_full. Restoring a blob that is not in the trash also succeeds.",
+      "security":[{"bearerAuth":[]}],
+      "responses":{"204":{"description":"Restored"},"401":{"description":"Missing or invalid authorization"},"403":{"description":"App inactive"},"404":{"description":"No blob in this account/app"},"409":{"description":"Replay rejected"},"413":{"description":"Account storage full"}}
     }
   }
 }

@@ -22,6 +22,13 @@ Every node registers `entity` as a built-in app. Its collections are
   the blob belongs to the account, not to that app. `DELETE` also works on an
   app's own blobs, stops them counting toward the account's storage and
   succeeds again for a blob already gone.
+- `POST /api/v1/blobs/entity/<address>/trash` moves a blob to the trash, signed
+  like `DELETE` with an empty body. It stays readable but stops counting
+  toward the account's storage at once, and the node deletes it 30 days after
+  it was first trashed. `POST .../restore`, or storing the same blob again,
+  takes it back out and counts it again, so a full account is refused with
+  `storage_full`. Neither the node nor any peer can read whether a photo is in
+  the trash: apps trash its chunks and preview when the person does.
 - Everything is private by default. Sharing stays an explicit step: a
   publication, a friends collection or an app grant.
 
@@ -71,7 +78,7 @@ lowercase SHA-256 of the original bytes, and schema `entity.photo.v1`:
 chunk's address and sealed size, in chunk order. The preview is content of its
 own under kind `photos`, keyed by its own hash. Optional fields that apps keep
 when they know them: `name` (original file name), `trashed` (true while in the
-trash), `day` (capture day `YYYY-MM-DD` on the camera's clock), `taken`
+trash; its blobs are trashed too, see above), `day` (capture day `YYYY-MM-DD` on the camera's clock), `taken`
 (capture time as local ISO 8601 with its offset), `capture` (true when the
 camera recorded the date), and what the person said about the photo:
 `favorite`, `hidden` and `archived` (true or false), `caption`, `tags` (an

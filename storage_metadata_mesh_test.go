@@ -89,12 +89,18 @@ func TestStorageMetadataPreservesOtherMeshConflictRules(t *testing.T) {
 			applyStorageMeshRecord(t, store, user, stored)
 			applyStorageMeshRecord(t, store, user, incoming)
 			var ciphertext string
-			var freeBytes int64
-			if err := store.Database.QueryRow(`SELECT ciphertext,free_bytes FROM server_encrypted_records WHERE user_id_hash=?1`, user).Scan(&ciphertext, &freeBytes); err != nil {
+			var freeBytes, deletedAt int64
+			if err := store.Database.QueryRow(`SELECT ciphertext,free_bytes,deleted_at FROM server_encrypted_records WHERE user_id_hash=?1`, user).Scan(&ciphertext, &freeBytes, &deletedAt); err != nil {
 				t.Fatal(err)
 			}
-			if ciphertext != stored.Ciphertext || freeBytes != 0 {
-				t.Fatal("accounting metadata changed the existing content conflict rule")
+			// A deleted record keeps no content, but stays deleted.
+			want := stored.Ciphertext
+			if stored.DeletedAt != 0 {
+				want = ""
+			}
+			if ciphertext != want || freeBytes != 0 || deletedAt != stored.DeletedAt {
+				t.Fatalf("accounting metadata changed the existing content conflict rule: %d content bytes, %d free, deleted %d",
+					len(ciphertext), freeBytes, deletedAt)
 			}
 		})
 	}

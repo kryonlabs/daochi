@@ -1,0 +1,575 @@
+// An account its owner deletes stays on hold for HoldDays, then it is gone
+// for good. Deleting copies every row the deletion removes into a file of
+// its own, <db>.held/<account>.db, and moves the account's blob files to
+// <db>.held/<account>.blobs. The live tables keep nothing of it: it no
+// longer syncs, counts toward storage or appears to anyone. A login that
+// asks to restore it, signed by the same key, brings it back while it is on
+// hold; the retention job deletes it afterwards.
+//
+// The held tables come from the database's own foreign keys: every table a
+// deletion of server_users reaches through ON DELETE CASCADE. A table added
+// later is held too, without a list to keep up to date.
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+files :: #import "std/file_go";
+locks :: #import "std/sync_go";
+identity :: #import "identity";
+state :: #import "account_state";
+storage :: #import "account_storage";
+go_sql :: #system_library "go:database/sql";
+go_os :: #system_library "go:os";
+go_fmt :: #system_library "go:fmt";
+go_strings :: #system_library "go:strings";
+go_sync :: #system_library "go:sync";
+go_slog :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+HoldDays :: 30
+
+HeldUntilResult :: struct {
+    value: s64
+    error: Error
+}
+
+RestoreResult :: struct {
+    restored: bool
+    error: Error
+}
+
+#scope_file
+Day :: 86400
+FileInfo :: #type #foreign go_os "FileInfo";
+StatResult :: struct {
+    value: FileInfo
+    error: Error
+}
+TextResult :: struct {
+    value: string
+    error: Error
+}
+TablesResult :: struct {
+    value: []string
+    error: Error
+}
+FlagResult :: struct {
+    value: bool
+    error: Error
+}
+Stat :: (path: string) -> StatResult #go_results #foreign go_os "Stat";
+RemoveAll :: (path: string) -> Error #foreign go_os "RemoveAll";
+Concat :: (a: string, b: string) -> string #foreign go_fmt "Sprint";
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+AllocateTexts :: (count: isize) -> []string #foreign builtin "make";
+AppendText :: (values: []string, value: string) -> []string #foreign builtin "append";
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+UnlockAtReturn :: (mutex: *locks.Mutex) #go_defer #foreign go_sync "(*Mutex).Unlock";
+LogWarning :: (message: string, key: string, value: string, errorKey: string, error: Error) #foreign go_slog "Warn";
+
+// Holding and restoring attach a file under the same schema name, held, on
+// the store's single connection, so one runs at a time.
+attaching: locks.Mutex;
+
+// Tables a deletion of the account reaches, parents before children. Storage
+// totals are derived from the other rows, which rebuild them on restore.
+HeldTablesSQL :: #string SQL_END
+WITH RECURSIVE
+edges(child, parent) AS (
+    SELECT tables.name, keys."table"
+    FROM sqlite_master AS tables, pragma_foreign_key_list(tables.name, 'main') AS keys
+    WHERE tables.type='table' AND keys.on_delete='CASCADE'
+),
+reached(name, depth) AS (
+    SELECT 'server_users', 0
+    UNION
+    SELECT edges.child, reached.depth+1
+    FROM edges JOIN reached ON edges.parent=reached.name
+    WHERE reached.depth<16 AND edges.child<>'server_storage_usage'
+)
+SELECT name FROM reached GROUP BY name ORDER BY MAX(depth), name
+SQL_END;
+
+// The rows of a table that its held parents own: exactly those a deletion
+// cascades to. Parents are held first, so their copies already exist.
+HoldConditionSQL :: #string SQL_END
+SELECT COALESCE(group_concat(clause, ' OR '), '') FROM (
+    SELECT 'EXISTS(SELECT 1 FROM held."' || keys."table" || '" AS parent WHERE ' ||
+        group_concat('parent."' || keys."to" || '"=item."' || keys."from" || '"', ' AND ') || ')' AS clause
+    FROM pragma_foreign_key_list(?1, 'main') AS keys
+    WHERE keys.on_delete='CASCADE'
+      AND EXISTS(SELECT 1 FROM held.sqlite_master WHERE type='table' AND name=keys."table")
+    GROUP BY keys.id
+)
+SQL_END;
+
+// Columns a held table and its live table share, so a column added while
+// the account was on hold takes its default.
+RestoreColumnsSQL :: #string SQL_END
+SELECT COALESCE(group_concat('"' || kept.name || '"', ','), '')
+FROM pragma_table_info(?1, 'held') AS kept
+WHERE EXISTS(SELECT 1 FROM pragma_table_info(?1, 'main') AS live WHERE live.name=kept.name)
+SQL_END;
+
+// A held row comes back only where every row it refers to still exists, such
+// as a friend who has not deleted their own account.
+RestoreConditionSQL :: #string SQL_END
+SELECT COALESCE(group_concat(clause, ' AND '), '') FROM (
+    SELECT '(item."' || MIN(CASE WHEN keys.seq=0 THEN keys."from" END) ||
+        '" IS NULL OR EXISTS(SELECT 1 FROM main."' || keys."table" || '" AS parent WHERE ' ||
+        group_concat('parent."' || keys."to" || '"=item."' || keys."from" || '"', ' AND ') || '))' AS clause
+    FROM pragma_foreign_key_list(?1, 'main') AS keys
+    GROUP BY keys.id
+)
+SQL_END;
+
+HeldTableSQL :: "SELECT EXISTS(SELECT 1 FROM held.sqlite_master WHERE type='table' AND name=?1)";
+
+// Someone may have taken the account's alias while it was on hold.
+AliasTakenSQL :: #string SQL_END
+UPDATE held.server_users SET alias=NULL
+WHERE alias IS NOT NULL AND EXISTS(
+    SELECT 1 FROM main.server_users AS other WHERE lower(other.alias)=lower(held.server_users.alias))
+SQL_END;
+
+HoldRecordSQL :: #string SQL_END
+INSERT INTO server_account_holds(user_id_hash,held_at,purge_after) VALUES(?1,?2,?3)
+ON CONFLICT(user_id_hash) DO UPDATE SET held_at=excluded.held_at,purge_after=excluded.purge_after
+SQL_END;
+
+Folder :: (dbPath: string) -> string {
+    return Concat(dbPath, ".held")
+}
+
+HeldFile :: (dbPath: string, userID: string) -> string {
+    parts: [4]string = .[Folder(dbPath), "/", userID, ".db"]
+    return Join(parts[:], "")
+}
+
+HeldBlobFolder :: (dbPath: string, userID: string) -> string {
+    parts: [4]string = .[Folder(dbPath), "/", userID, ".blobs"]
+    return Join(parts[:], "")
+}
+
+Missing :: (error: Error) -> bool {
+    return error == null || errors.Is(error, files.NotExist())
+}
+
+// Removes a held account's file and blob files; parts already gone are fine.
+Discard :: (dbPath: string, userID: string) -> Error {
+    file := HeldFile(dbPath, userID)
+    removed := files.Remove(file)
+    if !Missing(removed) {
+        return removed
+    }
+    // A hold interrupted mid-write leaves SQLite's journal beside the file.
+    removed = files.Remove(Concat(file, "-journal"))
+    if !Missing(removed) {
+        return removed
+    }
+    return RemoveAll(HeldBlobFolder(dbPath, userID))
+}
+
+Text :: (database: *sql.Database, context: ctx.Context, query: string, table: string) -> TextResult {
+    result: TextResult
+    arguments: [1]Any = .[table]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, query, arguments[:]), destinations[:])
+    return result
+}
+
+Flag :: (database: *sql.Database, context: ctx.Context, query: string, value: string) -> FlagResult {
+    result: FlagResult
+    arguments: [1]Any = .[value]
+    found: isize = 0
+    destinations: [1]Any = .[*found]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, query, arguments[:]), destinations[:])
+    result.value = found != cast(isize)0
+    return result
+}
+
+HeldTables :: (database: *sql.Database, context: ctx.Context) -> TablesResult {
+    result: TablesResult
+    empty: [0]Any
+    queried := sql.Query(database, context, HeldTablesSQL, empty[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    names := AllocateTexts(cast(isize)0)
+    while sql.Next(rows) {
+        name: string
+        destinations: [1]Any = .[*name]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        names = AppendText(names, name)
+    }
+    result.value = names
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Attach :: (database: *sql.Database, context: ctx.Context, file: string) -> Error {
+    // A run that failed before detaching must not block this one.
+    unused Detach(database, context)
+    arguments: [1]Any = .[file]
+    attached := sql.Exec(database, context, "ATTACH DATABASE ?1 AS held", arguments[:])
+    return attached.error
+}
+
+Detach :: (database: *sql.Database, context: ctx.Context) -> Error {
+    empty: [0]Any
+    detached := sql.Exec(database, context, "DETACH DATABASE held", empty[:])
+    return detached.error
+}
+
+// Copies the account's rows into the attached hold file, table by table.
+CopyRows :: (database: *sql.Database, context: ctx.Context, tables: []string, userID: string) -> Error {
+    empty: [0]Any
+    for table: tables {
+        if table == "server_users" {
+            owner: [1]Any = .[userID]
+            copied := sql.Exec(database, context,
+                "CREATE TABLE held.\"server_users\" AS SELECT * FROM main.\"server_users\" WHERE user_id_hash=?1", owner[:])
+            if copied.error != null {
+                return copied.error
+            }
+            continue
+        }
+        condition := Text(database, context, HoldConditionSQL, table)
+        if condition.error != null {
+            return condition.error
+        }
+        if condition.value == "" {
+            // Its rows still leave with the account; only their copy is lost.
+            LogWarning("hold account rows", "table", table, "error", errors.New("no held parent"))
+            continue
+        }
+        parts: [6]string = .["CREATE TABLE held.\"", table, "\" AS SELECT * FROM main.\"", table,
+            "\" AS item WHERE ", condition.value]
+        copied := sql.Exec(database, context, Join(parts[:], ""), empty[:])
+        if copied.error != null {
+            return copied.error
+        }
+    }
+    return null
+}
+
+Copy :: (database: *sql.Database, context: ctx.Context, dbPath: string, userID: string) -> Error {
+    tables := HeldTables(database, context)
+    if tables.error != null {
+        return tables.error
+    }
+    error := Attach(database, context, HeldFile(dbPath, userID))
+    if error != null {
+        return error
+    }
+    error = CopyRows(database, context, tables.value, userID)
+    detached := Detach(database, context)
+    if error != null {
+        return error
+    }
+    return detached
+}
+
+// Removes the account from the live tables and records its hold, together.
+RemoveLive :: (database: *sql.Database, context: ctx.Context, userID: string, now: clock.Time) -> Error {
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    RollbackAtReturn(opened.value)
+    error := state.DeleteTx(opened.value, context, userID)
+    if error != null {
+        return error
+    }
+    heldAt := clock.Unix(now)
+    purgeAfter := heldAt + cast(s64)(HoldDays * Day)
+    arguments: [3]Any = .[userID, heldAt, purgeAfter]
+    recorded := sql.ExecTx(opened.value, context, HoldRecordSQL, arguments[:])
+    if recorded.error != null {
+        return recorded.error
+    }
+    return sql.Commit(opened.value)
+}
+
+// The statements that bring each held table back, built before the
+// transaction because the store's one connection is busy during it.
+RestoreStatements :: (database: *sql.Database, context: ctx.Context) -> TablesResult {
+    result: TablesResult
+    tables := HeldTables(database, context)
+    if tables.error != null {
+        result.error = tables.error
+        return result
+    }
+    statements := AllocateTexts(cast(isize)0)
+    for table: tables.value {
+        present := Flag(database, context, HeldTableSQL, table)
+        if present.error != null {
+            result.error = present.error
+            return result
+        }
+        if !present.value {
+            continue
+        }
+        columns := Text(database, context, RestoreColumnsSQL, table)
+        if columns.error != null {
+            result.error = columns.error
+            return result
+        }
+        if columns.value == "" {
+            continue
+        }
+        condition := Text(database, context, RestoreConditionSQL, table)
+        if condition.error != null {
+            result.error = condition.error
+            return result
+        }
+        filter := condition.value
+        if filter == "" {
+            filter = "1"
+        }
+        parts: [9]string = .["INSERT OR IGNORE INTO main.\"", table, "\"(", columns.value, ") SELECT ",
+            columns.value, " FROM held.\"", table, "\" AS item WHERE "]
+        statement := Concat(Join(parts[:], ""), filter)
+        statements = AppendText(statements, statement)
+    }
+    result.value = statements
+    return result
+}
+
+RestoreRows :: (database: *sql.Database, context: ctx.Context, userID: string) -> Error {
+    statements := RestoreStatements(database, context)
+    if statements.error != null {
+        return statements.error
+    }
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        return opened.error
+    }
+    transaction := opened.value
+    RollbackAtReturn(transaction)
+    empty: [0]Any
+    freed := sql.ExecTx(transaction, context, AliasTakenSQL, empty[:])
+    if freed.error != null {
+        return freed.error
+    }
+    for statement: statements.value {
+        restored := sql.ExecTx(transaction, context, statement, empty[:])
+        if restored.error != null {
+            return restored.error
+        }
+    }
+    owner: [1]Any = .[userID]
+    back: isize = 0
+    destinations: [1]Any = .[*back]
+    error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT EXISTS(SELECT 1 FROM main.server_users WHERE user_id_hash=?1)", owner[:]), destinations[:])
+    if error != null {
+        return error
+    }
+    if back == cast(isize)0 {
+        return errors.New("held account did not come back")
+    }
+    released := sql.ExecTx(transaction, context, "DELETE FROM server_account_holds WHERE user_id_hash=?1", owner[:])
+    if released.error != null {
+        return released.error
+    }
+    revived := sql.ExecTx(transaction, context, "DELETE FROM server_account_tombstones WHERE user_id_hash=?1", owner[:])
+    if revived.error != null {
+        return revived.error
+    }
+    return sql.Commit(transaction)
+}
+
+PurgeOne :: (database: *sql.Database, context: ctx.Context, dbPath: string, userID: string, now: s64) -> Error {
+    locks.Lock(*attaching)
+    UnlockAtReturn(*attaching)
+    arguments: [2]Any = .[userID, now]
+    due: isize = 0
+    destinations: [1]Any = .[*due]
+    error := sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT EXISTS(SELECT 1 FROM server_account_holds WHERE user_id_hash=?1 AND purge_after<=?2)", arguments[:]), destinations[:])
+    if error != null {
+        return error
+    }
+    // Restored in the meantime.
+    if due == cast(isize)0 {
+        return null
+    }
+    error = Discard(dbPath, userID)
+    if error != null {
+        return error
+    }
+    removed := sql.Exec(database, context,
+        "DELETE FROM server_account_holds WHERE user_id_hash=?1 AND purge_after<=?2", arguments[:])
+    return removed.error
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL_END
+CREATE TABLE IF NOT EXISTS server_account_holds (
+    user_id_hash TEXT PRIMARY KEY,
+    held_at INTEGER NOT NULL,
+    purge_after INTEGER NOT NULL
+);
+SQL_END;
+}
+
+// Deletes the account from the live tables and keeps its rows and blob files
+// on hold for HoldDays. A hold left from an earlier deletion gives way.
+Delete :: (database: *sql.Database, context: ctx.Context, dbPath: string, userID: string,
+    now: clock.Time) -> Error {
+    if !identity.ValidUserID(userID) {
+        return errors.New("invalid account")
+    }
+    // A node without a database file has nowhere to hold an account.
+    if dbPath == "" {
+        return state.Delete(database, context, userID)
+    }
+    locks.Lock(*attaching)
+    UnlockAtReturn(*attaching)
+    error := files.MkdirAll(Folder(dbPath), cast(files.FileMode)448)
+    if error != null {
+        return error
+    }
+    error = Discard(dbPath, userID)
+    if error != null {
+        return error
+    }
+    error = Copy(database, context, dbPath, userID)
+    if error == null {
+        error = RemoveLive(database, context, userID, now)
+    }
+    if error != null {
+        unused Discard(dbPath, userID)
+        return error
+    }
+    live := storage.BlobAccountFolder(dbPath, userID)
+    moved := files.Rename(live, HeldBlobFolder(dbPath, userID))
+    if Missing(moved) {
+        return null
+    }
+    // Blob files that cannot be held are not kept either.
+    LogWarning("hold account blobs", "path", live, "error", moved)
+    return storage.RemoveBlobs(dbPath, userID)
+}
+
+// Brings back an account on hold, signed in again with its key, when it has
+// no live account. Rows that would conflict with others' data, such as an
+// alias someone took meanwhile, stay behind; the rest returns as it was.
+Restore :: (database: *sql.Database, context: ctx.Context, dbPath: string, userID: string) -> RestoreResult {
+    result: RestoreResult
+    if !identity.ValidUserID(userID) || dbPath == "" {
+        return result
+    }
+    locks.Lock(*attaching)
+    UnlockAtReturn(*attaching)
+    held := Flag(database, context, "SELECT EXISTS(SELECT 1 FROM server_account_holds WHERE user_id_hash=?1)", userID)
+    if held.error != null || !held.value {
+        result.error = held.error
+        return result
+    }
+    live := Flag(database, context, "SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)", userID)
+    if live.error != null || live.value {
+        result.error = live.error
+        return result
+    }
+    file := HeldFile(dbPath, userID)
+    found := Stat(file)
+    if found.error != null && !errors.Is(found.error, files.NotExist()) {
+        result.error = found.error
+        return result
+    }
+    // An operator deleted it early: there is nothing left to bring back.
+    if found.error != null {
+        LogWarning("restore held account", "user", userID, "error", found.error)
+        owner: [1]Any = .[userID]
+        ended := sql.Exec(database, context, "DELETE FROM server_account_holds WHERE user_id_hash=?1", owner[:])
+        result.error = ended.error
+        return result
+    }
+    result.error = Attach(database, context, file)
+    if result.error != null {
+        return result
+    }
+    result.error = RestoreRows(database, context, userID)
+    detached := Detach(database, context)
+    if result.error == null {
+        result.error = detached
+    }
+    if result.error != null {
+        return result
+    }
+    result.restored = true
+    moved := files.Rename(HeldBlobFolder(dbPath, userID), storage.BlobAccountFolder(dbPath, userID))
+    if !Missing(moved) {
+        LogWarning("restore account blobs", "user", userID, "error", moved)
+        return result
+    }
+    removed := files.Remove(file)
+    if !Missing(removed) {
+        LogWarning("remove restored hold", "user", userID, "error", removed)
+    }
+    return result
+}
+
+// When the account's held data is deleted for good, or 0 without a hold.
+HeldUntil :: (database: *sql.Database, context: ctx.Context, userID: string) -> HeldUntilResult {
+    result: HeldUntilResult
+    arguments: [1]Any = .[userID]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT COALESCE((SELECT purge_after FROM server_account_holds WHERE user_id_hash=?1),0)", arguments[:]), destinations[:])
+    return result
+}
+
+// Deletes every hold whose time is up, with its file and blob files.
+Purge :: (database: *sql.Database, context: ctx.Context, dbPath: string, now: clock.Time) -> Error {
+    seconds := clock.Unix(now)
+    arguments: [1]Any = .[seconds]
+    queried := sql.Query(database, context,
+        "SELECT user_id_hash FROM server_account_holds WHERE purge_after<=?1", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    due := AllocateTexts(cast(isize)0)
+    while sql.Next(rows) {
+        userID: string
+        destinations: [1]Any = .[*userID]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            unused sql.CloseRows(rows)
+            return error
+        }
+        due = AppendText(due, userID)
+    }
+    error := sql.RowsError(rows)
+    if error != null {
+        unused sql.CloseRows(rows)
+        return error
+    }
+    // The store's one connection must be free before the deletions.
+    error = sql.CloseRows(rows)
+    if error != null {
+        return error
+    }
+    for userID: due {
+        if !identity.ValidUserID(userID) {
+            continue
+        }
+        error = PurgeOne(database, context, dbPath, userID, seconds)
+        if error != null {
+            return error
+        }
+    }
+    return null
+}

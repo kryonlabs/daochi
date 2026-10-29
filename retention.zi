@@ -1,9 +1,12 @@
 // A periodic job that deletes what the node no longer needs: each account's
-// daily chat counts after 30 days and once the account is gone, and Lumi's
+// daily chat counts after 30 days and once the account is gone, Lumi's
 // handled Telegram updates, delivered or orphaned report copies and expired
-// link codes.
+// link codes, deleted accounts whose 30-day hold is over and blobs that
+// spent 30 days in the trash.
 #import "std/go_types"
 lumi :: #import "lumi_telegram";
+holds :: #import "account_hold";
+storage :: #import "account_storage";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 clock :: #import "std/time_go";
@@ -88,8 +91,17 @@ Prune :: (database: *sql.Database, context: ctx.Context, now: clock.Time) -> Err
     return sql.Commit(transaction)
 }
 
+// Deletes the files of held accounts and trashed blobs whose time is up.
+PruneFiles :: (database: *sql.Database, context: ctx.Context, dbPath: string, now: clock.Time) -> Error {
+    error := holds.Purge(database, context, dbPath, now)
+    if error != null {
+        return error
+    }
+    return storage.PurgeTrashedBlobs(database, context, dbPath, clock.Unix(now))
+}
+
 // Prunes once at start and then at every interval until the context ends.
-Run :: (database: *sql.Database, context: ctx.Context, interval: clock.Duration) {
+Run :: (database: *sql.Database, context: ctx.Context, interval: clock.Duration, dbPath: string) {
     if cast(s64)interval <= 0 {
         interval = cast(clock.Duration)Interval
     }
@@ -99,11 +111,16 @@ Run :: (database: *sql.Database, context: ctx.Context, interval: clock.Duration)
     cases[0] = selection.Receive(ctx.Done(context))
     cases[1] = selection.Receive(clock.TickerChannel(ticker))
     while true {
-        error := Prune(database, context, clock.Now())
+        now := clock.Now()
+        error := Prune(database, context, now)
         // Stopping ends the context and rolls back a prune in progress, which
         // then fails with an error of its own; that is not a failure.
         if error != null && !Stopped(context) {
             LogWarning("data retention failed", "error", error)
+        }
+        error = PruneFiles(database, context, dbPath, now)
+        if error != null && !Stopped(context) {
+            LogWarning("held data retention failed", "error", error)
         }
         if selection.Select(cases[:]).chosen == cast(isize)0 {
             return

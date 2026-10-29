@@ -16,6 +16,8 @@ LoginRequest :: struct {
     UserIDHash: string #go_tag "json:\"user_id_hash\""
     ClientID: string #go_tag "json:\"client_id\""
     PublicKey: string #go_tag "json:\"public_key,omitempty\""
+    // Brings back an account deleted within its hold, before any new data.
+    Restore: bool #go_tag "json:\"restore,omitempty\""
 }
 
 LoginResponse :: struct {
@@ -25,6 +27,9 @@ LoginResponse :: struct {
     ServerTime: s64 #go_tag "json:\"server_time,omitempty\""
     AccountAlias: string #go_tag "json:\"account_alias,omitempty\""
     ProfileIcon: isize #go_tag "json:\"profile_icon,omitempty\""
+    // When the account's deleted data, still on hold, is deleted for good
+    // (Unix seconds); absent when nothing is on hold.
+    HeldUntil: s64 #go_tag "json:\"held_until,omitempty\""
 }
 
 NodePeer :: struct {

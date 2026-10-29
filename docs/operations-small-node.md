@@ -61,4 +61,9 @@ Before exposing a node publicly:
 - `GET /api/v1/node` shows the expected node name and protocol bounds;
 - `/metrics` is protected by `X-Daochi-Admin` when an admin token is set;
 - backups include the SQLite database and node identity key;
+- the `<database>.blobs` and `<database>.held` folders sit beside the database
+  on the same filesystem: a deleted account is moved to `.held` for 30 days,
+  and backups of deleted data must not outlive that. To delete a held account
+  at once, set its `purge_after` in `server_account_holds` to 0; the hourly
+  retention job removes it;
 - restore has been tested on a separate machine or directory.

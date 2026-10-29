@@ -38,6 +38,7 @@ func TestRecordPackingNegotiationQuotaInvalidationAndRollback(t *testing.T) {
 	record := EncryptedRecord{Collection: collection, ID: "record", KeyID: "main", Nonce: "nonce", Ciphertext: "identity", SchemaVersion: 1,
 		PackedNonce: "packed-nonce", PackedCiphertext: "packed", ContentHash: strings.Repeat("a", 64)}
 	input := SyncRequest{ProtocolVersion: 6, AppID: "pageapp", UserIDHash: identity.UserID}
+	content := "identity"
 	check := func(packed bool) {
 		t.Helper()
 		for _, encoding := range []string{"", "gzip-v1"} {
@@ -45,7 +46,7 @@ func TestRecordPackingNegotiationQuotaInvalidationAndRollback(t *testing.T) {
 			if page.Error != nil || len(page.Records) != 1 {
 				t.Fatalf("page: %#v", page)
 			}
-			expected := "identity"
+			expected := content
 			if packed && encoding == "gzip-v1" {
 				expected = "packed"
 			}
@@ -91,7 +92,9 @@ func TestRecordPackingNegotiationQuotaInvalidationAndRollback(t *testing.T) {
 	record.SchemaVersion = 1
 	savePackingFixture(t, store, identity.UserID, record, 0, true)
 	check(true)
+	// A deleted record keeps no content, packed or not.
 	lifecycleExecute(t, store, `UPDATE server_encrypted_records SET deleted_at=1 WHERE id='record'`)
+	content = ""
 	check(false)
 	savePackingFixture(t, store, identity.UserID, record, 0, true)
 	check(false)

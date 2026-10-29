@@ -123,7 +123,7 @@ jobs:
             cp /opt/daochi/daochi \"/var/lib/daochi/backups/daochi.pre-upgrade.$STAMP\"
             sqlite3 /var/lib/daochi/daochi.db \".backup '/var/lib/daochi/backups/daochi.db.$STAMP'\"
             test -s \"/var/lib/daochi/backups/daochi.db.$STAMP\"
-            # A daily timer deletes backups older than 30 days, also between deploys.
+            # A daily timer deletes backups older than 28 days, also between deploys.
             install -m 644 /opt/daochi-src/deploy/daochi-backup-prune.service /opt/daochi-src/deploy/daochi-backup-prune.timer /etc/systemd/system/
             systemctl daemon-reload
             systemctl enable --now daochi-backup-prune.timer

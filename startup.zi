@@ -159,7 +159,7 @@ RunDiscovery :: (server: *application.Server, context: ctx.Context) {
 }
 
 RunRetention :: (server: *application.Server, context: ctx.Context) {
-    retention.Run(server.store.database, context, cast(clock.Duration)retention.Interval)
+    retention.Run(server.store.database, context, cast(clock.Duration)retention.Interval, server.cfg.DBPath)
 }
 
 RunRates :: (server: *application.Server, context: ctx.Context) {

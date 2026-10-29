@@ -148,27 +148,33 @@ Delete :: (database: *sql.Database, context: ctx.Context, userID: string) -> Err
         return opened.error
     }
     RollbackAtReturn(opened.value)
+    error := DeleteTx(opened.value, context, userID)
+    if error != null {
+        return error
+    }
+    return sql.Commit(opened.value)
+}
+
+// Removes the account and, through its foreign keys, every row it owns.
+DeleteTx :: (transaction: *sql.Transaction, context: ctx.Context, userID: string) -> Error {
     arguments: [1]Any = .[userID]
-    tombstone := sql.ExecTx(opened.value, context,
+    tombstone := sql.ExecTx(transaction, context,
         "\nINSERT INTO server_account_tombstones(user_id_hash,deleted_at)\nVALUES(?1,CURRENT_TIMESTAMP)\nON CONFLICT(user_id_hash) DO UPDATE SET deleted_at=CURRENT_TIMESTAMP", arguments[:])
     if tombstone.error != null {
         return tombstone.error
     }
-    disabled := sql.ExecTx(opened.value, context,
+    disabled := sql.ExecTx(transaction, context,
         "\nUPDATE monero_account_addresses SET disabled_at=CURRENT_TIMESTAMP\nWHERE account_id=?1 AND disabled_at=''", arguments[:])
     if disabled.error != null {
         return disabled.error
     }
     // Daily chat counts have no foreign key to the account.
-    usage := sql.ExecTx(opened.value, context,
+    usage := sql.ExecTx(transaction, context,
         "DELETE FROM server_chat_usage WHERE account_id=?1", arguments[:])
     if usage.error != null {
         return usage.error
     }
-    deleted := sql.ExecTx(opened.value, context,
+    deleted := sql.ExecTx(transaction, context,
         "DELETE FROM server_users WHERE user_id_hash=?1", arguments[:])
-    if deleted.error != null {
-        return deleted.error
-    }
-    return sql.Commit(opened.value)
+    return deleted.error
 }

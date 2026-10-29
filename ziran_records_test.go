@@ -123,6 +123,8 @@ func TestZiranProtocolRecordsKeepReleasedLayout(t *testing.T) {
 				"SyncResponse":    {"AccountStorage": "*main.AccountStorage", "PackageSequence": "int64"},
 				"EncryptedRecord": {"PackedNonce": "string", "PackedCiphertext": "string", "FreeBytes": "int64"},
 				"FriendStatRow":   {"GameIcon": "int"},
+				"LoginRequest":    {"Restore": "bool"},
+				"LoginResponse":   {"HeldUntil": "int64"},
 			}
 			expectedExtensions := extensions[typ.Name()]
 			if !found || typ.NumField() != len(fields)+len(expectedExtensions) {

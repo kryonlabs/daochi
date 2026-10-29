@@ -34,7 +34,8 @@ SQL_END;
 Tables: [10]CountedTable = .[
 .{"server_encrypted_records", "ROW.user_id_hash", "record"},
     .{"server_encrypted_payloads", "ROW.user_id_hash", "LENGTH(ROW.client_id)+LENGTH(ROW.payload_json)"},
-    .{"server_blobs", "ROW.user_id_hash", "ROW.size"},
+    // A blob in the account's trash is kept for a while but costs nothing.
+    .{"server_blobs", "ROW.user_id_hash", "CASE WHEN ROW.trashed_at<>0 THEN 0 ELSE ROW.size END"},
     .{"server_shared_lists", "ROW.owner", ListSize},
     .{"server_list_invitations", "(SELECT owner FROM server_shared_lists WHERE id=ROW.list_id)", "LENGTH(ROW.id)+LENGTH(ROW.target)+LENGTH(ROW.status)"},
     .{"server_list_permissions", "(SELECT owner FROM server_shared_lists WHERE id=ROW.list_id)", "LENGTH(ROW.access)"},
@@ -44,7 +45,7 @@ Tables: [10]CountedTable = .[
 .{"game_completions", "ROW.account_id", "0"}
 ];
 
-SchemaVersion :: 4
+SchemaVersion :: 5
 
 Definition :: #string SQL_END
 CREATE TABLE IF NOT EXISTS server_storage_usage (

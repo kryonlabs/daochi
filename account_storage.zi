@@ -13,11 +13,16 @@ clock :: #import "std/time_go";
 native :: #system_library "go:database/sql";
 go_os :: #system_library "go:os";
 go_fmt :: #system_library "go:fmt";
+go_strings :: #system_library "go:strings";
+builtin :: #system_library "go:builtin";
 
 UsageResult :: struct {
     value: s64
     error: Error
 }
+
+// A blob in the account's trash stays this long, then it is deleted.
+TrashDays :: 30
 
 StorageFullResponse :: struct {
     Message: string #go_tag "json:\"error\""
@@ -30,8 +35,30 @@ ErrStorageFull: Error = errors.New("account storage limit reached");
 #scope_file
 UsageSQL :: "SELECT COALESCE((SELECT used_bytes FROM server_storage_usage WHERE user_id_hash=?1),0)";
 BlobStoredSQL :: "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3)";
-BlobRecordSQL :: "INSERT OR IGNORE INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)";
+BlobTrashedSQL :: "SELECT EXISTS(SELECT 1 FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3 AND trashed_at<>0)";
+BlobSizeSQL :: "SELECT size FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3";
+// Storing a blob again takes it out of the trash.
+BlobRecordSQL :: #string SQL_END
+INSERT INTO server_blobs(user_id_hash,app_id,hash,size) VALUES(?1,?2,?3,?4)
+ON CONFLICT(user_id_hash,app_id,hash) DO UPDATE SET trashed_at=0 WHERE trashed_at<>0
+SQL_END;
 BlobForgetSQL :: "DELETE FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3";
+BlobTrashSQL :: "UPDATE server_blobs SET trashed_at=?4 WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3 AND trashed_at=0";
+BlobRestoreSQL :: "UPDATE server_blobs SET trashed_at=0 WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3";
+TrashedBlobsSQL :: "SELECT user_id_hash,app_id,hash FROM server_blobs WHERE trashed_at<>0 AND trashed_at<=?1";
+ForgetTrashedSQL :: "DELETE FROM server_blobs WHERE user_id_hash=?1 AND app_id=?2 AND hash=?3 AND trashed_at<>0 AND trashed_at<=?4";
+Day :: 86400
+AllocateBlobs :: (count: isize) -> []TrashedBlob #foreign builtin "make";
+AppendBlob :: (values: []TrashedBlob, value: TrashedBlob) -> []TrashedBlob #foreign builtin "append";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+Remove :: (path: string) -> Error #foreign go_os;
+IsNotExist :: (error: Error) -> bool #foreign go_os;
+TrashedBlob :: struct {
+    user: string
+    app: string
+    hash: string
+}
 RemoveAllRaw :: (path: string) -> Error #foreign go_os "RemoveAll";
 Concat :: (a: string, b: string) -> string #foreign go_fmt "Sprint";
 RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
@@ -126,12 +153,122 @@ RecordBlob :: (database: *sql.Database, context: ctx.Context, userID: string, ap
     return written.error
 }
 
+// A blob in the trash stays readable but no longer counts toward storage.
+// Whether a blob was there to move: an unknown blob cannot be trashed.
+TrashBlob :: (database: *sql.Database, context: ctx.Context, userID: string, appID: string,
+    hash: string, now: s64) -> BlobStoredResult {
+    result := BlobStored(database, context, userID, appID, hash)
+    if result.error != null || !result.value {
+        return result
+    }
+    arguments: [4]Any = .[userID, appID, hash, now]
+    written := sql.Exec(database, context, BlobTrashSQL, arguments[:])
+    result.error = written.error
+    return result
+}
+
+BlobTrashed :: (database: *sql.Database, context: ctx.Context, userID: string, appID: string,
+    hash: string) -> BlobStoredResult {
+    result: BlobStoredResult
+    arguments: [3]Any = .[userID, appID, hash]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, BlobTrashedSQL, arguments[:]), destinations[:])
+    return result
+}
+
+BlobSize :: (database: *sql.Database, context: ctx.Context, userID: string, appID: string,
+    hash: string) -> UsageResult {
+    result: UsageResult
+    arguments: [3]Any = .[userID, appID, hash]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, BlobSizeSQL, arguments[:]), destinations[:])
+    return result
+}
+
+// Takes a blob out of the trash, so it counts toward storage again.
+RestoreBlob :: (database: *sql.Database, context: ctx.Context, userID: string, appID: string,
+    hash: string) -> Error {
+    arguments: [3]Any = .[userID, appID, hash]
+    written := sql.Exec(database, context, BlobRestoreSQL, arguments[:])
+    return written.error
+}
+
+// Deletes, file and row, every blob trashed at least TrashDays before now.
+PurgeTrashedBlobs :: (database: *sql.Database, context: ctx.Context, dbPath: string, now: s64) -> Error {
+    cutoff := now - cast(s64)(TrashDays * Day)
+    arguments: [1]Any = .[cutoff]
+    queried := sql.Query(database, context, TrashedBlobsSQL, arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    due := TrashedBlobsDue(queried.value)
+    if due.error != null {
+        return due.error
+    }
+    for blob: due.value {
+        if !identity.ValidUserID(blob.user) || !identity.ValidNamespace(blob.app) || !ValidBlobHash(blob.hash) {
+            continue
+        }
+        parts: [7]string = .[dbPath, ".blobs/", blob.user, "/", blob.app, "/", blob.hash]
+        removed := Remove(Join(parts[:], ""))
+        if removed != null && !IsNotExist(removed) {
+            return removed
+        }
+        values: [4]Any = .[blob.user, blob.app, blob.hash, cutoff]
+        forgotten := sql.Exec(database, context, ForgetTrashedSQL, values[:])
+        if forgotten.error != null {
+            return forgotten.error
+        }
+    }
+    return null
+}
+
 // A deleted blob no longer counts toward the account's storage.
 ForgetBlob :: (database: *sql.Database, context: ctx.Context, userID: string, appID: string,
     hash: string) -> Error {
     arguments: [3]Any = .[userID, appID, hash]
     written := sql.Exec(database, context, BlobForgetSQL, arguments[:])
     return written.error
+}
+
+TrashedBlobsResult :: struct {
+    value: []TrashedBlob
+    error: Error
+}
+
+// Reads every due blob first: the store's one connection must be free
+// before the deletions.
+TrashedBlobsDue :: (rows: *sql.Rows) -> TrashedBlobsResult {
+    result: TrashedBlobsResult
+    CloseRowsAtReturn(rows)
+    values := AllocateBlobs(cast(isize)0)
+    while sql.Next(rows) {
+        blob: TrashedBlob
+        destinations: [3]Any = .[*blob.user, *blob.app, *blob.hash]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendBlob(values, blob)
+    }
+    result.value = values
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+// 64 lowercase hexadecimal digits, as blob addresses are.
+ValidBlobHash :: (hash: string) -> bool {
+    if hash.count != 64 {
+        return false
+    }
+    for byte: hash {
+        digit := byte >= 48 && byte <= 57
+        letter := byte >= 97 && byte <= 102
+        if !digit && !letter {
+            return false
+        }
+    }
+    return true
 }
 
 // Account deletion removes the account's rows; this removes its blob files,

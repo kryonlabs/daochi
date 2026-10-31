@@ -110,7 +110,35 @@ func syncHTTPState(t *testing.T, store *Store) map[string]any {
 			t.Fatal(rows.Error)
 		}
 		for _, row := range rows.Value {
+			if name == "server_auth_settings" && (row["name"] == "legacy_v1_started" || row["name"] == "legacy_v1_deadline") {
+				stamp, ok := row["value"].(string)
+				if !ok {
+					t.Fatal("invalid legacy session migration timestamp")
+				}
+				validateSyncHTTPTime(t, stamp)
+				row["value"] = "<validated migration time>"
+			}
+			if name == "server_auth_sessions" {
+				for _, column := range []string{"session_id", "token_hash"} {
+					value, ok := row[column].(string)
+					if !ok || len(value) != 64 {
+						t.Fatalf("invalid generated session %s: %v", column, row[column])
+					}
+					if _, err := hex.DecodeString(value); err != nil {
+						t.Fatal(err)
+					}
+					row[column] = "<validated random session identifier>"
+				}
+				issued, ok := row["issued_at"].(int64)
+				if !ok || issued <= 0 || issued > time.Now().Add(time.Minute).Unix() {
+					t.Fatalf("invalid session issuance: %v", row["issued_at"])
+				}
+				row["issued_at"] = "<validated issuance time>"
+			}
 			for column, value := range row {
+				if name == "server_auth_sessions" && column == "issued_at" {
+					continue
+				}
 				if !strings.HasSuffix(column, "_at") {
 					continue
 				}
@@ -187,6 +215,7 @@ type syncHTTPCase struct {
 	envelope bool
 	mode     string
 	expiry   int64
+	tokens   map[string]string
 }
 
 type syncHTTPObservation struct {
@@ -212,6 +241,31 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 		log.SetFlags(logFlags)
 	}()
 	server, store, _ := testServer(t)
+	if test.tokens == nil {
+		test.tokens = make(map[string]string)
+	}
+	bearerFor := func(account string) string {
+		token, ok := test.tokens[account]
+		if !ok {
+			issued := Token_IssueAuthToken(server.Cfg.TokenSecret, account, 4_000_000_000)
+			if issued.Error != "" {
+				t.Fatal(issued.Error)
+			}
+			token = issued.Value
+			if test.mode == "bootstrap" {
+				token = legacyBearerToken(server.Cfg.TokenSecret, account, test.expiry)
+			}
+			test.tokens[account] = token
+		}
+		var exists bool
+		if err := store.Database.QueryRow("SELECT EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1)", account).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if exists {
+			recordTestBearer(t, server, token)
+		}
+		return token
+	}
 	user, key, signature := accessIdentity()
 	verifier := &accessVerifier{transactionVerifier: transactionVerifier{accept: test.mode != "rejected"}}
 	server.Verifier = testVerifier(verifier)
@@ -339,7 +393,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 	request.Header.Set("X-Daochi-User", user)
 	request.Header.Set("X-Daochi-Client", input.ClientID)
 	request.Header.Set("X-Daochi-Limit", "1")
-	request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, user, 4_000_000_000).Value)
+	request.Header.Set("Authorization", "Bearer "+bearerFor(user))
 	if test.version >= 6 && !test.envelope {
 		tx := SignedTxEnvelope{ProtocolVersion: 6, TxID: "transaction-1", AccountID: user, AppID: input.AppID, DeviceKeyID: "device-key",
 			Method: request.Method, Path: request.URL.Path, BodySHA256: Signing_SHA256Hex(data), Nonce: "transaction-nonce", ExpiresAt: test.expiry,
@@ -361,7 +415,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 		request.Header.Del("X-Daochi-Tx")
 	}
 	if test.mode == "token mismatch" {
-		request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, other, 4_000_000_000).Value)
+		request.Header.Set("Authorization", "Bearer "+bearerFor(other))
 	}
 	if test.mode == "missing header" {
 		request.Header.Del("X-Daochi-User")
@@ -437,6 +491,13 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 	after := time.Now()
 	result.trace = append([]lifecycleTrace(nil), plan.trace...)
 	for _, call := range result.trace {
+		if strings.Contains(call.Query, "FROM server_auth_sessions") && strings.Contains(call.Query, "expires_at>=?3") {
+			epoch, ok := call.Arguments[2].(int64)
+			if !ok || epoch < before.Unix() || epoch > after.Unix() {
+				t.Fatal("session validation clock changed", call.Arguments)
+			}
+			call.Arguments[2] = "<validated Unix timestamp>"
+		}
 		if call.Query == "DELETE FROM server_signed_transactions WHERE expires_at<?1" {
 			epoch, ok := call.Arguments[0].(int64)
 			if !ok || epoch < before.Unix() || epoch > after.Unix() {
@@ -472,6 +533,7 @@ func syncHTTPRun(t *testing.T, test syncHTTPCase, original bool, failAt int, sen
 
 func compareSyncHTTP(t *testing.T, test syncHTTPCase, failAt int, sentinel error) syncHTTPObservation {
 	t.Helper()
+	test.tokens = make(map[string]string)
 	actual := syncHTTPRun(t, test, false, failAt, sentinel)
 	expected := syncHTTPRun(t, test, true, failAt, sentinel)
 	compareHTTPResponse(t, actual.response, expected.response)

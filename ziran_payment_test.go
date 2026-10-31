@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -144,6 +145,8 @@ func TestZiranPaymentPolicyValuesMatchBaseline(t *testing.T) {
 	}
 }
 
+var paymentFixtureBearers sync.Map
+
 func paymentHTTPFixture(t *testing.T) (*Server, string, ed25519.PrivateKey) {
 	t.Helper()
 	server, account, key := registryHTTPFixture(t)
@@ -153,13 +156,19 @@ func paymentHTTPFixture(t *testing.T) (*Server, string, ed25519.PrivateKey) {
 		"z": {ProductID: "z", TokenUnits: 50, MoneroAtomicAmount: 100},
 		"a": {ProductID: "a", TokenUnits: 10, MoneroAtomicAmount: 20},
 	}
+	// Establish the valid durable session before fault scenarios close the store.
+	paymentFixtureBearers.Store(server, issueTestBearer(t, server, account, time.Now().Add(time.Hour)))
+	t.Cleanup(func() { paymentFixtureBearers.Delete(server) })
 	return server, account, key
 }
 
-func paymentHTTPRequest(server *Server, account string, method, path string, body []byte) *http.Request {
+func paymentHTTPRequest(t *testing.T, server *Server, account string, method, path string, body []byte) *http.Request {
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
-	token := Token_IssueAuthToken(server.Cfg.TokenSecret, account, time.Now().Add(time.Hour).Unix()).Value
-	request.Header.Set("Authorization", "Bearer "+token)
+	token, ok := paymentFixtureBearers.Load(server)
+	if !ok {
+		t.Fatal("payment fixture has no authenticated session")
+	}
+	request.Header.Set("Authorization", "Bearer "+token.(string))
 	return request
 }
 
@@ -214,7 +223,7 @@ func TestZiranPaymentReadHandlersMatchBaseline(t *testing.T) {
 			for _, handler := range handlers {
 				writers := []*httptest.ResponseRecorder{httptest.NewRecorder(), httptest.NewRecorder()}
 				for index, server := range []*Server{actual, baseline} {
-					request := paymentHTTPRequest(server, account, "GET", handler.path, nil)
+					request := paymentHTTPRequest(t, server, account, "GET", handler.path, nil)
 					if mode == "unauthenticated" {
 						request.Header.Del("Authorization")
 					}
@@ -301,8 +310,8 @@ func TestZiranPaymentAuthorizationAndReplayMatchBaseline(t *testing.T) {
 				}
 			}
 			requests := []*http.Request{
-				paymentHTTPRequest(actual, account, "POST", "/api/v1/tokens/spend", body),
-				paymentHTTPRequest(baseline, account, "POST", "/api/v1/tokens/spend", body),
+				paymentHTTPRequest(t, actual, account, "POST", "/api/v1/tokens/spend", body),
+				paymentHTTPRequest(t, baseline, account, "POST", "/api/v1/tokens/spend", body),
 			}
 			for index, request := range requests {
 				if mode != "unsigned" && mode != "legacy" && mode != "signed required" {
@@ -362,7 +371,7 @@ func TestZiranPaymentSpendFailureCleanupMatchesBaseline(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				request := paymentHTTPRequest(server, account, "POST", "/api/v1/tokens/spend", body)
+				request := paymentHTTPRequest(t, server, account, "POST", "/api/v1/tokens/spend", body)
 				request.Header.Set("X-Daochi-Tx", header)
 				var writer http.ResponseWriter = responses[index]
 				if strings.Contains(mode, "response panic") {

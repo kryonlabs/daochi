@@ -139,7 +139,7 @@ func TestZiranSocialHTTPAgainstBaseline(t *testing.T) {
 					}
 					body := &httpPortBody{Reader: strings.NewReader(bodyText)}
 					request := httptest.NewRequest(endpoint.method, endpoint.path, body)
-					request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value)
+					request.Header.Set("Authorization", "Bearer "+issueTestBearer(t, server, user, time.Now().Add(time.Hour)))
 					request.Header.Set("X-Daochi-User", user)
 					switch mode {
 					case "legacy header":

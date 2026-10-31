@@ -12,6 +12,7 @@ locks :: #import "std/sync_go";
 auth :: #import "authentication";
 auth_errors :: #import "authentication_error";
 http_auth :: #import "http_auth";
+sessions :: #import "auth_sessions";
 access :: #import "account_access";
 account_signature :: #import "account_signature";
 operations :: #import "operational_http";
@@ -131,6 +132,10 @@ New :: (configuration: config.Config, store: *storage.Store, verifier: *verifica
     storedScopeError := app_network.StoredAllowed(scope, store.database, ctx.Background())
     if storedScopeError != null {
         Panic(storedScopeError)
+    }
+    authSessionsError := sessions.Initialize(store.database, ctx.Background(), configuration.TokenTTL)
+    if authSessionsError != null {
+        Panic(authSessionsError)
     }
     identity := node.New(configuration.NodeIdentityPrivateKey)
     if identity.error != null {
@@ -410,6 +415,7 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "GET /api/v1/sync/challenge", server, HandleChallenge)
     Route(mux, "GET /api/v1/sync/ws", server, HandleSyncWebSocket)
     Route(mux, "POST /api/v1/sync/login", server, HandleLogin)
+    Route(mux, "POST /api/v1/sync/logout", server, HandleLogout)
     Route(mux, "POST /api/v1/sync", server, HandleSync)
     Route(mux, "POST /api/v1/account/alias", server, HandleAccountHttpAlias)
     Route(mux, "GET /api/v1/account/alias", server, HandleAliasQuoteOrPurchase)
@@ -735,6 +741,10 @@ HandleSync :: (server: *Server, writer: http.ResponseWriter, request: *http.Requ
 
 HandleLogin :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleLogin" {
     access.Login(Access(server), writer, request)
+}
+
+HandleLogout :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleLogout" {
+    access.Logout(Access(server), writer, request)
 }
 
 HandleDeleteAccount :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) #go_method "handleDeleteAccount" {

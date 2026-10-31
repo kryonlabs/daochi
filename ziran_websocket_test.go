@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -312,11 +311,8 @@ func TestZiranSyncHubPreservesDeliveryAndCleanup(t *testing.T) {
 
 func TestZiranWebSocketAuthenticationMatchesBaseline(t *testing.T) {
 	server, store, _ := testServer(t)
-	user := strings.Repeat("b", 64)
-	issued := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix())
-	if issued.Error != "" {
-		t.Fatal(issued.Error)
-	}
+	user := ownerWebSocketAccount(t, server)
+	issued := ownerWebSocketToken(t, server, user, time.Now().Add(time.Hour))
 	for _, cancelled := range []bool{false, true} {
 		if cancelled {
 			if err := store.Close(); err != nil {
@@ -324,8 +320,8 @@ func TestZiranWebSocketAuthenticationMatchesBaseline(t *testing.T) {
 			}
 		}
 		for _, query := range []string{"", "?token=secret", "?token=", "?token=&token=secret"} {
-			for _, protocol := range []string{"", "bearer.", "bearer.bad", "bearer." + issued.Value, "daochi-sync-v1, bearer." + issued.Value} {
-				for _, authorization := range []string{"", "Bearer bad", "Bearer " + issued.Value} {
+			for _, protocol := range []string{"", "bearer.", "bearer.bad", "bearer." + issued, "daochi-sync-v1, bearer." + issued} {
+				for _, authorization := range []string{"", "Bearer bad", "Bearer " + issued} {
 					request := httptest.NewRequest(http.MethodGet, "/api/v1/sync/ws"+query, nil)
 					request.Header.Set("Sec-WebSocket-Protocol", protocol)
 					request.Header.Set("Authorization", authorization)
@@ -346,10 +342,15 @@ func TestZiranWebSocketHandlerMatchesBaseline(t *testing.T) {
 			actual, _, _ := testServer(t)
 			baseline, _, _ := testServer(t)
 			oldHub := baselineNewSyncHub()
-			user := strings.Repeat("c", 64)
-			issued := Token_IssueAuthToken(actual.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix())
+			user := ownerWebSocketAccount(t, actual)
+			baselineUser := ownerWebSocketAccount(t, baseline)
+			if baselineUser != user {
+				t.Fatal("websocket fixture accounts differ")
+			}
+			issued := ownerWebSocketToken(t, actual, user, time.Now().Add(time.Hour))
+			recordTestBearer(t, baseline, issued)
 			request := websocketHandshakeRequest()
-			request.Header.Set("Sec-WebSocket-Protocol", "daochi-sync-v1, bearer."+issued.Value)
+			request.Header.Set("Sec-WebSocket-Protocol", "daochi-sync-v1, bearer."+issued)
 			if scenario == "method" {
 				request.Method = http.MethodPost
 			}

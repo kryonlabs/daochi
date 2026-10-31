@@ -1,10 +1,12 @@
 #import "std/go_types"
 #import "metrics"
+ctx :: #import "std/context_go";
 auth :: #import "authentication";
 auth_errors :: #import "authentication_error";
 accounts :: #import "account_keys";
 state :: #import "account_state";
 token :: #import "token";
+sessions :: #import "auth_sessions";
 http :: #import "std/http_go";
 sql :: #import "std/sql_go";
 clock :: #import "std/time_go";
@@ -180,6 +182,16 @@ AuthenticateBearer :: (database: *sql.Database, request: *http.Request, bearer: 
                 return result
             }
             if !deleted.value {
+                authorized := sessions.AuthorizeBearer(database, context, secret, bearer, verified.value,
+                    clock.Unix(clock.Now()))
+                if authorized.error != null {
+                    result.authentication = auth.NativeFailure(authorized.error)
+                    return result
+                }
+                if !authorized.value {
+                    result.authentication = auth.Failure(cast(isize)401, "invalid bearer token")
+                    return result
+                }
                 result.value = verified.value
                 return result
             }
@@ -187,8 +199,22 @@ AuthenticateBearer :: (database: *sql.Database, request: *http.Request, bearer: 
         result.authentication = auth.Failure(cast(isize)401, "sync account not found")
         return result
     }
+    authorized := sessions.AuthorizeBearer(database, context, secret, bearer, verified.value,
+        clock.Unix(clock.Now()))
+    if authorized.error != null {
+        result.authentication = auth.NativeFailure(authorized.error)
+        return result
+    }
+    if !authorized.value {
+        result.authentication = auth.Failure(cast(isize)401, "invalid bearer token")
+        return result
+    }
     result.value = verified.value
     return result
+}
+
+BearerSessionActive :: (database: *sql.Database, context: ctx.Context, bearer: string, userID: string, now: s64) -> bool {
+    return sessions.BearerSessionActive(database, context, bearer, userID, now)
 }
 
 BearerUser :: (database: *sql.Database, request: *http.Request, secret: []u8) -> UserAuthenticationResult {

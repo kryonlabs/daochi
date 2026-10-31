@@ -14,6 +14,8 @@ application :: #import "server";
 access :: #import "account_access";
 inspection :: #import "inspect";
 invoices :: #import "monero_invoices";
+google :: #import "google_play";
+google_lifecycle :: #import "google_play_reconciliation";
 mesh :: #import "mesh";
 discovery :: #import "discovery";
 retention :: #import "retention";
@@ -46,6 +48,7 @@ Workers :: struct {
     discovery: Worker
     retention: Worker
     rates: Worker
+    google: Worker
 }
 VerifierFactory :: #type () -> verification.VerifierResult;
 Listen :: #type (server: *HTTPServer) -> Error;
@@ -150,6 +153,12 @@ RunInvoices :: (server: *application.Server, context: ctx.Context) {
     invoices.Run(application.Monero(server), context, cast(clock.Duration)Minute)
 }
 
+RunGoogle :: (server: *application.Server, context: ctx.Context) {
+    values := application.Tokens(server)
+    google_lifecycle.Run(server.store.database, context, server.cfg,
+        values.issuerUnavailable, cast(clock.Duration)Minute)
+}
+
 RunMesh :: (server: *application.Server, context: ctx.Context) {
     mesh.Run(application.Mesh(server), context)
 }
@@ -190,10 +199,14 @@ NativeWorkers :: () -> Workers {
     result.discovery = RunDiscovery
     result.retention = RunRetention
     result.rates = RunRates
+    result.google = RunGoogle
     return result
 }
 
 StartWorkers :: (server: *application.Server, context: ctx.Context, group: *WorkerGroup, workers: Workers) {
+    if google.HasVerifier(server.cfg) {
+        StartWorker(group, workers.google, server, context)
+    }
     // A configured wallet must settle deposits and late invoices even when purchases are disabled.
     if server.cfg.TokenDirectPurchasesEnabled || TrimSpace(server.cfg.MoneroWalletRPCURL) != "" {
         StartWorker(group, workers.invoices, server, context)

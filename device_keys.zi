@@ -8,6 +8,7 @@ timestamp :: #import "timestamp";
 identity :: #import "identity";
 accounts :: #import "account_keys";
 auth :: #import "authentication";
+sessions :: #import "auth_sessions";
 codec :: #import "codec";
 go_sql :: #system_library "go:database/sql";
 go_strings :: #system_library "go:strings";
@@ -241,6 +242,23 @@ Revoke :: (database: *sql.Database, context: ctx.Context, accountID: string, req
     }
     if changed.value == 0 {
         return sql.NoRows()
+    }
+    clientArguments: [3]Any = .[accountID, request.AppID, request.KeyID]
+    clientID: string
+    clientDestinations: [1]Any = .[*clientID]
+    clientError := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT client_id FROM server_device_keys WHERE account_id=?1 AND app_id=?2 AND device_key_id=?3",
+        clientArguments[:]), clientDestinations[:])
+    if clientError != null {
+        return clientError
+    }
+    error = sessions.RevokeDeviceTx(transaction, context, accountID, clientID)
+    if error != null {
+        return error
+    }
+    error = sessions.RevokeLegacyTx(transaction, context, accountID)
+    if error != null {
+        return error
     }
     return sql.Commit(transaction)
 }

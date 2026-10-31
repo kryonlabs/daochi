@@ -37,10 +37,10 @@ func premiumAliasFixture(t *testing.T) (*Server, []string, http.Handler) {
 	return server, users, server.Routes()
 }
 
-func aliasRequest(server *Server, handler http.Handler, user, method, path, body string) *httptest.ResponseRecorder {
+func aliasRequest(t *testing.T, server *Server, handler http.Handler, user, method, path, body string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	if user != "" {
-		request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value)
+		request.Header.Set("Authorization", "Bearer "+issueTestBearer(t, server, user, time.Now().Add(time.Hour)))
 		request.Header.Set("X-Daochi-User", user)
 	}
 	request.Header.Set("Content-Type", "application/json")
@@ -121,7 +121,7 @@ func TestPremiumAliasConfigurationAndQuotes(t *testing.T) {
 		{"12_a", "12_a", "four_character", 100},
 		{"google_fan", "google_fan", "standard", 0},
 	} {
-		res := aliasRequest(server, handler, users[0], "GET", "/api/v1/account/alias?alias="+sample.query, "")
+		res := aliasRequest(t, server, handler, users[0], "GET", "/api/v1/account/alias?alias="+sample.query, "")
 		var quote AliasQuote
 		if err := json.Unmarshal(res.Body.Bytes(), &quote); err != nil {
 			t.Fatal(err)
@@ -135,7 +135,7 @@ func TestPremiumAliasConfigurationAndQuotes(t *testing.T) {
 	}
 	for _, enabled := range []bool{true, false} {
 		server.Cfg.PremiumAliasesEnabled = enabled
-		res := aliasRequest(server, handler, "", "GET", "/api/v1/node", "")
+		res := aliasRequest(t, server, handler, "", "GET", "/api/v1/node", "")
 		if res.Code != 200 || strings.Contains(res.Body.String(), "premium-usernames-v1") != enabled {
 			t.Fatalf("node rollout flag %t: %d %s", enabled, res.Code, res.Body.String())
 		}
@@ -146,7 +146,7 @@ func TestAliasCaseVariantsShareOwnershipPriceAndPayment(t *testing.T) {
 	server, users, handler := premiumAliasFixture(t)
 	user := users[0]
 	for _, spelling := range []string{"google", "GOOGLE", "GoOgLe", " @GOOGLE "} {
-		res := aliasRequest(server, handler, user, "GET", "/api/v1/account/alias?alias="+url.QueryEscape(spelling), "")
+		res := aliasRequest(t, server, handler, user, "GET", "/api/v1/account/alias?alias="+url.QueryEscape(spelling), "")
 		var quote AliasQuote
 		if err := json.Unmarshal(res.Body.Bytes(), &quote); err != nil {
 			t.Fatal(err)
@@ -156,7 +156,7 @@ func TestAliasCaseVariantsShareOwnershipPriceAndPayment(t *testing.T) {
 		}
 	}
 	for _, spelling := range []string{"GOOGLE", "gOoGlE"} {
-		res := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase",
+		res := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias/purchase",
 			aliasPurchaseBody(spelling, 1000*UnitsPerDew, "same-case-purchase"))
 		if res.Code != 200 {
 			t.Fatalf("case variant purchase: %d %s", res.Code, res.Body.String())
@@ -170,7 +170,7 @@ func TestAliasCaseVariantsShareOwnershipPriceAndPayment(t *testing.T) {
 		if err != nil || !found || owner != user {
 			t.Fatalf("case variant lookup %q: %q %t %v", spelling, owner, found, err)
 		}
-		res := aliasRequest(server, handler, users[1], "POST", "/api/v1/account/alias/purchase",
+		res := aliasRequest(t, server, handler, users[1], "POST", "/api/v1/account/alias/purchase",
 			aliasPurchaseBody(spelling, 1000*UnitsPerDew, "taken-case-purchase"))
 		if res.Code != 409 {
 			t.Fatalf("case variant took an existing alias: %d %s", res.Code, res.Body.String())
@@ -192,12 +192,12 @@ func TestAliasRejectsUnicodeLookalikesBeforeCaseFolding(t *testing.T) {
 		server.Cfg.PremiumAliasesEnabled = enabled
 		for _, alias := range []string{"Kite", "İris", "аbcd", "αbcd", "ａｂｃｄ", "ábcd", "ab\u0301cd",
 			"a\u200dbcd", "abcd\u2060", "\u00a0abcd", "abcd\u00a0", "\u202eabcd", "abc-d", "abc.d"} {
-			quote := aliasRequest(server, handler, users[0], "GET", "/api/v1/account/alias?alias="+url.QueryEscape(alias), "")
+			quote := aliasRequest(t, server, handler, users[0], "GET", "/api/v1/account/alias?alias="+url.QueryEscape(alias), "")
 			if quote.Code != 400 {
 				t.Fatalf("lookalike quote %q accepted: %d %s", alias, quote.Code, quote.Body.String())
 			}
 			for _, path := range []string{"/api/v1/account/alias", "/api/v1/account/alias/purchase"} {
-				res := aliasRequest(server, handler, users[0], "POST", path, aliasPurchaseBody(alias, 0, "invalid-lookalike"))
+				res := aliasRequest(t, server, handler, users[0], "POST", path, aliasPurchaseBody(alias, 0, "invalid-lookalike"))
 				if res.Code != 400 {
 					t.Fatalf("lookalike %q accepted by %s: %d %s", alias, path, res.Code, res.Body.String())
 				}
@@ -215,7 +215,7 @@ func TestAliasRejectsUnicodeLookalikesBeforeCaseFolding(t *testing.T) {
 	if _, err := server.Store.Database.Exec("UPDATE server_users SET alias=? WHERE user_id_hash=?", "ábcd", users[0]); err != nil {
 		t.Fatal(err)
 	}
-	res := aliasRequest(server, handler, users[0], "POST", "/api/v1/account/alias", `{"alias":"ábcd"}`)
+	res := aliasRequest(t, server, handler, users[0], "POST", "/api/v1/account/alias", `{"alias":"ábcd"}`)
 	if res.Code != 200 {
 		t.Fatalf("grandfathered alias changed: %d %s", res.Code, res.Body.String())
 	}
@@ -230,7 +230,7 @@ func TestPremiumAliasKeepsExistingOwnersAndFreeClaims(t *testing.T) {
 		if _, err := server.Store.Database.Exec("UPDATE server_users SET alias=? WHERE user_id_hash=?", alias, users[i]); err != nil {
 			t.Fatal(err)
 		}
-		res := aliasRequest(server, handler, users[i], "GET", "/api/v1/account/alias?alias="+alias, "")
+		res := aliasRequest(t, server, handler, users[i], "GET", "/api/v1/account/alias?alias="+alias, "")
 		var quote map[string]any
 		if err := json.Unmarshal(res.Body.Bytes(), &quote); err != nil {
 			t.Fatal(err)
@@ -238,7 +238,7 @@ func TestPremiumAliasKeepsExistingOwnersAndFreeClaims(t *testing.T) {
 		if res.Code != 200 || quote["owned"] != true || quote["available"] != false || quote["price_units"] != float64(0) {
 			t.Fatalf("existing owner's quote: %d %s", res.Code, res.Body.String())
 		}
-		res = aliasRequest(server, handler, users[i], "POST", "/api/v1/account/alias", fmt.Sprintf(`{"alias":%q}`, alias))
+		res = aliasRequest(t, server, handler, users[i], "POST", "/api/v1/account/alias", fmt.Sprintf(`{"alias":%q}`, alias))
 		if res.Code != 200 {
 			t.Fatalf("keeping existing name: %d %s", res.Code, res.Body.String())
 		}
@@ -247,11 +247,11 @@ func TestPremiumAliasKeepsExistingOwnersAndFreeClaims(t *testing.T) {
 			t.Fatal("existing username or balance changed")
 		}
 	}
-	res := aliasRequest(server, handler, users[1], "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("google", 1000*UnitsPerDew, "taken-name-claim"))
+	res := aliasRequest(t, server, handler, users[1], "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("google", 1000*UnitsPerDew, "taken-name-claim"))
 	if res.Code != 409 {
 		t.Fatalf("another owner's name offered: %d %s", res.Code, res.Body.String())
 	}
-	res = aliasRequest(server, handler, users[0], "POST", "/api/v1/account/alias", `{"alias":"@mynewname"}`)
+	res = aliasRequest(t, server, handler, users[0], "POST", "/api/v1/account/alias", `{"alias":"@mynewname"}`)
 	if res.Code != 200 {
 		t.Fatalf("free rename failed: %d %s", res.Code, res.Body.String())
 	}
@@ -260,7 +260,7 @@ func TestPremiumAliasKeepsExistingOwnersAndFreeClaims(t *testing.T) {
 		t.Fatal("free rename charged DEW")
 	}
 	server.Cfg.PremiumAliasesEnabled = false
-	res = aliasRequest(server, handler, users[0], "POST", "/api/v1/account/alias", `{"alias":"zzzz"}`)
+	res = aliasRequest(t, server, handler, users[0], "POST", "/api/v1/account/alias", `{"alias":"zzzz"}`)
 	if res.Code != 200 {
 		t.Fatalf("disabled node changed legacy behavior: %d %s", res.Code, res.Body.String())
 	}
@@ -271,7 +271,7 @@ func TestPremiumAliasPurchaseIsAtomicAndRetrySafe(t *testing.T) {
 	user := users[0]
 	claim := aliasPurchaseBody(" @GoOgLe ", 1000*UnitsPerDew, "paid-claim-0001")
 	for _, body := range []string{`{"alias":"google"}`, claim} {
-		res := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias", body)
+		res := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias", body)
 		if res.Code != 402 {
 			t.Fatalf("legacy endpoint allowed a premium claim: %d %s", res.Code, res.Body.String())
 		}
@@ -279,7 +279,7 @@ func TestPremiumAliasPurchaseIsAtomicAndRetrySafe(t *testing.T) {
 	if alias, balance := aliasState(t, server, user); alias != "user0" || balance != 2000*UnitsPerDew {
 		t.Fatal("unconfirmed purchase changed account")
 	}
-	res := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase", claim)
+	res := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias/purchase", claim)
 	var first struct {
 		Alias string `json:"alias"`
 		Price int64  `json:"price_units"`
@@ -292,7 +292,7 @@ func TestPremiumAliasPurchaseIsAtomicAndRetrySafe(t *testing.T) {
 		t.Fatalf("purchase: %d %s", res.Code, res.Body.String())
 	}
 	for i := 0; i < 3; i++ {
-		again := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase", claim)
+		again := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias/purchase", claim)
 		if again.Code != 200 || again.Body.String() != res.Body.String() {
 			t.Fatalf("retry changed result: %d %s", again.Code, again.Body.String())
 		}
@@ -306,18 +306,18 @@ func TestPremiumAliasPurchaseIsAtomicAndRetrySafe(t *testing.T) {
 		t.Fatalf("purchase has no valid signed username receipt: %+v", receipt)
 	}
 	for _, body := range []string{aliasPurchaseBody("apple", 1000*UnitsPerDew, "paid-claim-0001"), aliasPurchaseBody("google", 100*UnitsPerDew, "paid-claim-0001")} {
-		if changed := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase", body); changed.Code != 409 {
+		if changed := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias/purchase", body); changed.Code != 409 {
 			t.Fatalf("conflicting retry: %d %s", changed.Code, changed.Body.String())
 		}
 	}
-	if renamed := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias", `{"alias":"anothername"}`); renamed.Code != 200 {
+	if renamed := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias", `{"alias":"anothername"}`); renamed.Code != 200 {
 		t.Fatal("free rename failed")
 	}
 	// Once released, another account can buy the name; the old receipt cannot reclaim it.
-	if other := aliasRequest(server, handler, users[1], "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("google", 1000*UnitsPerDew, "other-paid-claim")); other.Code != 200 {
+	if other := aliasRequest(t, server, handler, users[1], "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("google", 1000*UnitsPerDew, "other-paid-claim")); other.Code != 200 {
 		t.Fatalf("released name purchase: %d %s", other.Code, other.Body.String())
 	}
-	if replay := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase", claim); replay.Code != 409 {
+	if replay := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias/purchase", claim); replay.Code != 409 {
 		t.Fatalf("stale retry: %d %s", replay.Code, replay.Body.String())
 	}
 	if alias, balance := aliasState(t, server, user); alias != "anothername" || balance != 1000*UnitsPerDew {
@@ -343,7 +343,7 @@ func TestPremiumAliasFailuresLeaveNameAndDEWUntouched(t *testing.T) {
 		{`not json`, 400},
 	}
 	for _, c := range cases {
-		res := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase", c.body)
+		res := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias/purchase", c.body)
 		if res.Code != c.want {
 			t.Fatalf("%s: %d %s, want %d", c.body, res.Code, res.Body.String(), c.want)
 		}
@@ -353,7 +353,7 @@ func TestPremiumAliasFailuresLeaveNameAndDEWUntouched(t *testing.T) {
 		if method == "POST" {
 			path = "/api/v1/account/alias/purchase"
 		}
-		if res := aliasRequest(server, handler, "", method, path, aliasPurchaseBody("zzzz", 100*UnitsPerDew, "unauthorized-claim")); res.Code != 401 {
+		if res := aliasRequest(t, server, handler, "", method, path, aliasPurchaseBody("zzzz", 100*UnitsPerDew, "unauthorized-claim")); res.Code != 401 {
 			t.Fatalf("unauthenticated %s: %d", method, res.Code)
 		}
 	}
@@ -365,7 +365,7 @@ func TestPremiumAliasFailuresLeaveNameAndDEWUntouched(t *testing.T) {
 	if drained.Error != nil {
 		t.Fatal(drained.Error)
 	}
-	res := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("zzzz", 100*UnitsPerDew, "unaffordable-claim"))
+	res := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("zzzz", 100*UnitsPerDew, "unaffordable-claim"))
 	if res.Code != 402 {
 		t.Fatalf("unaffordable: %d %s", res.Code, res.Body.String())
 	}
@@ -373,7 +373,7 @@ func TestPremiumAliasFailuresLeaveNameAndDEWUntouched(t *testing.T) {
 		t.Fatal("failed purchase changed account")
 	}
 	server.Cfg.WaoziIssuerPrivateKey = nil
-	res = aliasRequest(server, handler, users[1], "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("zzzz", 100*UnitsPerDew, "missing-issuer-claim"))
+	res = aliasRequest(t, server, handler, users[1], "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("zzzz", 100*UnitsPerDew, "missing-issuer-claim"))
 	if res.Code != 503 {
 		t.Fatalf("missing issuer: %d %s", res.Code, res.Body.String())
 	}
@@ -396,7 +396,7 @@ func TestPremiumAliasConcurrentClaimsHaveOneWinner(t *testing.T) {
 		go func(i int, user string) {
 			defer group.Done()
 			<-start
-			res := aliasRequest(server, handler, user, "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("zzzz", 100*UnitsPerDew, fmt.Sprintf("concurrent-claim-%d", i)))
+			res := aliasRequest(t, server, handler, user, "POST", "/api/v1/account/alias/purchase", aliasPurchaseBody("zzzz", 100*UnitsPerDew, fmt.Sprintf("concurrent-claim-%d", i)))
 			codes <- res.Code
 		}(i, user)
 	}
@@ -422,7 +422,7 @@ func TestPremiumAliasEmptyNameIsNotGrandfathered(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, method := range []string{"GET", "POST"} {
-		res := aliasRequest(server, handler, users[0], method, "/api/v1/account/alias", `{}`)
+		res := aliasRequest(t, server, handler, users[0], method, "/api/v1/account/alias", `{}`)
 		if res.Code != 400 {
 			t.Fatalf("empty name %s: %d %s", method, res.Code, res.Body.String())
 		}

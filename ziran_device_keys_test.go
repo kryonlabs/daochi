@@ -46,6 +46,9 @@ CREATE TABLE server_device_registration_nonces (
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := AuthSessions_Initialize(database, context.Background(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
 	return &Store{Database: database}
 }
 

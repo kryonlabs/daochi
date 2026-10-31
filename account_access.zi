@@ -17,6 +17,7 @@ holds :: #import "account_hold";
 clients :: #import "sync_clients";
 profile :: #import "account_profile";
 token :: #import "token";
+sessions :: #import "auth_sessions";
 http_auth :: #import "http_auth";
 response :: #import "response";
 logs :: #import "log_safety";
@@ -49,6 +50,7 @@ AccountAccess :: struct {
 
 #scope_file
 TrimSpace :: (value: string) -> string #foreign strings;
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings "TrimPrefix";
 ToLower :: (value: string) -> string #foreign strings;
 Join :: (parts: []string, separator: string) -> string #foreign strings;
 EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
@@ -177,6 +179,19 @@ Login :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Req
         response.Error(writer, cast(isize)500, "login failed")
         return
     }
+    error = sessions.Initialize(access.database, context, access.configuration.TokenTTL)
+    if error != null {
+        LogAccountError("initialize auth sessions", "user", logs.LogText(value.UserIDHash), "error", error)
+        response.Error(writer, cast(isize)500, "login failed")
+        return
+    }
+    error = sessions.RecordIssued(access.database, context, access.configuration.TokenSecret,
+        issued.value, value.ClientID)
+    if error != null {
+        LogAccountError("record auth session", "user", logs.LogText(value.UserIDHash), "error", error)
+        response.Error(writer, cast(isize)500, "login failed")
+        return
+    }
     alias := profile.Alias(access.database, context, value.UserIDHash)
     if alias.error != null {
         LogAccountError("load account alias", "user", logs.LogText(value.UserIDHash), "error", alias.error)
@@ -201,6 +216,32 @@ Login :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Req
     result.ServerTime = clock.Unix(clock.Now())
     result.AccountAlias = alias.value
     result.ProfileIcon = icon.value
+    response.JSON(writer, cast(isize)200, result)
+}
+LogoutResponse :: struct {
+    status: string #go_tag "json:\"status\""
+}
+
+Logout :: (access: AccountAccess, writer: http.ResponseWriter, request: *http.Request) {
+    user := http_auth.BearerUser(access.database, request, access.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != cast(isize)0 {
+        http_auth.Respond(writer, access.counters, user.authentication)
+        return
+    }
+    authorization := TrimSpace(http.HeaderValue(http.Headers(request), "Authorization"))
+    error := sessions.RevokeBearer(access.database, http.Context(request), user.value,
+        TrimPrefix(authorization, "Bearer "))
+    if errors.Is(error, sql.NoRows()) {
+        response.Error(writer, cast(isize)401, "invalid bearer token")
+        return
+    }
+    if error != null {
+        LogAccountError("logout auth session", "user", logs.LogText(user.value), "error", error)
+        response.Error(writer, cast(isize)500, "logout failed")
+        return
+    }
+    result: LogoutResponse
+    result.status = "ok"
     response.JSON(writer, cast(isize)200, result)
 }
 

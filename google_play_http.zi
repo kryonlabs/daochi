@@ -10,6 +10,7 @@ policy :: #import "token_policy";
 requests :: #import "payment_request";
 receipts :: #import "token_receipt";
 ledger :: #import "token_ledger";
+reconciliation :: #import "google_play_reconciliation";
 apps :: #import "app_store";
 signed :: #import "signed_tx";
 response :: #import "response";
@@ -31,6 +32,8 @@ LogCreditError :: (message: string, userKey: string, user: string,
     paymentKey: string, payment: string, errorKey: string, error: Error) #foreign logging "Error";
 LogConsumeError :: (message: string, userKey: string, user: string,
     paymentKey: string, payment: string, errorKey: string, error: Error) #foreign logging "Warn";
+LogReconcileError :: (message: string, packageKey: string, packageName: string,
+    errorKey: string, error: Error) #foreign logging "Warn";
 
 ForgetOnFailure :: (database: *sql.Database, context: ctx.Context,
     authorization: policy.TokenAuthorizationResult, completed: *bool) {
@@ -90,32 +93,39 @@ Verify :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Re
     completed := false
     CleanupAtReturn(ForgetOnFailure, server.database, http.Context(request), authorization, *completed)
     if MapCount(server.configuration.GooglePackageNames) > 0 &&
-        !MapGet(server.configuration.GooglePackageNames, decoded.value.PackageName) {
+    !MapGet(server.configuration.GooglePackageNames, decoded.value.PackageName) {
         response.Error(writer, cast(isize)400, "package not allowed")
         return
     }
-    verified := google.VerifyPurchase(http.Context(request), <<server.configuration, decoded.value)
-    if verified.error != null {
-        PaymentError(writer, verified.error)
+    schemaError := reconciliation.Ensure(server.database, http.Context(request))
+    if schemaError != null {
+        response.Error(writer, cast(isize)500, "google purchase lifecycle unavailable")
         return
     }
-    event: receipts.TokenEventInput
-    event.AccountID = user.value
-    event.AppID = decoded.value.AppID
-    event.EventType = "credit"
-    event.AmountDelta = product.value.TokenUnits
-    event.SourceType = "google_play"
-    event.SourceRef = verified.value
-    credited := ledger.CreditPayment(server.database, http.Context(request), issuer.value,
-        "google_play", verified.value, event, server.issuerUnavailable)
+    refunds := reconciliation.ReconcileRecentRefunds(server.database, http.Context(request), <<server.configuration,
+        decoded.value.PackageName, issuer.value, server.issuerUnavailable)
+    if refunds.error != null {
+        LogReconcileError("google refund reconciliation deferred", "package", decoded.value.PackageName, "error", refunds.error)
+    }
+    inspected := google.InspectPurchase(http.Context(request), <<server.configuration, decoded.value)
+    if inspected.error != null {
+        PaymentError(writer, inspected.error)
+        return
+    }
+    credited := reconciliation.ProcessPurchase(server.database, http.Context(request), issuer.value,
+        server.issuerUnavailable, inspected, decoded.value, user.value, decoded.value.AppID, product.value.TokenUnits)
     if credited.error != null {
-        LogCreditError("google token credit", "user", logs.LogText(user.value), "payment", logs.LogText(verified.value), "error", credited.error)
+        LogCreditError("google token credit", "user", logs.LogText(user.value), "payment", logs.LogText(inspected.paymentID), "error", credited.error)
         response.Error(writer, cast(isize)500, "token credit failed")
         return
     }
-    consumed := google.ConsumePurchase(http.Context(request), <<server.configuration, decoded.value)
-    if consumed != null {
-        LogConsumeError("google purchase consume failed after token credit", "user", logs.LogText(user.value), "payment", logs.LogText(verified.value), "error", consumed)
+    if credited.bindingMissing {
+        response.Error(writer, cast(isize)409, "google purchase account binding required")
+        return
+    }
+    consumed := reconciliation.RetryConsume(server.database, http.Context(request), <<server.configuration, inspected.paymentID)
+    if consumed.error != null {
+        LogConsumeError("google purchase consume retry deferred", "user", logs.LogText(user.value), "payment", logs.LogText(inspected.paymentID), "error", consumed.error)
     }
     balance := ledger.Balance(server.database, http.Context(request), user.value, receipts.AssetID)
     if balance.error != null {
@@ -126,6 +136,6 @@ Verify :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Re
     purchase: TokenPurchaseResponse
     purchase.Status = "ok"
     purchase.Balance = balance.value
-    purchase.Receipt = credited.value
+    purchase.Receipt = credited.receipt
     response.JSON(writer, cast(isize)200, purchase)
 }

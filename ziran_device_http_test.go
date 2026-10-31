@@ -157,7 +157,15 @@ func TestZiranDeviceHTTPAgainstBaseline(t *testing.T) {
 						body.Reader = deviceHTTPReadFailure{failure: errors.New("device body read failed")}
 					}
 					request := httptest.NewRequest(method, "/api/v1/account/devices", body)
-					token := Token_IssueAuthToken(server.Cfg.TokenSecret, account, time.Now().Add(time.Hour).Unix()).Value
+					issued := Token_IssueAuthToken(server.Cfg.TokenSecret, account, time.Now().Add(time.Hour).Unix())
+					if issued.Error != "" {
+						t.Fatal(issued.Error)
+					}
+					if err := AuthSessions_RecordIssued(server.Store.Database, t.Context(),
+						server.Cfg.TokenSecret, issued.Value, "device-http-fixture"); err != nil {
+						t.Fatal(err)
+					}
+					token := issued.Value
 					request.Header.Set("Authorization", "Bearer "+token)
 					switch mode {
 					case "missing token":

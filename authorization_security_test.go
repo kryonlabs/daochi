@@ -128,6 +128,13 @@ func TestAuthorizationRendezvousPrivacyAndLegacyKeyRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherToken := Token_IssueAuthToken(fixture.server.Cfg.TokenSecret, otherID, time.Now().Unix()+300)
+	if otherToken.Error != "" {
+		t.Fatal(otherToken.Error)
+	}
+	if err := AuthSessions_RecordIssued(fixture.store.Database, t.Context(), fixture.server.Cfg.TokenSecret,
+		otherToken.Value, "authorization-other"); err != nil {
+		t.Fatal(err)
+	}
 	other := authorizationCall(t, fixture.handler, "/api/v1/authorization/rendezvous", input,
 		map[string]string{"Authorization": "Bearer " + otherToken.Value})
 	if other.Code != 404 {

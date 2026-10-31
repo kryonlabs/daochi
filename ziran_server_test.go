@@ -230,7 +230,7 @@ func baselineRoutePatterns(t *testing.T) []string {
 		patterns = append(patterns, pattern)
 		return true
 	})
-	if len(patterns) != 62 {
+	if len(patterns) != 63 {
 		t.Fatal("original server route fixture changed", len(patterns))
 	}
 	return patterns

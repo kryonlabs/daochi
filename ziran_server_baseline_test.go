@@ -251,6 +251,9 @@ func (s *baselineServer) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/sync/challenge", s.handleChallenge)
 	mux.HandleFunc("GET /api/v1/sync/ws", s.handleSyncWebSocket)
 	mux.HandleFunc("POST /api/v1/sync/login", s.handleLogin)
+	mux.HandleFunc("POST /api/v1/sync/logout", func(w http.ResponseWriter, r *http.Request) {
+		AccountAccess_Logout(s.access(), w, r)
+	})
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("POST /api/v1/account/alias", func(w http.ResponseWriter, r *http.Request) {
 		AccountHttp_Alias(s.accounts(), w, r)

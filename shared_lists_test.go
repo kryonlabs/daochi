@@ -26,7 +26,7 @@ func TestSharedListsInvitationsAndCollaboration(t *testing.T) {
 		}
 		request := httptest.NewRequest(method, "/api/v1/lists", bytes.NewReader(body))
 		request.Header.Set("X-Daochi-User", users[user])
-		request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+		request.Header.Set("Authorization", "Bearer "+issueTestBearer(t, server, users[user], time.Now().Add(time.Hour)))
 		result := httptest.NewRecorder()
 		SharedLists_Handle(server.accounts(), result, request)
 		if result.Code != want {
@@ -179,7 +179,7 @@ func TestSharedListsQuotaRollbackAndFriendRevocation(t *testing.T) {
 		}
 		request := httptest.NewRequest("POST", "/api/v1/lists", bytes.NewReader(raw))
 		request.Header.Set("X-Daochi-User", users[user])
-		request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+		request.Header.Set("Authorization", "Bearer "+issueTestBearer(t, server, users[user], time.Now().Add(time.Hour)))
 		result := httptest.NewRecorder()
 		SharedLists_Handle(server.accounts(), result, request)
 		if result.Code != want {
@@ -239,7 +239,7 @@ func TestSharedListAccessRolesAndRemoval(t *testing.T) {
 		}
 		request := httptest.NewRequest(method, "/api/v1/lists", bytes.NewReader(encoded))
 		request.Header.Set("X-Daochi-User", users[user])
-		request.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+		request.Header.Set("Authorization", "Bearer "+issueTestBearer(t, server, users[user], time.Now().Add(time.Hour)))
 		result := httptest.NewRecorder()
 		SharedLists_Handle(server.accounts(), result, request)
 		if result.Code != want {

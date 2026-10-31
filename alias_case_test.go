@@ -15,7 +15,7 @@ func TestAliasDisplayCaseSavesWithoutPurchase(t *testing.T) {
 	}
 	_, before := aliasState(t, server, user)
 	for _, spelling := range []string{"Moon", "MOON", "mOoN"} {
-		response := aliasRequest(server, handler, user, http.MethodPost, "/api/v1/account/alias", `{"alias":"`+spelling+`"}`)
+		response := aliasRequest(t, server, handler, user, http.MethodPost, "/api/v1/account/alias", `{"alias":"`+spelling+`"}`)
 		if response.Code != http.StatusOK {
 			t.Fatalf("case edit: %d %s", response.Code, response.Body.String())
 		}

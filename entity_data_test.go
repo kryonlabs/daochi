@@ -97,7 +97,7 @@ func TestEntityBlobsBelongToTheAccount(t *testing.T) {
 	path := "/api/v1/blobs/entity/" + Signing_SHA256Hex(data)
 	request := func(signer string, method string, body []byte, nonce string) *http.Request {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))
-		token := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+		token := issueTestBearer(t, server, user, time.Now().Add(time.Hour))
 		request.Header.Set("Authorization", "Bearer "+token)
 		tx := SignedTxEnvelope{ProtocolVersion: 6, TxID: nonce, Nonce: nonce, AccountID: user,
 			AppID: signer, DeviceKeyID: "device-key", Method: method, Path: path,

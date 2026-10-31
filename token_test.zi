@@ -84,21 +84,26 @@ TokensPreserveWireBytesAndAuthentication :: (test: *testing.Test) {
         }
         for expiry: expiries[:] {
             payload := Payload(user, expiry)
-            want := ExpectedIssue(test, secret, payload)
-            issued := token.IssueAuthToken(secret, user, expiry)
-            if issued.error != "" || issued.value != want {
-                arguments: [4]Any = .[size, expiry, issued, want]
-                testing.Fatalf(test, "issue key=%d expiry=%d: got %#v, want %q", arguments[:])
-            }
+            legacy := ExpectedIssue(test, secret, payload)
             clocks: [4]s64 = .[expiry, 0, 1790709000, 9223372036854775807]
             for now: clocks[:] {
-                gotResult := token.VerifyAuthToken(secret, issued.value, now)
-                wantResult := ExpectedVerify(test, secret, want, now)
+                gotResult := token.VerifyAuthToken(secret, legacy, now)
+                wantResult := ExpectedVerify(test, secret, legacy, now)
                 if !SameResult(gotResult, wantResult) {
                     arguments: [5]Any = .[size, expiry, now, gotResult, wantResult]
-                    testing.Fatalf(test, "verify key=%d expiry=%d now=%d: got %#v, want %#v", arguments[:])
+                    testing.Fatalf(test, "legacy verify key=%d expiry=%d now=%d: got %#v, want %#v", arguments[:])
                 }
             }
+        }
+        issued := token.IssueAuthToken(secret, user, 1790709000)
+        renewed := token.IssueAuthToken(secret, user, 1790709000)
+        metadata := token.InspectAuthToken(secret, issued.value)
+        if issued.error != "" || renewed.error != "" || issued.value == renewed.value ||
+            metadata.error != "" || metadata.value.version != "v2" ||
+            metadata.value.userID != user || metadata.value.sessionID.count != 64 ||
+            metadata.value.expiresAt != 1790709000 {
+            arguments: [4]Any = .[size, issued, renewed, metadata]
+            testing.Fatalf(test, "issue key=%d: got %#v, %#v, %#v", arguments[:])
         }
     }
     secret := text.ToBytes("stable test secret")

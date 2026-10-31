@@ -1,0 +1,709 @@
+#import "protocol"
+#import "std/go_types"
+google :: #import "google_play";
+receipts :: #import "token_receipt";
+ledger :: #import "token_ledger";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+ed :: #import "std/ed25519_go";
+config :: #import "config";
+policy :: #import "token_policy";
+selection :: #import "std/select_go";
+go_time :: #system_library "go:time";
+go_context :: #system_library "go:context";
+logging :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+go_sql :: #system_library "go:database/sql";
+
+ProviderName :: "google_play";
+RecentRefundMillis: s64 = 2592000000;
+
+LifecycleRecord :: struct {
+    provider: string
+    purchaseToken: string
+    packageName: string
+    productID: string
+    appID: string
+    accountID: string
+    accountBinding: string
+    orderID: string
+    state: string
+    amount: s64
+    receiptID: string
+    refundReceiptID: string
+    voidedMillis: s64
+}
+LifecycleResult :: struct {
+    value: LifecycleRecord
+    found: bool
+    error: Error
+}
+PaymentRecord :: struct {
+    receiptID: string
+    accountID: string
+    assetID: string
+    amount: s64
+}
+PaymentLookup :: struct {
+    value: PaymentRecord
+    found: bool
+    error: Error
+}
+PurchaseResult :: struct {
+    receipt: TokenReceipt
+    bindingMissing: bool
+    created: bool
+    error: Error
+}
+ConsumeRetryResult :: struct {
+    consumed: bool
+    error: Error
+}
+PendingConsumeResult :: struct {
+    attempted: s64
+    consumed: s64
+    error: Error
+}
+RefundResult :: struct {
+    compensated: s64
+    error: Error
+}
+
+#scope_file
+TransactionResult :: struct {
+    value: *sql.Transaction
+    error: Error
+}
+ExecResult :: struct {
+    value: sql.Result
+    error: Error
+}
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(*Tx).Rollback";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
+ContextError :: (value: ctx.Context) -> Error #foreign go_context "Context.Err";
+LogFailure :: (message: string, key: string, error: Error) #foreign logging "Error";
+AppendPackage :: (values: []string, value: string) -> []string #foreign builtin "append";
+Stopped :: (value: ctx.Context) -> bool {
+    return ContextError(value) != null
+}
+BeginTransaction :: (database: *sql.Database, context: ctx.Context, options: *sql.TransactionOptions) -> TransactionResult #go_results #foreign go_sql "(*DB).BeginTx";
+
+Schema :: #string SQL
+CREATE TABLE IF NOT EXISTS google_play_purchase_lifecycle (
+    provider TEXT NOT NULL DEFAULT 'google_play',
+    purchase_token TEXT NOT NULL,
+    package_name TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    app_id TEXT NOT NULL DEFAULT '',
+    account_id TEXT NOT NULL DEFAULT '',
+    account_binding TEXT NOT NULL DEFAULT '',
+    order_id TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL CHECK(state IN ('binding_missing','consume_pending','consumed','refunded')),
+    amount INTEGER NOT NULL,
+    receipt_id TEXT NOT NULL DEFAULT '',
+    refund_receipt_id TEXT NOT NULL DEFAULT '',
+    voided_millis INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(provider,purchase_token)
+);
+CREATE INDEX IF NOT EXISTS google_play_purchase_lifecycle_consume_pending
+ON google_play_purchase_lifecycle(state,created_at);
+SQL;
+
+#scope_export
+Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
+    empty: [0]Any
+    written := sql.Exec(database, context, Schema, empty[:])
+    return written.error
+}
+
+// Run retries durable lifecycle work independently of purchase HTTP traffic.
+Run :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
+    unavailable: Error, interval: clock.Duration) {
+    if cast(s64)interval <= 0 {
+        interval = cast(clock.Duration)60000000000
+    }
+    ticker := clock.NewTicker(interval)
+    StopAtReturn(ticker)
+    cases: [2]selection.Case
+    cases[0] = selection.Receive(ctx.Done(context))
+    cases[1] = selection.Receive(clock.TickerChannel(ticker))
+    while !Stopped(context) {
+        failure := Reconcile(database, context, configuration, unavailable)
+        if failure != null && !Stopped(context) {
+            LogFailure("google purchase reconciliation failed", "error", failure)
+        }
+        if selection.Select(cases[:]).chosen == cast(isize)0 {
+            return
+        }
+    }
+}
+
+Reconcile :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
+    unavailable: Error) -> Error {
+    failure := Ensure(database, context)
+    if failure != null {
+        return failure
+    }
+    issuer := policy.Issuer(configuration, unavailable)
+    if issuer.error != null {
+        return issuer.error
+    }
+    // Finish reads before nested transactions use the store's one connection.
+    packages: []string
+    empty: [0]Any
+    queried := sql.Query(database, context,
+        "SELECT DISTINCT package_name FROM google_play_purchase_lifecycle WHERE provider='google_play' ORDER BY package_name", empty[:])
+    if queried.error != null {
+        return queried.error
+    }
+    CloseRowsAtReturn(queried.value)
+    while sql.Next(queried.value) {
+        packageName := ""
+        destinations: [1]Any = .[*packageName]
+        failure = sql.ScanRows(queried.value, destinations[:])
+        if failure != null {
+            return failure
+        }
+        packages = AppendPackage(packages, packageName)
+    }
+    failure = sql.RowsError(queried.value)
+    if failure != null {
+        return failure
+    }
+    failure = sql.CloseRows(queried.value)
+    if failure != null {
+        return failure
+    }
+    pending := ReconcilePendingConsumes(database, context, configuration)
+    failure = pending.error
+    // A consume outage must not suppress refund processing.
+    for packageName: packages {
+        refunded := ReconcileRecentRefunds(database, context, configuration, packageName, issuer.value, unavailable)
+        if refunded.error != null {
+            failure = refunded.error
+        }
+    }
+    return failure
+}
+
+LoadLifecycleTx :: (transaction: *sql.Transaction, context: ctx.Context, purchaseToken: string) -> LifecycleResult {
+    result: LifecycleResult
+    record: LifecycleRecord
+    arguments: [2]Any = .[ProviderName, purchaseToken]
+    destinations: [13]Any = .[*record.provider, *record.purchaseToken, *record.packageName, *record.productID,
+    *record.appID, *record.accountID, *record.accountBinding, *record.orderID, *record.state, *record.amount,
+    *record.receiptID, *record.refundReceiptID, *record.voidedMillis]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT provider,purchase_token,package_name,product_id,app_id,account_id,account_binding,order_id,state,amount,receipt_id,refund_receipt_id,voided_millis\nFROM google_play_purchase_lifecycle\nWHERE provider=?1 AND purchase_token=?2",
+        arguments[:]), destinations[:])
+    if result.error == null {
+        result.value = record
+        result.found = true
+        return result
+    }
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+    }
+    return result
+}
+
+LoadPaymentTx :: (transaction: *sql.Transaction, context: ctx.Context, paymentID: string) -> PaymentLookup {
+    result: PaymentLookup
+    record: PaymentRecord
+    arguments: [2]Any = .[ProviderName, paymentID]
+    destinations: [4]Any = .[*record.receiptID, *record.accountID, *record.assetID, *record.amount]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT receipt_id,account_id,asset_id,amount\nFROM token_processed_payments\nWHERE provider=?1 AND provider_payment_id=?2",
+        arguments[:]), destinations[:])
+    if result.error == null {
+        result.value = record
+        result.found = true
+        return result
+    }
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+    }
+    return result
+}
+
+InsertMissingBindingTx :: (transaction: *sql.Transaction, context: ctx.Context, inspected: google.GooglePurchaseResult,
+    purchase: GooglePurchaseVerifyRequest, amount: s64) -> Error {
+    arguments: [7]Any = .[ProviderName, inspected.paymentID, purchase.PackageName, purchase.ProductID,
+    "binding_missing", amount, inspected.orderID]
+    written := sql.ExecTx(transaction, context,
+        "INSERT INTO google_play_purchase_lifecycle(provider,purchase_token,package_name,product_id,app_id,state,amount,order_id)\nVALUES(?1,?2,?3,?4,'',?5,?6,?7)",
+        arguments[:])
+    return written.error
+}
+
+InsertLifecycleTx :: (transaction: *sql.Transaction, context: ctx.Context, record: LifecycleRecord) -> Error {
+    arguments: [13]Any = .[record.provider, record.purchaseToken, record.packageName, record.productID,
+    record.appID, record.accountID, record.accountBinding, record.orderID, record.state, record.amount,
+    record.receiptID, record.refundReceiptID, record.voidedMillis]
+    written := sql.ExecTx(transaction, context,
+        "INSERT INTO google_play_purchase_lifecycle(provider,purchase_token,package_name,product_id,app_id,account_id,account_binding,order_id,state,amount,receipt_id,refund_receipt_id,voided_millis)\nVALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+        arguments[:])
+    return written.error
+}
+
+ClaimBindingTx :: (transaction: *sql.Transaction, context: ctx.Context, inspected: google.GooglePurchaseResult,
+    accountID: string, appID: string, amount: s64,
+    receiptID: string, state: string) -> Error {
+    arguments: [7]Any = .[appID, accountID, inspected.accountBinding, state, receiptID, ProviderName, inspected.paymentID]
+    written := sql.ExecTx(transaction, context,
+        "UPDATE google_play_purchase_lifecycle\nSET app_id=?1,account_id=?2,account_binding=?3,state=?4,receipt_id=?5,updated_at=CURRENT_TIMESTAMP\nWHERE provider=?6 AND purchase_token=?7 AND state='binding_missing'",
+        arguments[:])
+    if written.error != null {
+        return written.error
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error != null {
+        return affected.error
+    }
+    if affected.value != 1 {
+        return errors.New("google purchase lifecycle changed")
+    }
+    return null
+}
+
+AdoptLegacyPaymentTx :: (transaction: *sql.Transaction, context: ctx.Context, inspected: google.GooglePurchaseResult,
+    purchase: GooglePurchaseVerifyRequest, accountID: string, amount: s64) -> PurchaseResult {
+    result: PurchaseResult
+    if inspected.accountBinding != "" && inspected.accountBinding != google.AccountBinding(accountID) {
+        result.error = errors.New("google purchase account mismatch")
+        return result
+    }
+    legacy := LoadPaymentTx(transaction, context, inspected.value)
+    result.error = legacy.error
+    if result.error != null || !legacy.found {
+        return result
+    }
+    if legacy.value.accountID != accountID || legacy.value.assetID != receipts.AssetID || legacy.value.amount != amount {
+        result.error = errors.New("google purchase legacy account mismatch")
+        return result
+    }
+    loaded := ledger.ByIDTx(transaction, context, legacy.value.receiptID)
+    result.error = loaded.error
+    if result.error != null {
+        return result
+    }
+    if !loaded.found || loaded.value.SourceType != ProviderName || loaded.value.SourceRef != inspected.value ||
+    loaded.value.AccountID != accountID || loaded.value.AmountDelta != amount {
+        result.error = errors.New("google purchase legacy receipt mismatch")
+        return result
+    }
+    existing := LoadPaymentTx(transaction, context, inspected.paymentID)
+    result.error = existing.error
+    if result.error != null {
+        return result
+    }
+    if !existing.found {
+        arguments: [6]Any = .[ProviderName, inspected.paymentID, accountID, receipts.AssetID, amount, legacy.value.receiptID]
+        written := sql.ExecTx(transaction, context,
+            "INSERT INTO token_processed_payments(provider,provider_payment_id,account_id,asset_id,amount,receipt_id)\nVALUES(?1,?2,?3,?4,?5,?6)",
+            arguments[:])
+        result.error = written.error
+        if result.error != null {
+            return result
+        }
+    } else if existing.value.receiptID != legacy.value.receiptID {
+        result.error = errors.New("google purchase token collision")
+        return result
+    }
+    result.receipt = loaded.value
+    return result
+}
+
+#scope_export
+ProcessPurchase :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, unavailable: Error,
+    inspected: google.GooglePurchaseResult, purchase: GooglePurchaseVerifyRequest, accountID: string,
+    appID: string, amount: s64) -> PurchaseResult {
+    result: PurchaseResult
+    if inspected.error != null || inspected.paymentID == "" || inspected.paymentID != purchase.PurchaseToken || amount <= 0 {
+        result.error = errors.New("invalid google purchase")
+        return result
+    }
+    begun := BeginTransaction(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    RollbackAtReturn(begun.value)
+    existing := LoadLifecycleTx(begun.value, context, inspected.paymentID)
+    result.error = existing.error
+    if result.error != null {
+        return result
+    }
+    expectedBinding := google.AccountBinding(accountID)
+    if existing.found {
+        record := existing.value
+        if record.provider != ProviderName || record.purchaseToken != inspected.paymentID || record.packageName != purchase.PackageName ||
+        record.productID != purchase.ProductID || record.amount != amount {
+            result.error = errors.New("google purchase lifecycle mismatch")
+            return result
+        }
+        if record.orderID != "" && inspected.orderID != record.orderID {
+            result.error = errors.New("google purchase order mismatch")
+            return result
+        }
+        if record.accountID != "" && record.accountID != accountID {
+            result.error = errors.New("google purchase account mismatch")
+            return result
+        }
+        if record.accountBinding != "" && inspected.accountBinding != "" && record.accountBinding != inspected.accountBinding {
+            result.error = errors.New("google purchase account mismatch")
+            return result
+        }
+        if record.state == "refunded" {
+            result.error = errors.New("google purchase refunded")
+            return result
+        }
+        if inspected.purchaseState != 0 {
+            result.error = errors.New("google purchase is not purchased")
+            return result
+        }
+        if record.state == "binding_missing" {
+            if inspected.accountBinding != "" && inspected.accountBinding != expectedBinding {
+                result.error = errors.New("google purchase account mismatch")
+                return result
+            }
+            legacy := AdoptLegacyPaymentTx(begun.value, context, inspected, purchase, accountID, amount)
+            if legacy.error != null {
+                result.error = legacy.error
+                return result
+            }
+            if legacy.receipt.ReceiptID == "" && inspected.accountBinding != expectedBinding {
+                result.bindingMissing = true
+                result.error = sql.Commit(begun.value)
+                return result
+            }
+            if legacy.receipt.ReceiptID == "" && inspected.consumptionState == 1 {
+                result.error = errors.New("google purchase already consumed")
+                return result
+            }
+            state := "consume_pending"
+            if inspected.consumptionState == 1 {
+                state = "consumed"
+            }
+            if legacy.receipt.ReceiptID == "" {
+                credited := creditNewPurchase(begun.value, context, signer, unavailable, inspected, purchase, accountID, appID, amount)
+                if credited.error != null {
+                    result.error = credited.error
+                    return result
+                }
+                result.receipt = credited.receipt
+            } else {
+                result.receipt = legacy.receipt
+            }
+            result.error = ClaimBindingTx(begun.value, context, inspected, accountID, appID, amount, result.receipt.ReceiptID, state)
+            if result.error != null {
+                return result
+            }
+            result.created = true
+        } else {
+            event: receipts.TokenEventInput
+            event.AccountID = record.accountID
+            event.AppID = record.appID
+            event.EventType = "credit"
+            event.AmountDelta = amount
+            event.SourceType = ProviderName
+            event.SourceRef = inspected.paymentID
+            credited := ledger.CreditPaymentTx(begun.value, context, signer, ProviderName, inspected.paymentID, event, unavailable)
+            result.error = credited.error
+            if result.error != null {
+                return result
+            }
+            result.receipt = credited.value
+        }
+    } else {
+        if inspected.purchaseState != 0 {
+            result.error = errors.New("google purchase is not purchased")
+            return result
+        }
+        legacy := AdoptLegacyPaymentTx(begun.value, context, inspected, purchase, accountID, amount)
+        result.error = legacy.error
+        if result.error != null {
+            return result
+        }
+        state := "consume_pending"
+        if legacy.receipt.ReceiptID == "" {
+            if inspected.accountBinding != expectedBinding {
+                result.error = InsertMissingBindingTx(begun.value, context, inspected, purchase, amount)
+                if result.error != null {
+                    return result
+                }
+                result.bindingMissing = true
+                result.error = sql.Commit(begun.value)
+                return result
+            }
+            if inspected.consumptionState == 1 {
+                result.error = errors.New("google purchase already consumed")
+                return result
+            }
+            credited := creditNewPurchase(begun.value, context, signer, unavailable, inspected, purchase, accountID, appID, amount)
+            if credited.error != null {
+                result.error = credited.error
+                return result
+            }
+            result.receipt = credited.receipt
+        } else {
+            state = "consume_pending"
+            if inspected.consumptionState == 1 {
+                state = "consumed"
+            }
+            result.receipt = legacy.receipt
+            result.created = false
+        }
+        record: LifecycleRecord
+        record.provider = ProviderName
+        record.purchaseToken = inspected.paymentID
+        record.packageName = purchase.PackageName
+        record.productID = purchase.ProductID
+        record.appID = appID
+        record.accountID = accountID
+        if inspected.accountBinding != "" {
+            record.accountBinding = inspected.accountBinding
+        }
+        record.orderID = inspected.orderID
+        record.state = state
+        record.amount = amount
+        record.receiptID = result.receipt.ReceiptID
+        result.error = InsertLifecycleTx(begun.value, context, record)
+        if result.error != null {
+            return result
+        }
+        result.created = legacy.receipt.ReceiptID == ""
+    }
+    result.error = sql.Commit(begun.value)
+    return result
+}
+
+RetryConsume :: (database: *sql.Database, context: ctx.Context, configuration: config.Config, purchaseToken: string) -> ConsumeRetryResult {
+    result: ConsumeRetryResult
+    record := loadLifecycle(database, context, purchaseToken)
+    result.error = record.error
+    if result.error != null || !record.found {
+        return result
+    }
+    if record.value.state == "consumed" {
+        result.consumed = true
+        return result
+    }
+    if record.value.state != "consume_pending" {
+        result.error = errors.New("google purchase not awaiting consume")
+        return result
+    }
+    request: GooglePurchaseVerifyRequest
+    request.PackageName = record.value.packageName
+    request.ProductID = record.value.productID
+    request.PurchaseToken = purchaseToken
+    inspected := google.InspectPurchase(context, configuration, request)
+    if inspected.error != null {
+        result.error = inspected.error
+        return result
+    }
+    if inspected.purchaseState != 0 {
+        result.error = errors.New("google purchase is not purchased")
+        return result
+    }
+    if inspected.consumptionState == 1 {
+        result.error = markConsumed(database, context, purchaseToken)
+        result.consumed = result.error == null
+        return result
+    }
+    consumed := google.ConsumePurchase(context, configuration, request)
+    if consumed != null {
+        checked := google.InspectPurchase(context, configuration, request)
+        if checked.error != null {
+            result.error = consumed
+            return result
+        }
+        if checked.consumptionState != 1 {
+            result.error = consumed
+            return result
+        }
+    }
+    result.error = markConsumed(database, context, purchaseToken)
+    result.consumed = result.error == null
+    return result
+}
+
+ReconcilePendingConsumes :: (database: *sql.Database, context: ctx.Context, configuration: config.Config) -> PendingConsumeResult {
+    result: PendingConsumeResult
+    purchaseTokens: [100]string
+    tokenCount: s32
+    arguments: [1]Any = .[ProviderName]
+    rows := sql.Query(database, context,
+        "SELECT purchase_token\nFROM google_play_purchase_lifecycle\nWHERE provider=?1 AND state='consume_pending'\nORDER BY created_at\nLIMIT 100",
+        arguments[:])
+    result.error = rows.error
+    if result.error != null {
+        return result
+    }
+    CloseRowsAtReturn(rows.value)
+    while sql.Next(rows.value) {
+        purchaseToken := ""
+        destinations: [1]Any = .[*purchaseToken]
+        result.error = sql.ScanRows(rows.value, destinations[:])
+        if result.error != null {
+            return result
+        }
+        purchaseTokens[tokenCount] = purchaseToken
+        tokenCount += 1
+    }
+    rowsError := sql.RowsError(rows.value)
+    if rowsError != null {
+        result.error = rowsError
+        return result
+    }
+    result.error = sql.CloseRows(rows.value)
+    if result.error != null {
+        return result
+    }
+    index: s32 = 0
+    while index < tokenCount {
+        retried := RetryConsume(database, context, configuration, purchaseTokens[index])
+        result.attempted += 1
+        if retried.error != null {
+            result.error = retried.error
+        } else if retried.consumed {
+            result.consumed += 1
+        }
+        index += 1
+    }
+    return result
+}
+
+ReconcileRefunds :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
+    packageName: string, sinceMillis: s64, signer: ed.PrivateKey, unavailable: Error) -> RefundResult {
+    result: RefundResult
+    result.error = Ensure(database, context)
+    if result.error != null {
+        return result
+    }
+    voided := google.ListVoidedPurchases(context, configuration, packageName, sinceMillis)
+    result.error = voided.error
+    if result.error != null {
+        return result
+    }
+    for record: voided.value {
+        compensated := CompensateVoided(database, context, record, signer, unavailable)
+        result.error = compensated
+        if result.error != null {
+            return result
+        }
+        result.compensated += 1
+    }
+    return result
+}
+
+ReconcileRecentRefunds :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
+    packageName: string, signer: ed.PrivateKey, unavailable: Error) -> RefundResult {
+    since := clock.Unix(clock.Now()) * 1000 - RecentRefundMillis
+    return ReconcileRefunds(database, context, configuration, packageName, since, signer, unavailable)
+}
+
+CompensateVoided :: (database: *sql.Database, context: ctx.Context, voided: google.GoogleVoidedPurchase,
+    signer: ed.PrivateKey, unavailable: Error) -> Error {
+    begun := BeginTransaction(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    RollbackAtReturn(begun.value)
+    existing := LoadLifecycleTx(begun.value, context, voided.purchaseToken)
+    if existing.error != null {
+        return existing.error
+    }
+    if !existing.found || existing.value.state == "binding_missing" || existing.value.state == "refunded" {
+        return sql.Commit(begun.value)
+    }
+    if voided.orderID != "" && existing.value.orderID != "" && voided.orderID != existing.value.orderID {
+        return errors.New("google purchase refund order mismatch")
+    }
+    event: receipts.TokenEventInput
+    event.AccountID = existing.value.accountID
+    event.AppID = existing.value.appID
+    event.EventType = "debit"
+    event.AmountDelta = -existing.value.amount
+    event.SourceType = ProviderName
+    event.SourceRef = voided.purchaseToken
+    compensation := ledger.Insert(begun.value, context, signer, event, unavailable)
+    if compensation.error != null {
+        return compensation.error
+    }
+    refundArguments: [4]Any = .[compensation.value.ReceiptID, voided.voidedTimeMillis, ProviderName, voided.purchaseToken]
+    written := sql.ExecTx(begun.value, context,
+        "UPDATE google_play_purchase_lifecycle\nSET state='refunded',refund_receipt_id=?1,voided_millis=?2,updated_at=CURRENT_TIMESTAMP\nWHERE provider=?3 AND purchase_token=?4 AND state IN ('consume_pending','consumed')",
+        refundArguments[:])
+    if written.error != null {
+        return written.error
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error != null {
+        return affected.error
+    }
+    if affected.value != 1 {
+        return errors.New("google purchase refund lifecycle changed")
+    }
+    return sql.Commit(begun.value)
+}
+
+creditNewPurchase :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.PrivateKey, unavailable: Error,
+    inspected: google.GooglePurchaseResult, purchase: GooglePurchaseVerifyRequest, accountID: string,
+    appID: string, amount: s64) -> PurchaseResult {
+    result: PurchaseResult
+    event: receipts.TokenEventInput
+    event.AccountID = accountID
+    event.AppID = appID
+    event.EventType = "credit"
+    event.AmountDelta = amount
+    event.SourceType = ProviderName
+    event.SourceRef = inspected.paymentID
+    credited := ledger.CreditPaymentTx(transaction, context, signer, ProviderName, inspected.paymentID, event, unavailable)
+    result.error = credited.error
+    if result.error == null {
+        result.receipt = credited.value
+    }
+    return result
+}
+loadLifecycle :: (database: *sql.Database, context: ctx.Context, purchaseToken: string) -> LifecycleResult {
+    begun := BeginTransaction(database, context, null)
+    result: LifecycleResult
+    if begun.error != null {
+        result.error = begun.error
+        return result
+    }
+    RollbackAtReturn(begun.value)
+    result = LoadLifecycleTx(begun.value, context, purchaseToken)
+    if result.error == null {
+        result.error = sql.Commit(begun.value)
+    }
+    return result
+}
+markConsumed :: (database: *sql.Database, context: ctx.Context, purchaseToken: string) -> Error {
+    begun := BeginTransaction(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    RollbackAtReturn(begun.value)
+    consumeArguments: [2]Any = .[ProviderName, purchaseToken]
+    written := sql.ExecTx(begun.value, context,
+        "UPDATE google_play_purchase_lifecycle\nSET state='consumed',updated_at=CURRENT_TIMESTAMP\nWHERE provider=?1 AND purchase_token=?2 AND state='consume_pending'",
+        consumeArguments[:])
+    if written.error != null {
+        return written.error
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error != null {
+        return affected.error
+    }
+    if affected.value != 1 {
+        return errors.New("google purchase consume lifecycle changed")
+    }
+    return sql.Commit(begun.value)
+}

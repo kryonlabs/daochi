@@ -1,5 +1,5 @@
 // Completion evidence is retained against immutable, publisher-registered maps.
-// These are light geometry checks, independent of the puzzle engine.
+// Complete evidence is replayed by the canonical headless puzzle engine.
 #import "std/go_types"
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
@@ -7,6 +7,7 @@ json :: #import "std/json_go";
 text :: #import "std/text_go";
 clock :: #import "std/time_go";
 errors :: #import "std/errors_go";
+shovey :: #import "shovey/rules";
 sha :: #system_library "go:crypto/sha256";
 hex :: #system_library "go:encoding/hex";
 numbers :: #system_library "go:strconv";
@@ -90,13 +91,13 @@ HexText :: (value: string, size: s32) -> bool {
 Solid :: (kind: s32) -> bool {
     // Cracked walls, locks, gates, water and pushable objects can change.
     return kind == 12 || kind == 63 || kind == 76 || kind == 84 ||
-        (kind >= 95 && kind <= 98) || kind == 106 || kind == 122 ||
-        (kind >= 139 && kind <= 142)
+    (kind >= 95 && kind <= 98) || kind == 106 || kind == 122 ||
+    (kind >= 139 && kind <= 142)
 }
 Movable :: (kind: s32) -> bool {
     return (kind >= 1 && kind <= 3) || kind == 9 || kind == 19 || kind == 28 ||
-        (kind >= 36 && kind <= 38) || kind == 40 || (kind >= 44 && kind <= 46) ||
-        (kind >= 53 && kind <= 55) || kind == 72
+    (kind >= 36 && kind <= 38) || kind == 40 || (kind >= 44 && kind <= 46) ||
+    (kind >= 53 && kind <= 55) || kind == 72
 }
 Ground :: (map: string, cell: s32) -> s32 {
     kind := ByteAt(map, cell * 2)
@@ -144,7 +145,7 @@ MapHash :: (game: string, level: s32, map: string) -> string {
 }
 ValidateRegistration :: (registration: MapRegistration) -> Error {
     if registration.game != "shovey.classic" || registration.source_version.count < 1 ||
-        registration.source_version.count > 128 || registration.maps.count < 1 || registration.maps.count > 512 {
+    registration.source_version.count > 128 || registration.maps.count < 1 || registration.maps.count > 512 {
         return errors.New("invalid map registration")
     }
     for map: registration.maps {
@@ -200,10 +201,10 @@ Register :: (database: *sql.Database, context: ctx.Context, registration: MapReg
 
 Validate :: (completion: Completion, map: string) -> Error {
     if completion.game != "shovey.classic" || completion.level < 1 || completion.level > 4096 ||
-        !HexText(completion.map_hash, 64) || MapHash(completion.game, completion.level, map) != completion.map_hash ||
-        completion.moves < 1 || completion.actions.count < 1 || completion.actions.count > 60000 ||
-        completion.trace.count < 2 || completion.trace.count > 240000 || completion.trace.count % 2 != 0 ||
-        !HexText(completion.trace, cast(s32)completion.trace.count) {
+    !HexText(completion.map_hash, 64) || MapHash(completion.game, completion.level, map) != completion.map_hash ||
+    completion.moves < 1 || completion.actions.count < 1 || completion.actions.count > 60000 ||
+    completion.trace.count < 2 || completion.trace.count > 240000 || completion.trace.count % 2 != 0 ||
+    !HexText(completion.trace, cast(s32)completion.trace.count) {
         return errors.New("invalid completion evidence")
     }
     for action: completion.actions {
@@ -243,6 +244,9 @@ Validate :: (completion: Completion, map: string) -> Error {
         if completion.moves < steps || cast(s64)completion.moves > cast(s64)steps + completion.actions.count {
             return errors.New("move count contradicts recorded actions and cells")
         }
+        if !shovey.ShoveyRulesVerify(completion.level, map, completion.actions, completion.trace, completion.moves) {
+            return errors.New("completion actions do not replay to a win")
+        }
     }
     return null
 }
@@ -269,8 +273,8 @@ Put :: (database: *sql.Database, context: ctx.Context, account: string, completi
     }
     result.id = Digest(text.FromBytes(encoded.value))
     values: [11]Any = .[account, result.id, completion.game, completion.level, completion.map_hash,
-        completion.moves, completion.actions, completion.trace, completion.evidence_complete,
-        text.FromBytes(encoded.value), clock.Unix(clock.Now())]
+    completion.moves, completion.actions, completion.trace, completion.evidence_complete,
+    text.FromBytes(encoded.value), clock.Unix(clock.Now())]
     written := sql.Exec(database, context, InsertCompletion, values[:])
     result.error = written.error
     if result.error == null {
@@ -356,4 +360,4 @@ ReadMap :: "SELECT map FROM game_maps WHERE game=?1 AND level=?2 AND map_hash=?3
 InsertSource :: "INSERT INTO game_map_sources(game,level,map_hash,source_version,created_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING";
 InsertCompletion :: "INSERT INTO game_completions(account_id,id,game,level,map_hash,moves,actions,trace,evidence_complete,payload,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT DO NOTHING";
 ReadHistory :: "SELECT c.payload,m.map FROM game_completions c JOIN game_maps m USING(game,level,map_hash) WHERE c.account_id=?1 AND c.game=?2 AND c.level=?3 AND c.map_hash=?4 ORDER BY c.moves,c.created_at,c.id LIMIT 16 OFFSET ?5";
-ReadEligibility :: "WITH RECURSIVE levels(level) AS (SELECT 1 UNION ALL SELECT level+1 FROM levels WHERE level<?2) SELECT COUNT(*) FROM levels WHERE EXISTS(SELECT 1 FROM game_completions c WHERE c.account_id=?1 AND c.game='shovey.classic' AND c.level=levels.level AND c.evidence_complete=1 AND c.moves>=10) OR EXISTS(SELECT 1 FROM game_legacy_progress p WHERE p.account_id=?1 AND (levels.level<p.unlocked OR substr(p.completed,levels.level,1)='1'))";
+ReadEligibility :: "WITH RECURSIVE levels(level) AS (SELECT 1 UNION ALL SELECT level+1 FROM levels WHERE level<?2) SELECT COUNT(*) FROM levels WHERE EXISTS(SELECT 1 FROM game_completions c WHERE c.account_id=?1 AND c.game='shovey.classic' AND c.level=levels.level AND c.evidence_complete=1 AND c.moves>=10)";

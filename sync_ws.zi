@@ -20,11 +20,13 @@ address :: #import "client_address";
 rate :: #import "rate_limit";
 metrics :: #import "metrics";
 token :: #import "token";
+accounts :: #import "account_keys";
 go_sql :: #system_library "go:database/sql";
 go_net :: #system_library "go:net";
 go_bufio :: #system_library "go:bufio";
 go_time :: #system_library "go:time";
 go_reflect :: #system_library "go:reflect";
+go_strings :: #system_library "go:strings";
 builtin :: #system_library "go:builtin";
 
 SyncSocket :: struct {
@@ -44,6 +46,20 @@ EventResult :: struct {
     value: SyncEvent
     present: bool
 }
+Credential :: struct {
+    userID: string
+    bearer: string
+    expiresAt: s64
+    valid: bool
+}
+BearerExpiryResult :: struct {
+    value: s64
+    valid: bool
+}
+TextPrefixResult :: struct {
+    value: string
+    found: bool
+}
 ReaderWorker :: #type (connection: socket.Connection, reader: *socket.BufferedReader, cancel: ctx.CancelFunc) -> void;
 CancelCallback :: #type (cancel: ctx.CancelFunc) -> void;
 UnsubscribeCallback :: #type (hub: *SyncHub, userID: string, subscription: *Subscription) -> void;
@@ -59,10 +75,13 @@ Unbox :: (value: selection.Value) -> Any #foreign go_reflect "Value.Interface";
 AsEvent :: (value: Any) -> EventResult #go_results #foreign builtin "assert";
 QueryVersion :: (database: *sql.Database, context: ctx.Context, query: string, userID: string) -> *sql.Row #foreign go_sql "(*DB).QueryRowContext";
 ScanVersion :: (row: *sql.Row, version: *s64) -> Error #foreign go_sql "(*Row).Scan";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+CutTextPrefix :: (value: string, prefix: string) -> TextPrefixResult #go_results #foreign go_strings "CutPrefix";
 Minute :: 60000000000;
 ReadWindow :: 90000000000;
 WriteWindow :: 10000000000;
 PingInterval :: 30000000000;
+ValidationInterval :: 500000000;
 
 Allow :: (value: SyncSocket, key: string, limit: isize) -> bool {
     if value.limiter == null {
@@ -111,6 +130,62 @@ Authenticate :: (value: SyncSocket, request: *http.Request) -> http_auth.UserAut
     return http_auth.AuthenticateToken(value.database, request, value.configuration.TokenSecret)
 }
 
+#scope_file
+RequestBearer :: (request: *http.Request) -> string {
+    bearer := socket.BearerToken(http.HeaderValue(http.Headers(request), "Sec-WebSocket-Protocol"))
+    if bearer != "" {
+        return bearer
+    }
+    header := TrimSpace(http.HeaderValue(http.Headers(request), "Authorization"))
+    prefixed := CutTextPrefix(header, "Bearer ")
+    if !prefixed.found {
+        return ""
+    }
+    return TrimSpace(prefixed.value)
+}
+
+BearerExpiry :: (value: SyncSocket, userID: string, bearer: string) -> BearerExpiryResult {
+    result: BearerExpiryResult
+    metadata := token.InspectAuthToken(value.configuration.TokenSecret, bearer)
+    if metadata.error != "" || metadata.value.userID != userID {
+        return result
+    }
+    result.value = metadata.value.expiresAt
+    result.valid = true
+    return result
+}
+
+CredentialFor :: (value: SyncSocket, request: *http.Request, userID: string) -> Credential {
+    result: Credential
+    result.userID = userID
+    result.bearer = RequestBearer(request)
+    expiry := BearerExpiry(value, userID, result.bearer)
+    if !expiry.valid {
+        return result
+    }
+    result.expiresAt = expiry.value
+    result.valid = true
+    return result
+}
+
+#scope_export
+CredentialActive :: (value: SyncSocket, context: ctx.Context, credential: Credential) -> bool {
+    if !credential.valid || credential.bearer == "" {
+        return false
+    }
+    now := clock.Unix(clock.Now())
+    verified := token.VerifyAuthToken(value.configuration.TokenSecret, credential.bearer, now)
+    if verified.error != "" || verified.value != credential.userID {
+        return false
+    }
+    account := accounts.PublicKey(value.database, context, credential.userID)
+    if account.error != null {
+        return false
+    }
+    return account.found && http_auth.BearerSessionActive(value.database, context,
+        credential.bearer, credential.userID, now)
+}
+
 Handle :: (value: SyncSocket, writer: http.ResponseWriter, request: *http.Request) {
     if http.Method(request) != "GET" {
         response.Error(writer, cast(isize)405, "method not allowed")
@@ -123,6 +198,12 @@ Handle :: (value: SyncSocket, writer: http.ResponseWriter, request: *http.Reques
         return
     }
     userID := authenticated.value
+    credential := CredentialFor(value, request, userID)
+    if !credential.valid {
+        metrics.RecordWebSocketReject(value.counters, "auth")
+        response.Error(writer, cast(isize)401, "invalid bearer token")
+        return
+    }
     if !Allow(value, socket.AddText("ws:ip:", address.FromRequest(request)), cast(isize)120) ||
         !Allow(value, socket.AddText("ws:user:", userID), cast(isize)40) {
         metrics.RecordWebSocketReject(value.counters, "rate_limited")
@@ -143,6 +224,9 @@ Handle :: (value: SyncSocket, writer: http.ResponseWriter, request: *http.Reques
     CloseAtReturn(accepted.connection)
     events := hub.Subscribe(value.hub, userID)
     UnsubscribeAtReturn(hub.Unsubscribe, value.hub, userID, events)
+    if !CredentialActive(value, http.Context(request), credential) {
+        return
+    }
     version := CurrentVersion(value, http.Context(request), userID)
     if version.error == null {
         ready: SyncEvent
@@ -156,14 +240,23 @@ Handle :: (value: SyncSocket, writer: http.ResponseWriter, request: *http.Reques
     SpawnReader(ReadLoop, accepted.connection, Reader(accepted.buffer), child.cancel)
     ticker := clock.NewTicker(cast(clock.Duration)PingInterval)
     StopAtReturn(ticker)
+    validation := clock.NewTicker(cast(clock.Duration)ValidationInterval)
+    StopAtReturn(validation)
     while true {
-        cases: [3]selection.Case
+        cases: [4]selection.Case
         cases[0] = selection.Receive(ctx.Done(child.value))
         cases[1] = selection.Receive(channels.Interface(events.channel))
         cases[2] = selection.Receive(clock.TickerChannel(ticker))
+        cases[3] = selection.Receive(clock.TickerChannel(validation))
         chosen := selection.Select(cases[:])
         if chosen.chosen == cast(isize)0 {
             return
+        }
+        if chosen.chosen != cast(isize)0 && !CredentialActive(value, child.value, credential) {
+            return
+        }
+        if chosen.chosen == cast(isize)3 {
+            continue
         }
         SetWriteDeadline(accepted.connection, clock.Add(clock.Now(), cast(clock.Duration)WriteWindow))
         if chosen.chosen == cast(isize)1 {

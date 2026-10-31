@@ -34,6 +34,24 @@ func (v *recordingVerifier) Verify(publicKey, message, signature []byte) bool {
 	return len(publicKey) == mlDSA44PublicKeySize && len(signature) == mlDSA44SignatureSize
 }
 
+func recordTestBearer(t *testing.T, server *Server, bearer string) {
+	t.Helper()
+	if err := AuthSessions_RecordIssued(server.Store.Database, t.Context(),
+		server.Cfg.TokenSecret, bearer, "test-client-1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func issueTestBearer(t *testing.T, server *Server, userID string, expiresAt time.Time) string {
+	t.Helper()
+	issued := Token_IssueAuthToken(server.Cfg.TokenSecret, userID, expiresAt.Unix())
+	if issued.Error != "" {
+		t.Fatal(issued.Error)
+	}
+	recordTestBearer(t, server, issued.Value)
+	return issued.Value
+}
+
 func testServer(t *testing.T) (*Server, *Store, *recordingVerifier) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "ksync-test.db")
@@ -630,7 +648,7 @@ func TestHeaderSignedSyncAndDelete(t *testing.T) {
 			Collection: "inbe.habits", ID: "deleted-habit", KeyID: "main",
 			Nonce: "n1", Ciphertext: "ciphertext", UpdatedAt: "2026-09-04T12:00:00Z",
 		},
-	}})
+	}}, 0, false)
 	applied, err := importedRecords.Value, importedRecords.Error
 	if err != nil || applied != 0 {
 		t.Fatalf("deleted account mesh import applied=%d err=%v", applied, err)
@@ -666,6 +684,16 @@ func TestPostAccountDeleteRouteMatchesKryonClient(t *testing.T) {
 		t.Fatalf("post delete signed message mismatch\n got: %q\nwant: %q", string(verifier.message), wantMessage)
 	}
 	assertCount(t, store, "server_users", 0)
+
+	recreatedToken, _ := loginWithKey(t, handler, "", userID, publicKeyHex, signature)
+	assertCount(t, store, "server_users", 1)
+	recreatedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/tokens/balance", nil)
+	recreatedRequest.Header.Set("Authorization", "Bearer "+recreatedToken)
+	recreatedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(recreatedResponse, recreatedRequest)
+	if recreatedResponse.Code != http.StatusOK {
+		t.Fatalf("recreated account bearer status = %d body=%s", recreatedResponse.Code, recreatedResponse.Body.String())
+	}
 }
 
 func TestDaochiHeaderAliases(t *testing.T) {
@@ -1679,7 +1707,12 @@ func TestReadinessMetricsDiagnosticsAndEncryptedRecords(t *testing.T) {
 
 func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	source, _, _ := testServer(t)
-	source.Cfg.NodeSyncToken = "mesh-secret"
+	target, _, _ := testServer(t)
+	credential := meshTokenCredential(target.Node.ID)
+	source.Cfg.NodeSyncToken = credential
+	meshHTTPPeer(t, source, target.Node, NodeSyncPolicy{
+		Direction: "bidirectional", Apps: []string{"inbe"}, Collections: []string{"inbe.*"}, Data: []string{"encrypted_records"},
+	})
 	sourceHandler := source.Routes()
 	identity := newTestIdentity(t, sourceHandler, 0x6b)
 
@@ -1704,7 +1737,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 		t.Fatalf("mesh export without token status = %d body=%s", unauthorized.Code, unauthorized.Body.String())
 	}
 	unscoped := httptest.NewRequest(http.MethodPost, "/api/v1/node/mesh/export", strings.NewReader(`{}`))
-	unscoped.Header.Set("Authorization", "Bearer mesh-secret")
+	unscoped.Header.Set("Authorization", "Bearer "+credential)
 	unscopedRes := httptest.NewRecorder()
 	sourceHandler.ServeHTTP(unscopedRes, unscoped)
 	if unscopedRes.Code != http.StatusBadRequest {
@@ -1726,7 +1759,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	}
 	exportHTTP := httptest.NewRequest(http.MethodPost, "/api/v1/node/mesh/export", bytes.NewReader(exportBody))
 	exportHTTP.Header.Set("Content-Type", "application/json")
-	exportHTTP.Header.Set("Authorization", "Bearer mesh-secret")
+	exportHTTP.Header.Set("Authorization", "Bearer "+credential)
 	exportRes := httptest.NewRecorder()
 	sourceHandler.ServeHTTP(exportRes, exportHTTP)
 	if exportRes.Code != http.StatusOK {
@@ -1761,8 +1794,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 	}))
 	defer peerHTTP.Close()
 
-	target, _, _ := testServer(t)
-	target.Cfg.NodeSyncToken = "mesh-secret"
+	target.Cfg.NodeSyncToken = credential
 	target.Cfg.NodeSyncBatchLimit = 1
 	err = Mesh_PullPeer(target.mesh(), context.Background(), NodePeer{
 		Name: "source",
@@ -1812,7 +1844,7 @@ func TestNodeMeshEncryptedRecordPullHonorsPolicy(t *testing.T) {
 		Apps:        []string{"inbe"},
 		Collections: []string{"inbe.*"},
 		Data:        []string{"encrypted_records"},
-	}, imported)
+	}, imported, 0, false)
 	appliedAgain, err := reimported.Value, reimported.Error
 	if err != nil {
 		t.Fatal(err)
@@ -3390,33 +3422,73 @@ func TestBootstrapDoesNotApplyLocalTombstones(t *testing.T) {
 	}
 }
 
-func TestBearerSyncCanRegisterUserWithPublicKey(t *testing.T) {
-	server, _, _ := testServer(t)
+func TestFirstAccountBearerBootstrapAndLogout(t *testing.T) {
+	server, store, _ := testServer(t)
 	handler := server.Routes()
 	publicKey := bytes.Repeat([]byte{0x48}, mlDSA44PublicKeySize)
 	userHash := sha256.Sum256(publicKey)
 	userID := hex.EncodeToString(userHash[:])
-	tokenResult := Token_IssueAuthToken(server.Cfg.TokenSecret, userID, time.Now().Add(server.Cfg.TokenTTL).Unix())
-	if tokenResult.Error != "" {
-		t.Fatal(tokenResult.Error)
-	}
-	token := tokenResult.Value
+	signature := hex.EncodeToString(bytes.Repeat([]byte{0x59}, mlDSA44SignatureSize))
+	assertCount(t, store, "server_users", 0)
 
-	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `","since_server_version":0,"bootstrap":true,"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
-	res := syncWithBody(t, handler, "", userID, token, body)
-	if res.Code != http.StatusOK {
-		t.Fatalf("sync status = %d body=%s", res.Code, res.Body.String())
+	unrecorded := Token_IssueAuthToken(server.Cfg.TokenSecret, userID, time.Now().Add(server.Cfg.TokenTTL).Unix())
+	if unrecorded.Error != "" {
+		t.Fatal(unrecorded.Error)
 	}
+	unrecordedBody := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1"}`)
+	unrecordedRequest := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(unrecordedBody))
+	unrecordedRequest.Header.Set("X-Daochi-User", userID)
+	unrecordedRequest.Header.Set("Authorization", "Bearer "+unrecorded.Value)
+	unrecordedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(unrecordedResponse, unrecordedRequest)
+	if unrecordedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unrecorded bootstrap status = %d body=%s", unrecordedResponse.Code, unrecordedResponse.Body.String())
+	}
+
+	token, _ := loginWithKey(t, handler, "", userID, hex.EncodeToString(publicKey), signature)
+	assertCount(t, store, "server_users", 1)
+	body := []byte(`{"user_id_hash":"` + userID + `","client_id":"test-client-1","public_key":"` + hex.EncodeToString(publicKey) + `","since_server_version":0,"bootstrap":true,"habits":[{"id":"habit-1","name":"Meditate","color_r":1,"color_g":2,"color_b":3,"sync_mode":1,"sync_activity":2,"counter_enabled":1,"sort_order":0,"deleted_at":0,"updated_at":"2026-06-19T00:00:00Z"}]}`)
+	response := syncWithBody(t, handler, "", userID, token, body)
 	var payload SyncResponse
-	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
 	if payload.Applied.Habits != 1 || len(payload.Changes.Habits) != 1 {
-		t.Fatalf("registered sync response = %#v", payload)
+		t.Fatalf("first-account bootstrap response = %#v", payload)
 	}
-	if account := AccountKeys_PublicKey(server.Store.Database, t.Context(), userID); account.Error != nil || !account.Found {
-		t.Fatalf("registered public key found=%v err=%v", account.Found, account.Error)
+
+	target := httptest.NewServer(handler)
+	t.Cleanup(target.Close)
+	reader, connection := openSyncWebSocket(t, target.URL, token)
+	t.Cleanup(func() { _ = connection.Close() })
+	if ready := readTestWebSocketEvent(t, reader); ready.Type != "sync_ready" || ready.UserIDHash != userID {
+		t.Fatalf("ready event = %#v", ready)
 	}
+
+	logout := httptest.NewRequest(http.MethodPost, "/api/v1/sync/logout", nil)
+	logout.Header.Set("X-Daochi-User", userID)
+	logout.Header.Set("Authorization", "Bearer "+token)
+	logoutResponse := httptest.NewRecorder()
+	handler.ServeHTTP(logoutResponse, logout)
+	if logoutResponse.Code != http.StatusOK || logoutResponse.Body.String() != "{\"status\":\"ok\"}\n" {
+		t.Fatalf("logout status = %d body=%s", logoutResponse.Code, logoutResponse.Body.String())
+	}
+
+	rejected := httptest.NewRequest(http.MethodGet, "/api/v1/tokens/balance", nil)
+	rejected.Header.Set("X-Daochi-User", userID)
+	rejected.Header.Set("Authorization", "Bearer "+token)
+	rejectedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(rejectedResponse, rejected)
+	if rejectedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("logged-out sync status = %d body=%s", rejectedResponse.Code, rejectedResponse.Body.String())
+	}
+	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if frame := Websocket_ReadFrame(reader); frame.Error == nil {
+		t.Fatalf("logged-out websocket returned %q", frame.Payload)
+	}
+	requireOwnerSocketRemoved(t, server, userID)
 }
 
 func TestSyncWebSocketReceivesChangeEvents(t *testing.T) {

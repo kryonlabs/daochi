@@ -43,6 +43,7 @@ Monero :: struct {
 TransfersResult :: struct {
     value: []wallet.WalletTransfer
     height: s64
+    rollback: bool
     error: Error
 }
 
@@ -73,15 +74,140 @@ LogLookupError :: (message: string, key: string, error: Error) #foreign logging 
 LogAccountError :: (message: string, accountKey: string, account: string, errorKey: string, error: Error) #foreign logging "Error";
 LogSettlementError :: (message: string, accountKey: string, account: string, transactionKey: string, transaction: string, errorKey: string, error: Error) #foreign logging "Warn";
 PathEscape :: (value: string) -> string #foreign go_url;
+EmptyTransfer :: () -> wallet.WalletTransfer {
+    value: wallet.WalletTransfer
+    return value
+}
 
 CollectTransfers :: (payments: Map(string, wallet.WalletTransfer), transfers: []wallet.WalletTransfer) {
     for transfer: transfers {
         key := PaymentKey("%s:%d:%d", transfer.TxID, transfer.SubaddrIndex.Major, transfer.SubaddrIndex.Minor)
         previous := MapLookup(payments, key)
-        if !previous.has_value || transfer.Confirmations >= previous.value.Confirmations {
+        replacement := !previous.has_value
+        if previous.has_value && previous.value.Height == cast(s64)0 && transfer.Height > cast(s64)0 &&
+        previous.value.Amount == transfer.Amount {
+            replacement = true
+        }
+        if previous.has_value && previous.value.Height == transfer.Height &&
+        previous.value.Amount == transfer.Amount && transfer.Confirmations >= previous.value.Confirmations {
+            replacement = true
+        }
+        if replacement {
             MapSet(payments, key, transfer)
         }
     }
+}
+
+FinalityHeight :: (blockHeight: s64, configuration: config.Config) -> s64 {
+    finality := wallet.FinalityConfirmations(configuration)
+    if blockHeight <= cast(s64)0 || finality > cast(s64)9223372036854775807 - blockHeight {
+        return cast(s64)9223372036854775807
+    }
+    return blockHeight + finality
+}
+
+MatchingTransfer :: (transfers: []wallet.WalletTransfer, deposit: MoneroDeposit) -> wallet.WalletTransfer {
+    for transfer: transfers {
+        if transfer.TxID == deposit.TxID && transfer.Amount == deposit.AmountAtomic &&
+        transfer.Height == deposit.BlockHeight && transfer.UnlockTime == deposit.UnlockTime &&
+        transfer.Locked == deposit.Locked &&
+        transfer.SubaddrIndex.Major == deposit.AccountIndex &&
+        transfer.SubaddrIndex.Minor == deposit.AddressIndex {
+            return transfer
+        }
+    }
+    return EmptyTransfer()
+}
+
+TransferLookup :: struct {
+    value: wallet.WalletTransfer
+    found: bool
+}
+
+LookupTransfer :: (transfers: []wallet.WalletTransfer, transactionID: string) -> TransferLookup {
+    result: TransferLookup
+    for transfer: transfers {
+        if transfer.TxID == transactionID {
+            result.value = transfer
+            result.found = true
+            return result
+        }
+    }
+    return result
+}
+
+ReconcileFinality :: (monero: Monero, context: ctx.Context, deposits: []MoneroDeposit) -> Error {
+    parameters: Map(string, Any)
+    MapInit(parameters)
+    height: WalletHeight
+    heightError := wallet.Request(context, <<monero.configuration, "get_height", parameters, *height, monero.unavailable)
+    if heightError != null {
+        return heightError
+    }
+    issuer := policy.Issuer(<<monero.configuration, monero.issuerUnavailable)
+    if issuer.error != null {
+        return issuer.error
+    }
+    for deposit: deposits {
+        if height.height > cast(s64)0 && deposit.BlockHeight > cast(s64)0 && height.height < deposit.BlockHeight {
+            return errors.New("monero wallet height moved before credited deposit")
+        }
+        MapClear(parameters)
+        MapSet(parameters, "in", true)
+        MapSet(parameters, "account_index", deposit.AccountIndex)
+        indices: [1]isize
+        indices[0] = deposit.AddressIndex
+        MapSet(parameters, "subaddr_indices", indices[:])
+        confirmed: ConfirmedTransfers
+        rpcError := wallet.Request(context, <<monero.configuration, "get_transfers", parameters, *confirmed, monero.unavailable)
+        if rpcError != null {
+            return rpcError
+        }
+        lookup := LookupTransfer(confirmed.incoming, deposit.TxID)
+        transfer := lookup.value
+        found := lookup.found
+        finalityHeight := FinalityHeight(deposit.BlockHeight, <<monero.configuration)
+        if found && transfer.DoubleSpendSeen {
+            held := storage.CompensationHold(monero.database, context, deposit.TxID, deposit.AccountIndex, deposit.AddressIndex)
+            if held.error != null {
+                return held.error
+            }
+            compensated := storage.CompensateDeposit(monero.database, context, issuer.value,
+                deposit.TxID, deposit.AccountIndex, deposit.AddressIndex, monero.issuerUnavailable)
+            if compensated.error != null {
+                return compensated.error
+            }
+            continue
+        }
+        if !found {
+            // A wallet may omit a transfer while refreshing or rescanning.
+            // Height alone is not evidence that a paid transfer was reversed.
+            held := storage.ConflictHold(monero.database, context, deposit.TxID, deposit.AccountIndex, deposit.AddressIndex)
+            if held.error != null {
+                return held.error
+            }
+            continue
+        }
+        consistent := transfer.Amount == deposit.AmountAtomic && transfer.Height == deposit.BlockHeight &&
+        transfer.UnlockTime == deposit.UnlockTime && transfer.Locked == deposit.Locked &&
+        transfer.SubaddrIndex.Major == deposit.AccountIndex &&
+        transfer.SubaddrIndex.Minor == deposit.AddressIndex
+        if !consistent || transfer.Confirmations < height.height - transfer.Height {
+            held := storage.ConflictHold(monero.database, context, deposit.TxID, deposit.AccountIndex, deposit.AddressIndex)
+            if held.error != null {
+                return held.error
+            }
+            continue
+        }
+        if height.height >= finalityHeight && transfer.Confirmations >= wallet.FinalityConfirmations(<<monero.configuration) {
+            finalized := storage.FinalizeDeposit(monero.database, context, deposit.TxID, deposit.AccountIndex, deposit.AddressIndex)
+            if finalized.error != null {
+                return finalized.error
+            }
+            continue
+        }
+    }
+    return null
 }
 
 #scope_export
@@ -197,6 +323,11 @@ Transfers :: (monero: Monero, context: ctx.Context) -> TransfersResult {
     if height.height > 0 && height.height < bookmark.value {
         // A restored/failover wallet or a shorter chain must rediscover history.
         scan.value = 0
+        result.rollback = true
+        result.error = storage.RollbackHoldDeposits(monero.database, context)
+        if result.error != null {
+            return result
+        }
     }
     MapSet(parameters, "in", true)
     MapSet(parameters, "pending", true)
@@ -218,7 +349,9 @@ Transfers :: (monero: Monero, context: ctx.Context) -> TransfersResult {
         return result
     }
     maximum := bookmark.value
-    if height.height > maximum {
+    if result.rollback {
+        maximum = height.height
+    } else if height.height > maximum {
         maximum = height.height
     }
     for transfer: confirmed.incoming {
@@ -310,6 +443,16 @@ Reconcile :: (monero: Monero, context: ctx.Context) -> Error {
     }
     if settlementError != null {
         return settlementError
+    }
+    credited := storage.ReconcileDeposits(monero.database, context)
+    if credited.error != null {
+        return credited.error
+    }
+    if credited.value.count > cast(s64)0 {
+        finalityError := ReconcileFinality(monero, context, credited.value)
+        if finalityError != null {
+            return finalityError
+        }
     }
     // Never checkpoint past a failed persistence or ledger transaction.
     return storage.SaveScanHeight(monero.database, context, transfers.height)

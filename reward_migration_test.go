@@ -126,29 +126,28 @@ func TestRewardMigrationPreservesEarnedUnlocksWithoutInventingRoutes(t *testing.
 	if balance := TokenLedger_Balance(store.Database, context.Background(), player.UserID, AssetID); balance.Error != nil || balance.Value != 0 {
 		t.Fatalf("migration credited a reward without a claim: %+v", balance)
 	}
-	if eligible := GameEvidence_Eligible(store.Database, context.Background(), player.UserID, "shovey.secret-chest"); eligible.Error != nil || !eligible.Eligible {
-		t.Fatalf("earned chest entitlement lost: %+v", eligible)
+	if eligible := GameEvidence_Eligible(store.Database, context.Background(), player.UserID, "shovey.secret-chest"); eligible.Error != nil || eligible.Eligible {
+		t.Fatalf("unproven legacy marks granted chest entitlement: %+v", eligible)
 	}
 	if eligible := GameEvidence_Eligible(store.Database, context.Background(), player.UserID, "shovey.campaign-complete"); eligible.Error != nil || eligible.Eligible {
 		t.Fatalf("migration granted unfinished campaign: %+v", eligible)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		got := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/rewards", player.Token, []byte(`{"reward":"shovey.secret-chest"}`))
-		var claim rewardClaimResponse
-		if got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &claim) != nil || claim.Credited != (attempt == 0) || claim.Balance != 2*UnitsPerDew {
-			t.Fatalf("migrated reward claim %d: %d %s", attempt, got.Code, got.Body.String())
+		if got.Code != http.StatusForbidden {
+			t.Fatalf("unproven migrated reward claim %d: %d %s", attempt, got.Code, got.Body.String())
 		}
 	}
-	// Newly earned history fills only the remaining campaign levels.
+	// Retained legacy progress stays available, while monetary rewards require proof.
 	board := evidenceMap()
-	for level := int32(74); level <= 175; level++ {
+	for level := int32(1); level <= 175; level++ {
 		registerEvidenceMap(t, store, board, level, "after-upgrade")
 		if result := GameEvidence_Put(store.Database, context.Background(), player.UserID, evidenceAttempt(level, board, true)); result.Error != nil {
 			t.Fatal(result.Error)
 		}
 	}
 	if eligible := GameEvidence_Eligible(store.Database, context.Background(), player.UserID, "shovey.campaign-complete"); eligible.Error != nil || !eligible.Eligible {
-		t.Fatalf("legacy and new progress did not combine: %+v", eligible)
+		t.Fatalf("verified campaign history did not qualify: %+v", eligible)
 	}
 }
 

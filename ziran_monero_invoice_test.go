@@ -196,7 +196,7 @@ func TestZiranMoneroInvoiceHandlersMatchBaseline(t *testing.T) {
 				}
 				writers := []*httptest.ResponseRecorder{httptest.NewRecorder(), httptest.NewRecorder()}
 				for index, server := range []*Server{actual, baseline} {
-					request := paymentHTTPRequest(server, account, method, path, body)
+					request := paymentHTTPRequest(t, server, account, method, path, body)
 					if mode == "unauthenticated" {
 						request.Header.Del("Authorization")
 					}
@@ -294,7 +294,7 @@ func TestZiranMoneroInvoiceCreationMatchesBaseline(t *testing.T) {
 		server.Cfg.MoneroWalletRPCURL = wallet.URL
 		server.Cfg.TokenDirectPurchasesEnabled = true
 		writer := httptest.NewRecorder()
-		request := paymentHTTPRequest(server, account, http.MethodPost, "/api/v1/tokens/purchases/monero/invoices", []byte(`{"app_id":"target","product_id":"a"}`))
+		request := paymentHTTPRequest(t, server, account, http.MethodPost, "/api/v1/tokens/purchases/monero/invoices", []byte(`{"app_id":"target","product_id":"a"}`))
 		if index == 0 {
 			MoneroInvoices_Create(server.monero(), writer, request)
 		} else {
@@ -422,7 +422,7 @@ func TestZiranMoneroInvoiceReplayCleanupMatchesBaseline(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				request := paymentHTTPRequest(server, account, http.MethodPost, path, body)
+				request := paymentHTTPRequest(t, server, account, http.MethodPost, path, body)
 				request.Header.Set("X-Daochi-Tx", header)
 				var writer http.ResponseWriter = httptest.NewRecorder()
 				if strings.Contains(mode, "response panic") {

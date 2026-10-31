@@ -23,14 +23,18 @@ type fakeGooglePlay struct {
 	mu               sync.Mutex
 	purchaseState    int64
 	consumptionState int64
+	accountBinding   string
 	orderID          string
 	consumeCalls     int64
 	tokenCalls       int64
+	consumeStatus    int
+	consumeCompletes bool
+	voidedPurchases  []GoogleVoidedPurchase
 }
 
 func newFakeGooglePlay(t *testing.T) *fakeGooglePlay {
 	t.Helper()
-	fake := &fakeGooglePlay{orderID: "GPA.3306-TEST-0001"}
+	fake := &fakeGooglePlay{orderID: "GPA.3306-TEST-0001", consumeCompletes: true}
 	fake.Token = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mu.Lock()
 		fake.tokenCalls++
@@ -52,19 +56,42 @@ func newFakeGooglePlay(t *testing.T) *fakeGooglePlay {
 		if strings.HasSuffix(r.URL.Path, ":consume") {
 			fake.mu.Lock()
 			fake.consumeCalls++
+			consumeStatus := fake.consumeStatus
+			if fake.consumeCompletes {
+				fake.consumptionState = 1
+			}
 			fake.mu.Unlock()
+			if consumeStatus != 0 {
+				w.WriteHeader(consumeStatus)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+		if strings.Contains(r.URL.Path, "/purchases/voidedpurchases") {
+			fake.mu.Lock()
+			voided := append([]GoogleVoidedPurchase{}, fake.voidedPurchases...)
+			fake.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"pageInfo":        map[string]any{},
+				"voidedPurchases": voided,
+			})
+			return
+		}
 		fake.mu.Lock()
-		purchaseState, consumptionState, orderID := fake.purchaseState, fake.consumptionState, fake.orderID
+		purchaseState, consumptionState := fake.purchaseState, fake.consumptionState
+		accountBinding, orderID := fake.accountBinding, fake.orderID
 		fake.mu.Unlock()
+		purchaseToken := strings.TrimPrefix(r.URL.Path, "/applications/net.waozi.inbe/purchases/products/waozi_tokens_small/tokens/")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"purchaseState":        purchaseState,
-			"consumptionState":     consumptionState,
-			"acknowledgementState": 1,
-			"orderId":              orderID,
+			"purchaseState":               purchaseState,
+			"consumptionState":            consumptionState,
+			"acknowledgementState":        1,
+			"purchaseToken":               purchaseToken,
+			"obfuscatedExternalAccountId": accountBinding,
+			"orderId":                     orderID,
 		})
 	}))
 	t.Cleanup(fake.API.Close)
@@ -77,6 +104,17 @@ func (f *fakeGooglePlay) setPurchaseState(purchase, consumption int64) {
 	defer f.mu.Unlock()
 	f.purchaseState = purchase
 	f.consumptionState = consumption
+}
+func (f *fakeGooglePlay) setAccountBinding(binding string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.accountBinding = binding
+}
+func (f *fakeGooglePlay) setConsumeFailure(status int, completes bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.consumeStatus = status
+	f.consumeCompletes = completes
 }
 
 func (f *fakeGooglePlay) consumeCount() int64 {
@@ -173,6 +211,63 @@ func TestConsumeGooglePlayPurchase(t *testing.T) {
 	}
 	if fake.consumeCount() != 1 {
 		t.Fatalf("consume calls = %d, want 1", fake.consumeCount())
+	}
+}
+
+func TestGooglePlayRejectsMalformedProviderStates(t *testing.T) {
+	_, cfg, restore := googleTestConfig(t)
+	defer restore()
+	for _, body := range []string{
+		`{}`, `null`, `{"purchaseState":0}`, `{"consumptionState":0}`,
+		`{"purchaseState":null,"consumptionState":0}`,
+		`{"purchaseState":0,"consumptionState":null}`,
+		`{"purchaseState":-1,"consumptionState":0}`,
+		`{"purchaseState":3,"consumptionState":0}`,
+		`{"purchaseState":0,"consumptionState":2}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer api.Close()
+			GoogleAPIBaseURL = api.URL
+			result := GooglePlay_InspectPurchase(context.Background(), cfg, googlePurchaseRequest("malformed-state"))
+			if result.Error == nil {
+				t.Fatalf("accepted malformed provider response: %s", body)
+			}
+		})
+	}
+}
+
+func TestGooglePlayVoidedPurchaseProviderContract(t *testing.T) {
+	_, cfg, restore := googleTestConfig(t)
+	defer restore()
+	pages := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages++
+		if r.Header.Get("Authorization") != "Bearer fake-access-token" {
+			t.Error("missing provider authorization")
+		}
+		if pages == 1 {
+			_, _ = w.Write([]byte(`{"tokenPagination":{"nextPageToken":"next-page"},"voidedPurchases":[{"purchaseToken":"first","orderId":"order-1","voidedTimeMillis":"1770000000000"}]}`))
+			return
+		}
+		if r.URL.Query().Get("token") != "next-page" {
+			t.Errorf("pagination query = %s", r.URL.RawQuery)
+		}
+		_, _ = w.Write([]byte(`{"voidedPurchases":[{"purchaseToken":"second","orderId":"order-2","voidedTimeMillis":"1770000000001"}]}`))
+	}))
+	defer api.Close()
+	GoogleAPIBaseURL = api.URL
+	result := GooglePlay_ListVoidedPurchases(context.Background(), cfg, "net.waozi.inbe", 1770000000000)
+	if result.Error != nil {
+		t.Fatal(result.Error)
+	}
+	if pages != 2 || len(result.Value) != 2 {
+		t.Fatalf("refund pages/records = %d/%d, want 2/2", pages, len(result.Value))
+	}
+	if result.Value[1].PurchaseToken != "second" || result.Value[1].VoidedTimeMillis != 1770000000001 {
+		t.Fatalf("second refund = %+v", result.Value[1])
 	}
 }
 

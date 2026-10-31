@@ -290,18 +290,23 @@ func accessNormalizeLogin(t *testing.T, recorder *httptest.ResponseRecorder, ser
 		t.Fatal(err)
 	}
 	fields := strings.Split(string(payload), "\n")
-	if len(fields) != 4 || fields[0] != "v1" || fields[1] != user || fields[3] != "" {
+	if len(fields) < 5 || fields[0] != "v2" || fields[1] != user || len(fields[4]) != 64 {
 		t.Fatal("login token payload changed", string(payload))
 	}
 	expiry, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil || expiry < before.Add(server.Cfg.TokenTTL).Unix() || expiry > after.Add(server.Cfg.TokenTTL).Unix() {
 		t.Fatal("token expiration changed", expiry, err)
 	}
+	if _, err := strconv.ParseInt(fields[3], 10, 64); err != nil {
+		t.Fatal("token issue time is invalid", err)
+	}
 	verified := Token_VerifyAuthToken(server.Cfg.TokenSecret, response.AuthToken, before.Unix())
-	issued := Token_IssueAuthToken(server.Cfg.TokenSecret, user, expiry)
-	if verified.Error != "" || verified.Value != user || issued.Value != response.AuthToken || response.ServerTime < before.Unix() || response.ServerTime > after.Unix() ||
+	if verified.Error != "" || verified.Value != user || response.ServerTime < before.Unix() || response.ServerTime > after.Unix() ||
 		response.ExpiresIn != int64(server.Cfg.TokenTTL.Seconds()) {
 		t.Fatal("login token or timestamps are invalid", response)
+	}
+	if !HttpAuth_BearerSessionActive(server.Store.Database, context.Background(), response.AuthToken, user, before.Unix()) {
+		t.Fatal("login token was not recorded as an active session")
 	}
 	response.AuthToken, response.ServerTime = "<validated token>", 0
 	recorder.Body.Reset()

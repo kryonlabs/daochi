@@ -51,7 +51,7 @@ func (c *publicationClient) call(user, method, path string, body any, want int) 
 	}
 	token := ""
 	if user != "" {
-		token = Token_IssueAuthToken(c.server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+		token = issueTestBearer(c.t, c.server, user, time.Now().Add(time.Hour))
 	}
 	res := tokenJSONRequest(c.t, c.handler, method, path, token, raw)
 	c.last = res.Body.String()

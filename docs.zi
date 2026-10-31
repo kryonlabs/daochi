@@ -1497,6 +1497,29 @@ PathApiV1SyncLogin :: () -> Map(string, Any) {
     return result
 }
 
+PathApiV1SyncLogout :: () -> Map(string, Any) {
+    result: Map(string, Any)
+    MapInit(result)
+    operation: Map(string, Any)
+    MapInit(operation)
+    MapSet(operation, "summary", "Revoke current bearer session")
+    MapSet(operation, "description", "Revokes the authenticated bearer session and disconnects its active sync sockets. Future requests require a fresh login.")
+    MapSet(operation, "parameters", BearerHeaderParameters())
+    responses: Map(string, Any)
+    MapInit(responses)
+    success: Map(string, Any)
+    MapInit(success)
+    MapSet(success, "description", "Bearer session revoked")
+    MapSet(responses, "200", success)
+    unauthorized: Map(string, Any)
+    MapInit(unauthorized)
+    MapSet(unauthorized, "description", "Bearer session is missing, expired or revoked")
+    MapSet(responses, "401", unauthorized)
+    MapSet(operation, "responses", responses)
+    MapSet(result, "post", operation)
+    return result
+}
+
 PathApiV1Sync :: () -> Map(string, Any) {
     result: Map(string, Any)
     MapInit(result)
@@ -2164,17 +2187,17 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/admin/feedback/reply", MapGet(additions, "/api/v1/admin/feedback/reply"))
     telegram := telegram_paths.Paths()
     telegramNames: [12]string = .["/api/v1/lumi/telegram/link", "/api/v1/lumi/telegram/updates",
-        "/api/v1/lumi/telegram/ack", "/api/v1/lumi/telegram/messages", "/api/v1/lumi/telegram/webhook",
-        "/api/v1/telegram/environment", "/api/v1/telegram/entry", "/api/v1/telegram/entry/verify",
-        "/api/v1/telegram/entry/status", "/api/v1/telegram/entry/rendezvous", "/api/v1/telegram/entry/cancel", "/api/v1/telegram/account/bind"]
+    "/api/v1/lumi/telegram/ack", "/api/v1/lumi/telegram/messages", "/api/v1/lumi/telegram/webhook",
+    "/api/v1/telegram/environment", "/api/v1/telegram/entry", "/api/v1/telegram/entry/verify",
+    "/api/v1/telegram/entry/status", "/api/v1/telegram/entry/rendezvous", "/api/v1/telegram/entry/cancel", "/api/v1/telegram/account/bind"]
     for name: telegramNames {
         MapSet(result, name, MapGet(telegram, name))
     }
     authorization := authorization_paths.Paths()
     authorizationNames: [10]string = .["/api/v1/authorization/requests", "/api/v1/authorization/rendezvous",
-        "/api/v1/authorization/cancel", "/api/v1/authorization/claim", "/api/v1/authorization/approve",
-        "/api/v1/authorization/revoke", "/api/v1/authorization/challenge", "/api/v1/authorization/session",
-        "/api/v1/delegated/sync", "/api/v1/delegated/ws"]
+    "/api/v1/authorization/cancel", "/api/v1/authorization/claim", "/api/v1/authorization/approve",
+    "/api/v1/authorization/revoke", "/api/v1/authorization/challenge", "/api/v1/authorization/session",
+    "/api/v1/delegated/sync", "/api/v1/delegated/ws"]
     for name: authorizationNames {
         MapSet(result, name, MapGet(authorization, name))
     }
@@ -2253,6 +2276,7 @@ Paths :: () -> Map(string, Any) {
     MapSet(result, "/api/v1/sync/diagnostics", PathApiV1SyncDiagnostics())
     MapSet(result, "/api/v1/sync/challenge", PathApiV1SyncChallenge())
     MapSet(result, "/api/v1/sync/login", PathApiV1SyncLogin())
+    MapSet(result, "/api/v1/sync/logout", PathApiV1SyncLogout())
     MapSet(result, "/api/v1/sync", PathApiV1Sync())
     MapSet(result, "/api/v1/sync/ws", PathApiV1SyncWs())
     MapSet(result, "/api/v1/account", PathApiV1Account())

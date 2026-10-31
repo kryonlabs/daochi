@@ -9,13 +9,20 @@ json :: #import "std/json_go";
 clock :: #import "std/time_go";
 errors :: #import "std/errors_go";
 raw :: #import "sync_types";
+url :: #import "std/url_go";
+network :: #import "std/net_go";
+random :: #import "std/random_go";
+text :: #import "std/text_go";
 sorting :: #system_library "go:sort";
 go_http :: #system_library "go:net/http";
 go_io :: #system_library "go:io";
 numbers :: #system_library "go:strconv";
 strings :: #system_library "go:strings";
 format :: #system_library "go:fmt";
+go_url :: #system_library "go:net/url";
 big :: #system_library "go:math/big";
+md5 :: #system_library "go:crypto/md5";
+hex :: #system_library "go:encoding/hex";
 builtin :: #system_library "go:builtin";
 
 WalletSubaddress :: struct {
@@ -72,6 +79,16 @@ RPCAddress :: struct {
     address: string #go_tag "json:\"address\""
     addressIndex: isize #go_tag "json:\"address_index\""
 }
+DigestChallenge :: struct {
+    realm: string
+    nonce: string
+    qop: string
+    algorithm: string
+}
+DigestAuthorizationResult :: struct {
+    value: string
+    error: Error
+}
 InvoiceTransfers :: struct {
     #go_anonymous
     incoming: []WalletTransfer #go_tag "json:\"in\""
@@ -84,14 +101,119 @@ Divide :: (result: *BigInteger, left: *BigInteger, right: *BigInteger) -> *BigIn
 FitsInteger :: (value: *BigInteger) -> bool #foreign big "(*Int).IsInt64";
 IntegerValue :: (value: *BigInteger) -> s64 #foreign big "(*Int).Int64";
 SetBasicAuth :: (request: *http.Request, user: string, password: string) #foreign go_http "(*Request).SetBasicAuth";
+HeaderValues :: (header: http.Header, name: string) -> []string #foreign go_http "Header.Values";
 CloseAtReturn :: (body: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
 StatusError :: (message: string, status: isize) -> Error #foreign format "Errorf";
 RPCMessageError :: (message: string, detail: string) -> Error #foreign format "Errorf";
+ResponseHeaders :: (response: *http.Response) -> http.Header #go_field #foreign go_http "(*Response).Header";
+RequestURI :: (target: *url.URL) -> string #foreign go_url "(*URL).RequestURI";
+FormatPair :: (pattern: string, first: string, second: string) -> string #foreign format "Sprintf";
+FormatTriple :: (pattern: string, first: string, second: string, third: string) -> string #foreign format "Sprintf";
+FormatSix :: (pattern: string, first: string, second: string, third: string,
+    fourth: string, fifth: string, sixth: string) -> string #foreign format "Sprintf";
+FormatEight :: (pattern: string, first: string, second: string, third: string, fourth: string,
+    fifth: string, sixth: string, seventh: string, eighth: string) -> string #foreign format "Sprintf";
+SplitRaw :: (value: string, separator: string) -> []string #foreign strings "Split";
+TrimRaw :: (value: string) -> string #foreign strings "TrimSpace";
+LowerRaw :: (value: string) -> string #foreign strings "ToLower";
+HasPrefix :: (value: string, prefix: string) -> bool #foreign strings;
+SumMD5 :: (value: []u8) -> [16]u8 #foreign md5 "Sum";
+EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
 AllocateText :: (count: isize) -> []string #foreign builtin "make";
 AppendText :: (values: []string, value: string) -> []string #foreign builtin "append";
 IntegerText :: (value: isize) -> string #foreign numbers "Itoa";
 Join :: (values: []string, separator: string) -> string #foreign strings;
 SortStrings :: (values: []string) #foreign sorting "Strings";
+
+SplitText :: (value: string, separator: string) -> []string {
+    return SplitRaw(value, separator)
+}
+
+TrimText :: (value: string) -> string {
+    return TrimRaw(value)
+}
+
+ToLowerText :: (value: string) -> string {
+    return LowerRaw(value)
+}
+
+RPCDigest :: (value: string) -> string {
+    digest := SumMD5(text.ToBytes(value))
+    return EncodeHex(digest[:])
+}
+
+SafeCredentialText :: (value: string) -> bool {
+    for index: cast(s64)0..value.count - 1 {
+        byte := value[index]
+        if byte < cast(u8)32 || byte == cast(u8)127 || byte == cast(u8)34 || byte == cast(u8)92 {
+            return false
+        }
+    }
+    return true
+}
+
+ChallengeValue :: (challenge: string, name: string) -> string {
+    fields := SplitText(challenge, ",")
+    prefixParts: [2]string
+    prefixParts[0] = name
+    prefixParts[1] = "="
+    prefix := Join(prefixParts[:], "")
+    for field: fields {
+        value := TrimText(field)
+        if !HasPrefix(value, prefix) {
+            continue
+        }
+        value = TrimText(value[prefix.count:])
+        if value.count >= cast(s64)2 && value[0] == cast(u8)34 && value[value.count - 1] == cast(u8)34 {
+            value = value[1:value.count - 1]
+        }
+        return value
+    }
+    return ""
+}
+
+ParseDigestChallenge :: (headers: http.Header) -> DigestChallenge {
+    values := HeaderValues(headers, "WWW-Authenticate")
+    challenge: DigestChallenge
+    for value: values {
+        if !HasPrefix(ToLowerText(value), "digest ") {
+            continue
+        }
+        value = value[7:]
+        challenge.realm = ChallengeValue(value, "realm")
+        challenge.nonce = ChallengeValue(value, "nonce")
+        challenge.qop = ChallengeValue(value, "qop")
+        challenge.algorithm = ChallengeValue(value, "algorithm")
+        return challenge
+    }
+    return challenge
+}
+
+DigestAuthorization :: (challenge: DigestChallenge, method: string, target: string,
+    user: string, password: string) -> DigestAuthorizationResult {
+    result: DigestAuthorizationResult
+    if challenge.realm == "" || challenge.nonce == "" ||
+        (challenge.algorithm != "" && challenge.algorithm != "MD5") ||
+        (challenge.qop != "" && challenge.qop != "auth") ||
+        !SafeCredentialText(challenge.realm) || !SafeCredentialText(challenge.nonce) {
+        result.error = errors.New("monero rpc digest challenge invalid")
+        return result
+    }
+    clientNonceBytes: [16]u8
+    filled := random.Fill(clientNonceBytes[:])
+    if filled.error != null {
+        result.error = filled.error
+        return result
+    }
+    clientNonce := EncodeHex(clientNonceBytes[:])
+    ha1 := RPCDigest(FormatTriple("%s:%s:%s", user, challenge.realm, password))
+    ha2 := RPCDigest(FormatPair("%s:%s", method, target))
+    response := RPCDigest(FormatSix("%s:%s:%s:%s:%s:%s", ha1, challenge.nonce, "00000001", clientNonce, "auth", ha2))
+    result.value = FormatSix(
+        "Digest username=\"%s\",realm=\"%s\",nonce=\"%s\",uri=\"%s\",algorithm=MD5,qop=auth,nc=00000001,cnonce=\"%s\",response=\"%s\"",
+        user, challenge.realm, challenge.nonce, target, clientNonce, response)
+    return result
+}
 
 CollectTransfers :: (state: *InvoicePaymentState, seen: Map(string, bool), identifiers: []string,
     transfers: []WalletTransfer, configuration: config.Config, invoice: MoneroInvoiceResponse) -> []string {
@@ -127,6 +249,48 @@ ConfirmationsRequired :: (configuration: config.Config) -> s64 {
         return configuration.MoneroConfirmationsRequired
     }
     return 10
+}
+
+FinalityConfirmations :: (configuration: config.Config) -> s64 {
+    required := ConfirmationsRequired(configuration)
+    if required > cast(s64)9223372036854775807 - cast(s64)60 {
+        return cast(s64)9223372036854775807
+    }
+    return required + cast(s64)60
+}
+
+ValidateRPCConfiguration :: (configuration: config.Config) -> Error {
+    target := TrimText(configuration.MoneroWalletRPCURL)
+    if target == "" {
+        return errors.New("monero rpc url required")
+    }
+    parsed := url.Parse(target)
+    if parsed.error != null {
+        return errors.New("monero rpc url invalid")
+    }
+    scheme := ToLowerText(url.Scheme(parsed.value))
+    if scheme != "http" && scheme != "https" {
+        return errors.New("monero rpc transport invalid")
+    }
+    host := url.Host(parsed.value)
+    split := network.SplitHostPort(host)
+    if split.error == null {
+        host = split.host
+    }
+    ip := network.ParseIP(host)
+    loopback := network.ValidIP(ip) && network.IsLoopback(ip)
+    if !loopback && scheme != "https" {
+        return errors.New("monero rpc transport invalid")
+    }
+    if (configuration.MoneroWalletRPCUser == "") != (configuration.MoneroWalletRPCPassword == "") {
+        return errors.New("monero rpc credentials incomplete")
+    }
+    if configuration.MoneroWalletRPCUser != "" &&
+        (!SafeCredentialText(configuration.MoneroWalletRPCUser) ||
+        !SafeCredentialText(configuration.MoneroWalletRPCPassword)) {
+        return errors.New("monero rpc credentials invalid")
+    }
+    return null
 }
 
 MinimumAtomicAmount :: (configuration: config.Config) -> s64 {
@@ -179,6 +343,10 @@ AtomicAmount :: (units: s64, rateAtomic: s64, rateTokens: s64) -> TokenUnitsResu
 
 Request :: (context: ctx.Context, configuration: config.Config, method: string,
     parameters: Map(string, Any), output: Any, unavailable: Error) -> Error {
+    trustError := ValidateRPCConfiguration(configuration)
+    if trustError != null {
+        return trustError
+    }
     envelope: Map(string, Any)
     MapInit(envelope)
     MapSet(envelope, "jsonrpc", "2.0")
@@ -187,7 +355,7 @@ Request :: (context: ctx.Context, configuration: config.Config, method: string,
     MapSet(envelope, "params", parameters)
     body := json.Marshal(envelope)
     target: [2]string
-    target[0] = configuration.MoneroWalletRPCURL
+    target[0] = TrimText(configuration.MoneroWalletRPCURL)
     target[1] = "/json_rpc"
     request := http.NewRequest(context, "POST", Join(target[:], ""), io.FromBytes(body.value))
     if request.error != null {
@@ -206,6 +374,37 @@ Request :: (context: ctx.Context, configuration: config.Config, method: string,
     CloseAtReturn(stream)
     bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 1048576))
     status := http.StatusCode(response.value)
+    if status < 200 || status >= 300 {
+        if status == cast(isize)401 && configuration.MoneroWalletRPCUser != "" &&
+            configuration.MoneroWalletRPCPassword != "" {
+            challenge := ParseDigestChallenge(ResponseHeaders(response.value))
+            if challenge.realm != "" || challenge.nonce != "" {
+                authorization := DigestAuthorization(challenge, "POST", RequestURI(http.RequestURL(request.value)),
+                    configuration.MoneroWalletRPCUser, configuration.MoneroWalletRPCPassword)
+                if authorization.error != null {
+                    return authorization.error
+                }
+                retry := http.NewRequest(context, "POST", Join(target[:], ""), io.FromBytes(body.value))
+                if retry.error != null {
+                    return retry.error
+                }
+                http.SetHeader(http.Headers(retry.value), "Content-Type", "application/json")
+                SetBasicAuth(retry.value, configuration.MoneroWalletRPCUser, configuration.MoneroWalletRPCPassword)
+                http.SetHeader(http.Headers(retry.value), "Authorization", authorization.value)
+                retryResponse := http.Do(client, retry.value)
+                if retryResponse.error != null {
+                    return unavailable
+                }
+                retryStream := http.ResponseBody(retryResponse.value)
+                CloseAtReturn(retryStream)
+                retryBytes := io.ReadAll(io.LimitReader(cast(io.Reader)retryStream, 1048576))
+                bytes = retryBytes
+                response = retryResponse
+                stream = retryStream
+                status = http.StatusCode(retryResponse.value)
+            }
+        }
+    }
     if status < 200 || status >= 300 {
         return StatusError("monero rpc status %d", status)
     }

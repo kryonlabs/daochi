@@ -32,7 +32,7 @@ func meshHTTPFixture(t *testing.T) *Server {
 		Store: store,
 		Node:  identity.Value,
 		Cfg: Config{
-			NodeSyncToken:      "mesh-secret",
+			NodeSyncToken:      identity.Value.ID + ":mesh-secret",
 			NodeSyncBatchLimit: 1,
 			MaxBodyBytes:       1 << 20,
 		},
@@ -74,26 +74,39 @@ func TestZiranMeshBearerTokenAgainstBaseline(t *testing.T) {
 	}
 }
 
-func TestZiranMeshTokenAuthenticationAgainstBaseline(t *testing.T) {
-	for _, token := range []string{"", "\u2003\t", "mesh-secret", " \u2003mesh-secret\t", "\xff\x00"} {
-		for _, headers := range []http.Header{
-			{}, {"Authorization": {"Bearer mesh-secret"}}, {"Authorization": {"bEaReR  mesh-secret\u2003"}},
-			{"X-Daochi-Node-Token": {"wrong"}, "Authorization": {"Bearer mesh-secret"}},
-			{"X-Daochi-Node-Token": {"\u2003\t"}, "X-Ksync-Node-Token": {" mesh-secret "}},
-			{"X-Daochi-Node-Token": {"\xff\x00"}}, {"X-Daochi-Node-ID": {"invalid"}, "X-Daochi-Node-Token": {"mesh-secret"}},
-		} {
-			server := meshHTTPFixture(t)
-			server.Cfg.NodeSyncToken = token
+func TestZiranMeshTokenCredentialAuthentication(t *testing.T) {
+	server := meshHTTPFixture(t)
+	server.Cfg.NodeSyncToken = server.Node.ID + ":mesh-secret"
+	for _, testCase := range []struct {
+		name       string
+		header     string
+		authorized bool
+		status     int
+	}{
+		{name: "bearer", header: "Bearer " + server.Node.ID + ":mesh-secret", authorized: true},
+		{name: "alias", header: server.Node.ID + ":mesh-secret", authorized: true},
+		{name: "legacy shared secret", header: "Bearer mesh-secret", status: http.StatusUnauthorized},
+		{name: "foreign node", header: "Bearer " + strings.Repeat("b", 64) + ":mesh-secret", status: http.StatusUnauthorized},
+		{name: "wrong secret", header: "Bearer " + server.Node.ID + ":wrong", status: http.StatusUnauthorized},
+		{name: "missing secret", header: "Bearer " + server.Node.ID + ":", status: http.StatusUnauthorized},
+		{name: "missing node", header: "Bearer :mesh-secret", status: http.StatusUnauthorized},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
 			request := httptest.NewRequest("POST", "/api/v1/node/mesh/export", nil)
-			request.Header = headers.Clone()
-			actual, expected := httptest.NewRecorder(), httptest.NewRecorder()
-			got := Mesh_Authorize(server.mesh(), actual, request, []byte("body"))
-			want := server.baselineMeshAuthorizeNodeSync(expected, request, []byte("body"))
-			if got != want {
-				t.Fatalf("authentication changed for token %q and headers %v", token, headers)
+			if testCase.name == "alias" {
+				request.Header.Set("X-Daochi-Node-Token", testCase.header)
+			} else {
+				request.Header.Set("Authorization", testCase.header)
 			}
-			compareHTTPResponse(t, actual, expected)
-		}
+			writer := httptest.NewRecorder()
+			authorized := Mesh_Authorize(server.mesh(), writer, request, []byte("body"))
+			if authorized != testCase.authorized {
+				t.Fatalf("authorization = %v, want %v: %s", authorized, testCase.authorized, writer.Body.String())
+			}
+			if !authorized && writer.Code != testCase.status {
+				t.Fatalf("status = %d, want %d", writer.Code, testCase.status)
+			}
+		})
 	}
 }
 
@@ -147,7 +160,7 @@ func TestZiranMeshHTTPAgainstBaseline(t *testing.T) {
 				case "invalid JSON":
 					encoded = []byte("{")
 				}
-				signed := mode == "signed" || mode == "replayed" || mode == "unpaired" || mode == "expired" || mode == "bad signature" || mode == "denied scope" || mode == "policy query failure"
+				signed := mode == "valid" || mode == "unscoped" || mode == "signed" || mode == "replayed" || mode == "unpaired" || mode == "expired" || mode == "bad signature" || mode == "denied scope" || mode == "policy query failure"
 				request := httptest.NewRequest("POST", "/api/v1/node/mesh/"+operation, bytes.NewReader(encoded))
 				request.Header.Set("Authorization", "Bearer mesh-secret")
 				if mode == "no token" {

@@ -183,7 +183,7 @@ func TestZiranHTTPAuthenticationAgainstBaseline(t *testing.T) {
 	for _, mode := range []string{"valid", "missing", "invalid", "empty", "wrong scheme", "whitespace", "header mismatch", "legacy user", "header precedence", "missing account", "bootstrap", "deleted bootstrap", "query error", "cancelled"} {
 		t.Run(mode, func(t *testing.T) {
 			server, user, _ := registryHTTPFixture(t)
-			token := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+			token := issueTestBearer(t, server, user, time.Now().Add(time.Hour))
 			request := httptest.NewRequest("GET", "/api/v1/account/app-grants", nil)
 			request.Header.Set("Authorization", "Bearer "+token)
 			switch mode {
@@ -284,7 +284,8 @@ func TestZiranRegistryHTTPAgainstBaseline(t *testing.T) {
 					}
 				}
 				request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
-				token := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+				rand.Reader = original
+				token := issueTestBearer(t, server, user, time.Now().Add(time.Hour))
 				request.Header.Set("Authorization", "Bearer "+token)
 				request.Header.Set("X-Ksync-Admin", server.Cfg.AdminToken)
 				switch test.mutation {
@@ -521,7 +522,8 @@ func TestZiranRegistrySignedRequestCleanupAgainstBaseline(t *testing.T) {
 					t.Fatal(err)
 				}
 				request := httptest.NewRequest(method, path, bytes.NewReader(body))
-				token := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+				rand.Reader = originalRandom
+				token := issueTestBearer(t, server, user, time.Now().Add(time.Hour))
 				request.Header.Set("Authorization", "Bearer "+token)
 				if records {
 					header, err := json.Marshal(wire)

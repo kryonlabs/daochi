@@ -4,6 +4,7 @@
 config :: #import "config";
 state :: #import "payment_state";
 policy :: #import "token_policy";
+signing :: #import "signing";
 ctx :: #import "std/context_go";
 http :: #import "std/http_go";
 io :: #import "std/io_go";
@@ -14,6 +15,7 @@ errors :: #import "std/errors_go";
 url :: #import "std/url_go";
 strings :: #system_library "go:strings";
 format :: #system_library "go:fmt";
+numbers :: #system_library "go:strconv";
 base64 :: #system_library "go:encoding/base64";
 pem :: #system_library "go:encoding/pem";
 x509 :: #system_library "go:crypto/x509";
@@ -29,7 +31,30 @@ AccessTokenResult :: struct {
     error: Error
 }
 GooglePurchaseResult :: struct {
+    paymentID: string
+    accountBinding: string
+    orderID: string
+    purchaseState: isize
+    consumptionState: isize
     value: string
+    error: Error
+}
+GoogleVoidedPage :: struct {
+    nextPageToken: string #go_tag "json:\"nextPageToken,omitempty\""
+}
+GoogleVoidedPurchase :: struct {
+    purchaseToken: string #go_tag "json:\"purchaseToken\""
+    orderID: string #go_tag "json:\"orderId\""
+    voidedTimeMillis: s64 #go_tag "json:\"voidedTimeMillis,string\""
+    voidedSource: isize #go_tag "json:\"voidedSource\""
+    voidedState: isize #go_tag "json:\"voidedState\""
+}
+GoogleVoidedResponse :: struct {
+    tokenPagination: GoogleVoidedPage #go_tag "json:\"tokenPagination\""
+    voidedPurchases: []GoogleVoidedPurchase #go_tag "json:\"voidedPurchases\""
+}
+GoogleVoidedResult :: struct {
+    value: []GoogleVoidedPurchase
     error: Error
 }
 GoogleServiceAccount :: struct {
@@ -54,9 +79,11 @@ GoogleAPIBaseURL: string = "https://androidpublisher.googleapis.com/androidpubli
 #scope_file
 PurchasePayload :: struct {
     #go_anonymous
-    purchaseState: isize #go_tag "json:\"purchaseState\""
-    consumptionState: isize #go_tag "json:\"consumptionState\""
+    purchaseState: *isize #go_tag "json:\"purchaseState\""
+    consumptionState: *isize #go_tag "json:\"consumptionState\""
     acknowledgementState: isize #go_tag "json:\"acknowledgementState\""
+    purchaseToken: string #go_tag "json:\"purchaseToken\""
+    obfuscatedExternalAccountId: string #go_tag "json:\"obfuscatedExternalAccountId\""
     orderID: string #go_tag "json:\"orderId\""
     purchaseType: *isize #go_tag "json:\"purchaseType,omitempty\""
 }
@@ -98,11 +125,14 @@ FormValues :: (value: Map(string, []string)) -> url.Values #foreign go_url "Valu
 EncodeForm :: (values: url.Values) -> string #foreign go_url "Values.Encode";
 NewStringReader :: (value: string) -> *StringReader #foreign strings "NewReader";
 PathEscape :: (value: string) -> string #foreign go_url;
+QueryEscape :: (value: string) -> string #foreign go_url;
 TrimSpace :: (value: string) -> string #foreign strings;
 Join :: (values: []string, separator: string) -> string #foreign strings;
 StatusError :: (message: string, status: isize) -> Error #foreign format "Errorf";
+FormatInteger :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
 CloseAtReturn :: (body: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
 AllocateStrings :: (count: isize) -> []string #foreign builtin "make";
+AppendVoided :: (values: []GoogleVoidedPurchase, value: GoogleVoidedPurchase) -> []GoogleVoidedPurchase #foreign builtin "append";
 
 Endpoint :: (request: GooglePurchaseVerifyRequest) -> string {
     parts: [7]string
@@ -113,6 +143,19 @@ Endpoint :: (request: GooglePurchaseVerifyRequest) -> string {
     parts[4] = PathEscape(request.ProductID)
     parts[5] = "/tokens/"
     parts[6] = PathEscape(request.PurchaseToken)
+    return Join(parts[:], "")
+}
+VoidedEndpoint :: (packageName: string, sinceMillis: s64, pageToken: string) -> string {
+    parts: [10]string
+    parts[0] = GoogleAPIBaseURL
+    parts[1] = "/applications/"
+    parts[2] = PathEscape(packageName)
+    parts[3] = "/purchases/voidedpurchases?maxResults=100&startTime="
+    parts[4] = QueryEscape(FormatInteger(sinceMillis, cast(isize)10))
+    if pageToken != "" {
+        parts[5] = "&token="
+        parts[6] = QueryEscape(pageToken)
+    }
     return Join(parts[:], "")
 }
 Authorization :: (token: string) -> string {
@@ -148,6 +191,10 @@ RequestToken :: (context: ctx.Context, target: string, form: Map(string, []strin
     stream := http.ResponseBody(response.value)
     CloseAtReturn(stream)
     bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 1048576))
+    if bytes.error != null {
+        result.error = errors.New("invalid google token response")
+        return result
+    }
     status := http.StatusCode(response.value)
     if status < 200 || status >= 300 {
         result.error = errors.New(failure)
@@ -169,7 +216,7 @@ RequestToken :: (context: ctx.Context, target: string, form: Map(string, []strin
 #scope_export
 HasVerifier :: (configuration: config.Config) -> bool {
     return configuration.GoogleServiceAccountJSON != "" ||
-        (configuration.GoogleOAuthClientJSON != "" && configuration.GoogleOAuthRefreshToken != "")
+    (configuration.GoogleOAuthClientJSON != "" && configuration.GoogleOAuthRefreshToken != "")
 }
 AccessToken :: (context: ctx.Context, configuration: config.Config) -> AccessTokenResult {
     if configuration.GoogleServiceAccountJSON != "" {
@@ -260,6 +307,48 @@ RefreshAccessToken :: (context: ctx.Context, rawClient: string, refreshToken: st
 }
 VerifyPurchase :: (context: ctx.Context, configuration: config.Config,
     purchase: GooglePurchaseVerifyRequest) -> GooglePurchaseResult {
+    result := InspectPurchase(context, configuration, purchase)
+    if result.error != null {
+        return result
+    }
+    if result.purchaseState != 0 {
+        result.error = errors.New("google purchase is not purchased")
+        return result
+    }
+    if result.consumptionState == 1 {
+        result.error = errors.New("google purchase already consumed")
+        return result
+    }
+    return result
+}
+AccountBinding :: (accountID: string) -> string {
+    return signing.SHA256Hex(text.ToBytes(accountID))
+}
+VerifyPurchaseForAccount :: (context: ctx.Context, configuration: config.Config,
+    purchase: GooglePurchaseVerifyRequest, accountID: string, allowConsumed: bool) -> GooglePurchaseResult {
+    result: GooglePurchaseResult
+    inspected := InspectPurchase(context, configuration, purchase)
+    if inspected.error != null {
+        return inspected
+    }
+    result = inspected
+    if result.purchaseState != 0 {
+        result.error = errors.New("google purchase is not purchased")
+        return result
+    }
+    if result.consumptionState == 1 && !allowConsumed {
+        result.error = errors.New("google purchase already consumed")
+        return result
+    }
+    expected := AccountBinding(accountID)
+    if result.accountBinding != "" && result.accountBinding != expected {
+        result.error = errors.New("google purchase account mismatch")
+        return result
+    }
+    return result
+}
+InspectPurchase :: (context: ctx.Context, configuration: config.Config,
+    purchase: GooglePurchaseVerifyRequest) -> GooglePurchaseResult {
     result: GooglePurchaseResult
     if !HasVerifier(configuration) {
         result.error = state.errPaymentUnavailable
@@ -286,6 +375,10 @@ VerifyPurchase :: (context: ctx.Context, configuration: config.Config,
     CloseAtReturn(stream)
     bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 1048576))
     status := http.StatusCode(response.value)
+    if bytes.error != null {
+        result.error = errors.New("invalid google purchase response")
+        return result
+    }
     if status < 200 || status >= 300 {
         result.error = errors.New("google purchase rejected")
         return result
@@ -296,12 +389,28 @@ VerifyPurchase :: (context: ctx.Context, configuration: config.Config,
         result.error = errors.New("invalid google purchase response")
         return result
     }
-    if payload.purchaseState != 0 {
-        result.error = errors.New("google purchase is not purchased")
+    if payload.purchaseState == null || payload.consumptionState == null {
+        result.error = errors.New("invalid google purchase response")
         return result
     }
-    if payload.consumptionState == 1 {
-        result.error = errors.New("google purchase already consumed")
+    result.purchaseState = <<payload.purchaseState
+    result.consumptionState = <<payload.consumptionState
+    if result.purchaseState < 0 || result.purchaseState > 2 || result.consumptionState < 0 || result.consumptionState > 1 {
+        result.error = errors.New("invalid google purchase response")
+        return result
+    }
+    result.orderID = payload.orderID
+    result.accountBinding = payload.obfuscatedExternalAccountId
+    result.paymentID = payload.purchaseToken
+    if result.paymentID == "" {
+        result.paymentID = purchase.PurchaseToken
+    }
+    if result.paymentID != purchase.PurchaseToken {
+        result.error = errors.New("google purchase token mismatch")
+        return result
+    }
+    if result.paymentID == "" {
+        result.error = errors.New("google purchase token required")
         return result
     }
     reference := payload.orderID
@@ -315,6 +424,66 @@ VerifyPurchase :: (context: ctx.Context, configuration: config.Config,
     parts[3] = ":"
     parts[4] = reference
     result.value = Join(parts[:], "")
+    return result
+}
+ListVoidedPurchases :: (context: ctx.Context, configuration: config.Config,
+    packageName: string, sinceMillis: s64) -> GoogleVoidedResult {
+    result: GoogleVoidedResult
+    if !HasVerifier(configuration) {
+        result.error = state.errPaymentUnavailable
+        return result
+    }
+    token := AccessToken(context, configuration)
+    if token.error != null {
+        result.error = state.errPaymentUnavailable
+        return result
+    }
+    pageToken := ""
+    for page: 0..9 {
+        body: io.Reader
+        request := http.NewRequest(context, "GET", VoidedEndpoint(packageName, sinceMillis, pageToken), body)
+        result.error = request.error
+        if result.error != null {
+            return result
+        }
+        http.SetHeader(http.Headers(request.value), "Authorization", Authorization(token.value))
+        response := http.Do(GoogleHTTPClient, request.value)
+        result.error = response.error
+        if result.error != null {
+            result.error = state.errPaymentUnavailable
+            return result
+        }
+        stream := http.ResponseBody(response.value)
+        CloseAtReturn(stream)
+        bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, 1048576))
+        if bytes.error != null {
+            result.error = errors.New("invalid google voided purchase response")
+            return result
+        }
+        status := http.StatusCode(response.value)
+        if status < 200 || status >= 300 {
+            result.error = errors.New("google voided purchase list rejected")
+            return result
+        }
+        payload: GoogleVoidedResponse
+        result.error = json.Unmarshal(bytes.value, *payload)
+        if result.error != null {
+            result.error = errors.New("invalid google voided purchase response")
+            return result
+        }
+        for record: payload.voidedPurchases {
+            if record.purchaseToken == "" || record.voidedTimeMillis <= 0 {
+                result.error = errors.New("invalid google voided purchase response")
+                return result
+            }
+            result.value = AppendVoided(result.value, record)
+        }
+        pageToken = payload.tokenPagination.nextPageToken
+        if pageToken == "" {
+            return result
+        }
+    }
+    result.error = errors.New("google voided purchase pagination limit exceeded")
     return result
 }
 ConsumePurchase :: (context: ctx.Context, configuration: config.Config,

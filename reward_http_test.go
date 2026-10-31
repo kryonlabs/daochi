@@ -84,11 +84,93 @@ func TestGameRewardsCreditEachAccountOnce(t *testing.T) {
 			Units  int64  `json:"units"`
 		} `json:"rewards"`
 	}
-	if listed.Code != 200 || json.Unmarshal(listed.Body.Bytes(), &offers) != nil || len(offers.Rewards) != 2 {
+	if listed.Code != 200 || json.Unmarshal(listed.Body.Bytes(), &offers) != nil || len(offers.Rewards) != 7 {
 		t.Fatalf("listed rewards: %d %s", listed.Code, listed.Body.String())
 	}
 	// The list names what the next claim gives: the second place is still 100 Dew.
 	if offers.Rewards[0].Units != 2*UnitsPerDew || offers.Rewards[1].Units != 100*UnitsPerDew {
 		t.Fatalf("listed rewards: %+v", offers.Rewards)
+	}
+	daily := []int64{1, 2, 2, 2, 3}
+	for index, reward := range []string{"wurm.daily-05", "wurm.daily-10", "wurm.daily-15", "wurm.daily-20", "wurm.daily-25"} {
+		if offers.Rewards[index+2].Reward != reward || offers.Rewards[index+2].Units != daily[index]*UnitsPerDew {
+			t.Fatalf("listed daily rewards: %+v", offers.Rewards)
+		}
+	}
+}
+
+func TestRewardRejectsForgedEvidence(t *testing.T) {
+	board := evidenceMap()
+	completion := evidenceAttempt(1, board, true)
+	completion.Actions = completion.Actions[:len(completion.Actions)-1] + "1"
+	if err := GameEvidence_Validate(completion, board); err == nil {
+		t.Fatal("structurally valid actions that do not make the recorded trace were accepted")
+	}
+}
+
+func TestRewardRejectsIllegalTrace(t *testing.T) {
+	board := evidenceMap()
+	completion := evidenceAttempt(1, board, true)
+	completion.Actions = "11111111111"
+	if err := GameEvidence_Validate(completion, board); err == nil {
+		t.Fatal("a recorded route was accepted without replaying its actions")
+	}
+}
+
+func TestRewardProofBindsMapSessionAccount(t *testing.T) {
+	_, store, handler, _ := unlockFixture(t)
+	player, other := newTestIdentity(t, handler, 0xb7), newTestIdentity(t, handler, 0xb8)
+	board := evidenceMap()
+	seedGameEvidence(t, store, player.UserID, 28)
+	registerEvidenceMap(t, store, board, 29, "bound")
+
+	unbound := evidenceAttempt(29, board, true)
+	unbound.MapHash = GameEvidence_MapHash("shovey.classic", 1, board)
+	if result := GameEvidence_Put(store.Database, context.Background(), player.UserID, unbound); result.Error == nil {
+		t.Fatal("evidence was accepted for an unbound map revision")
+	}
+	if eligible := GameEvidence_Eligible(store.Database, context.Background(), other.UserID, "shovey.secret-chest"); eligible.Error != nil || eligible.Eligible {
+		t.Fatalf("another authenticated account became eligible: %+v", eligible)
+	}
+	response := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/rewards", other.Token, []byte(`{"reward":"shovey.secret-chest"}`))
+	if response.Code != 403 {
+		t.Fatalf("unbound account claimed reward: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestRewardLegitimateCompletion(t *testing.T) {
+	_, store, handler, _ := unlockFixture(t)
+	player := newTestIdentity(t, handler, 0xb9)
+	seedGameEvidence(t, store, player.UserID, 28)
+	response := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/rewards", player.Token, []byte(`{"reward":"shovey.secret-chest"}`))
+	var claim rewardClaimResponse
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &claim) != nil || !claim.Credited || claim.Units != 2*UnitsPerDew {
+		t.Fatalf("legitimate completion: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestRewardReplayIdempotency(t *testing.T) {
+	_, store, handler, _ := unlockFixture(t)
+	player := newTestIdentity(t, handler, 0xba)
+	board := evidenceMap()
+	registerEvidenceMap(t, store, board, 1, "idempotency")
+	completion := evidenceAttempt(1, board, true)
+	first := GameEvidence_Put(store.Database, context.Background(), player.UserID, completion)
+	again := GameEvidence_Put(store.Database, context.Background(), player.UserID, completion)
+	if first.Error != nil || !first.Created || again.Error != nil || again.Created || again.ID != first.ID {
+		t.Fatalf("evidence replay: first=%+v again=%+v", first, again)
+	}
+	seedGameEvidence(t, store, player.UserID, 28)
+	var balance int64
+	for range 2 {
+		response := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/rewards", player.Token, []byte(`{"reward":"shovey.secret-chest"}`))
+		var claim rewardClaimResponse
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &claim) != nil || claim.Balance != 2*UnitsPerDew {
+			t.Fatalf("reward replay: %d %s", response.Code, response.Body.String())
+		}
+		balance = claim.Balance
+	}
+	if balance != 2*UnitsPerDew {
+		t.Fatalf("reward replay changed balance: %d", balance)
 	}
 }

@@ -37,6 +37,10 @@ DepositResult :: struct {
     value: MoneroDeposit
     error: Error
 }
+UpdateResult :: struct {
+    value: isize
+    error: Error
+}
 DepositsResult :: struct {
     value: []MoneroDeposit
     error: Error
@@ -67,19 +71,32 @@ SELECT tx_id,account_id,amount_atomic,token_units,block_height,confirmations,sta
     rate_atomic_amount,rate_token_units,usd_cents,usd_updated_at,usd_sources
 FROM monero_deposits WHERE account_id=?1 ORDER BY first_seen_at DESC LIMIT ?2
 SQL;
+ReconcileDepositsSQL :: #string SQL
+SELECT tx_id,account_id,amount_atomic,token_units,block_height,confirmations,status,first_seen_at,
+    confirmed_at,credited_at,receipt_id,account_index,address_index,unlock_time,locked,double_spend_seen,
+    rate_atomic_amount,rate_token_units,usd_cents,usd_updated_at,usd_sources
+FROM monero_deposits WHERE status IN ('credited','compensation_hold','conflict_hold')
+ORDER BY first_seen_at,tx_id,account_index,address_index
+SQL;
 InsertDepositSQL :: #string SQL
 INSERT INTO monero_deposits(tx_id,account_index,address_index,account_id,amount_atomic,block_height,
     confirmations,unlock_time,locked,double_spend_seen,status,rate_atomic_amount,rate_token_units,
     usd_cents,usd_updated_at,usd_sources,token_units)
 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
 ON CONFLICT(tx_id,account_index,address_index) DO UPDATE SET
-    amount_atomic=excluded.amount_atomic,
-    block_height=excluded.block_height,
+    amount_atomic=CASE WHEN monero_deposits.status IN ('credited','compensation_hold','conflict_hold','rollback_hold','compensated','finalized')
+        THEN monero_deposits.amount_atomic ELSE excluded.amount_atomic END,
+    block_height=CASE WHEN monero_deposits.status IN ('credited','compensation_hold','conflict_hold','rollback_hold','compensated','finalized')
+        THEN monero_deposits.block_height ELSE excluded.block_height END,
     confirmations=excluded.confirmations,
-    unlock_time=excluded.unlock_time,
-    locked=excluded.locked,
-    double_spend_seen=excluded.double_spend_seen,
-    status=CASE WHEN monero_deposits.status='credited' THEN 'credited' ELSE excluded.status END,
+    unlock_time=CASE WHEN monero_deposits.status IN ('credited','compensation_hold','conflict_hold','rollback_hold','compensated','finalized')
+        THEN monero_deposits.unlock_time ELSE excluded.unlock_time END,
+    locked=CASE WHEN monero_deposits.status IN ('credited','compensation_hold','conflict_hold','rollback_hold','compensated','finalized')
+        THEN monero_deposits.locked ELSE excluded.locked END,
+    double_spend_seen=CASE WHEN monero_deposits.status IN ('credited','compensation_hold','conflict_hold','rollback_hold','compensated','finalized')
+        THEN monero_deposits.double_spend_seen ELSE excluded.double_spend_seen END,
+    status=CASE WHEN monero_deposits.status IN ('credited','compensation_hold','conflict_hold','rollback_hold','compensated','finalized')
+        THEN monero_deposits.status ELSE excluded.status END,
     updated_at=CURRENT_TIMESTAMP
 SQL;
 
@@ -237,7 +254,45 @@ SaveScanHeight :: (database: *sql.Database, context: ctx.Context, height: s64) -
     arguments[0] = height
     arguments[1] = timestamp.CanonicalNow()
     updated := sql.Exec(database, context,
-        "INSERT INTO monero_wallet_state(wallet_id,last_height,updated_at) VALUES('default',?1,?2) ON CONFLICT(wallet_id) DO UPDATE SET last_height=MAX(monero_wallet_state.last_height,excluded.last_height),updated_at=excluded.updated_at", arguments[:])
+        "INSERT INTO monero_wallet_state(wallet_id,last_height,updated_at) VALUES('default',?1,?2) ON CONFLICT(wallet_id) DO UPDATE SET last_height=CASE WHEN excluded.last_height<monero_wallet_state.last_height THEN 0 ELSE excluded.last_height END,updated_at=excluded.updated_at", arguments[:])
+    return updated.error
+}
+
+ReconcileDeposits :: (database: *sql.Database, context: ctx.Context) -> DepositsResult {
+    result: DepositsResult
+    arguments: [0]Any
+    query := sql.Query(database, context, ReconcileDepositsSQL, arguments[:])
+    result.error = query.error
+    if result.error != null {
+        return result
+    }
+    CloseAtReturn(query.value)
+    values: []MoneroDeposit
+    while sql.Next(query.value) {
+        item: MoneroDeposit
+        destinations := DepositDestinations(*item)
+        result.error = sql.ScanRows(query.value, destinations[:])
+        if result.error != null {
+            return result
+        }
+        values = AppendDeposit(values, item)
+    }
+    result.error = sql.CloseRows(query.value)
+    if result.error != null {
+        return result
+    }
+    result.error = sql.RowsError(query.value)
+    if result.error != null {
+        return result
+    }
+    result.value = values
+    return result
+}
+
+RollbackHoldDeposits :: (database: *sql.Database, context: ctx.Context) -> Error {
+    arguments: [0]Any
+    updated := sql.Exec(database, context,
+        "UPDATE monero_deposits SET status='rollback_hold',updated_at=CURRENT_TIMESTAMP WHERE status IN ('credited','compensation_hold','conflict_hold')", arguments[:])
     return updated.error
 }
 
@@ -401,6 +456,122 @@ CreditDeposit :: (database: *sql.Database, context: ctx.Context, signer: ed.Priv
     }
     result.value = credited.value
     result.created = credited.created
+    result.error = sql.Commit(transaction)
+    return result
+}
+
+CompensationHold :: (database: *sql.Database, context: ctx.Context,
+    transactionID: string, account: isize, address: isize) -> UpdateResult {
+    result: UpdateResult
+    arguments: [3]Any
+    arguments[0] = transactionID
+    arguments[1] = account
+    arguments[2] = address
+    updated := sql.Exec(database, context,
+        "UPDATE monero_deposits SET status='compensation_hold',updated_at=CURRENT_TIMESTAMP WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND status IN ('credited','compensation_hold','conflict_hold')", arguments[:])
+    result.error = updated.error
+    if result.error == null {
+        result.value = accounts.Affected(updated.value)
+    }
+    return result
+}
+
+ConflictHold :: (database: *sql.Database, context: ctx.Context,
+    transactionID: string, account: isize, address: isize) -> UpdateResult {
+    result: UpdateResult
+    arguments: [3]Any
+    arguments[0] = transactionID
+    arguments[1] = account
+    arguments[2] = address
+    updated := sql.Exec(database, context,
+        "UPDATE monero_deposits SET status='conflict_hold',updated_at=CURRENT_TIMESTAMP WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND status IN ('credited','compensation_hold','conflict_hold')", arguments[:])
+    result.error = updated.error
+    if result.error == null {
+        result.value = accounts.Affected(updated.value)
+    }
+    return result
+}
+
+FinalizeDeposit :: (database: *sql.Database, context: ctx.Context,
+    transactionID: string, account: isize, address: isize) -> UpdateResult {
+    result: UpdateResult
+    arguments: [3]Any
+    arguments[0] = transactionID
+    arguments[1] = account
+    arguments[2] = address
+    updated := sql.Exec(database, context,
+        "UPDATE monero_deposits SET status='finalized',updated_at=CURRENT_TIMESTAMP WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND status IN ('credited','compensation_hold','conflict_hold')", arguments[:])
+    result.error = updated.error
+    if result.error == null {
+        result.value = accounts.Affected(updated.value)
+    }
+    return result
+}
+
+CompensateDeposit :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
+    transactionID: string, account: isize, address: isize, issuerUnavailable: Error) -> ledger.SpendResult {
+    result: ledger.SpendResult
+    started := sql.Begin(database, context, null)
+    result.error = started.error
+    if result.error != null {
+        return result
+    }
+    transaction := started.value
+    RollbackAtReturn(transaction)
+    accountID: string
+    status: string
+    units: s64
+    arguments: [3]Any
+    arguments[0] = transactionID
+    arguments[1] = account
+    arguments[2] = address
+    row := sql.QueryRowTx(transaction, context,
+        "SELECT account_id,status,token_units FROM monero_deposits WHERE tx_id=?1 AND account_index=?2 AND address_index=?3", arguments[:])
+    destinations: [3]Any
+    destinations[0] = *accountID
+    destinations[1] = *status
+    destinations[2] = *units
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    if status == "compensated" {
+        result.error = sql.Commit(transaction)
+        return result
+    }
+    if status != "compensation_hold" || units <= 0 {
+        result.error = errors.New("monero deposit is not compensable")
+        return result
+    }
+    key := PaymentID("monero_reorg:%s:%d:%d", transactionID, account, address)
+    event: receipts.TokenEventInput
+    event.AccountID = accountID
+    event.EventType = "debit"
+    event.AmountDelta = cast(s64)0 - units
+    event.SourceType = "monero_reorg"
+    event.SourceRef = key
+    spent := ledger.SpendTx(transaction, context, signer, event, key, issuerUnavailable)
+    result.error = spent.error
+    if result.error != null {
+        return result
+    }
+    values: [3]Any
+    values[0] = transactionID
+    values[1] = account
+    values[2] = address
+    updated := sql.ExecTx(transaction, context,
+        "UPDATE monero_deposits SET status='compensated',updated_at=CURRENT_TIMESTAMP WHERE tx_id=?1 AND account_index=?2 AND address_index=?3 AND status='compensation_hold'", values[:])
+    result.error = updated.error
+    if result.error != null {
+        return result
+    }
+    if accounts.Affected(updated.value) != cast(isize)1 {
+        result.error = errors.New("monero deposit compensation race")
+        return result
+    }
+    result.value = spent.value
+    result.balance = spent.balance
+    result.created = spent.created
     result.error = sql.Commit(transaction)
     return result
 }

@@ -101,7 +101,7 @@ func (s *Server) baselineMeshHandleNodeMeshImport(w http.ResponseWriter, r *http
 		Response_Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	importedRecords := MeshStore_ImportEncryptedBatch(s.Store.Database, r.Context(), req.Policy, req.Records, req.Deletions)
+	importedRecords := MeshStore_ImportEncryptedBatch(s.Store.Database, r.Context(), req.Policy, req.Records, req.Deletions, s.Cfg.AccountStorageLimitBytes, s.Cfg.StoragePlansEnabled)
 	applied, err := importedRecords.Value, importedRecords.Error
 	if err != nil {
 		slog.Error("mesh import", "error", err)
@@ -258,7 +258,7 @@ func (s *Server) baselineMeshPullNodePeer(ctx context.Context, peer NodePeer) er
 		if err != nil {
 			return err
 		}
-		importedRecords := MeshStore_ImportEncryptedBatch(s.Store.Database, ctx, policy, exported.Records, exported.Deletions)
+		importedRecords := MeshStore_ImportEncryptedBatch(s.Store.Database, ctx, policy, exported.Records, exported.Deletions, s.Cfg.AccountStorageLimitBytes, s.Cfg.StoragePlansEnabled)
 		applied, err := importedRecords.Value, importedRecords.Error
 		if err != nil {
 			return err

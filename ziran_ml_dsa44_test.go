@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"math/rand"
 	"os"
@@ -28,6 +29,31 @@ type cryptoResponse struct {
 	PrivateKey   []byte
 	Error        string
 	ErrorIsExact bool
+}
+
+type mlDsa44OfficialVectorSource struct {
+	URL    string
+	Commit string
+	SHA256 string
+}
+
+type mlDsa44OfficialVector struct {
+	TcID    int
+	Comment string
+	Flags   []string
+	Result  string
+	Msg     string
+	Sig     string
+}
+
+type mlDsa44OfficialVectorGroup struct {
+	PublicKey string
+	Tests     []mlDsa44OfficialVector
+}
+
+type mlDsa44OfficialVectors struct {
+	Source     mlDsa44OfficialVectorSource
+	TestGroups []mlDsa44OfficialVectorGroup
 }
 
 func cryptoEnvironment(t *testing.T) []string {
@@ -179,6 +205,61 @@ func TestZiranMLDSA44NativeCompatibility(t *testing.T) {
 		if actual := runZiranCrypto(inputs[index]); !reflect.DeepEqual(actual, expected) {
 			t.Fatalf("validation case %d differs: actual=%+v expected=%+v", index, actual, expected)
 		}
+	}
+}
+
+func TestZiranMLDSA44OfficialVectors(t *testing.T) {
+	if !MlDsa44_NativeAvailable() {
+		t.Skip("requires liboqs")
+	}
+
+	encoded, err := os.ReadFile("testdata/ml_dsa44_wycheproof.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors mlDsa44OfficialVectors
+	if err := json.Unmarshal(encoded, &vectors); err != nil {
+		t.Fatal(err)
+	}
+
+	expectedSource := mlDsa44OfficialVectorSource{
+		URL:    "https://raw.githubusercontent.com/C2SP/wycheproof/032b56abd1368843e4def50b4975032ec1ec7ba4/testvectors_v1/mldsa_44_verify_test.json",
+		Commit: "032b56abd1368843e4def50b4975032ec1ec7ba4",
+		SHA256: "fcf10f762855a8c3c6f847914a04803c61fba3bca94d0e43dd12541c05f1e22a",
+	}
+	if vectors.Source != expectedSource {
+		t.Fatalf("official vector source changed: %+v", vectors.Source)
+	}
+
+	seenTestIDs := make([]int, 0, 5)
+	for _, group := range vectors.TestGroups {
+		publicKey, err := hex.DecodeString(group.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, vector := range group.Tests {
+			message, err := hex.DecodeString(vector.Msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signature, err := hex.DecodeString(vector.Sig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(message) == 0 || len(signature) != mlDSA44SignatureSize {
+				t.Fatalf("test case %d has invalid input sizes", vector.TcID)
+			}
+
+			expected := vector.Result == "valid"
+			actual := MlDsa44_Verify(publicKey, message, signature)
+			if actual != expected {
+				t.Fatalf("test case %d verified=%v expected=%v flags=%v", vector.TcID, actual, expected, vector.Flags)
+			}
+			seenTestIDs = append(seenTestIDs, vector.TcID)
+		}
+	}
+	if !reflect.DeepEqual(seenTestIDs, []int{1, 8, 15, 64, 65}) {
+		t.Fatalf("selected official test cases changed: %v", seenTestIDs)
 	}
 }
 

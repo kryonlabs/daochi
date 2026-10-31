@@ -1,0 +1,61 @@
+// The days an account checked in with a game, for rewards that pay after
+// that many days, such as Wurm's daily plan. The node counts UTC days by its
+// own clock, so a client can neither choose a day nor count one twice.
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+errors :: #import "std/errors_go";
+
+DaySeconds :: 86400
+
+CheckInResult :: struct {
+    // The account's check-in days for the game, today included.
+    days: s64
+    error: Error
+}
+
+#scope_file
+Schema :: #string SQL
+CREATE TABLE IF NOT EXISTS reward_checkins (
+ account_id TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ game TEXT NOT NULL, day INTEGER NOT NULL, created_at INTEGER NOT NULL,
+ PRIMARY KEY(account_id,game,day)
+);
+SQL
+InsertCheckIn :: "INSERT INTO reward_checkins(account_id,game,day,created_at) VALUES(?1,?2,?3,?4) ON CONFLICT DO NOTHING";
+CountCheckIns :: "SELECT COUNT(*) FROM reward_checkins WHERE account_id=?1 AND game=?2";
+
+#scope_export
+SchemaSQL :: () -> string {
+    return Schema
+}
+
+// The UTC day of a Unix time, in days since 1970.
+Day :: (unix_seconds: s64) -> s64 {
+    if unix_seconds < 0 {
+        return -1
+    }
+    return unix_seconds / DaySeconds
+}
+
+// Checks the account in for the UTC day of now, once per day, and counts its
+// check-in days for the game.
+CheckIn :: (database: *sql.Database, context: ctx.Context, account: string, game: string,
+    now: s64) -> CheckInResult {
+    result: CheckInResult
+    day := Day(now)
+    if day < 0 {
+        result.error = errors.New("invalid check-in time")
+        return result
+    }
+    values: [4]Any = .[account, game, day, now]
+    written := sql.Exec(database, context, InsertCheckIn, values[:])
+    if written.error != null {
+        result.error = written.error
+        return result
+    }
+    arguments: [2]Any = .[account, game]
+    destinations: [1]Any = .[*result.days]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, CountCheckIns, arguments[:]), destinations[:])
+    return result
+}

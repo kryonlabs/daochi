@@ -57,7 +57,7 @@ func TestMeshAccountScopedImportExportAndTombstones(t *testing.T) {
 	store := meshPortFixture(t)
 	first, second := scopedRecord("first", 10), scopedRecord("second", 20)
 	full := NodeSyncPolicy{Apps: []string{"source"}, Data: []string{"encrypted_records"}}
-	imported := MeshStore_ImportEncryptedRecords(store.Database, ctx, full, []MeshEncryptedRecord{first, second})
+	imported := MeshStore_ImportEncryptedRecords(store.Database, ctx, full, []MeshEncryptedRecord{first, second}, 0, false)
 	if imported.Error != nil || imported.Value != 2 {
 		t.Fatal("fixture import failed", imported)
 	}
@@ -68,7 +68,7 @@ func TestMeshAccountScopedImportExportAndTombstones(t *testing.T) {
 		t.Fatal("export leaked another account", exported)
 	}
 	remote := meshPortFixture(t)
-	imported = MeshStore_ImportEncryptedRecords(remote.Database, ctx, scoped, []MeshEncryptedRecord{first, second})
+	imported = MeshStore_ImportEncryptedRecords(remote.Database, ctx, scoped, []MeshEncryptedRecord{first, second}, 0, false)
 	if imported.Error != nil || imported.Value != 1 {
 		t.Fatal("scoped import accepted another account", imported)
 	}
@@ -80,7 +80,7 @@ func TestMeshAccountScopedImportExportAndTombstones(t *testing.T) {
 		{UserIDHash: first.UserIDHash, Collection: first.Record.Collection, ID: first.Record.ID, DeletedAt: "2026-10-04T00:00:00Z"},
 		{UserIDHash: second.UserIDHash, Collection: second.Record.Collection, ID: second.Record.ID, DeletedAt: "2026-10-04T00:00:00Z"},
 	}
-	deleted := MeshStore_ImportEncryptedBatch(store.Database, ctx, scoped, nil, deletions)
+	deleted := MeshStore_ImportEncryptedBatch(store.Database, ctx, scoped, nil, deletions, 0, false)
 	if deleted.Error != nil || deleted.Value != 1 {
 		t.Fatal("account scoped deletion failed", deleted)
 	}

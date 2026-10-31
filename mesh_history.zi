@@ -1,0 +1,699 @@
+#import "std/go_types"
+#import "protocol"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+cursor :: #import "mesh_cursor";
+timestamp :: #import "timestamp";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+
+DefaultMaxMeshHistoryChanges :: 65536;
+DefaultMaxMeshHistoryTombstones :: 65536;
+DefaultMaxMeshHistoryPeerCursors :: 4096;
+DefaultMeshHistoryCursorExpirySeconds :: 2592000;
+
+MeshHistoryRetention :: struct {
+    maxChanges: isize
+    maxTombstones: isize
+    maxPeerCursors: isize
+    cursorExpirySeconds: s64
+}
+
+MeshHistoryState :: struct {
+    compactedThrough: s64
+    tombstoneCompactedThrough: s64
+    snapshotEpoch: s64
+    tombstonesComplete: bool
+    error: Error
+}
+
+MeshHistoryCompactionResult :: struct {
+    compactedThrough: s64
+    tombstoneCompactedThrough: s64
+    snapshotEpoch: s64
+    tombstonesComplete: bool
+    tombstoneLimitExceeded: bool
+    compacted: bool
+    peerCursorsCompacted: bool
+    error: Error
+}
+
+MeshHistoryExportPlan :: struct {
+    startSequence: s64
+    snapshotEpoch: s64
+    fullSnapshot: bool
+    resetSnapshot: bool
+    cursorExpired: bool
+    peerEpoch: s64
+    error: Error
+}
+
+MeshHistoryPeerCursor :: struct {
+    rawCursor: string
+    snapshotEpoch: s64
+    found: bool
+    error: Error
+}
+
+MeshHistoryResurrectionResult :: struct {
+    blocked: bool
+    error: Error
+}
+
+ErrMeshHistoryCursorExpired: Error = errors.New("mesh cursor expired; full snapshot recovery required");
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+NullableInteger :: #type #foreign native "NullInt64";
+NullableIntegerValid :: (value: NullableInteger) -> bool #go_field #foreign native "NullInt64.Valid";
+NullableIntegerValue :: (value: NullableInteger) -> s64 #go_field #foreign native "NullInt64.Int64";
+TrimSpace :: (value: string) -> string #foreign strings "TrimSpace";
+CompareTime :: (left: string, right: string) -> isize #foreign strings "Compare";
+
+Larger :: (left: s64, right: s64) -> s64 {
+    if left >= right {
+        return left
+    }
+    return right
+}
+
+
+NormalizedRetention :: (retention: MeshHistoryRetention) -> MeshHistoryRetention {
+    value := retention
+    if value.maxChanges <= cast(isize)0 {
+        value.maxChanges = cast(isize)DefaultMaxMeshHistoryChanges
+    }
+    if value.maxTombstones <= cast(isize)0 {
+        value.maxTombstones = cast(isize)DefaultMaxMeshHistoryTombstones
+    }
+    if value.maxPeerCursors <= cast(isize)0 {
+        value.maxPeerCursors = cast(isize)DefaultMaxMeshHistoryPeerCursors
+    }
+    if value.cursorExpirySeconds < cast(s64)0 {
+        value.cursorExpirySeconds = cast(s64)DefaultMeshHistoryCursorExpirySeconds
+    }
+    return value
+}
+
+ReadState :: (source: *sql.Database, context: ctx.Context) -> MeshHistoryState {
+    result: MeshHistoryState
+    result.tombstonesComplete = true
+    complete: isize = 0
+    empty: [0]Any
+    destinations: [4]Any = .[*result.compactedThrough, *result.tombstoneCompactedThrough,
+    *result.snapshotEpoch, *complete]
+    row := sql.QueryRow(source, context, StateSQL, empty[:])
+    result.error = sql.ScanRow(row, destinations[:4])
+    if result.error != null {
+        return result
+    }
+    result.tombstonesComplete = complete != cast(isize)0
+    return result
+}
+
+ReadStateTx :: (transaction: *sql.Transaction, context: ctx.Context) -> MeshHistoryState {
+    result: MeshHistoryState
+    result.tombstonesComplete = true
+    complete: isize = 0
+    empty: [0]Any
+    destinations: [4]Any = .[*result.compactedThrough, *result.tombstoneCompactedThrough,
+    *result.snapshotEpoch, *complete]
+    row := sql.QueryRowTx(transaction, context, StateSQL, empty[:])
+    result.error = sql.ScanRow(row, destinations[:])
+    if result.error != null {
+        return result
+    }
+    result.tombstonesComplete = complete != cast(isize)0
+    return result
+}
+
+ActiveCursorCutoff :: (transaction: *sql.Transaction, context: ctx.Context,
+    retention: MeshHistoryRetention, snapshotEpoch: s64) -> s64, bool, Error {
+    expiry := timestamp.CanonicalTimestamp(clock.Add(clock.UTC(clock.Now()),
+        cast(clock.Duration)(-retention.cursorExpirySeconds*cast(s64)1000000000)))
+    arguments: [2]Any = .[expiry, snapshotEpoch]
+    value: NullableInteger
+    destinations: [1]Any = .[*value]
+    row := sql.QueryRowTx(transaction, context, ActiveCursorSQL, arguments[:])
+    error := sql.ScanRow(row, destinations[:])
+    if error != null {
+        return cast(s64)0, false, error
+    }
+    if !NullableIntegerValid(value) {
+        return cast(s64)0, false, null
+    }
+    return NullableIntegerValue(value) - cast(s64)1, true, null
+}
+
+ReadPeerCursorTx :: (transaction: *sql.Transaction, context: ctx.Context,
+    peerKey: string) -> MeshHistoryPeerCursor {
+    result: MeshHistoryPeerCursor
+    arguments: [1]Any = .[peerKey]
+    rawCursor: sql.NullString
+    destinations: [2]Any = .[*rawCursor, *result.snapshotEpoch]
+    row := sql.QueryRowTx(transaction, context, PeerCursorSQL, arguments[:])
+    error := sql.ScanRow(row, destinations[:])
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    result.error = error
+    if result.error != null {
+        return result
+    }
+    if !sql.NullStringValid(rawCursor) {
+        result.error = errors.New("invalid mesh peer cursor")
+        return result
+    }
+    result.rawCursor = sql.NullStringValue(rawCursor)
+    result.found = true
+    return result
+}
+
+HardHistoryCutoff :: (transaction: *sql.Transaction, context: ctx.Context,
+    floor: s64, maxChanges: isize) -> s64, bool, Error {
+    arguments: [2]Any = .[floor, cast(s64)maxChanges - cast(s64)1]
+    value: s64
+    destinations: [1]Any = .[*value]
+    row := sql.QueryRowTx(transaction, context, HardHistorySQL, arguments[:])
+    error := sql.ScanRow(row, destinations[:])
+    if errors.Is(error, sql.NoRows()) {
+        return floor, false, null
+    }
+    if error != null {
+        return floor, false, error
+    }
+    return value, true, null
+}
+
+HasOrphanHistory :: (transaction: *sql.Transaction, context: ctx.Context) -> bool, Error {
+    value: NullableInteger
+    empty: [0]Any
+    destinations: [1]Any = .[*value]
+    row := sql.QueryRowTx(transaction, context, OrphanHistorySQL, empty[:])
+    error := sql.ScanRow(row, destinations[:])
+    if error != null {
+        return false, error
+    }
+    if !NullableIntegerValid(value) {
+        return false, null
+    }
+    return true, null
+}
+
+TombstoneSummary :: (transaction: *sql.Transaction,
+    context: ctx.Context) -> isize, s64, Error {
+    count: isize = 0
+    lastSequence: s64 = 0
+    empty: [0]Any
+    destinations: [2]Any = .[*count, *lastSequence]
+    row := sql.QueryRowTx(transaction, context, TombstoneSummarySQL, empty[:])
+    error := sql.ScanRow(row, destinations[:])
+    if error != null {
+        return cast(isize)0, cast(s64)0, error
+    }
+    return count, lastSequence, null
+}
+
+PeerCursorAnchor :: (transaction: *sql.Transaction, context: ctx.Context,
+    maxPeerCursors: isize) -> string, string, bool, Error {
+    arguments: [2]Any = .[cast(s64)maxPeerCursors, cast(s64)maxPeerCursors]
+    updatedAt: sql.NullString
+    peerKey: sql.NullString
+    destinations: [2]Any = .[*updatedAt, *peerKey]
+    row := sql.QueryRowTx(transaction, context, PeerCursorAnchorSQL, arguments[:])
+    error := sql.ScanRow(row, destinations[:])
+    if errors.Is(error, sql.NoRows()) {
+        return "", "", false, null
+    }
+    if error != null {
+        return "", "", false, error
+    }
+    if !sql.NullStringValid(updatedAt) || !sql.NullStringValid(peerKey) {
+        return "", "", false, errors.New("invalid mesh peer cursor anchor")
+    }
+    return sql.NullStringValue(updatedAt), sql.NullStringValue(peerKey), true, null
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return Schema
+}
+
+CompactMeshHistory :: (database: *sql.Database, context: ctx.Context,
+    retention: MeshHistoryRetention) -> MeshHistoryCompactionResult {
+    result: MeshHistoryCompactionResult
+    result.tombstonesComplete = true
+    settings := NormalizedRetention(retention)
+    begun := sql.Begin(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+
+    state := ReadStateTx(transaction, context)
+    result.error = state.error
+    if result.error != null {
+        return result
+    }
+    activeCutoff, hasActiveCursor, activeError := ActiveCursorCutoff(transaction, context,
+        settings, state.snapshotEpoch)
+    result.error = activeError
+    if result.error != null {
+        return result
+    }
+
+    empty: [0]Any
+    merged := sql.ExecTx(transaction, context, MergeTombstonesSQL, empty[:])
+    result.error = merged.error
+    if result.error != null {
+        return result
+    }
+
+    coalesced := sql.ExecTx(transaction, context, CoalesceRewritesSQL, empty[:])
+    result.error = coalesced.error
+    if result.error != null {
+        return result
+    }
+    coalescedRows := sql.RowsAffected(coalesced.value)
+    result.error = coalescedRows.error
+    if result.error != null {
+        return result
+    }
+    compacted := coalescedRows.value > cast(s64)0
+
+    hardCutoff, hasHardCutoff, hardError := HardHistoryCutoff(transaction, context,
+        state.compactedThrough, settings.maxChanges)
+    result.error = hardError
+    if result.error != null {
+        return result
+    }
+    hasOrphans, orphanError := HasOrphanHistory(transaction, context)
+    result.error = orphanError
+    if result.error != null {
+        return result
+    }
+
+    cutoff := state.compactedThrough
+    if hasActiveCursor {
+        cutoff = Larger(cutoff, activeCutoff)
+    }
+    if hasHardCutoff {
+        cutoff = Larger(cutoff, hardCutoff)
+    }
+
+    tombstoneCount, tombstoneSequence, tombstoneError := TombstoneSummary(transaction, context)
+    result.error = tombstoneError
+    if result.error != null {
+        return result
+    }
+    tombstoneLimitExceeded := tombstoneCount > settings.maxTombstones
+
+    cutoffArguments: [1]Any = .[cutoff]
+    deletedHistory := sql.ExecTx(transaction, context, DeleteHistorySQL, cutoffArguments[:])
+    result.error = deletedHistory.error
+    if result.error != null {
+        return result
+    }
+    deletedOrphans := sql.ExecTx(transaction, context, DeleteOrphanHistorySQL, empty[:])
+    result.error = deletedOrphans.error
+    if result.error != null {
+        return result
+    }
+    deletedOrphanTombstones := sql.ExecTx(transaction, context, DeleteOrphanTombstonesSQL, empty[:])
+    result.error = deletedOrphanTombstones.error
+    if result.error != null {
+        return result
+    }
+    compacted = compacted || cutoff > state.compactedThrough
+
+    peerUpdatedAt, peerKey, hasPeerAnchor, peerError := PeerCursorAnchor(transaction, context,
+        settings.maxPeerCursors)
+    result.error = peerError
+    if result.error != null {
+        return result
+    }
+    if hasPeerAnchor {
+        peerArguments: [2]Any = .[peerUpdatedAt, peerKey]
+        deletedPeers := sql.ExecTx(transaction, context, DeletePeerCursorsSQL,
+            peerArguments[:])
+        result.error = deletedPeers.error
+        if result.error != null {
+            return result
+        }
+        result.peerCursorsCompacted = true
+    }
+
+    finalTombstoneCutoff := Larger(state.tombstoneCompactedThrough, tombstoneSequence)
+    nextEpoch := state.snapshotEpoch
+    arguments: [5]Any = .[cutoff, finalTombstoneCutoff, true, nextEpoch,
+    timestamp.CanonicalNow()]
+    updated := sql.ExecTx(transaction, context, UpdateStateSQL, arguments[:])
+    result.error = updated.error
+    if result.error != null {
+        return result
+    }
+    result.error = sql.Commit(transaction)
+    if result.error != null {
+        return result
+    }
+    result.compactedThrough = cutoff
+    result.tombstoneCompactedThrough = finalTombstoneCutoff
+    result.snapshotEpoch = nextEpoch
+    result.tombstonesComplete = true
+    result.tombstoneLimitExceeded = tombstoneLimitExceeded
+    result.compacted = compacted
+    return result
+}
+
+PlanFromState :: (state: MeshHistoryState, peer: MeshHistoryPeerCursor,
+    rawCursor: string, protocolVersion: isize) -> MeshHistoryExportPlan {
+    result: MeshHistoryExportPlan
+    if protocolVersion < MinSupportedProtocol || protocolVersion > LatestProtocol {
+        result.error = errors.New("unsupported mesh protocol version")
+        return result
+    }
+    result.snapshotEpoch = state.snapshotEpoch
+    result.peerEpoch = state.snapshotEpoch
+    decoded := cursor.Decode(rawCursor)
+    result.error = decoded.error
+    if result.error != null {
+        return result
+    }
+    epochMismatch := peer.found && peer.snapshotEpoch != state.snapshotEpoch
+    if decoded.value.Seq == cast(s64)0 {
+        if state.compactedThrough > cast(s64)0 || epochMismatch || !state.tombstonesComplete {
+            result.fullSnapshot = true
+            result.resetSnapshot = true
+            result.cursorExpired = state.compactedThrough > cast(s64)0 || epochMismatch
+            if protocolVersion < LatestProtocol {
+                result.fullSnapshot = false
+                result.resetSnapshot = false
+                result.error = ErrMeshHistoryCursorExpired
+            }
+        }
+        return result
+    }
+    if epochMismatch || decoded.value.Seq <= state.compactedThrough {
+        result.cursorExpired = true
+        result.fullSnapshot = true
+        result.resetSnapshot = true
+        if protocolVersion < LatestProtocol {
+            result.fullSnapshot = false
+            result.resetSnapshot = false
+            result.error = ErrMeshHistoryCursorExpired
+        }
+        return result
+    }
+    result.startSequence = decoded.value.Seq
+    return result
+}
+
+PrepareExport :: (database: *sql.Database, context: ctx.Context, peerKey: string,
+    rawCursor: string, protocolVersion: isize) -> MeshHistoryExportPlan {
+    result: MeshHistoryExportPlan
+    if TrimSpace(peerKey) == "" {
+        result.error = errors.New("mesh peer identity is required")
+        return result
+    }
+    begun := sql.Begin(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    state := ReadStateTx(transaction, context)
+    if state.error != null {
+        result.error = state.error
+        return result
+    }
+    peer := ReadPeerCursorTx(transaction, context, peerKey)
+    if peer.error != null {
+        result.error = peer.error
+        return result
+    }
+    return PlanFromState(state, peer, rawCursor, protocolVersion)
+}
+
+PrepareExportTx :: (transaction: *sql.Transaction, context: ctx.Context, peerKey: string,
+    rawCursor: string, protocolVersion: isize) -> MeshHistoryExportPlan {
+    result: MeshHistoryExportPlan
+    if TrimSpace(peerKey) == "" {
+        result.error = errors.New("mesh peer identity is required")
+        return result
+    }
+    state := ReadStateTx(transaction, context)
+    if state.error != null {
+        result.error = state.error
+        return result
+    }
+    peer := ReadPeerCursorTx(transaction, context, peerKey)
+    if peer.error != null {
+        result.error = peer.error
+        return result
+    }
+    return PlanFromState(state, peer, rawCursor, protocolVersion)
+}
+
+AcknowledgeCursor :: (database: *sql.Database, context: ctx.Context,
+    peerKey: string, rawCursor: string, snapshotEpoch: s64) -> Error {
+    if TrimSpace(peerKey) == "" {
+        return errors.New("mesh peer identity is required")
+    }
+    if TrimSpace(rawCursor) == "" {
+        return null
+    }
+    begun := sql.Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    state := ReadStateTx(transaction, context)
+    if state.error != null {
+        return state.error
+    }
+    if snapshotEpoch != state.snapshotEpoch {
+        return ErrMeshHistoryCursorExpired
+    }
+    decoded := cursor.Decode(rawCursor)
+    if decoded.error != null {
+        return decoded.error
+    }
+    if decoded.value.Seq <= state.compactedThrough {
+        return ErrMeshHistoryCursorExpired
+    }
+    peer := ReadPeerCursorTx(transaction, context, peerKey)
+    if peer.error != null {
+        return peer.error
+    }
+    if peer.found {
+        previous := cursor.Decode(peer.rawCursor)
+        if previous.error != null {
+            return previous.error
+        }
+        if previous.value.Seq > decoded.value.Seq {
+            return errors.New("mesh cursor acknowledgment cannot regress")
+        }
+    }
+    cursorArguments: [5]Any = .[peerKey, rawCursor, decoded.value.Seq, snapshotEpoch,
+    timestamp.CanonicalNow()]
+    written := sql.ExecTx(transaction, context, AcknowledgeCursorSQL, cursorArguments[:])
+    if written.error != null {
+        return written.error
+    }
+    return sql.Commit(transaction)
+}
+
+ResurrectionBlocked :: (transaction: *sql.Transaction, context: ctx.Context,
+    userID: string, collection: string, recordID: string,
+    updatedAt: string) -> MeshHistoryResurrectionResult {
+    result: MeshHistoryResurrectionResult
+    arguments: [3]Any = .[userID, collection, recordID]
+    deletedAt: sql.NullString
+    destinations: [1]Any = .[*deletedAt]
+    row := sql.QueryRowTx(transaction, context, MeshHistoryTombstoneSQL, arguments[:])
+    error := sql.ScanRow(row, destinations[:])
+    if errors.Is(error, sql.NoRows()) {
+        return result
+    }
+    result.error = error
+    if result.error != null {
+        return result
+    }
+    if !sql.NullStringValid(deletedAt) {
+        result.error = errors.New("invalid mesh deletion provenance")
+        return result
+    }
+    updated := timestamp.NormalizeTime(updatedAt, "")
+    deleted := timestamp.NormalizeTime(sql.NullStringValue(deletedAt), "")
+    result.blocked = CompareTime(updated, deleted) <= cast(isize)0
+    return result
+}
+
+LoadState :: (database: *sql.Database, context: ctx.Context) -> MeshHistoryState {
+    return ReadState(database, context)
+}
+
+DefaultRetention :: () -> MeshHistoryRetention {
+    return MeshHistoryRetention.{
+        maxChanges = cast(isize)DefaultMaxMeshHistoryChanges,
+        maxTombstones = cast(isize)DefaultMaxMeshHistoryTombstones,
+        maxPeerCursors = cast(isize)DefaultMaxMeshHistoryPeerCursors,
+        cursorExpirySeconds = cast(s64)DefaultMeshHistoryCursorExpirySeconds
+    }
+}
+
+Schema :: #string SQL_END
+CREATE TABLE IF NOT EXISTS server_mesh_history_state (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    compacted_through INTEGER NOT NULL DEFAULT 0,
+    tombstone_compacted_through INTEGER NOT NULL DEFAULT 0,
+    snapshot_epoch INTEGER NOT NULL DEFAULT 1,
+    tombstones_complete INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT OR IGNORE INTO server_mesh_history_state(singleton) VALUES(1);
+CREATE TABLE IF NOT EXISTS server_mesh_history_tombstones (
+    user_id_hash TEXT NOT NULL,
+    collection TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    deleted_at TEXT NOT NULL,
+    last_seq INTEGER NOT NULL,
+    PRIMARY KEY(user_id_hash,collection,record_id)
+);
+CREATE INDEX IF NOT EXISTS server_mesh_history_tombstone_sequence
+    ON server_mesh_history_tombstones(last_seq,user_id_hash,collection,record_id);
+CREATE INDEX IF NOT EXISTS server_mesh_changes_record_sequence
+    ON server_mesh_changes(user_id_hash,collection,record_id,seq);
+CREATE TABLE IF NOT EXISTS server_mesh_peer_cursors (
+    peer_key TEXT PRIMARY KEY,
+    cursor TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    snapshot_epoch INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS server_mesh_peer_cursor_activity
+    ON server_mesh_peer_cursors(updated_at,peer_key);
+CREATE TRIGGER IF NOT EXISTS server_mesh_changes_coalesce_record
+AFTER INSERT ON server_mesh_changes
+BEGIN
+    DELETE FROM server_mesh_changes
+    WHERE user_id_hash=NEW.user_id_hash
+      AND collection=NEW.collection
+      AND record_id=NEW.record_id
+      AND seq<NEW.seq;
+END;
+CREATE TRIGGER IF NOT EXISTS server_mesh_changes_preserve_deletion
+AFTER INSERT ON server_mesh_changes
+WHEN NEW.op='delete'
+BEGIN
+    INSERT INTO server_mesh_history_tombstones(
+        user_id_hash,collection,record_id,deleted_at,last_seq)
+    VALUES(NEW.user_id_hash,NEW.collection,NEW.record_id,NEW.deleted_at,NEW.seq)
+    ON CONFLICT(user_id_hash,collection,record_id) DO UPDATE SET
+        deleted_at=excluded.deleted_at,
+        last_seq=excluded.last_seq;
+END;
+SQL_END;
+
+StateSQL :: "SELECT compacted_through,tombstone_compacted_through,snapshot_epoch,tombstones_complete FROM server_mesh_history_state WHERE singleton=1";
+ActiveCursorSQL :: #string SQL_END
+SELECT MIN(sequence)
+FROM server_mesh_peer_cursors
+WHERE updated_at>=?1
+  AND snapshot_epoch=?2
+  AND sequence>0
+SQL_END;
+PeerCursorSQL :: "SELECT cursor,snapshot_epoch FROM server_mesh_peer_cursors WHERE peer_key=?1";
+HardHistorySQL :: #string SQL_END
+SELECT seq-1
+FROM server_mesh_changes
+WHERE seq>?1
+ORDER BY seq DESC
+LIMIT 1 OFFSET ?2
+SQL_END;
+OrphanHistorySQL :: #string SQL_END
+SELECT MAX(c.seq)
+FROM server_mesh_changes c
+LEFT JOIN server_users u ON u.user_id_hash=c.user_id_hash
+WHERE u.user_id_hash IS NULL
+SQL_END;
+MergeTombstonesSQL :: #string SQL_END
+INSERT INTO server_mesh_history_tombstones(
+    user_id_hash,collection,record_id,deleted_at,last_seq)
+SELECT c.user_id_hash,c.collection,c.record_id,c.deleted_at,c.seq
+FROM server_mesh_changes c
+JOIN (
+    SELECT user_id_hash,collection,record_id,MAX(seq) AS last_seq
+    FROM server_mesh_changes
+    WHERE op='delete'
+    GROUP BY user_id_hash,collection,record_id
+) latest ON latest.user_id_hash=c.user_id_hash
+    AND latest.collection=c.collection
+    AND latest.record_id=c.record_id
+    AND latest.last_seq=c.seq
+WHERE c.op='delete'
+ON CONFLICT(user_id_hash,collection,record_id) DO UPDATE SET
+    deleted_at=excluded.deleted_at,
+    last_seq=excluded.last_seq
+SQL_END;
+CoalesceRewritesSQL :: #string SQL_END
+DELETE FROM server_mesh_changes
+WHERE EXISTS (
+    SELECT 1 FROM server_mesh_changes newer
+    WHERE newer.user_id_hash=server_mesh_changes.user_id_hash
+      AND newer.collection=server_mesh_changes.collection
+      AND newer.record_id=server_mesh_changes.record_id
+      AND newer.seq>server_mesh_changes.seq
+)
+SQL_END;
+DeleteHistorySQL :: "DELETE FROM server_mesh_changes WHERE seq<=?1";
+DeleteOrphanHistorySQL :: #string SQL_END
+DELETE FROM server_mesh_changes
+WHERE NOT EXISTS (
+    SELECT 1 FROM server_users u WHERE u.user_id_hash=server_mesh_changes.user_id_hash
+)
+SQL_END;
+DeleteOrphanTombstonesSQL :: #string SQL_END
+DELETE FROM server_mesh_history_tombstones
+WHERE NOT EXISTS (
+    SELECT 1 FROM server_users u
+    WHERE u.user_id_hash=server_mesh_history_tombstones.user_id_hash
+)
+SQL_END;
+TombstoneSummarySQL :: "SELECT COUNT(*),COALESCE(MAX(last_seq),0) FROM server_mesh_history_tombstones";
+MeshHistoryTombstoneSQL :: "SELECT deleted_at FROM server_mesh_history_tombstones WHERE user_id_hash=?1 AND collection=?2 AND record_id=?3";
+UpdateStateSQL :: #string SQL_END
+UPDATE server_mesh_history_state
+SET compacted_through=?1,
+    tombstone_compacted_through=?2,
+    tombstones_complete=?3,
+    snapshot_epoch=?4,
+    updated_at=?5
+WHERE singleton=1
+SQL_END;
+AcknowledgeCursorSQL :: #string SQL_END
+INSERT INTO server_mesh_peer_cursors(peer_key,cursor,sequence,snapshot_epoch,updated_at)
+VALUES(?1,?2,?3,?4,?5)
+ON CONFLICT(peer_key) DO UPDATE SET
+    cursor=excluded.cursor,
+    sequence=excluded.sequence,
+    snapshot_epoch=excluded.snapshot_epoch,
+    updated_at=excluded.updated_at
+SQL_END;
+PeerCursorAnchorSQL :: #string SQL_END
+SELECT updated_at,peer_key
+FROM server_mesh_peer_cursors
+ORDER BY updated_at DESC,peer_key DESC
+LIMIT ?1 OFFSET ?2
+SQL_END;
+DeletePeerCursorsSQL :: #string SQL_END
+DELETE FROM server_mesh_peer_cursors
+WHERE updated_at<?1
+   OR (updated_at=?1 AND peer_key<=?2)
+SQL_END;

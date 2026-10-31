@@ -3,10 +3,28 @@
 #import "identity"
 #import "std/hmac_sha256_go"
 #import "std/constant_time"
+#import "std/random_go"
+clock :: #import "std/time_go";
+
+go_hex :: #system_library "go:encoding/hex";
 
 go_strings :: #system_library "go:strings";
 Split :: (value: string, separator: string) -> []string #foreign go_strings "Split";
 Join :: (values: []string, separator: string) -> string #foreign go_strings "Join";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+
+AuthTokenMetadata :: struct {
+    userID: string
+    sessionID: string
+    issuedAt: s64
+    expiresAt: s64
+    version: string
+}
+
+AuthTokenMetadataResult :: struct {
+    value: AuthTokenMetadata
+    error: string
+}
 
 AuthTokenResult :: struct {
     value: string
@@ -103,7 +121,17 @@ IssueAuthToken :: (secret: []u8, userID: string, expiresAt: s64) -> AuthTokenRes
     if expiry.error != "" {
         return expiry
     }
-    parts: [4]string = .["v1", userID, expiry.value, ""]
+    sessionBytes: [32]u8
+    filled := Fill(sessionBytes[:])
+    if filled.error != null {
+        result.error = "secure session allocation failed"
+        return result
+    }
+    issued: AuthTokenResult = DecimalText(clock.Unix(clock.Now()))
+    if issued.error != "" {
+        return issued
+    }
+    parts: [6]string = .["v2", userID, expiry.value, issued.value, EncodeHex(sessionBytes[:]), ""]
     payload: string = Join(parts[:], "\n")
     mac: DigestResult = HMACSHA256(secret, payload)
     if mac.error != "" {
@@ -123,6 +151,21 @@ IssueAuthToken :: (secret: []u8, userID: string, expiresAt: s64) -> AuthTokenRes
 
 VerifyAuthToken :: (secret: []u8, token: string, now: s64) -> AuthTokenResult {
     result: AuthTokenResult
+    metadata := InspectAuthToken(secret, token)
+    if metadata.error != "" {
+        result.error = metadata.error
+        return result
+    }
+    if now > metadata.value.expiresAt {
+        result.error = "token expired"
+        return result
+    }
+    result.value = metadata.value.userID
+    return result
+}
+
+InspectAuthToken :: (secret: []u8, token: string) -> AuthTokenMetadataResult {
+    result: AuthTokenMetadataResult
     parts: []string = Split(token, ".")
     if parts.count != 2 || secret.count == 0 {
         result.error = "invalid token"
@@ -148,19 +191,36 @@ VerifyAuthToken :: (secret: []u8, token: string, now: s64) -> AuthTokenResult {
         return result
     }
     fields: []string = Split(payload.value, "\n")
-    if fields.count < 4 {
+    if fields.count >= 4 && fields[0] == "v1" {
+        if !ValidUserID(fields[1]) {
+            result.error = "invalid token payload"
+            return result
+        }
+        expiresAt := ParseInteger(fields[2])
+        if !expiresAt.is_ok {
+            result.error = "token expired"
+            return result
+        }
+        result.value.userID = fields[1]
+        result.value.expiresAt = expiresAt.value
+        result.value.version = "v1"
+        return result
+    }
+    if fields.count != 6 || fields[5] != "" || fields[0] != "v2" || !ValidUserID(fields[1]) ||
+        !IsHex(fields[4]) || fields[4].count != 64 {
         result.error = "invalid token payload"
         return result
     }
-    if fields[0] != "v1" || !ValidUserID(fields[1]) {
+    expiresAt := ParseInteger(fields[2])
+    issuedAt := ParseInteger(fields[3])
+    if !expiresAt.is_ok || !issuedAt.is_ok || issuedAt.value <= 0 {
         result.error = "invalid token payload"
         return result
     }
-    expiresAt: ParsedInteger = ParseInteger(fields[2])
-    if !expiresAt.is_ok || now > expiresAt.value {
-        result.error = "token expired"
-        return result
-    }
-    result.value = fields[1]
+    result.value.userID = fields[1]
+    result.value.sessionID = fields[4]
+    result.value.issuedAt = issuedAt.value
+    result.value.expiresAt = expiresAt.value
+    result.value.version = "v2"
     return result
 }

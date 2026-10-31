@@ -10,6 +10,9 @@ scope :: #import "collection_scope";
 policy :: #import "mesh_policy";
 record :: #import "encrypted_record";
 account :: #import "account_state";
+plans :: #import "storage_plan";
+storage :: #import "account_storage";
+#import "sync_types";
 identity :: #import "identity";
 timestamp :: #import "timestamp";
 clock :: #import "std/time_go";
@@ -28,7 +31,14 @@ MeshExportResult :: struct {
 }
 MeshImportResult :: struct {
     value: isize
+    storage: AccountStorage
     error: Error
+}
+
+MeshQuotaAccount :: struct {
+    userID: string
+    usedBefore: s64
+    limit: s64
 }
 
 #scope_file
@@ -298,12 +308,12 @@ ExportEncryptedRecords :: (database: *sql.Database, context: ctx.Context, meshPo
     return result
 }
 
-ImportEncryptedRecords :: (database: *sql.Database, context: ctx.Context, meshPolicy: NodeSyncPolicy, records: []MeshEncryptedRecord) -> MeshImportResult {
+ImportEncryptedRecords :: (database: *sql.Database, context: ctx.Context, meshPolicy: NodeSyncPolicy, records: []MeshEncryptedRecord, storageLimit: s64, storagePlansEnabled: bool) -> MeshImportResult {
     deletions: []MeshEncryptedRecordDeletion
-    return ImportEncryptedBatch(database, context, meshPolicy, records, deletions)
+    return ImportEncryptedBatch(database, context, meshPolicy, records, deletions, storageLimit, storagePlansEnabled)
 }
 
-ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPolicy: NodeSyncPolicy, records: []MeshEncryptedRecord, deletions: []MeshEncryptedRecordDeletion) -> MeshImportResult {
+ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPolicy: NodeSyncPolicy, records: []MeshEncryptedRecord, deletions: []MeshEncryptedRecordDeletion, storageLimit: s64, storagePlansEnabled: bool) -> MeshImportResult {
     result: MeshImportResult
     if !policy.IncludesData(*meshPolicy, "encrypted_records") {
         return result
@@ -322,6 +332,8 @@ ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPoli
     transaction := begun.value
     RollbackAtReturn(transaction)
     tombstones: Map(string, bool)
+    quotaAccounts: Map(string, MeshQuotaAccount)
+    quotaNow := clock.Unix(clock.Now())
     applied: isize = 0
     for change: changes {
         if change.deletion != null {
@@ -342,6 +354,12 @@ ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPoli
             }
             if deleted.value {
                 continue
+            }
+            remembered := RememberQuota(transaction, context, change.deletion.UserIDHash, *quotaAccounts,
+                storageLimit, storagePlansEnabled, quotaNow)
+            result.error = remembered.error
+            if result.error != null {
+                return result
             }
             changed := ApplyDeletion(transaction, context, <<change.deletion)
             result.error = changed.error
@@ -383,6 +401,12 @@ ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPoli
         if deleted.value {
             continue
         }
+        remembered := RememberQuota(transaction, context, item.UserIDHash, *quotaAccounts,
+            storageLimit, storagePlansEnabled, quotaNow)
+        result.error = remembered.error
+        if result.error != null {
+            return result
+        }
         result.error = UpsertUser(transaction, context, item, key.value)
         if result.error != null {
             return result
@@ -394,10 +418,55 @@ ImportEncryptedBatch :: (database: *sql.Database, context: ctx.Context, meshPoli
         }
         applied += changed.value
     }
+    for userID: MapKeys(quotaAccounts) {
+        snapshot := MapGet(quotaAccounts, userID)
+        usedAfter := storage.UsedTx(transaction, context, userID)
+        result.error = usedAfter.error
+        if result.error != null {
+            return result
+        }
+        if storage.Exceeds(snapshot.usedBefore, usedAfter.value, snapshot.limit) {
+            result.storage = storage.Report(snapshot.usedBefore, snapshot.limit)
+            result.error = storage.ErrStorageFull
+            return result
+        }
+    }
     result.error = sql.Commit(transaction)
     if result.error == null {
         result.value = applied
     }
+    return result
+}
+
+QuotaSnapshotResult :: struct {
+    value: MeshQuotaAccount
+    seen: bool
+    error: Error
+}
+
+RememberQuota :: (transaction: *sql.Transaction, context: ctx.Context, userID: string,
+    quotaAccounts: *Map(string, MeshQuotaAccount), storageLimit: s64, storagePlansEnabled: bool,
+    now: s64) -> QuotaSnapshotResult {
+    result: QuotaSnapshotResult
+    existing := MapGet(<<quotaAccounts, userID)
+    if existing.userID != "" {
+        result.value = existing
+        result.seen = true
+        return result
+    }
+    used := storage.UsedTx(transaction, context, userID)
+    result.error = used.error
+    if result.error != null {
+        return result
+    }
+    limit := plans.LimitTx(transaction, context, userID, storageLimit, storagePlansEnabled, now)
+    result.error = limit.error
+    if result.error != null {
+        return result
+    }
+    result.value = MeshQuotaAccount.{userID = userID, usedBefore = used.value, limit = limit.value}
+    MapSet(<<quotaAccounts, userID, result.value)
+    result.seen = true
     return result
 }
 

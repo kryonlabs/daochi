@@ -395,10 +395,26 @@ func (s *Server) baselineAuthenticateToken(r *http.Request) (string, error) {
 				return "", err
 			}
 			if !deleted {
+				authorized := AuthSessions_AuthorizeBearer(s.Store.Database, r.Context(),
+					s.Cfg.TokenSecret, strings.TrimSpace(token), userID, time.Now().Unix())
+				if authorized.Error != nil {
+					return "", authorized.Error
+				}
+				if !authorized.Value {
+					return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
+				}
 				return userID, nil
 			}
 		}
 		return "", authError{status: http.StatusUnauthorized, message: "sync account not found"}
+	}
+	authorized := AuthSessions_AuthorizeBearer(s.Store.Database, r.Context(),
+		s.Cfg.TokenSecret, strings.TrimSpace(token), userID, time.Now().Unix())
+	if authorized.Error != nil {
+		return "", authorized.Error
+	}
+	if !authorized.Value {
+		return "", authError{status: http.StatusUnauthorized, message: "invalid bearer token"}
 	}
 	return userID, nil
 }

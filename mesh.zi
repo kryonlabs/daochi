@@ -8,8 +8,10 @@ node_auth :: #import "node_auth";
 http_auth :: #import "http_auth";
 http_body :: #import "http_body";
 response :: #import "response";
+identity :: #import "identity";
 apps :: #import "mesh_apps";
 records :: #import "mesh_store";
+storage :: #import "account_storage";
 trust :: #import "trust_store";
 policy :: #import "mesh_policy";
 network :: #import "network_scope";
@@ -49,6 +51,12 @@ HeaderParts :: struct {
     after: string
     found: bool
 }
+TokenCredential :: struct {
+    nodeID: string
+    secret: string
+    value: string
+    valid: bool
+}
 TrimSpace :: (value: string) -> string #foreign go_strings;
 TrimRight :: (value: string, cutset: string) -> string #foreign go_strings;
 TrimBytes :: (value: []u8) -> []u8 #foreign go_bytes "TrimSpace";
@@ -57,6 +65,7 @@ EqualFold :: (left: string, right: string) -> bool #foreign go_strings;
 Join :: (values: []string, separator: string) -> string #foreign go_strings;
 AllocatePeers :: (count: isize) -> []NodePeer #foreign builtin "make";
 AppendPeer :: (peers: []NodePeer, peer: NodePeer) -> []NodePeer #foreign builtin "append";
+headerNames: [2]string = .["X-Daochi-Node-Token", "X-Ksync-Node-Token"];
 LogError :: (message: string, key: string, error: Error) #foreign go_slog "Error";
 LogWarning :: (message: string, key: string, error: Error) #foreign go_slog "Warn";
 LogPeerWarning :: (message: string, peerKey: string, peer: string, urlKey: string, url: string, errorKey: string, error: Error) #foreign go_slog "Warn";
@@ -64,6 +73,41 @@ LogApplied :: (message: string, peerKey: string, peer: string, urlKey: string, u
 CloseAtReturn :: (body: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
 StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
 RemoteFailure :: (format: string, status: string, body: string) -> Error #foreign go_format "Errorf";
+
+ParseTokenCredential :: (credential: string) -> TokenCredential {
+    result: TokenCredential
+    cut := Cut(TrimSpace(credential), ":")
+    if !cut.found {
+        return result
+    }
+    result.nodeID = TrimSpace(cut.before)
+    result.secret = TrimSpace(cut.after)
+    if result.nodeID == "" || result.secret == "" || !identity.ValidUserID(result.nodeID) {
+        return result
+    }
+    value: [2]string = .[result.nodeID, result.secret]
+    result.value = Join(value[:], ":")
+    result.valid = true
+    return result
+}
+
+RequestTokenCredential :: (mesh: Mesh, request: *http.Request) -> TokenCredential {
+    result: TokenCredential
+    configured := ParseTokenCredential(mesh.configuration.NodeSyncToken)
+    if !configured.valid {
+        return result
+    }
+    headers := http.Headers(request)
+    provided := TrimSpace(http_auth.HeaderAlias(request, headerNames[:]))
+    if provided == "" {
+        provided = BearerToken(http.HeaderValue(headers, "Authorization"))
+    }
+    candidate := ParseTokenCredential(provided)
+    if !candidate.valid || !constant_time.ConstantTimeTextEqual(candidate.value, configured.value) {
+        return result
+    }
+    return candidate
+}
 
 #scope_export
 Run :: (mesh: Mesh, context: ctx.Context) {
@@ -173,7 +217,11 @@ Import :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request) {
         response.Error(writer, cast(isize)400, errors.Message(importedApps.error))
         return
     }
-    importedRecords := records.ImportEncryptedBatch(mesh.database, context, input.Policy, input.Records, input.Deletions)
+    importedRecords := records.ImportEncryptedBatch(mesh.database, context, input.Policy, input.Records, input.Deletions, mesh.configuration.AccountStorageLimitBytes, mesh.configuration.StoragePlansEnabled)
+    if errors.Is(importedRecords.error, storage.ErrStorageFull) {
+        storage.RespondFull(writer, importedRecords.storage)
+        return
+    }
     if importedRecords.error != null {
         LogError("mesh import", "error", importedRecords.error)
         response.Error(writer, cast(isize)400, errors.Message(importedRecords.error))
@@ -212,21 +260,20 @@ Authorize :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request, b
         }
         return true
     }
-    token := TrimSpace(mesh.configuration.NodeSyncToken)
+    credential := ParseTokenCredential(mesh.configuration.NodeSyncToken)
     if scope.LANOnly {
         response.Error(writer, cast(isize)401, "LAN mesh requires signed peer identity")
         return false
     }
-    if token == "" {
+    if TrimSpace(mesh.configuration.NodeSyncToken) == "" {
         response.Error(writer, cast(isize)503, "node sync disabled")
         return false
     }
-    names: [2]string = .["X-Daochi-Node-Token", "X-Ksync-Node-Token"]
-    provided := TrimSpace(http_auth.HeaderAlias(request, names[:]))
-    if provided == "" {
-        provided = BearerToken(http.HeaderValue(headers, "Authorization"))
+    if !credential.valid {
+        response.Error(writer, cast(isize)503, "identity-bound node token required")
+        return false
     }
-    if provided == "" || !constant_time.ConstantTimeTextEqual(provided, token) {
+    if !RequestTokenCredential(mesh, request).valid {
         response.Error(writer, cast(isize)401, "invalid node token")
         return false
     }
@@ -236,14 +283,20 @@ Authorize :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request, b
 AuthorizePolicy :: (mesh: Mesh, writer: http.ResponseWriter, request: *http.Request, requested: NodeSyncPolicy, operation: string) -> bool {
     nodeID := TrimSpace(http.HeaderValue(http.Headers(request), "X-Daochi-Node-ID"))
     if nodeID == "" {
-        return true
+        credential := RequestTokenCredential(mesh, request)
+        if !credential.valid {
+            response.Error(writer, cast(isize)401, "invalid node token")
+            return false
+        }
+        nodeID = credential.nodeID
     }
     approved := trust.TrustedPeerPolicy(mesh.database, http.Context(request), nodeID)
     if approved.error != null {
         response.Error(writer, cast(isize)500, "peer policy lookup failed")
         return false
     }
-    if !approved.found || !policy.AllowsOperation(approved.value, requested, operation) {
+    if !approved.found || !policy.ValidInbound(approved.value) ||
+    !policy.AllowsOperation(approved.value, requested, operation) {
         response.Error(writer, cast(isize)403, "requested mesh policy exceeds paired scope")
         return false
     }
@@ -339,7 +392,7 @@ PullPeer :: (mesh: Mesh, context: ctx.Context, peer: NodePeer) -> Error {
         if importedApps.error != null {
             return importedApps.error
         }
-        importedRecords := records.ImportEncryptedBatch(mesh.database, context, sync, exported.Records, exported.Deletions)
+        importedRecords := records.ImportEncryptedBatch(mesh.database, context, sync, exported.Records, exported.Deletions, mesh.configuration.AccountStorageLimitBytes, mesh.configuration.StoragePlansEnabled)
         if importedRecords.error != null {
             return importedRecords.error
         }

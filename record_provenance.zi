@@ -1,0 +1,242 @@
+#import "std/go_types"
+codec :: #import "codec";
+identity :: #import "identity";
+signing :: #import "signing";
+signature :: #import "ml_dsa44";
+text :: #import "std/text_go";
+errors :: #import "std/errors_go";
+go_hex :: #system_library "go:encoding/hex";
+go_strconv :: #system_library "go:strconv";
+go_strings :: #system_library "go:strings";
+
+RecordProvenanceDomain :: "daochi-record-provenance-v1";
+RecordProvenanceMaxFutureSeconds :: 300;
+RecordMutation :: "record";
+TombstoneMutation :: "tombstone";
+
+RecordWriterRole :: enum {
+    WRITER_UNKNOWN :: 0
+    WRITER_TRANSPORT_ONLY :: 1
+    WRITER_DELEGATED :: 2
+}
+
+using RecordWriterRole;
+
+RecordProvenanceMutation :: struct {
+    AccountID: string #go_tag "json:\"account_id\""
+    AppID: string #go_tag "json:\"app_id\""
+    Collection: string #go_tag "json:\"collection\""
+    ID: string #go_tag "json:\"id\""
+    Version: s64 #go_tag "json:\"version\""
+    ContentHash: string #go_tag "json:\"content_hash\""
+    Timestamp: s64 #go_tag "json:\"timestamp\""
+    Tombstone: bool #go_tag "json:\"tombstone\""
+    Signature: string #go_tag "json:\"signature,omitempty\""
+}
+
+RecordProvenanceAuthorization :: struct {
+    Role: RecordWriterRole #go_tag "json:\"role\""
+    AccountID: string #go_tag "json:\"account_id\""
+    AppID: string #go_tag "json:\"app_id\""
+    Collection: string #go_tag "json:\"collection\""
+    DelegatedWriterID: string #go_tag "json:\"delegated_writer_id,omitempty\""
+    DelegatedWriterExpiresAt: s64 #go_tag "json:\"delegated_writer_expires_at,omitempty\""
+    Now: s64 #go_tag "json:\"now\""
+}
+
+RecordProvenanceState :: struct {
+    AccountID: string #go_tag "json:\"account_id\""
+    AppID: string #go_tag "json:\"app_id\""
+    Collection: string #go_tag "json:\"collection\""
+    ID: string #go_tag "json:\"id\""
+    Version: s64 #go_tag "json:\"version\""
+    Timestamp: s64 #go_tag "json:\"timestamp\""
+    Signed: bool #go_tag "json:\"signed\""
+}
+
+RecordProvenanceResult :: struct {
+    Verified: bool
+    State: RecordProvenanceState
+    Error: Error
+}
+
+HexResult :: struct {
+    value: []u8
+    error: Error
+}
+
+#scope_file
+DecodeHex :: (value: string) -> HexResult #go_results #foreign go_hex "DecodeString";
+TrimSpace :: (value: string) -> string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+FormatInteger :: (value: s64, base: isize) -> string #foreign go_strconv "FormatInt";
+
+ValidContentHash :: (value: string) -> bool {
+    if !identity.ValidUserID(value) {
+        return false
+    }
+    return identity.ValidUserID(TrimSpace(value))
+}
+
+ValidMutation :: (mutation: RecordProvenanceMutation) -> bool {
+    if !identity.ValidUserID(mutation.AccountID) ||
+    !identity.ValidNamespace(mutation.AppID) ||
+    !identity.ValidNamespace(mutation.Collection) ||
+    !identity.ValidEncryptedRecordID(mutation.ID) ||
+    !ValidContentHash(mutation.ContentHash) {
+        return false
+    }
+    return mutation.Version > 0 && mutation.Timestamp > 0
+}
+
+ValidAuthorizationScope :: (mutation: RecordProvenanceMutation,
+    authorization: RecordProvenanceAuthorization) -> bool {
+    if !identity.ValidUserID(authorization.AccountID) ||
+    !identity.ValidNamespace(authorization.AppID) ||
+    !identity.ValidNamespace(authorization.Collection) {
+        return false
+    }
+    return authorization.AccountID == mutation.AccountID &&
+    authorization.AppID == mutation.AppID &&
+    authorization.Collection == mutation.Collection
+}
+
+ValidMutationTime :: (mutation: RecordProvenanceMutation,
+    authorization: RecordProvenanceAuthorization) -> bool {
+    if authorization.Now <= 0 {
+        return false
+    }
+    return mutation.Timestamp <= authorization.Now +
+    cast(s64)RecordProvenanceMaxFutureSeconds
+}
+
+SameRecord :: (mutation: RecordProvenanceMutation, state: RecordProvenanceState) -> bool {
+    return mutation.AccountID == state.AccountID &&
+    mutation.AppID == state.AppID &&
+    mutation.Collection == state.Collection &&
+    mutation.ID == state.ID
+}
+
+ValidDelegatedWriter :: (authorization: RecordProvenanceAuthorization) -> bool {
+    if !identity.ValidNamespace(authorization.DelegatedWriterID) {
+        return false
+    }
+    return authorization.Now > 0 &&
+    authorization.DelegatedWriterExpiresAt > authorization.Now
+}
+
+StateFor :: (mutation: RecordProvenanceMutation, signed: bool) -> RecordProvenanceState {
+    state: RecordProvenanceState
+    state.AccountID = mutation.AccountID
+    state.AppID = mutation.AppID
+    state.Collection = mutation.Collection
+    state.ID = mutation.ID
+    state.Version = mutation.Version
+    state.Timestamp = mutation.Timestamp
+    state.Signed = signed
+    return state
+}
+
+#scope_export
+CanonicalRecordProvenanceMessage :: (mutation: RecordProvenanceMutation) -> string {
+    kind := RecordMutation
+    if mutation.Tombstone {
+        kind = TombstoneMutation
+    }
+    parts: [10]string = .[
+    RecordProvenanceDomain,
+    kind,
+    mutation.AccountID,
+    mutation.AppID,
+    mutation.Collection,
+    mutation.ID,
+    FormatInteger(mutation.Version, cast(isize)10),
+    mutation.ContentHash,
+    FormatInteger(mutation.Timestamp, cast(isize)10),
+    "",
+    ]
+    return Join(parts[:], "\n")
+}
+
+VerifyRecordProvenance :: (mutation: RecordProvenanceMutation,
+    publicKeyText: string, authorization: RecordProvenanceAuthorization,
+    previous: *RecordProvenanceState) -> RecordProvenanceResult {
+    result: RecordProvenanceResult
+    if !ValidMutation(mutation) {
+        result.Error = errors.New("invalid record provenance mutation")
+        return result
+    }
+    if !ValidAuthorizationScope(mutation, authorization) {
+        result.Error = errors.New("record provenance scope is not authorized")
+        return result
+    }
+    if !ValidMutationTime(mutation, authorization) {
+        result.Error = errors.New("record provenance time is invalid")
+        return result
+    }
+    if authorization.Role != cast(RecordWriterRole)WRITER_TRANSPORT_ONLY &&
+    authorization.Role != cast(RecordWriterRole)WRITER_DELEGATED {
+        result.Error = errors.New("record writer role is unknown")
+        return result
+    }
+    if authorization.Role == cast(RecordWriterRole)WRITER_DELEGATED &&
+    !ValidDelegatedWriter(authorization) {
+        result.Error = errors.New("delegated writer trust is not explicit")
+        return result
+    }
+    decodedKey := DecodeHex(TrimSpace(publicKeyText))
+    if decodedKey.error != null ||
+    decodedKey.value.count != codec.mlDSA44PublicKeySize {
+        result.Error = errors.New("invalid record owner public key")
+        return result
+    }
+    if signing.SHA256Hex(decodedKey.value) != mutation.AccountID {
+        result.Error = errors.New("record owner key does not match account")
+        return result
+    }
+    if previous != null {
+        if !SameRecord(mutation, previous.*) {
+            result.Error = errors.New("record provenance state targets another record")
+            return result
+        }
+        if mutation.Version <= previous.Version {
+            result.Error = errors.New("record provenance version replay or rollback")
+            return result
+        }
+        if mutation.Timestamp < previous.Timestamp {
+            result.Error = errors.New("record provenance timestamp rollback")
+            return result
+        }
+    }
+
+    signed := TrimSpace(mutation.Signature) != ""
+    if authorization.Role == cast(RecordWriterRole)WRITER_TRANSPORT_ONLY && !signed {
+        result.Error = errors.New("transport-only writer requires an owner signature")
+        return result
+    }
+    if previous != null && previous.Signed && !signed {
+        result.Error = errors.New("signed record provenance cannot downgrade to delegated unsigned")
+        return result
+    }
+    if signed {
+        decodedSignature := codec.DecodeBinaryField(mutation.Signature)
+        if decodedSignature.error != "" {
+            result.Error = errors.New("invalid record provenance signature encoding")
+            return result
+        }
+        signatureBytes := text.ToBytes(decodedSignature.value)
+        if signatureBytes.count != codec.mlDSA44SignatureSize {
+            result.Error = errors.New("wrong record provenance signature size")
+            return result
+        }
+        message := text.ToBytes(CanonicalRecordProvenanceMessage(mutation))
+        if !signature.Verify(decodedKey.value, message, signatureBytes) {
+            result.Error = errors.New("record provenance signature rejected")
+            return result
+        }
+    }
+
+    result.State = StateFor(mutation, signed)
+    result.Verified = true
+    return result
+}

@@ -1,6 +1,7 @@
 name: security
 
 on:
+  workflow_call:
   push:
     branches: [master]
   pull_request:
@@ -13,12 +14,15 @@ permissions:
   security-events: write
 
 concurrency:
-  group: daochi-security-${{ github.ref }}
+  group: daochi-security-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   govulncheck:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cgo: ['0', '1']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -32,11 +36,17 @@ jobs:
       - name: Generate the Go from the Zi sources
         uses: ./.github/actions/generate
 
+      - name: Build native cryptography for the production scan
+        if: matrix.cgo == '1'
+        uses: ./.github/actions/liboqs
+
       - name: Run govulncheck
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         env:
-          CGO_ENABLED: "0"
+          CGO_ENABLED: ${{ matrix.cgo }}
           GOFLAGS: "-mod=mod"
+          CGO_CFLAGS: "-I${{ github.workspace }}/build/liboqs/install/include"
+          CGO_LDFLAGS: "-L${{ github.workspace }}/build/liboqs/install/lib -loqs"
         with:
           go-version-input: "1.26"
           go-package: ./...
@@ -88,6 +98,11 @@ jobs:
 
       - name: Analyze
         uses: github/codeql-action/analyze@9f759ee644a3e7c15c1390abf49868036c00067b # v3.38.3
+        with:
+          output: codeql-results
+
+      - name: Reject high severity CodeQL findings
+        run: python3 -B scripts/check_sarif.py codeql-results
   container-scan:
     runs-on: ubuntu-latest
     permissions:
@@ -115,9 +130,12 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
-          ignore-unfixed: true
+          exit-code: '1'
+          ignore-unfixed: false
+          limit-severities-for-sarif: true
 
       - name: Upload scan results
+        if: always()
         uses: github/codeql-action/upload-sarif@9f759ee644a3e7c15c1390abf49868036c00067b # v3.38.3
         with:
           sarif_file: trivy-results.sarif

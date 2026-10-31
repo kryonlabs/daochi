@@ -17,7 +17,7 @@ import (
 func blobRequest(t *testing.T, server *Server, user string, key ed25519.PrivateKey, method, path string, body []byte, nonce string) *http.Request {
 	t.Helper()
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
-	token := Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+	token := issueTestBearer(t, server, user, time.Now().Add(time.Hour))
 	request.Header.Set("Authorization", "Bearer "+token)
 	tx := SignedTxEnvelope{ProtocolVersion: 6, TxID: nonce, Nonce: nonce, AccountID: user,
 		AppID: "target", DeviceKeyID: "device-key", Method: method, Path: request.URL.Path,

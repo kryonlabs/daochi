@@ -63,6 +63,10 @@ func authorizationSetup(t *testing.T) *authorizationFixture {
 	if token.Error != "" {
 		t.Fatal(token.Error)
 	}
+	if err := AuthSessions_RecordIssued(store.Database, t.Context(), server.Cfg.TokenSecret,
+		token.Value, "authorization-fixture"); err != nil {
+		t.Fatal(err)
+	}
 	return &authorizationFixture{server: server, store: store, handler: server.Routes(),
 		owner:        testIdentity{PublicKey: owner.PublicKey, UserID: id, Token: token.Value},
 		ownerPrivate: owner.PrivateKey, device: device,

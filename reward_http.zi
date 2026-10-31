@@ -3,10 +3,12 @@
 // client names only the reward. token_reward gives a reward to an account
 // once, so claiming it again credits nothing and reports the balance.
 // Finishing Shovey's campaign pays by place: more Dew for the first finishers.
+// Wurm's daily plan pays its Dew days once the node has counted enough days.
 #import "std/go_types"
 service :: #import "account_http";
 rewards :: #import "token_reward";
 evidence :: #import "game_evidence";
+checkins :: #import "reward_checkin";
 auth :: #import "http_auth";
 body :: #import "http_body";
 response :: #import "response";
@@ -16,6 +18,7 @@ http :: #import "std/http_go";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 ed :: #import "std/ed25519_go";
+clock :: #import "std/time_go";
 builtin :: #system_library "go:builtin";
 
 RewardCommand :: struct {
@@ -42,9 +45,19 @@ RewardClaim :: struct {
 
 // The rewards and their Dew, in integer millionths; the campaign's is its
 // Dew after the 100th finisher (see CampaignPlaces).
-RewardCount :: 2
-RewardNames: [2]string = .["shovey.secret-chest", "shovey.campaign-complete"];
-RewardUnits: [2]s64 = .[2000000, 5000000];
+RewardCount :: 7
+RewardNames: [7]string = .["shovey.secret-chest", "shovey.campaign-complete", "wurm.daily-05", "wurm.daily-10",
+    "wurm.daily-15", "wurm.daily-20", "wurm.daily-25"];
+RewardUnits: [7]s64 = .[2000000, 5000000, 1000000, 2000000, 2000000, 2000000, 3000000];
+
+// Wurm's daily plan: each Dew day is claimable once the node has counted that
+// many UTC check-in days for the account. Every claim of one checks the
+// account in for today, so a player who claims each day reaches each Dew day
+// on time, and no client can add a day the node did not see.
+DailyGame :: "wurm";
+DailyCount :: 5
+DailyNames: [5]string = .["wurm.daily-05", "wurm.daily-10", "wurm.daily-15", "wurm.daily-20", "wurm.daily-25"];
+DailyDays: [5]s64 = .[5, 10, 15, 20, 25];
 
 // Finishing the campaign: the first 10 finishers get 100 Dew, the next 20 get
 // 50, those up to the 100th get 20, and everyone after 5.
@@ -58,6 +71,16 @@ CampaignFlatUnits :: 5000000
 CampaignPlacesFrom :: "2026-10-28 00:00:00";
 
 MakeOffers :: (count: isize) -> []RewardOffer #foreign builtin "make";
+
+// The check-in days a daily reward needs, or 0 for a reward that is not one.
+RequiredDays :: (reward: string) -> s64 {
+    for index: cast(s32)0..DailyCount - 1 {
+        if DailyNames[index] == reward {
+            return DailyDays[index]
+        }
+    }
+    return 0
+}
 AppendOffer :: (values: []RewardOffer, value: RewardOffer) -> []RewardOffer #foreign builtin "append";
 
 // The Dew a reward gives, or 0 for a reward the node does not offer.
@@ -131,14 +154,28 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         response.Error(writer, 404, "unknown reward")
         return
     }
-    eligibility := evidence.Eligible(accounts.database, http.Context(request), user.value, command.reward)
-    if eligibility.error != null {
-        response.Error(writer, 503, "completion archive unavailable")
-        return
-    }
-    if !eligibility.eligible {
-        response.Error(writer, 403, "sync complete evidence for every required level with at least 10 moves before claiming this reward")
-        return
+    required := RequiredDays(command.reward)
+    if required > 0 {
+        counted := checkins.CheckIn(accounts.database, http.Context(request), user.value, DailyGame,
+            clock.Unix(clock.Now()))
+        if counted.error != null {
+            response.Error(writer, 503, "check-ins unavailable")
+            return
+        }
+        if counted.days < required {
+            response.Error(writer, 403, "check in on more days before claiming this reward")
+            return
+        }
+    } else {
+        eligibility := evidence.Eligible(accounts.database, http.Context(request), user.value, command.reward)
+        if eligibility.error != null {
+            response.Error(writer, 503, "completion archive unavailable")
+            return
+        }
+        if !eligibility.eligible {
+            response.Error(writer, 403, "sync complete evidence for every required level with at least 10 moves before claiming this reward")
+            return
+        }
     }
     given: rewards.RewardResult
     if command.reward == CampaignReward {

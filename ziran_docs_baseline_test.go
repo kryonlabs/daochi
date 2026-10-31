@@ -631,6 +631,17 @@ func baselineOpenAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/sync/logout": map[string]any{
+				"post": map[string]any{
+					"summary":     "Revoke current bearer session",
+					"description": "Revokes the authenticated bearer session and disconnects its active sync sockets. Future requests require a fresh login.",
+					"parameters":  baselineBearerHeaderParameters(),
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Bearer session revoked"},
+						"401": map[string]any{"description": "Bearer session is missing, expired or revoked"},
+					},
+				},
+			},
 			"/api/v1/sync/login": map[string]any{
 				"post": map[string]any{
 					"summary":     "Create bearer token",

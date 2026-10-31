@@ -83,6 +83,9 @@ Contains :: (approved: []string, requested: []string) -> bool {
 }
 
 AllowsOperation :: (approved: NodeSyncPolicy, requested: NodeSyncPolicy, operation: string) -> bool {
+    if operation != "export" && operation != "import" {
+        return false
+    }
     direction := Lower(TrimSpace(approved.Direction))
     if operation == "export" && direction != "push" && direction != "bidirectional" {
         return false
@@ -106,6 +109,9 @@ AllowsOperation :: (approved: NodeSyncPolicy, requested: NodeSyncPolicy, operati
         return false
     }
     if approved.Spaces.count > 0 && requested.Spaces.count == 0 {
+        return false
+    }
+    if approved.Data.count > 0 && requested.Data.count == 0 {
         return false
     }
     return Contains(approved.Apps, requested.Apps) &&

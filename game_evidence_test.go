@@ -13,7 +13,7 @@ import (
 func evidenceMap() string {
 	layers := make([]byte, 720)
 	for at := 0; at < 240; at++ {
-		layers[at], layers[240+at] = 12, 12
+		layers[at] = 12
 	}
 	for _, at := range []int{13, 14, 25} {
 		layers[at], layers[240+at] = 0, 0
@@ -109,6 +109,20 @@ func TestGameEvidenceEligibilityRetainsQualifyingAttemptBesideShortestAndLegacy(
 	history := GameEvidence_History(store.Database, ctx, player.UserID, "shovey.classic", 28, GameEvidence_MapHash("shovey.classic", 28, board), 0)
 	if history.Error != nil || len(history.Completions) != 3 || history.Completions[0].Moves != 1 {
 		t.Fatalf("shortest, incomplete and eligible history were not all retained: %+v", history)
+	}
+}
+
+func TestGameEvidenceLegacyMarksCannotMintRewards(t *testing.T) {
+	_, store, handler, _ := unlockFixture(t)
+	player := newTestIdentity(t, handler, 0xc7)
+	if _, err := store.Database.Exec(`INSERT INTO game_legacy_progress(account_id,unlocked,completed,snapshot,migrated_at) VALUES(?1,175,?2,'test',0)`, player.UserID, strings.Repeat("1", 175)); err != nil {
+		t.Fatal(err)
+	}
+	for _, reward := range []string{"shovey.secret-chest", "shovey.campaign-complete"} {
+		result := GameEvidence_Eligible(store.Database, context.Background(), player.UserID, reward)
+		if result.Error != nil || result.Eligible {
+			t.Fatalf("unproven legacy marks granted %s: %+v", reward, result)
+		}
 	}
 }
 

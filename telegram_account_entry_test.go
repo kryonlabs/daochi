@@ -686,6 +686,7 @@ func entryOtherOwner(t *testing.T, fixture *entryFixture) *authorizationFixture 
 	if token.Error != "" {
 		t.Fatal(token.Error)
 	}
+	recordTestBearer(t, fixture.owner.server, token.Value)
 	other.owner = testIdentity{PublicKey: keys.PublicKey, UserID: id, Token: token.Value}
 	other.ownerPrivate = keys.PrivateKey
 	if err := DeviceKeys_Register(fixture.owner.store.Database, t.Context(), DeviceKey{

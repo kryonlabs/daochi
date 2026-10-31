@@ -16,7 +16,7 @@ func TestInstalledAppLeaderboardIsolation(t *testing.T) {
 		t.Helper()
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		if authenticated {
-			r.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+			r.Header.Set("Authorization", "Bearer "+issueTestBearer(t, server, users[user], time.Now().Add(time.Hour)))
 			r.Header.Set("X-Daochi-User", users[user])
 		}
 		w := httptest.NewRecorder()
@@ -91,7 +91,7 @@ func TestGameLevelBoardsStaySeparate(t *testing.T) {
 	request := func(method, path, body string, user int) *httptest.ResponseRecorder {
 		t.Helper()
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
-		r.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+		r.Header.Set("Authorization", "Bearer "+issueTestBearer(t, server, users[user], time.Now().Add(time.Hour)))
 		r.Header.Set("X-Daochi-User", users[user])
 		w := httptest.NewRecorder()
 		if method == "PUT" {
@@ -173,7 +173,7 @@ func TestPublishedPracticeFiguresReplaceMissingSessions(t *testing.T) {
 	request := func(method, path, body string, user int) *httptest.ResponseRecorder {
 		t.Helper()
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
-		r.Header.Set("Authorization", "Bearer "+Token_IssueAuthToken(server.Cfg.TokenSecret, users[user], time.Now().Add(time.Hour).Unix()).Value)
+		r.Header.Set("Authorization", "Bearer "+issueTestBearer(t, server, users[user], time.Now().Add(time.Hour)))
 		r.Header.Set("X-Daochi-User", users[user])
 		w := httptest.NewRecorder()
 		if method == "PUT" {

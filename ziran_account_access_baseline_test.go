@@ -79,6 +79,16 @@ func (s *Server) baselineAccessHandleLogin(w http.ResponseWriter, r *http.Reques
 		Response_Error(w, http.StatusInternalServerError, "login failed")
 		return
 	}
+	if err := AuthSessions_Initialize(s.Store.Database, r.Context(), s.Cfg.TokenTTL); err != nil {
+		slog.Error("initialize auth sessions", "user", LogSafety_LogText(req.UserIDHash), "error", err)
+		Response_Error(w, http.StatusInternalServerError, "login failed")
+		return
+	}
+	if err := AuthSessions_RecordIssued(s.Store.Database, r.Context(), s.Cfg.TokenSecret, token.Value, req.ClientID); err != nil {
+		slog.Error("record auth session", "user", LogSafety_LogText(req.UserIDHash), "error", err)
+		Response_Error(w, http.StatusInternalServerError, "login failed")
+		return
+	}
 	accountAlias, err := s.Store.AccountAlias(r.Context(), req.UserIDHash)
 	if err != nil {
 		slog.Error("load account alias", "user", LogSafety_LogText(req.UserIDHash), "error", err)

@@ -83,6 +83,9 @@ func TestZiranOperationalHTTPAgainstBaseline(t *testing.T) {
 				if token.Error != "" {
 					t.Fatal(token.Error)
 				}
+				if mode != "closed" && mode != "log panic" && mode != "missing account" {
+					recordTestBearer(t, server, token.Value)
+				}
 				if mode == "missing account" {
 					token = Token_IssueAuthToken(server.Cfg.TokenSecret, strings.Repeat("b", 64), time.Now().Add(time.Hour).Unix())
 				}

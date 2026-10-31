@@ -1,0 +1,332 @@
+#import "std/go_types"
+ctx :: #import "std/context_go";
+sql :: #import "std/sql_go";
+errors :: #import "std/errors_go";
+clock :: #import "std/time_go";
+text :: #import "std/text_go";
+identity :: #import "identity";
+timestamp :: #import "timestamp";
+token :: #import "token";
+codec :: #import "codec";
+
+go_sha256 :: #system_library "go:crypto/sha256";
+go_hex :: #system_library "go:encoding/hex";
+
+SessionAuthorizationResult :: struct {
+    value: bool
+    bootstrap: bool
+    error: Error
+}
+
+LegacyAccountResult :: struct {
+    value: bool
+    started: string
+    accountFound: bool
+    error: Error
+}
+
+LegacyWindowResult :: struct {
+    deadline: clock.Time
+    started: string
+    error: Error
+}
+
+#scope_file
+Sum256 :: (value: []u8) -> [32]u8 #foreign go_sha256 "Sum256";
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+
+#scope_export
+BearerHash :: (bearer: string) -> string {
+    digest: [32]u8 = Sum256(text.ToBytes(bearer))
+    return EncodeHex(digest[:])
+}
+
+Initialize :: (database: *sql.Database, context: ctx.Context, legacyTTL: clock.Duration) -> Error {
+    error := EnsureSchema(database, context)
+    if error != null {
+        return error
+    }
+    arguments: [1]Any = .["legacy_v1_started"]
+    started := sql.Exec(database, context,
+        "INSERT OR IGNORE INTO server_auth_settings(name,value) VALUES(?1,CURRENT_TIMESTAMP)", arguments[:])
+    if started.error != null {
+        return started.error
+    }
+    deadline := timestamp.CanonicalTimestamp(clock.Add(clock.Now(), legacyTTL))
+    deadlineArguments: [2]Any = .["legacy_v1_deadline", deadline]
+    deadlineWritten := sql.Exec(database, context,
+        "INSERT OR IGNORE INTO server_auth_settings(name,value) VALUES(?1,?2)", deadlineArguments[:])
+    return deadlineWritten.error
+}
+
+EnsureSchema :: (database: *sql.Database, context: ctx.Context) -> Error {
+    empty: []Any
+    schema := sql.Exec(database, context, SchemaSQL, empty[:])
+    return schema.error
+}
+
+RecordIssued :: (database: *sql.Database, context: ctx.Context, secret: []u8, bearer: string, clientID: string) -> Error {
+    metadata := token.InspectAuthToken(secret, bearer)
+    if metadata.error != "" || metadata.value.version != "v2" || !identity.ValidClientID(clientID) {
+        return errors.New("invalid bearer session")
+    }
+    return InsertSession(database, context, metadata.value, BearerHash(bearer), clientID)
+}
+
+AuthorizeBearer :: (database: *sql.Database, context: ctx.Context, secret: []u8, bearer: string, userID: string, now: s64) -> SessionAuthorizationResult {
+    result: SessionAuthorizationResult
+    schemaError := EnsureSchema(database, context)
+    if schemaError != null {
+        result.error = schemaError
+        return result
+    }
+    metadata := token.InspectAuthToken(secret, bearer)
+    if metadata.error != "" || metadata.value.userID != userID {
+        result.value = false
+        return result
+    }
+    if metadata.value.version == "v1" {
+        window := LegacyWindow(database, context)
+        if window.error != null {
+            result.error = window.error
+            return result
+        }
+        if now > clock.Unix(window.deadline) {
+            return result
+        }
+        legacy := AccountCreatedBeforeMigration(database, context, userID)
+        if legacy.error != null {
+            result.error = legacy.error
+            return result
+        }
+        if LegacyRevoked(database, context, userID) {
+            return result
+        }
+        if !legacy.value {
+            if !legacy.accountFound {
+                result.bootstrap = true
+                result.value = true
+            }
+            return result
+        }
+        legacyMetadata := metadata.value
+        legacyMetadata.sessionID = BearerHash(bearer)
+        existing := SessionActive(database, context, userID, legacyMetadata.sessionID, now)
+        if existing.error != null {
+            result.error = existing.error
+            return result
+        }
+        if existing.value {
+            result.value = true
+            return result
+        }
+        result.error = InsertSession(database, context, legacyMetadata, legacyMetadata.sessionID, "")
+        if result.error != null {
+            return result
+        }
+        active := SessionActive(database, context, userID, legacyMetadata.sessionID, now)
+        result.error = active.error
+        result.value = active.value
+        return result
+    }
+    existing := SessionActive(database, context, userID, BearerHash(bearer), now)
+    if existing.error != null {
+        result.error = existing.error
+        return result
+    }
+    result.value = existing.value
+    return result
+}
+
+BearerSessionActive :: (database: *sql.Database, context: ctx.Context, bearer: string, userID: string, now: s64) -> bool {
+    active := SessionActive(database, context, userID, BearerHash(bearer), now)
+    return active.error == null && active.value
+}
+
+RevokeBearer :: (database: *sql.Database, context: ctx.Context, userID: string, bearer: string) -> Error {
+    arguments: [2]Any = .[userID, BearerHash(bearer)]
+    revoked := sql.Exec(database, context, RevokeBearerSQL, arguments[:])
+    if revoked.error != null {
+        return revoked.error
+    }
+    affected := sql.RowsAffected(revoked.value)
+    if affected.error != null {
+        return affected.error
+    }
+    if affected.value == 0 {
+        return sql.NoRows()
+    }
+    return null
+}
+
+RevokeSession :: (database: *sql.Database, context: ctx.Context, userID: string, sessionID: string) -> Error {
+    if !identity.ValidClientID(sessionID) || sessionID.count != 64 || !codec.IsHex(sessionID) {
+        return errors.New("invalid bearer session")
+    }
+    arguments: [2]Any = .[userID, sessionID]
+    revoked := sql.Exec(database, context, RevokeSessionSQL, arguments[:])
+    if revoked.error != null {
+        return revoked.error
+    }
+    affected := sql.RowsAffected(revoked.value)
+    if affected.error != null {
+        return affected.error
+    }
+    if affected.value == 0 {
+        return sql.NoRows()
+    }
+    return null
+}
+
+RevokeDeviceTx :: (transaction: *sql.Transaction, context: ctx.Context, accountID: string, clientID: string) -> Error {
+    arguments: [2]Any = .[accountID, clientID]
+    revoked := sql.ExecTx(transaction, context, RevokeDeviceSQL, arguments[:])
+    return revoked.error
+}
+
+RevokeLegacyTx :: (transaction: *sql.Transaction, context: ctx.Context, accountID: string) -> Error {
+    arguments: [2]Any = .[accountID, timestamp.CanonicalNow()]
+    revoked := sql.ExecTx(transaction, context,
+        "INSERT OR IGNORE INTO server_auth_legacy_revocations(account_id,invalidated_at) VALUES(?1,?2)", arguments[:])
+    return revoked.error
+}
+
+LegacyRevoked :: (database: *sql.Database, context: ctx.Context, accountID: string) -> bool {
+    arguments: [1]Any = .[accountID]
+    exists: bool
+    destinations: [1]Any = .[*exists]
+    error := sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT EXISTS(SELECT 1 FROM server_auth_legacy_revocations WHERE account_id=?1)", arguments[:]), destinations[:])
+    return error == null && exists
+}
+
+#scope_file
+SchemaSQL :: #string SQL_END
+CREATE TABLE IF NOT EXISTS server_auth_settings (
+ name TEXT PRIMARY KEY,
+ value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS server_auth_sessions (
+ token_hash TEXT PRIMARY KEY,
+ user_id_hash TEXT NOT NULL REFERENCES server_users(user_id_hash) ON DELETE CASCADE,
+ session_id TEXT NOT NULL UNIQUE,
+ client_id TEXT NOT NULL DEFAULT '',
+ issued_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ created_at TEXT NOT NULL,
+ revoked_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS server_auth_sessions_device
+ON server_auth_sessions(user_id_hash,client_id,revoked_at,expires_at);
+CREATE TABLE IF NOT EXISTS server_auth_legacy_revocations (
+ account_id TEXT PRIMARY KEY,
+ invalidated_at TEXT NOT NULL
+);
+SQL_END;
+
+InsertSessionSQL :: #string SQL_END
+INSERT INTO server_auth_sessions(token_hash,user_id_hash,session_id,client_id,issued_at,expires_at,created_at)
+VALUES(?1,?2,?3,?4,?5,?6,?7)
+ON CONFLICT(token_hash) DO NOTHING
+SQL_END;
+
+SessionActiveSQL :: #string SQL_END
+SELECT EXISTS(
+ SELECT 1 FROM server_auth_sessions
+ WHERE token_hash=?1 AND user_id_hash=?2 AND revoked_at='' AND expires_at>=?3
+)
+SQL_END;
+
+RevokeBearerSQL :: #string SQL_END
+UPDATE server_auth_sessions
+SET revoked_at=CURRENT_TIMESTAMP
+WHERE user_id_hash=?1 AND token_hash=?2 AND revoked_at=''
+SQL_END;
+
+RevokeSessionSQL :: #string SQL_END
+UPDATE server_auth_sessions
+SET revoked_at=CURRENT_TIMESTAMP
+WHERE user_id_hash=?1 AND session_id=?2 AND revoked_at=''
+SQL_END;
+
+RevokeDeviceSQL :: #string SQL_END
+UPDATE server_auth_sessions
+SET revoked_at=CURRENT_TIMESTAMP
+WHERE user_id_hash=?1 AND client_id=?2 AND revoked_at=''
+SQL_END;
+
+InsertSession :: (database: *sql.Database, context: ctx.Context, metadata: token.AuthTokenMetadata, tokenHash: string, clientID: string) -> Error {
+    arguments: [7]Any = .[tokenHash, metadata.userID, metadata.sessionID, clientID,
+        metadata.issuedAt, metadata.expiresAt, timestamp.CanonicalNow()]
+    inserted := sql.Exec(database, context, InsertSessionSQL, arguments[:])
+    return inserted.error
+}
+
+SessionActive :: (database: *sql.Database, context: ctx.Context, userID: string, tokenHash: string, now: s64) -> SessionAuthorizationResult {
+    result: SessionAuthorizationResult
+    arguments: [3]Any = .[tokenHash, userID, now]
+    active: bool
+    destinations: [1]Any = .[*active]
+    result.error = sql.ScanRow(sql.QueryRow(database, context, SessionActiveSQL, arguments[:]), destinations[:])
+    result.value = result.error == null && active
+    return result
+}
+
+AccountCreatedBeforeMigration :: (database: *sql.Database, context: ctx.Context, userID: string) -> LegacyAccountResult {
+    result: LegacyAccountResult
+    arguments: [1]Any = .[userID]
+    createdAt: string
+    startedAt: string
+    destinations: [2]Any = .[*createdAt, *startedAt]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT u.created_at,s.value FROM server_users u,server_auth_settings s WHERE u.user_id_hash=?1 AND s.name='legacy_v1_started'", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    if result.error != null {
+        return result
+    }
+    created := timestamp.ParseTimestamp(createdAt)
+    started := timestamp.ParseTimestamp(startedAt)
+    if !created.valid || !started.valid {
+        result.error = errors.New("invalid bearer migration time")
+        return result
+    }
+    result.accountFound = true
+    result.value = clock.After(started.value, created.value)
+    result.started = startedAt
+    return result
+}
+
+LegacyWindow :: (database: *sql.Database, context: ctx.Context) -> LegacyWindowResult {
+    result: LegacyWindowResult
+    arguments: [1]Any = .["legacy_v1_deadline"]
+    value: string
+    destinations: [1]Any = .[*value]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT value FROM server_auth_settings WHERE name=?1", arguments[:]), destinations[:])
+    if result.error != null {
+        return result
+    }
+    parsed := timestamp.ParseTimestamp(value)
+    if !parsed.valid {
+        result.error = errors.New("invalid legacy bearer deadline")
+        return result
+    }
+    result.deadline = parsed.value
+    result.started = MigrationStarted(database, context)
+    return result
+}
+
+MigrationStarted :: (database: *sql.Database, context: ctx.Context) -> string {
+    arguments: [1]Any = .["legacy_v1_started"]
+    value: string
+    destinations: [1]Any = .[*value]
+    error := sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT value FROM server_auth_settings WHERE name=?1", arguments[:]), destinations[:])
+    if error != null {
+        return ""
+    }
+    return value
+}

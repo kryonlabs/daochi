@@ -115,10 +115,13 @@ func TestZiranMeshScopeAgainstBaseline(t *testing.T) {
 			{Collections: []string{"inbe.habits"}}, {Collections: []string{" inbe.* "}},
 			{Spaces: []string{"SPACE"}}, {Data: []string{"plaintext"}},
 		} {
-			for _, operation := range []string{"import", "export", "IMPORT", ""} {
+			for _, operation := range []string{"import", "export"} {
 				if got, want := MeshPolicy_AllowsOperation(approved, requested, operation), baselinePolicyAllowsOperation(approved, requested, operation); got != want {
 					t.Fatalf("policy %q, %#v, %q = %v; baseline = %v", direction, requested, operation, got, want)
 				}
+			}
+			if requested.Data == nil && MeshPolicy_AllowsOperation(approved, requested, "export") {
+				t.Fatalf("omitted data widened the approved scope: %#v", requested)
 			}
 			if got, want := MeshPolicy_AllowsPull(&requested), baselineNodePolicyAllowsPull(&requested); got != want {
 				t.Fatal("pull direction changed", requested, got, want)
@@ -130,6 +133,11 @@ func TestZiranMeshScopeAgainstBaseline(t *testing.T) {
 	}
 	if MeshPolicy_AllowsPull(nil) {
 		t.Fatal("unconfigured peer may pull")
+	}
+	for _, operation := range []string{"", " export ", "IMPORT"} {
+		if MeshPolicy_AllowsOperation(approved, approved, operation) {
+			t.Fatalf("invalid operation authorized: %q", operation)
+		}
 	}
 	matchers := []CollectionMatcher{
 		{AppID: "source", MatchPrefix: "shared.source.v1.", Wildcard: true, Specificity: 17},
@@ -175,6 +183,36 @@ DELETE FROM server_users WHERE user_id_hash=?;
 	_, err := store.Database.Exec(`
 CREATE TABLE server_account_tombstones(user_id_hash TEXT PRIMARY KEY);
 CREATE TABLE node_sync_cursors(peer_key TEXT PRIMARY KEY,cursor TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE server_storage_usage(user_id_hash TEXT PRIMARY KEY,used_bytes INTEGER NOT NULL DEFAULT 0 CHECK(used_bytes>=0));
+INSERT INTO server_storage_usage(user_id_hash,used_bytes)
+SELECT users.user_id_hash,COALESCE(SUM(
+  LENGTH(records.collection)+LENGTH(records.id)+LENGTH(records.key_id)+LENGTH(records.nonce)+
+  LENGTH(records.ciphertext)+LENGTH(records.content_hash)+LENGTH(records.parent_id)),0)
+FROM server_users AS users LEFT JOIN server_encrypted_records AS records ON records.user_id_hash=users.user_id_hash
+GROUP BY users.user_id_hash;
+CREATE TRIGGER mesh_storage_user_insert AFTER INSERT ON server_users BEGIN
+  INSERT INTO server_storage_usage(user_id_hash,used_bytes) VALUES(NEW.user_id_hash,0);
+END;
+CREATE TRIGGER mesh_storage_record_insert AFTER INSERT ON server_encrypted_records BEGIN
+  UPDATE server_storage_usage SET used_bytes=used_bytes+
+  (LENGTH(NEW.collection)+LENGTH(NEW.id)+LENGTH(NEW.key_id)+LENGTH(NEW.nonce)+LENGTH(NEW.ciphertext)+
+   LENGTH(NEW.content_hash)+LENGTH(NEW.parent_id)) WHERE user_id_hash=NEW.user_id_hash;
+END;
+CREATE TRIGGER mesh_storage_record_before_update BEFORE UPDATE ON server_encrypted_records BEGIN
+  UPDATE server_storage_usage SET used_bytes=used_bytes-
+  (LENGTH(OLD.collection)+LENGTH(OLD.id)+LENGTH(OLD.key_id)+LENGTH(OLD.nonce)+LENGTH(OLD.ciphertext)+
+   LENGTH(OLD.content_hash)+LENGTH(OLD.parent_id)) WHERE user_id_hash=OLD.user_id_hash;
+END;
+CREATE TRIGGER mesh_storage_record_after_update AFTER UPDATE ON server_encrypted_records BEGIN
+  UPDATE server_storage_usage SET used_bytes=used_bytes+
+  (LENGTH(NEW.collection)+LENGTH(NEW.id)+LENGTH(NEW.key_id)+LENGTH(NEW.nonce)+LENGTH(NEW.ciphertext)+
+   LENGTH(NEW.content_hash)+LENGTH(NEW.parent_id)) WHERE user_id_hash=NEW.user_id_hash;
+END;
+CREATE TRIGGER mesh_storage_record_delete BEFORE DELETE ON server_encrypted_records BEGIN
+  UPDATE server_storage_usage SET used_bytes=used_bytes-
+  (LENGTH(OLD.collection)+LENGTH(OLD.id)+LENGTH(OLD.key_id)+LENGTH(OLD.nonce)+LENGTH(OLD.ciphertext)+
+   LENGTH(OLD.content_hash)+LENGTH(OLD.parent_id)) WHERE user_id_hash=OLD.user_id_hash;
+END;
 CREATE TABLE server_mesh_changes(seq INTEGER PRIMARY KEY AUTOINCREMENT,op TEXT DEFAULT 'upsert',user_id_hash TEXT,collection TEXT,record_id TEXT,deleted_at TEXT DEFAULT '');
 CREATE TRIGGER mesh_insert AFTER INSERT ON server_encrypted_records BEGIN
   INSERT INTO server_mesh_changes(user_id_hash,collection,record_id) VALUES(NEW.user_id_hash,NEW.collection,NEW.id);
@@ -215,7 +253,7 @@ func compareMeshImport(t *testing.T, actual, expected *Store, ctx context.Contex
 	for _, item := range deletions {
 		baselineDeletions = append(baselineDeletions, baselineMeshEncryptedRecordDeletion(item))
 	}
-	got := MeshStore_ImportEncryptedBatch(actual.Database, ctx, policy, records, deletions)
+	got := MeshStore_ImportEncryptedBatch(actual.Database, ctx, policy, records, deletions, 0, false)
 	want, err := expected.baselineImportMeshEncryptedBatch(ctx, policy, baselineRecords, baselineDeletions)
 	if got.Value != want || !sameIdentityError(got.Error, err) {
 		t.Fatalf("mesh import = %#v; baseline = %d, %v", got, want, err)

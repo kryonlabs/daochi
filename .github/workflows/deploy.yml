@@ -11,8 +11,20 @@ concurrency:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  security:
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -29,14 +41,17 @@ jobs:
       - name: Build and test
         run: |
           python3 -B scripts/test_migrate_env.py
+          python3 -B scripts/test_deployment_inputs.py
           make test
 
   deploy:
-    needs: test
+    needs: [test, ci, security]
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.26"
@@ -44,37 +59,53 @@ jobs:
       - name: Generate the Go from the Zi sources
         uses: ./.github/actions/generate
 
+      - name: Verify the pinned native source
+        id: liboqs
+        run: python3 -B scripts/verify_deployment_inputs.py pinned-source
+
       - name: Configure SSH
+        env:
+          DAOCHI_SSH_KEY: ${{ secrets.DAOCHI_SSH_KEY }}
+          DAOCHI_SSH_HOST: ${{ secrets.DAOCHI_HOST }}
+          DAOCHI_SSH_HOST_KEY: ${{ secrets.DAOCHI_SSH_HOST_KEY }}
+          DAOCHI_SSH_USER: ${{ secrets.DAOCHI_USER }}
         run: |
           install -m 600 -D /dev/null ~/.ssh/id_ed25519
-          echo "${{ secrets.DAOCHI_SSH_KEY }}" > ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.DAOCHI_HOST }}" >> ~/.ssh/known_hosts
+          test -n "$DAOCHI_SSH_KEY"
+          printf '%s\n' "$DAOCHI_SSH_KEY" > ~/.ssh/id_ed25519
+          python3 -B scripts/verify_deployment_inputs.py configure-ssh \
+            --host "$DAOCHI_SSH_HOST" --user "$DAOCHI_SSH_USER" \
+            --trusted-key "$DAOCHI_SSH_HOST_KEY"
 
       - name: Sync source and build on origin
         run: |
-          REMOTE="${{ secrets.DAOCHI_USER }}@${{ secrets.DAOCHI_HOST }}"
+          expected_commit="${{ steps.liboqs.outputs.liboqs_commit }}"
+          expected_source_commit="${{ github.sha }}"
+          expected_digest="${{ steps.liboqs.outputs.liboqs_digest }}"
+          expected_entries="${{ steps.liboqs.outputs.liboqs_entries }}"
           tar --exclude='.git' --exclude='.ziran' --exclude='build' --exclude='*.db' \
-              --exclude='vendor/liboqs' -czf - . | \
-            ssh "$REMOTE" '
+              -czf - . | \
+            ssh daochi-origin '
               set -e
               rm -rf /opt/daochi-src.new
               mkdir -p /opt/daochi-src.new
               tar -C /opt/daochi-src.new -xzf -
-              # keep the prebuilt build dir and the vendored liboqs
-              # source from the previous tree (the origin cannot clone
-              # submodules itself)
-              for keep in build vendor/liboqs; do
-                if [ -d "/opt/daochi-src/$keep" ]; then
-                  mkdir -p "/opt/daochi-src.new/$(dirname "$keep")"
-                  cp -a "/opt/daochi-src/$keep" "/opt/daochi-src.new/$keep"
-                fi
-              done
+              python3 -B /opt/daochi-src.new/scripts/verify_deployment_inputs.py verify-source \
+                --source-dir /opt/daochi-src.new/vendor/liboqs \
+                --expected-commit "'"$expected_commit"'" \
+                --expected-digest "'"$expected_digest"'" \
+                --expected-entries "'"$expected_entries"'"
               rm -rf /opt/daochi-src.old
               [ -d /opt/daochi-src ] && mv /opt/daochi-src /opt/daochi-src.old
               mv /opt/daochi-src.new /opt/daochi-src
               rm -rf /opt/daochi-src.old
               cd /opt/daochi-src
-              make build VERSION=${{ github.sha }}
+              make build VERSION=${{ github.sha }} SOURCE_COMMIT=${{ github.sha }} \
+                LIBOQS_COMMIT='"$expected_commit"'
+              python3 -B scripts/verify_deployment_inputs.py verify-artifact-manifest \
+                --output daochi --manifest build/daochi.manifest.json \
+                --expected-source-commit "'"$expected_source_commit"'" \
+                --expected-liboqs-commit '"$expected_commit"'
             '
 
       # Google Play purchases need a service account that Play Console lets view
@@ -95,8 +126,7 @@ jobs:
               sys.exit("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON is not a Google service account key")
           print("Google Play service account:", account["client_email"])
           '
-          REMOTE="${{ secrets.DAOCHI_USER }}@${{ secrets.DAOCHI_HOST }}"
-          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" | ssh "$REMOTE" '
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" | ssh daochi-origin '
             set -e
             account=/etc/daochi/google-play-service-account.json
             umask 077
@@ -113,14 +143,22 @@ jobs:
         env:
           DAOCHI_NODE_SYNC_TOKEN: ${{ secrets.DAOCHI_NODE_SYNC_TOKEN }}
         run: |
-          REMOTE="${{ secrets.DAOCHI_USER }}@${{ secrets.DAOCHI_HOST }}"
+          expected_commit="${{ steps.liboqs.outputs.liboqs_commit }}"
           STAMP=$(date -u +%Y%m%dT%H%M%SZ)
           echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"
           mesh_token=$(printf '%s' "$DAOCHI_NODE_SYNC_TOKEN" | sed "s/'/'\\\\''/g")
-          ssh "$REMOTE" "
+          ssh daochi-origin "
             set -e
+            python3 /opt/daochi-src/scripts/verify_deployment_inputs.py verify-artifact-manifest \
+              --output /opt/daochi-src/daochi \
+              --manifest /opt/daochi-src/build/daochi.manifest.json \
+              --expected-source-commit '${{ github.sha }}' \
+              --expected-liboqs-commit '$expected_commit'
             mkdir -p /var/lib/daochi/backups
             cp /opt/daochi/daochi \"/var/lib/daochi/backups/daochi.pre-upgrade.$STAMP\"
+            if [ -f /opt/daochi/daochi.manifest.json ]; then
+              cp /opt/daochi/daochi.manifest.json \"/var/lib/daochi/backups/daochi.manifest.$STAMP\"
+            fi
             sqlite3 /var/lib/daochi/daochi.db \".backup '/var/lib/daochi/backups/daochi.db.$STAMP'\"
             test -s \"/var/lib/daochi/backups/daochi.db.$STAMP\"
             # A daily timer deletes backups older than 28 days, also between deploys.
@@ -129,7 +167,9 @@ jobs:
             systemctl enable --now daochi-backup-prune.timer
             systemctl start daochi-backup-prune.service
             cp /opt/daochi-src/daochi /opt/daochi/daochi.new
+            cp /opt/daochi-src/build/daochi.manifest.json /opt/daochi/daochi.manifest.new
             mv /opt/daochi/daochi.new /opt/daochi/daochi
+            mv /opt/daochi/daochi.manifest.new /opt/daochi/daochi.manifest.json
             if [ -n '$mesh_token' ]; then
               install -d -m 755 /etc/systemd/system/daochi.service.d
               umask 077
@@ -150,6 +190,11 @@ jobs:
               cp \"/var/lib/daochi/backups/daochi.pre-upgrade.$STAMP\" /opt/daochi/daochi
               cp \"/var/lib/daochi/backups/daochi.db.$STAMP\" /var/lib/daochi/daochi.db
               cp \"/var/lib/daochi/backups/daochi.env.$STAMP\" /etc/daochi/daochi.env
+              if [ -f \"/var/lib/daochi/backups/daochi.manifest.$STAMP\" ]; then
+                cp \"/var/lib/daochi/backups/daochi.manifest.$STAMP\" /opt/daochi/daochi.manifest.json
+              else
+                rm -f /opt/daochi/daochi.manifest.json
+              fi
               systemctl start daochi.service
               exit 1
             fi
@@ -160,18 +205,17 @@ jobs:
 
       - name: Health check (rollback on failure)
         run: |
-          REMOTE="${{ secrets.DAOCHI_USER }}@${{ secrets.DAOCHI_HOST }}"
           STAMP=${{ steps.swap.outputs.stamp }}
           code=000
           for attempt in $(seq 1 30); do
-            code=$(ssh "$REMOTE" 'curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:8080/readyz"' || true)
+            code=$(ssh daochi-origin 'curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:8080/readyz"' || true)
             [ "$code" = "200" ] && break
             sleep 2
           done
           echo "health check: $code"
           if [ "$code" != "200" ]; then
             echo "::error::health check failed ($code) - rolling back"
-            ssh "$REMOTE" "systemctl stop daochi.service && cp /var/lib/daochi/backups/daochi.pre-upgrade.$STAMP /opt/daochi/daochi && cp /var/lib/daochi/backups/daochi.db.$STAMP /var/lib/daochi/daochi.db && cp /var/lib/daochi/backups/daochi.env.$STAMP /etc/daochi/daochi.env && systemctl start daochi.service"
+            ssh daochi-origin "systemctl stop daochi.service && cp /var/lib/daochi/backups/daochi.pre-upgrade.$STAMP /opt/daochi/daochi && cp /var/lib/daochi/backups/daochi.db.$STAMP /var/lib/daochi/daochi.db && cp /var/lib/daochi/backups/daochi.env.$STAMP /etc/daochi/daochi.env && if [ -f /var/lib/daochi/backups/daochi.manifest.$STAMP ]; then cp /var/lib/daochi/backups/daochi.manifest.$STAMP /opt/daochi/daochi.manifest.json; else rm -f /opt/daochi/daochi.manifest.json; fi && systemctl start daochi.service"
             exit 1
           fi
           pub=000
@@ -183,6 +227,6 @@ jobs:
           echo "public endpoint through Cloudflare: $pub"
           if [ "$pub" != "200" ]; then
             echo "::error::public health check failed ($pub) - rolling back"
-            ssh "$REMOTE" "systemctl stop daochi.service && cp /var/lib/daochi/backups/daochi.pre-upgrade.$STAMP /opt/daochi/daochi && cp /var/lib/daochi/backups/daochi.db.$STAMP /var/lib/daochi/daochi.db && cp /var/lib/daochi/backups/daochi.env.$STAMP /etc/daochi/daochi.env && systemctl start daochi.service"
+            ssh daochi-origin "systemctl stop daochi.service && cp /var/lib/daochi/backups/daochi.pre-upgrade.$STAMP /opt/daochi/daochi && cp /var/lib/daochi/backups/daochi.db.$STAMP /var/lib/daochi/daochi.db && cp /var/lib/daochi/backups/daochi.env.$STAMP /etc/daochi/daochi.env && if [ -f /var/lib/daochi/backups/daochi.manifest.$STAMP ]; then cp /var/lib/daochi/backups/daochi.manifest.$STAMP /opt/daochi/daochi.manifest.json; else rm -f /opt/daochi/daochi.manifest.json; fi && systemctl start daochi.service"
             exit 1
           fi

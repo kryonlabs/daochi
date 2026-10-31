@@ -56,7 +56,7 @@ func TestMeshDeletePropagationConverges(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if imported := MeshStore_ImportEncryptedBatch(storeB.Database, ctx, policy, records, deletions); imported.Error != nil {
+		if imported := MeshStore_ImportEncryptedBatch(storeB.Database, ctx, policy, records, deletions, 0, false); imported.Error != nil {
 			t.Fatal(imported.Error)
 		}
 	}

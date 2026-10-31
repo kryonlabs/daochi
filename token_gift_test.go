@@ -32,7 +32,7 @@ func TestDewGiftsMoveOnceBetweenFriends(t *testing.T) {
 		t.Fatal(credit.Error)
 	}
 	token := func(user string) string {
-		return Token_IssueAuthToken(server.Cfg.TokenSecret, user, time.Now().Add(time.Hour).Unix()).Value
+		return issueTestBearer(t, server, user, time.Now().Add(time.Hour))
 	}
 	send := func(from string, body string, want int) map[string]any {
 		t.Helper()
@@ -189,7 +189,7 @@ func TestDewGiftsArePausedByDefault(t *testing.T) {
 	if credit.Error != nil {
 		t.Fatal(credit.Error)
 	}
-	token := Token_IssueAuthToken(server.Cfg.TokenSecret, sender, time.Now().Add(time.Hour).Unix()).Value
+	token := issueTestBearer(t, server, sender, time.Now().Add(time.Hour))
 	body := `{"recipient":"` + friend + `","units":1000000,"request_id":"paused-request-1"}`
 	res := tokenJSONRequest(t, handler, http.MethodPost, "/api/v1/tokens/gifts", token, []byte(body))
 	if res.Code != 403 || !strings.Contains(res.Body.String(), "gifts are paused") {

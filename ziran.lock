@@ -10,6 +10,15 @@
       "url": "https://github.com/ziranlang/qrcode.git"
     },
     {
+      "commit": "19b299005fbe2d895f4ad525cfdae62a2220c3ea",
+      "dependencies": {},
+      "id": "p1ca0e8d3c19dbe4c",
+      "name": "curl",
+      "ref": "19b299005fbe2d895f4ad525cfdae62a2220c3ea",
+      "source": true,
+      "url": "https://github.com/curl/curl.git"
+    },
+    {
       "commit": "61cf2f26cd023b5711f2c06763313d8aa0977e2a",
       "dependencies": {"raylib": "p5a77c9c35110e925"},
       "id": "p4f358d3cf769d853",
@@ -77,7 +86,7 @@
     },
     {
       "commit": "49b1401aa42b863fef8e566dbd8264613d2d6131",
-      "dependencies": {"apps": "p7e4fee1cefb16265", "entity": "p7085e5229dd3fa47", "kryon": "p4f358d3cf769d853", "mingcute": "pe1027b9d16704793"},
+      "dependencies": {"apps": "p7e4fee1cefb16265", "curl": "p1ca0e8d3c19dbe4c", "entity": "p7085e5229dd3fa47", "kryon": "p4f358d3cf769d853", "mingcute": "pe1027b9d16704793"},
       "id": "pc0b07a9be9f49bfe",
       "name": "Shovey",
       "ref": "master",
@@ -114,7 +123,7 @@
     "name": "Daochi"
   },
   "toolchain": {
-    "commit": "7f8b98bea36352c07e07b47751eabb8b7634db76",
+    "commit": "8442e7229595e4425ed8542911b144a64cddaf6c",
     "ref": "master",
     "url": "https://github.com/ziranlang/ziran.git"
   }

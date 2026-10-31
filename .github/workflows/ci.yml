@@ -23,13 +23,16 @@ jobs:
         with:
           go-version: "1.26.x"
       - name: Validate workflow permissions and dependencies
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          shellcheck deploy/install.sh deploy/rollback.sh
       - name: Verify immutable build and deployment policy
         run: |
           python3 -B scripts/verify_build_inputs.py
           python3 -B scripts/test_build_inputs.py
           python3 -B scripts/test_check_sarif.py
           python3 -B scripts/test_deployment_inputs.py
+          python3 -B scripts/test_deploy_install.py
           python3 -B scripts/test_migrate_env.py
 
   lint:
@@ -92,7 +95,7 @@ jobs:
         uses: ./.github/actions/liboqs
 
       - name: Check formatting
-        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+        run: test -z "$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
 
       - name: Check generated diff hygiene
         run: git diff --check

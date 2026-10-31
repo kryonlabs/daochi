@@ -266,9 +266,10 @@ class DeploymentInputTest(unittest.TestCase):
         ]
         self.assertTrue(ssh_commands)
         self.assertTrue(all("daochi-origin" in line for line in ssh_commands))
-        self.assertEqual(
-            workflow_text.count("rm -f /opt/daochi/daochi.manifest.json"), 3
-        )
+        deployment = Path(__file__).resolve().parents[1] / "deploy"
+        self.assertEqual(workflow_text.count("sh /opt/daochi-src/deploy/rollback.sh"), 2)
+        self.assertIn("trap finish 0", (deployment / "install.sh").read_text())
+        self.assertIn("rm -f /opt/daochi/daochi.manifest.json", (deployment / "rollback.sh").read_text())
 
 
 if __name__ == "__main__":

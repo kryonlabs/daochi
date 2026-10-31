@@ -134,3 +134,35 @@ jobs:
 
       - name: Build container image
         run: docker build --pull --build-arg VERSION=ci-${{ github.sha }} -t daochi:ci .
+
+      - name: Verify container starts as a non-root user
+        env:
+          EXPECTED_VERSION: ci-${{ github.sha }}
+        run: |
+          container=$(docker run -d --read-only --tmpfs /data:uid=65532,gid=65532,mode=0700 -e DAOCHI_DB=/data/test.db -e DAOCHI_ADDR=:8080 -p 127.0.0.1::8080 daochi:ci)
+          trap 'docker logs "$container"; docker rm -f "$container"' EXIT
+          test "$(docker inspect --format '{{.Config.User}}' "$container")" = '65532:65532'
+          port=$(docker port "$container" 8080/tcp)
+          export CONTAINER_URL="http://$port"
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          base = os.environ['CONTAINER_URL']
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen(base + '/readyz', timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except (urllib.error.URLError, TimeoutError):
+                  pass
+              time.sleep(1)
+          else:
+              raise SystemExit('container did not become ready')
+          with urllib.request.urlopen(base + '/api/v1/node', timeout=2) as response:
+              node = json.load(response)
+          assert node['build_version'] == os.environ['EXPECTED_VERSION'], node
+          PY

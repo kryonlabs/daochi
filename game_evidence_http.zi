@@ -11,10 +11,14 @@ numbers :: #system_library "go:strconv";
 
 #scope_file
 IntegerResult :: struct {
-    value: isize
+    value: s64
     error: Error
 }
-Integer :: (text: string) -> IntegerResult #go_results #foreign numbers "Atoi";
+ParseInteger :: (text: string, base: isize, bits: isize) -> IntegerResult #go_results #foreign numbers "ParseInt";
+
+Integer :: (text: string) -> IntegerResult {
+    return ParseInteger(text, 10, 32)
+}
 
 #scope_export
 RegisterMaps :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {

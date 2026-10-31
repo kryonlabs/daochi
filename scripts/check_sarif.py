@@ -19,15 +19,28 @@ def check_report(path):
         for invocation in run.get("invocations", []):
             if invocation.get("executionSuccessful") is False:
                 raise ValueError(f"SARIF analyzer failed: {path.name}")
-        rules = run.get("tool", {}).get("driver", {}).get("rules", [])
-        by_id = {rule["id"]: rule for rule in rules}
+        tool = run.get("tool", {})
         if not isinstance(run.get("results"), list):
             raise ValueError(f"SARIF results missing: {path.name}")
         for result in run["results"]:
-            rule_id = result.get("ruleId", "")
+            reference = result.get("rule", {})
+            component = reference.get("toolComponent", {})
+            selected = tool.get("driver", {})
+            if component:
+                extensions = tool.get("extensions", [])
+                index = component.get("index")
+                if type(index) is not int or not 0 <= index < len(extensions):
+                    raise ValueError(f"invalid SARIF tool component: {path.name}")
+                selected = extensions[index]
+                for key in ("name", "guid"):
+                    if key in component and component[key] != selected.get(key):
+                        raise ValueError(f"mismatched SARIF tool component: {path.name}")
+            rules = selected.get("rules", [])
+            by_id = {rule["id"]: rule for rule in rules}
+            rule_id = reference.get("id", result.get("ruleId", ""))
             rule = by_id.get(rule_id)
-            if rule is None and isinstance(result.get("ruleIndex"), int):
-                index = result["ruleIndex"]
+            if rule is None and type(reference.get("index", result.get("ruleIndex"))) is int:
+                index = reference.get("index", result.get("ruleIndex"))
                 if 0 <= index < len(rules):
                     rule = rules[index]
             if rule is None:

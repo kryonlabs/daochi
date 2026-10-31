@@ -41,6 +41,16 @@ class SarifSecurityGateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check(report)
 
+    def test_extension_rules_preserve_severity_gate(self):
+        report = self.report()
+        run = report["runs"][0]
+        run["tool"]["extensions"] = [{"name": "codeql/go-queries", "rules": run["tool"]["driver"].pop("rules")}]
+        run["results"] = [{"rule": {"id": "security/test", "index": 0, "toolComponent": {"index": 0}}}]
+        self.assertEqual(self.check(report), ["security/test"])
+        run["results"][0]["rule"]["toolComponent"]["index"] = 1
+        with self.assertRaises(ValueError):
+            self.check(report)
+
     def test_invalid_scores_block(self):
         for severity in ["NaN", "Infinity", "-1", "11", "bad"]:
             with self.assertRaises(ValueError):

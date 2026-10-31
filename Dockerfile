@@ -14,17 +14,14 @@ COPY --from=liboqs /usr/local /usr/local
 WORKDIR /src
 COPY . .
 ENV CGO_ENABLED=1
-RUN go build -mod=mod -ldflags "-X main.BuildVersion=${VERSION}" -o /out/daochi .
+RUN go build -mod=mod -ldflags "-X main.BuildVersion=${VERSION}" -o /out/daochi . && mkdir -p /out/data
 
-FROM debian:stable-slim@sha256:13e0a2e78aa0554ad5ff66e4e260c6dbcdff807eb1f39d43b9fb0288aae88b04
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && useradd --system --uid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin daochi \
-    && mkdir -p /data \
-    && chown daochi:daochi /data \
-    && rm -rf /var/lib/apt/lists/*
+FROM gcr.io/distroless/base-nossl-debian13:nonroot@sha256:6a2a3346335b94d3be0732472245f42ca3ce3cc1135a9521a2bda4b677f2ef0d
+COPY --from=build --chown=65532:65532 /out/data /data
 COPY --from=liboqs /usr/local/lib/liboqs.so* /usr/local/lib/
 COPY --from=build /out/daochi /usr/local/bin/daochi
 ENV LD_LIBRARY_PATH=/usr/local/lib
+WORKDIR /data
 EXPOSE 8080
-USER daochi
-CMD ["daochi"]
+USER 65532:65532
+CMD ["/usr/local/bin/daochi"]

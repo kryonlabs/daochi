@@ -40,16 +40,22 @@ jobs:
         if: matrix.cgo == '1'
         uses: ./.github/actions/liboqs
 
-      - name: Run govulncheck
-        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+      - name: Install the pinned vulnerability scanner
+        env:
+          CGO_ENABLED: '0'
+          GOFLAGS: '-mod=mod'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+      - name: Scan the generated application packages
         env:
           CGO_ENABLED: ${{ matrix.cgo }}
           GOFLAGS: "-mod=mod"
           CGO_CFLAGS: "-I${{ github.workspace }}/build/liboqs/install/include"
           CGO_LDFLAGS: "-L${{ github.workspace }}/build/liboqs/install/lib -loqs"
-        with:
-          go-version-input: "1.26"
-          go-package: ./...
+        run: |
+          test -s server.zi.go
+          test -s google_play_reconciliation.zi.go
+          govulncheck ./...
 
   dependency-review:
     if: github.event_name == 'pull_request'

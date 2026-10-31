@@ -18,6 +18,10 @@ spec.loader.exec_module(deployment_inputs)
 
 
 class DeploymentInputTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        Path("build").mkdir(exist_ok=True)
+
     def run_git(self, repository, *arguments):
         subprocess.run(
             ["git", "-C", str(repository), *arguments],

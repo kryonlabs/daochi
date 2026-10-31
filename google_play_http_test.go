@@ -202,10 +202,7 @@ func TestGooglePlayBackgroundRecoveryWithoutPurchaseTraffic(t *testing.T) {
 		GooglePlayReconciliation_Run(store.Database, ctx, cfg, errTokenIssuerReadOnly, time.Millisecond)
 	}()
 	defer func() { cancel(); <-done }()
-	for {
-		if lifecycleState(t, store, "background-token") == "refunded" {
-			break
-		}
+	for lifecycleState(t, store, "background-token") != "refunded" {
 		select {
 		case <-ctx.Done():
 			t.Fatal("background worker did not reconcile pending consume and refund")

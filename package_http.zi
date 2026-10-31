@@ -28,6 +28,7 @@ strconv :: #system_library "go:strconv";
 hex :: #system_library "go:encoding/hex";
 fmt :: #system_library "go:fmt";
 go_http :: #system_library "go:net/http";
+go_filepath :: #system_library "go:path/filepath";
 go_os :: #system_library "go:os";
 
 #scope_file
@@ -88,6 +89,7 @@ Decode :: (value: string) -> Decoded #go_results #foreign hex "DecodeString";
 Join :: (a: string, b: string) -> string #foreign fmt "Sprint";
 Write :: (writer: http.ResponseWriter, bytes: []u8) -> WriteResult #go_results #foreign go_http "ResponseWriter.Write";
 Stat :: (path: string) -> PayloadStatus #go_results #foreign go_os "Stat";
+LocalPath :: (value: string) -> bool #foreign go_filepath "IsLocal";
 
 // The release hash of a `<sha>.zx` or legacy `<sha>.zib` artifact name.
 ArtifactHash :: (asset: string) -> string {
@@ -297,6 +299,10 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
     path := TrimPrefix(url.Path(http.RequestURL(request)), "/api/v2/packages/")
     parts := Split(path, "/")
     if (parts.count != 2 && parts.count != 3) || !identity.ValidNamespace(parts[0]) {
+        response.Error(writer, 404, "package not found")
+        return
+    }
+    if !LocalPath(parts[0]) || !LocalPath(parts[1]) {
         response.Error(writer, 404, "package not found")
         return
     }

@@ -21,6 +21,7 @@ strings :: #system_library "go:strings";
 os :: #system_library "go:os";
 native_http :: #system_library "go:net/http";
 fmt :: #system_library "go:fmt";
+filepath :: #system_library "go:path/filepath";
 
 MaxBlobBytes :: 16777216;
 File :: #type #foreign os "File";
@@ -37,6 +38,7 @@ Write :: (file: *File, value: []u8) -> Written #go_results #foreign os "(*File).
 WriteResponse :: (writer: http.ResponseWriter, value: []u8) -> Written #go_results #foreign native_http "ResponseWriter.Write";
 Length :: (value: s64) -> string #foreign fmt "Sprint";
 Concat :: (a: string, b: string) -> string #foreign fmt "Sprint";
+LocalPath :: (value: string) -> bool #foreign filepath "IsLocal";
 
 ValidHash :: (hash: string) -> bool {
     if hash.count != 64 { return false }
@@ -128,6 +130,10 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
     }
     if (parts.count != 2 && parts.count != 3) || (parts.count == 3 && action != "trash" && action != "restore") ||
         !identity.ValidNamespace(parts[0]) || !ValidHash(parts[1]) {
+        response.Error(writer, 400, "invalid blob address")
+        return
+    }
+    if !LocalPath(parts[0]) || !LocalPath(parts[1]) || !LocalPath(user.value) {
         response.Error(writer, 400, "invalid blob address")
         return
     }

@@ -133,11 +133,21 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         response.Error(writer, 400, "invalid blob address")
         return
     }
-    if !LocalPath(parts[0]) || !LocalPath(parts[1]) || !LocalPath(user.value) {
+    appID := parts[0]
+    hash := parts[1]
+    if !LocalPath(appID) {
         response.Error(writer, 400, "invalid blob address")
         return
     }
-    app := apps.ByID(store.database, http.Context(request), parts[0])
+    if !LocalPath(hash) {
+        response.Error(writer, 400, "invalid blob address")
+        return
+    }
+    if !LocalPath(user.value) {
+        response.Error(writer, 400, "invalid blob address")
+        return
+    }
+    app := apps.ByID(store.database, http.Context(request), appID)
     if app.error != null {
         response.Error(writer, 500, "blob registry unavailable")
         return
@@ -163,7 +173,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
             return
         }
         data = read.value
-        if signing.SHA256Hex(data) != parts[1] {
+        if signing.SHA256Hex(data) != hash {
             response.Error(writer, 400, "blob hash mismatch")
             return
         }
@@ -175,8 +185,8 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
     }
     // Entity blobs belong to the account, so any of its active apps signs for
     // them with its own device key.
-    signer := parts[0]
-    if parts[0] == apps.EntityAppID {
+    signer := appID
+    if appID == apps.EntityAppID {
         signer = header.value.appID
         owner := apps.ByID(store.database, http.Context(request), signer)
         if owner.error != null {
@@ -195,7 +205,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         auth.Respond(writer, store.counters, verified)
         return
     }
-    pathParts: [4]string = .[Concat(store.configuration.DBPath, ".blobs"), user.value, parts[0], parts[1]]
+    pathParts: [4]string = .[Concat(store.configuration.DBPath, ".blobs"), user.value, appID, hash]
     folderParts: [3]string = .[pathParts[0], pathParts[1], pathParts[2]]
     path := Join(pathParts[:], "/")
     folder := Join(folderParts[:], "/")
@@ -204,14 +214,14 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         // Blobs count toward the account's storage limit like records, so
         // throwaway accounts cannot fill the node's disk.
         context := http.Context(request)
-        stored := storage.BlobStored(store.database, context, user.value, parts[0], parts[1])
+        stored := storage.BlobStored(store.database, context, user.value, appID, hash)
         if stored.error != null {
             signed.Forget(store.database, context, header.value)
             response.Error(writer, 500, "blob storage unavailable")
             return
         }
         // Storing a trashed blob again brings it back, so it is charged again.
-        trashed := storage.BlobTrashed(store.database, context, user.value, parts[0], parts[1])
+        trashed := storage.BlobTrashed(store.database, context, user.value, appID, hash)
         if trashed.error != null {
             signed.Forget(store.database, context, header.value)
             response.Error(writer, 500, "blob storage unavailable")
@@ -244,7 +254,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
             response.Error(writer, 507, "could not store blob")
             return
         }
-        error = storage.RecordBlob(store.database, context, user.value, parts[0], parts[1], cast(s64)data.count)
+        error = storage.RecordBlob(store.database, context, user.value, appID, hash, cast(s64)data.count)
         if error != null {
             unused files.Remove(path)
             signed.Forget(store.database, context, header.value)
@@ -256,7 +266,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
     }
     if action == "trash" {
         // Trashing is idempotent; the first time counts for the 30 days.
-        moved := storage.TrashBlob(store.database, http.Context(request), user.value, parts[0], parts[1],
+        moved := storage.TrashBlob(store.database, http.Context(request), user.value, appID, hash,
             clock.Unix(clock.Now()))
         if moved.error != null {
             response.Error(writer, 500, "blob storage unavailable")
@@ -270,7 +280,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         return
     }
     if action == "restore" {
-        Restore(store, writer, request, user.value, parts[0], parts[1])
+        Restore(store, writer, request, user.value, appID, hash)
         return
     }
     if method == "DELETE" {
@@ -280,7 +290,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
             response.Error(writer, 507, "could not delete blob")
             return
         }
-        error := storage.ForgetBlob(store.database, http.Context(request), user.value, parts[0], parts[1])
+        error := storage.ForgetBlob(store.database, http.Context(request), user.value, appID, hash)
         if error != null {
             response.Error(writer, 500, "blob storage unavailable")
             return
@@ -293,7 +303,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         response.Error(writer, 404, "blob not found")
         return
     }
-    if read.value.count > MaxBlobBytes || signing.SHA256Hex(read.value) != parts[1] {
+    if read.value.count > MaxBlobBytes || signing.SHA256Hex(read.value) != hash {
         response.Error(writer, 503, "blob integrity failure")
         return
     }

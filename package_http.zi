@@ -302,19 +302,24 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         response.Error(writer, 404, "package not found")
         return
     }
-    if !LocalPath(parts[0]) || !LocalPath(parts[1]) {
+    appID := parts[0]
+    asset := parts[1]
+    if !LocalPath(appID) {
+        response.Error(writer, 404, "package not found")
+        return
+    }
+    if !LocalPath(asset) {
         response.Error(writer, 404, "package not found")
         return
     }
     grant := ""
     if parts.count == 3 {
         grant = parts[2]
-        if parts[1] == "latest" || parts[1] == "history" || grant == "" {
+        if asset == "latest" || asset == "history" || grant == "" {
             response.Error(writer, 404, "package not found")
             return
         }
     }
-    appID := parts[0]
     app := store.ByID(context.database, http.Context(request), appID)
     if app.error != null {
         response.Error(writer, 500, "package registry unavailable")
@@ -327,19 +332,19 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         return
     }
     root := Join(Join(context.configuration.DBPath, ".packages/"), Join(appID, "/"))
-    if parts[1] == "history" {
+    if asset == "history" {
         History(context, writer, request, root, appID)
         return
     }
     filename := "latest-v2.json"
     hash := ""
-    if parts[1] != "latest" {
-        hash = ArtifactHash(parts[1])
+    if asset != "latest" {
+        hash = ArtifactHash(asset)
         if hash == "" {
             response.Error(writer, 404, "package not found")
             return
         }
-        filename = Join(parts[1], ".release-v2.json")
+        filename = Join(asset, ".release-v2.json")
     }
     metadata := files.ReadFile(Join(root, filename))
     if metadata.error != null {
@@ -357,7 +362,7 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         response.Error(writer, 503, "untrusted portable release")
         return
     }
-    if parts[1] == "latest" {
+    if asset == "latest" {
         wanted := Wanted(request)
         bucket := Bucket(request)
         if !wanted.valid || bucket < 0 {
@@ -388,13 +393,13 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         return
     }
     // A grant on an artifact that is not gated changes nothing.
-    gate := grants.Gate(Join(root, parts[1]))
+    gate := grants.Gate(Join(root, asset))
     if gate.gated && !grants.Valid(context.configuration.WaoziIssuerPublicKey, grant,
         gate.product, clock.Unix(clock.Now())) {
         response.Error(writer, 403, "package grant required")
         return
     }
-    bundle := files.ReadFile(Join(root, parts[1]))
+    bundle := files.ReadFile(Join(root, asset))
     if bundle.error != null || bundle.value.count != expected ||
     signing.SHA256Hex(bundle.value) != hash {
         response.Error(writer, 503, "portable release bytes do not match")

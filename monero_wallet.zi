@@ -105,6 +105,14 @@ HeaderValues :: (header: http.Header, name: string) -> []string #foreign go_http
 CloseAtReturn :: (body: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
 StatusError :: (message: string, status: isize) -> Error #foreign format "Errorf";
 RPCMessageError :: (message: string, detail: string) -> Error #foreign format "Errorf";
+RedirectPolicy :: #type (request: *http.Request, previous: []*http.Request) -> Error;
+SetRedirect :: (client: *http.Client, policy: RedirectPolicy) #go_field #foreign go_http "(*Client).CheckRedirect";
+LastResponse :: () -> Error #go_field #foreign go_http "ErrUseLastResponse";
+
+RejectRedirect :: (request: *http.Request, previous: []*http.Request) -> Error {
+    return LastResponse()
+}
+
 ResponseHeaders :: (response: *http.Response) -> http.Header #go_field #foreign go_http "(*Response).Header";
 RequestURI :: (target: *url.URL) -> string #foreign go_url "(*URL).RequestURI";
 FormatPair :: (pattern: string, first: string, second: string) -> string #foreign format "Sprintf";
@@ -366,6 +374,7 @@ Request :: (context: ctx.Context, configuration: config.Config, method: string,
         SetBasicAuth(request.value, configuration.MoneroWalletRPCUser, configuration.MoneroWalletRPCPassword)
     }
     client := http.NewClient(cast(clock.Duration)15000000000)
+    SetRedirect(client, RejectRedirect)
     response := http.Do(client, request.value)
     if response.error != null {
         return unavailable

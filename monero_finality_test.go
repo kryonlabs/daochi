@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -435,6 +436,29 @@ func TestMoneroRPCTrustValidation(t *testing.T) {
 		if err := MoneroWallet_ValidateRPCConfiguration(configuration); err != nil {
 			t.Fatalf("valid configuration rejected: %+v: %v", configuration, err)
 		}
+	}
+}
+
+func TestMoneroRPCDoesNotFollowCredentialRedirects(t *testing.T) {
+	for _, status := range []int{http.StatusFound, http.StatusTemporaryRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var reached atomic.Bool
+			destination := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				reached.Store(true)
+				writer.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(destination.Close)
+			origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				http.Redirect(writer, request, destination.URL, status)
+			}))
+			t.Cleanup(origin.Close)
+			configuration := Config{MoneroWalletRPCURL: origin.URL, MoneroWalletRPCUser: "user", MoneroWalletRPCPassword: "password"}
+			var output map[string]any
+			err := MoneroWallet_Request(t.Context(), configuration, "get_height", map[string]any{}, &output, errPaymentUnavailable)
+			if err == nil || reached.Load() {
+				t.Fatalf("wallet redirect followed: reached=%v error=%v", reached.Load(), err)
+			}
+		})
 	}
 }
 

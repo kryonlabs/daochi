@@ -139,7 +139,9 @@ jobs:
         env:
           EXPECTED_VERSION: ci-${{ github.sha }}
         run: |
-          container=$(docker run -d --read-only --tmpfs /data:uid=65532,gid=65532,mode=0700 -e DAOCHI_DB=/data/test.db -e DAOCHI_ADDR=:8080 -p 127.0.0.1::8080 daochi:ci)
+          DAOCHI_TOKEN_SECRET_HEX=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+          export DAOCHI_TOKEN_SECRET_HEX
+          container=$(docker run -d --read-only --tmpfs /data:uid=65532,gid=65532,mode=0700 -e DAOCHI_TOKEN_SECRET_HEX -e DAOCHI_DB=/data/test.db -e DAOCHI_ADDR=:8080 -p 127.0.0.1::8080 daochi:ci)
           trap 'docker logs "$container"; docker rm -f "$container"' EXIT
           test "$(docker inspect --format '{{.Config.User}}' "$container")" = '65532:65532'
           port=$(docker port "$container" 8080/tcp)

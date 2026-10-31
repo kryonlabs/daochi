@@ -68,6 +68,9 @@ ValidResourceID :: (value: string) -> bool {
 }
 
 ValidNamespace :: (value: string) -> bool {
+    if value == "." || value == ".." {
+        return false
+    }
     return ValidID(value, 1, 64)
 }
 

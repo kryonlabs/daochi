@@ -1,3 +1,14 @@
 .git
 .ziran
 build
+backup
+work
+.yue
+.env
+.env.*
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.key
+*.pem

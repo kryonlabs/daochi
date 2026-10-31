@@ -33,6 +33,7 @@ jobs:
           python3 -B scripts/verify_build_inputs.py
           python3 -B scripts/test_build_inputs.py
           python3 -B scripts/test_check_sarif.py
+          python3 -B scripts/test_bootstrap_ssh.py
           python3 -B scripts/test_deployment_inputs.py
           python3 -B scripts/test_deploy_install.py
           python3 -B scripts/test_migrate_env.py

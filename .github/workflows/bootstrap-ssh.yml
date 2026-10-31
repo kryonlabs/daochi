@@ -1,0 +1,37 @@
+name: Verify origin SSH identity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daochi-ssh-identity
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Test the identity proof verifier
+        run: python3 -m unittest discover -s scripts -p test_bootstrap_ssh.py
+      - name: Verify the origin without changing its service or files
+        env:
+          DAOCHI_HOST: ${{ secrets.DAOCHI_HOST }}
+          DAOCHI_USER: ${{ secrets.DAOCHI_USER }}
+          DAOCHI_SSH_KEY: ${{ secrets.DAOCHI_SSH_KEY }}
+          DAOCHI_SSH_BOOTSTRAP_RECIPIENT: ${{ vars.DAOCHI_SSH_BOOTSTRAP_RECIPIENT }}
+        run: python3 -B scripts/bootstrap_ssh.py
+      - name: Save the public proof and encrypted host pin
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-origin-identity
+          path: ${{ runner.temp }}/daochi-origin-proof/
+          if-no-files-found: error
+          retention-days: 1

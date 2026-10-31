@@ -459,6 +459,17 @@ the primary address before deploying the view-only archive.
 
 Each node has a persistent Ed25519 identity. By default it is stored beside the database as a mode-`0600` key; production deployments should set `DAOCHI_NODE_IDENTITY_KEY_FILE` explicitly or supply `DAOCHI_NODE_IDENTITY_PRIVATE_KEY_HEX_FILE`. `DAOCHI_LAN_DISCOVERY=1` advertises `_daochi._tcp.local` with mDNS. Discovery only finds candidates: it never grants trust or starts replication.
 
+The manual `Verify origin SSH identity` workflow can recover a missing deployment
+host pin using that identity. It verifies a fresh, domain-separated signature
+binding the SSH host key to the node public key obtained from the authenticated
+HTTPS API. A key scan alone is never trusted. The origin command only reads and
+signs; it does not change the service or export private keys. The resulting host
+pin is encrypted to the RSA public key in `DAOCHI_SSH_BOOTSTRAP_RECIPIENT`, with
+only public proof fields saved alongside it. Verify the proof and workflow
+revision before installing the decrypted pin as the production environment's
+`DAOCHI_SSH_HOST_KEY` secret. Normal deployments still require strict host-key
+verification and all CI/security gates.
+
 Pairing is operator-controlled. Create a short-lived, signed invite with `POST /api/v1/node/pairing/invites`, transfer its JSON as text or a QR payload, and accept it on the other node with `POST /api/v1/node/pairing/accept`. Acceptance automatically posts a signed completion to the inviter, so one invite establishes reciprocal trust while storing directional policy from each node's perspective. The invite is single-use and fixes the peer identity, addresses, direction, apps, collections, trust spaces, and data classes. Paired requests are signed, time-bounded, and replay-protected. If `DAOCHI_ADMIN_TOKEN` is configured, pairing and namespace writes require `X-Daochi-Admin`; without it they are limited to direct loopback callers. A request that carries a forwarding header (`X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP` and similar), names a non-local `Host`, or comes from a cross-site browser `Origin` is refused, so a node behind a reverse proxy must set `DAOCHI_ADMIN_TOKEN` to pair. Both nodes need reachable `DAOCHI_BASE_URL` values during pairing.
 
 `DAOCHI_KNOWN_NODES` remains the convenient public-node/bootstrap path. It is a comma-separated peer list whose entries can be `https://node.example`, `Name=https://node.example`, or `Name|https://node.example`. A peer can add `sync=<pull|push|bidirectional|none>`, `apps=inbe`, `collections=private.inbe.v1.*`, `spaces=<space-id>`, and `data=app_registry+encrypted_records+names`. The node worker tries configured and paired peers with pull permission. `DAOCHI_NODE_SYNC_INTERVAL_SECONDS` controls polling and `DAOCHI_NODE_SYNC_BATCH_LIMIT` caps record pages.

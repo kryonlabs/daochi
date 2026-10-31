@@ -18,6 +18,7 @@ strings :: #system_library "go:strings";
 hex :: #system_library "go:encoding/hex";
 fmt :: #system_library "go:fmt";
 go_http :: #system_library "go:net/http";
+native_paths :: #system_library "go:daochi/native";
 
 Release :: struct {
     AppID: string #go_tag "json:\"app_id\""
@@ -30,6 +31,11 @@ Release :: struct {
     Signature: string #go_tag "json:\"signature\""
 }
 Decoded :: struct { value: []u8; error: Error; }
+PathResult :: struct {
+    value: string
+    error: Error
+}
+PathComponent :: (value: string) -> PathResult #go_results #foreign native_paths "PathComponent";
 TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
 Split :: (value: string, separator: string) -> []string #foreign strings;
 ContainsAny :: (value: string, characters: string) -> bool #foreign strings;
@@ -64,7 +70,15 @@ Route :: (registry: app_registry.Registry, writer: http.ResponseWriter, request:
         response.Error(writer, 404, "package not found")
         return
     }
-    app := store.ByID(registry.database, http.Context(request), parts[0])
+    appPath := PathComponent(parts[0])
+    assetPath := PathComponent(parts[1])
+    if appPath.error != null || assetPath.error != null {
+        response.Error(writer, 404, "package not found")
+        return
+    }
+    appID := appPath.value
+    asset := assetPath.value
+    app := store.ByID(registry.database, http.Context(request), appID)
     if app.error != null {
         response.Error(writer, 500, "package registry unavailable")
         return
@@ -74,30 +88,30 @@ Route :: (registry: app_registry.Registry, writer: http.ResponseWriter, request:
         response.Error(writer, 404, "package not found")
         return
     }
-    root := Concat(Concat(registry.configuration.DBPath, ".packages/"), Concat(parts[0], "/"))
+    root := Concat(Concat(registry.configuration.DBPath, ".packages/"), Concat(appID, "/"))
     metadata := files.ReadFile(Concat(root, "latest.json"))
     release: Release
     if metadata.error != null {
         response.Error(writer, 404, "no portable release")
         return
     }
-    if json.Unmarshal(metadata.value, *release) != null || !Valid(release, parts[0]) {
+    if json.Unmarshal(metadata.value, *release) != null || !Valid(release, appID) {
         response.Error(writer, 503, "invalid portable release")
         return
     }
-    if parts[1] != "latest" && parts[1] != Concat(release.SHA256, ".zib") {
-        if parts[1].count != 68 || ContainsAny(parts[1], "/\\") {
+    if asset != "latest" && asset != Concat(release.SHA256, ".zib") {
+        if asset.count != 68 || ContainsAny(asset, "/\\") {
             response.Error(writer, 404, "package not found")
             return
         }
-        archived := files.ReadFile(Concat(root, Concat(parts[1], ".json")))
+        archived := files.ReadFile(Concat(root, Concat(asset, ".json")))
         if archived.error != null || json.Unmarshal(archived.value, *release) != null ||
-            !Valid(release, parts[0]) || parts[1] != Concat(release.SHA256, ".zib") {
+            !Valid(release, appID) || asset != Concat(release.SHA256, ".zib") {
             response.Error(writer, 404, "package not found")
             return
         }
     }
-    key := store.ActiveKey(registry.database, http.Context(request), parts[0], release.KeyID)
+    key := store.ActiveKey(registry.database, http.Context(request), appID, release.KeyID)
     public := Decode(key.value.PublicKey)
     signature := Decode(release.Signature)
     if key.error != null || !key.found || key.value.Algorithm != "ed25519" ||
@@ -108,7 +122,7 @@ Route :: (registry: app_registry.Registry, writer: http.ResponseWriter, request:
         response.Error(writer, 503, "untrusted portable release")
         return
     }
-    if parts[1] == "latest" {
+    if asset == "latest" {
         http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "no-store")
         response.JSON(writer, 200, release)
         return

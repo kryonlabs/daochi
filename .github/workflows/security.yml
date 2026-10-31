@@ -108,7 +108,7 @@ jobs:
           output: codeql-results
 
       - name: Reject high severity CodeQL findings
-        run: python3 -B scripts/check_sarif.py codeql-results
+        run: python3 -B scripts/check_sarif.py codeql-results --reviewed-policy scripts/security_reviews.json
   container-scan:
     runs-on: ubuntu-latest
     permissions:

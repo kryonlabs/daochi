@@ -292,6 +292,11 @@ MD5-only challenges; use a wallet RPC version supporting SHA-256. RPC credential
 are sent only to the configured HTTPS or literal loopback destination, and
 redirects are refused.
 
+The CodeQL review in `scripts/security_reviews.json` classifies this SHA-256
+Digest exchange as protocol authentication rather than password storage. It
+matches only the reviewed source fingerprint, digest function and authentication
+call site; other high-severity findings and source changes still block release.
+
 When `MONERO_RATE_ATOMIC_AMOUNT` and `MONERO_RATE_TOKEN_UNITS` are set, every
 Daochi account receives one permanent Monero subaddress on first use. Sending
 XMR to that address credits the account at the configured integer ratio after

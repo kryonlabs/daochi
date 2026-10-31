@@ -2,12 +2,67 @@
 """Fail the release gate on high severity or invalid SARIF security reports."""
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 
 
-def check_report(path):
+def function_lines(lines, name):
+    start = next((index for index, line in enumerate(lines, 1)
+                  if re.match(r"func " + re.escape(name) + r"\(", line)), None)
+    if start is None:
+        return None
+    end = next((index for index in range(start, len(lines) + 1) if lines[index - 1] == "}"), None)
+    return (start, end) if end is not None else None
+
+
+def reviewed_finding(result, rule_id, reviews, source_root):
+    if source_root is None:
+        return False
+    for review in reviews:
+        if rule_id != review["rule_id"]:
+            continue
+        locations = result.get("locations", [])
+        if len(locations) != 1:
+            continue
+        location = locations[0].get("physicalLocation", {})
+        if location.get("artifactLocation", {}).get("uri") != review["artifact"]:
+            continue
+        source = (source_root / review["source"]).resolve()
+        artifact = (source_root / review["artifact"]).resolve()
+        if source_root.resolve() not in source.parents or source_root.resolve() not in artifact.parents:
+            raise ValueError("security review path escapes the source tree")
+        if source.stat().st_size > 1024 * 1024 or artifact.stat().st_size > 1024 * 1024:
+            raise ValueError("reviewed security source exceeds size limit")
+        if hashlib.sha256(source.read_bytes()).hexdigest() != review["source_sha256"]:
+            continue
+        lines = artifact.read_text().splitlines()
+        bounds = function_lines(lines, review["function"])
+        caller = function_lines(lines, review["source_function"])
+        if bounds is None or caller is None:
+            continue
+        finding_line = location.get("region", {}).get("startLine")
+        origins = []
+        for flow in result.get("codeFlows", []):
+            for thread in flow.get("threadFlows", []):
+                steps = thread.get("locations", [])
+                if steps:
+                    origins.append(steps[0].get("location", {}).get("physicalLocation", {}))
+        if not origins:
+            continue
+        if any(origin.get("artifactLocation", {}).get("uri") != review["artifact"] or
+               type(origin.get("region", {}).get("startLine")) is not int or
+               not caller[0] <= origin["region"]["startLine"] <= caller[1] for origin in origins):
+            continue
+        if type(finding_line) is int and bounds[0] <= finding_line <= bounds[1]:
+            print("Reviewed protocol finding: " + review["function"] + ": " + review["reason"])
+            return True
+    return False
+
+
+def check_report(path, reviews=(), source_root=None):
     if path.stat().st_size > 16 * 1024 * 1024:
         raise ValueError(f"SARIF report exceeds the review limit: {path.name}")
     with path.open() as stream:
@@ -50,7 +105,7 @@ def check_report(path):
                 score = float(severity)
                 if not 0 <= score <= 10:
                     raise ValueError(f"invalid SARIF severity: {rule_id}")
-                if score >= 7:
+                if score >= 7 and not reviewed_finding(result, rule_id, reviews, source_root):
                     failures.append(rule_id or rule.get("id", "unknown"))
             elif result.get("level", rule.get("defaultConfiguration", {}).get("level")) == "error":
                 failures.append(rule_id or rule.get("id", "unknown"))
@@ -60,12 +115,21 @@ def check_report(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
+    parser.add_argument("--reviewed-policy", type=Path)
     args = parser.parse_args()
     try:
         reports = sorted(args.directory.glob("*.sarif"))
         if not reports:
             raise ValueError("no SARIF reports produced")
-        failures = [finding for report in reports for finding in check_report(report)]
+        reviews = []
+        if args.reviewed_policy:
+            if args.reviewed_policy.stat().st_size > 65536:
+                raise ValueError("security review policy exceeds size limit")
+            reviews = json.loads(args.reviewed_policy.read_text())
+            if not isinstance(reviews, list):
+                raise ValueError("invalid security review policy")
+        source_root = Path(__file__).resolve().parents[1]
+        failures = [finding for report in reports for finding in check_report(report, reviews, source_root)]
         if failures:
             raise ValueError("high severity findings: " + ", ".join(sorted(set(failures))))
     except (OSError, ValueError, TypeError, KeyError) as failure:

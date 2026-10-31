@@ -1,0 +1,13 @@
+[
+  {
+    "rule_id": "go/weak-sensitive-data-hashing",
+    "artifact": "monero_wallet.zi.go",
+    "function": "MoneroWallet_RPCDigest",
+    "source_function": "MoneroWallet_DigestAuthorization",
+    "source": "monero_wallet.zi",
+    "source_sha256": "6736dca8b5baa637945d39a0b8627ea0f5ea23b4b3b134fff07be85b52f2da42",
+    "reason": "RFC 7616 SHA-256 HTTP Digest wire authentication, not password storage. MD5 is rejected; non-loopback RPC requires verified HTTPS and redirects are refused. Any source change invalidates this review.",
+    "reference": "https://github.com/monero-project/monero/blob/master/contrib/epee/src/http_auth.cpp",
+    "reviewed_on": "2026-10-31"
+  }
+]

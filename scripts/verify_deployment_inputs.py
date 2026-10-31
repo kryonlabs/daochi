@@ -337,7 +337,8 @@ def configure_ssh(host, user, trusted_lines, ssh_directory):
     validate_user_name(user)
     known_host_entries(host, trusted_lines)
 
-    ssh_directory.mkdir(parents=True, mode=0o700)
+    ssh_directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    ssh_directory.chmod(0o700)
     known_hosts = ssh_directory / "known_hosts"
     atomic_write(known_hosts, ("\n".join(trusted_lines) + "\n").encode(), 0o600)
     configuration = "\n".join(

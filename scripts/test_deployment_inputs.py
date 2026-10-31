@@ -205,6 +205,22 @@ class DeploymentInputTest(unittest.TestCase):
                 )
             self.assertFalse((ssh_directory / "known_hosts").exists())
 
+    def test_ssh_configuration_reuses_existing_key_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trusted = self.write_host_key(root, "host")
+            ssh_directory = root / ".ssh"
+            ssh_directory.mkdir(mode=0o755)
+            identity = ssh_directory / "id_ed25519"
+            identity.write_text("existing deployment identity fixture")
+            identity.chmod(0o600)
+            for _ in range(2):
+                deployment_inputs.configure_ssh("deployment.test", "deploy", [trusted], ssh_directory)
+            self.assertEqual(identity.read_text(), "existing deployment identity fixture")
+            self.assertEqual(ssh_directory.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((ssh_directory / "known_hosts").stat().st_mode & 0o777, 0o600)
+            self.assertIn("StrictHostKeyChecking yes", (ssh_directory / "config").read_text())
+
     def test_presented_host_key_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             trusted = self.write_host_key(Path(temporary), "trusted")

@@ -21,7 +21,7 @@ strings :: #system_library "go:strings";
 format :: #system_library "go:fmt";
 go_url :: #system_library "go:net/url";
 big :: #system_library "go:math/big";
-md5 :: #system_library "go:crypto/md5";
+sha256 :: #system_library "go:crypto/sha256";
 hex :: #system_library "go:encoding/hex";
 builtin :: #system_library "go:builtin";
 
@@ -125,7 +125,7 @@ SplitRaw :: (value: string, separator: string) -> []string #foreign strings "Spl
 TrimRaw :: (value: string) -> string #foreign strings "TrimSpace";
 LowerRaw :: (value: string) -> string #foreign strings "ToLower";
 HasPrefix :: (value: string, prefix: string) -> bool #foreign strings;
-SumMD5 :: (value: []u8) -> [16]u8 #foreign md5 "Sum";
+SumSHA256 :: (value: []u8) -> [32]u8 #foreign sha256 "Sum256";
 EncodeHex :: (value: []u8) -> string #foreign hex "EncodeToString";
 AllocateText :: (count: isize) -> []string #foreign builtin "make";
 AppendText :: (values: []string, value: string) -> []string #foreign builtin "append";
@@ -146,7 +146,7 @@ ToLowerText :: (value: string) -> string {
 }
 
 RPCDigest :: (value: string) -> string {
-    digest := SumMD5(text.ToBytes(value))
+    digest := SumSHA256(text.ToBytes(value))
     return EncodeHex(digest[:])
 }
 
@@ -192,6 +192,10 @@ ParseDigestChallenge :: (headers: http.Header) -> DigestChallenge {
         challenge.nonce = ChallengeValue(value, "nonce")
         challenge.qop = ChallengeValue(value, "qop")
         challenge.algorithm = ChallengeValue(value, "algorithm")
+        if challenge.algorithm != "SHA-256" {
+            challenge = DigestChallenge.{}
+            continue
+        }
         return challenge
     }
     return challenge
@@ -201,7 +205,7 @@ DigestAuthorization :: (challenge: DigestChallenge, method: string, target: stri
     user: string, password: string) -> DigestAuthorizationResult {
     result: DigestAuthorizationResult
     if challenge.realm == "" || challenge.nonce == "" ||
-        (challenge.algorithm != "" && challenge.algorithm != "MD5") ||
+        challenge.algorithm != "SHA-256" ||
         (challenge.qop != "" && challenge.qop != "auth") ||
         !SafeCredentialText(challenge.realm) || !SafeCredentialText(challenge.nonce) {
         result.error = errors.New("monero rpc digest challenge invalid")
@@ -218,7 +222,7 @@ DigestAuthorization :: (challenge: DigestChallenge, method: string, target: stri
     ha2 := RPCDigest(FormatPair("%s:%s", method, target))
     response := RPCDigest(FormatSix("%s:%s:%s:%s:%s:%s", ha1, challenge.nonce, "00000001", clientNonce, "auth", ha2))
     result.value = FormatSix(
-        "Digest username=\"%s\",realm=\"%s\",nonce=\"%s\",uri=\"%s\",algorithm=MD5,qop=auth,nc=00000001,cnonce=\"%s\",response=\"%s\"",
+        "Digest username=\"%s\",realm=\"%s\",nonce=\"%s\",uri=\"%s\",algorithm=SHA-256,qop=auth,nc=00000001,cnonce=\"%s\",response=\"%s\"",
         user, challenge.realm, challenge.nonce, target, clientNonce, response)
     return result
 }

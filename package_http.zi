@@ -28,7 +28,7 @@ strconv :: #system_library "go:strconv";
 hex :: #system_library "go:encoding/hex";
 fmt :: #system_library "go:fmt";
 go_http :: #system_library "go:net/http";
-go_filepath :: #system_library "go:path/filepath";
+native_paths :: #system_library "go:daochi/native";
 go_os :: #system_library "go:os";
 
 #scope_file
@@ -89,7 +89,11 @@ Decode :: (value: string) -> Decoded #go_results #foreign hex "DecodeString";
 Join :: (a: string, b: string) -> string #foreign fmt "Sprint";
 Write :: (writer: http.ResponseWriter, bytes: []u8) -> WriteResult #go_results #foreign go_http "ResponseWriter.Write";
 Stat :: (path: string) -> PayloadStatus #go_results #foreign go_os "Stat";
-LocalPath :: (value: string) -> bool #foreign go_filepath "IsLocal";
+PathResult :: struct {
+    value: string
+    error: Error
+}
+PathComponent :: (value: string) -> PathResult #go_results #foreign native_paths "PathComponent";
 
 // The release hash of a `<sha>.zx` or legacy `<sha>.zib` artifact name.
 ArtifactHash :: (asset: string) -> string {
@@ -302,16 +306,14 @@ Route :: (context: registry.Registry, writer: http.ResponseWriter,
         response.Error(writer, 404, "package not found")
         return
     }
-    appID := parts[0]
-    asset := parts[1]
-    if !LocalPath(appID) {
+    appPath := PathComponent(parts[0])
+    assetPath := PathComponent(parts[1])
+    if appPath.error != null || assetPath.error != null {
         response.Error(writer, 404, "package not found")
         return
     }
-    if !LocalPath(asset) {
-        response.Error(writer, 404, "package not found")
-        return
-    }
+    appID := appPath.value
+    asset := assetPath.value
     grant := ""
     if parts.count == 3 {
         grant = parts[2]

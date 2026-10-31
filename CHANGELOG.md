@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Require SHA-256 wallet RPC Digest authentication and canonical filesystem components for blob and package requests.
+
 - Count daily Wurm check-ins by the node's UTC clock and grant each daily Dew reward once per account.
 
 - Revoke signed-in sessions durably on logout and device revocation, including active sync connections.

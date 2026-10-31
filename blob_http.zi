@@ -21,7 +21,7 @@ strings :: #system_library "go:strings";
 os :: #system_library "go:os";
 native_http :: #system_library "go:net/http";
 fmt :: #system_library "go:fmt";
-filepath :: #system_library "go:path/filepath";
+native_paths :: #system_library "go:daochi/native";
 
 MaxBlobBytes :: 16777216;
 File :: #type #foreign os "File";
@@ -38,7 +38,11 @@ Write :: (file: *File, value: []u8) -> Written #go_results #foreign os "(*File).
 WriteResponse :: (writer: http.ResponseWriter, value: []u8) -> Written #go_results #foreign native_http "ResponseWriter.Write";
 Length :: (value: s64) -> string #foreign fmt "Sprint";
 Concat :: (a: string, b: string) -> string #foreign fmt "Sprint";
-LocalPath :: (value: string) -> bool #foreign filepath "IsLocal";
+PathResult :: struct {
+    value: string
+    error: Error
+}
+PathComponent :: (value: string) -> PathResult #go_results #foreign native_paths "PathComponent";
 
 ValidHash :: (hash: string) -> bool {
     if hash.count != 64 { return false }
@@ -133,20 +137,15 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         response.Error(writer, 400, "invalid blob address")
         return
     }
-    appID := parts[0]
-    hash := parts[1]
-    if !LocalPath(appID) {
+    appPath := PathComponent(parts[0])
+    hashPath := PathComponent(parts[1])
+    userPath := PathComponent(user.value)
+    if appPath.error != null || hashPath.error != null || userPath.error != null {
         response.Error(writer, 400, "invalid blob address")
         return
     }
-    if !LocalPath(hash) {
-        response.Error(writer, 400, "invalid blob address")
-        return
-    }
-    if !LocalPath(user.value) {
-        response.Error(writer, 400, "invalid blob address")
-        return
-    }
+    appID := appPath.value
+    hash := hashPath.value
     app := apps.ByID(store.database, http.Context(request), appID)
     if app.error != null {
         response.Error(writer, 500, "blob registry unavailable")
@@ -205,7 +204,7 @@ Route :: (store: registry.Registry, writer: http.ResponseWriter, request: *http.
         auth.Respond(writer, store.counters, verified)
         return
     }
-    pathParts: [4]string = .[Concat(store.configuration.DBPath, ".blobs"), user.value, appID, hash]
+    pathParts: [4]string = .[Concat(store.configuration.DBPath, ".blobs"), userPath.value, appID, hash]
     folderParts: [3]string = .[pathParts[0], pathParts[1], pathParts[2]]
     path := Join(pathParts[:], "/")
     folder := Join(folderParts[:], "/")

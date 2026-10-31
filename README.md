@@ -287,6 +287,11 @@ DAOCHI_ENCRYPTED_PAYLOAD_MAX_ACCOUNT_BYTES=0
 DAOCHI_ENCRYPTED_PAYLOAD_RETENTION_DAYS=0
 ```
 
+Wallet RPC Digest authentication requires a SHA-256 challenge. Daochi rejects
+MD5-only challenges; use a wallet RPC version supporting SHA-256. RPC credentials
+are sent only to the configured HTTPS or literal loopback destination, and
+redirects are refused.
+
 When `MONERO_RATE_ATOMIC_AMOUNT` and `MONERO_RATE_TOKEN_UNITS` are set, every
 Daochi account receives one permanent Monero subaddress on first use. Sending
 XMR to that address credits the account at the configured integer ratio after

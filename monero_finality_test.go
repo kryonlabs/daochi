@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -54,7 +54,7 @@ func newF03MoneroWalletRPC(t *testing.T) *f03MoneroWalletRPC {
 		}
 		authorization := request.Header.Get("Authorization")
 		if !strings.HasPrefix(authorization, "Digest ") {
-			writer.Header().Set("WWW-Authenticate", `Digest realm="daochi-test", qop="auth", nonce="f03-nonce", algorithm=MD5`)
+			writer.Header().Set("WWW-Authenticate", `Digest realm="daochi-test", qop="auth", nonce="f03-nonce", algorithm=SHA-256`)
 			writer.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -131,9 +131,9 @@ func f03AuthorizationField(authorization string, name string) string {
 }
 
 func f03Digest(authorization string, method string) string {
-	ha1 := f03MD5("user:daochi-test:digest-password")
-	ha2 := f03MD5(method + ":" + f03AuthorizationField(authorization, "uri"))
-	return f03MD5(strings.Join([]string{
+	ha1 := f03SHA256("user:daochi-test:digest-password")
+	ha2 := f03SHA256(method + ":" + f03AuthorizationField(authorization, "uri"))
+	return f03SHA256(strings.Join([]string{
 		ha1,
 		f03AuthorizationField(authorization, "nonce"),
 		f03AuthorizationField(authorization, "nc"),
@@ -143,8 +143,8 @@ func f03Digest(authorization string, method string) string {
 	}, ":"))
 }
 
-func f03MD5(value string) string {
-	digest := md5.Sum([]byte(value))
+func f03SHA256(value string) string {
+	digest := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(digest[:])
 }
 
@@ -153,7 +153,7 @@ func f03DigestValid(authorization string, uri string) bool {
 		f03AuthorizationField(authorization, "realm") == "daochi-test" &&
 		f03AuthorizationField(authorization, "nonce") == "f03-nonce" &&
 		f03AuthorizationField(authorization, "uri") == uri &&
-		f03AuthorizationField(authorization, "algorithm") == "MD5" &&
+		f03AuthorizationField(authorization, "algorithm") == "SHA-256" &&
 		f03AuthorizationField(authorization, "qop") == "auth" &&
 		f03AuthorizationField(authorization, "response") == f03Digest(authorization, http.MethodPost)
 }
@@ -436,6 +436,27 @@ func TestMoneroRPCTrustValidation(t *testing.T) {
 		if err := MoneroWallet_ValidateRPCConfiguration(configuration); err != nil {
 			t.Fatalf("valid configuration rejected: %+v: %v", configuration, err)
 		}
+	}
+}
+
+func TestMoneroRPCSelectsSHA256AndRejectsWeakDigest(t *testing.T) {
+	weak := `Digest realm="weak", qop="auth", nonce="weak-nonce", algorithm=MD5`
+	strong := `Digest realm="wallet", qop="auth", nonce="strong-nonce", algorithm=SHA-256`
+	for _, challenges := range [][]string{{weak, strong}, {strong, weak}} {
+		challenge := MoneroWallet_ParseDigestChallenge(http.Header{"Www-Authenticate": challenges})
+		if challenge.Algorithm != "SHA-256" || challenge.Nonce != "strong-nonce" {
+			t.Fatalf("strong challenge not selected: %+v", challenge)
+		}
+	}
+	for _, algorithm := range []string{"MD5", "", "SHA-512"} {
+		challenge := DigestChallenge{Realm: "wallet", Nonce: "nonce", Qop: "auth", Algorithm: algorithm}
+		if got := MoneroWallet_DigestAuthorization(challenge, "POST", "/json_rpc", "user", "password"); got.Error == nil {
+			t.Errorf("unsupported digest accepted: %q", algorithm)
+		}
+	}
+	challenge := MoneroWallet_ParseDigestChallenge(http.Header{"Www-Authenticate": {weak}})
+	if challenge.Algorithm != "" || challenge.Nonce != "" {
+		t.Fatalf("weak-only challenge selected: %+v", challenge)
 	}
 }
 

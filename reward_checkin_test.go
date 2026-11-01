@@ -8,9 +8,10 @@ import (
 	"time"
 )
 
-// Wurm's Dew days pay once the node has counted enough UTC check-in days. A
-// claim checks the account in for today even when it is refused, a day is
-// counted once, and each Dew day credits an account once.
+// Wurm's Dew days pay once the node has counted enough UTC check-in days in a
+// row, ending today. A claim checks the account in for today even when it is
+// refused, a day is counted once, a missed day starts the count over, and each
+// Dew day credits an account once.
 func TestDailyRewardsNeedCheckInDays(t *testing.T) {
 	_, store, handler, _ := unlockFixture(t)
 	ctx := context.Background()
@@ -61,8 +62,12 @@ func TestDailyRewardsNeedCheckInDays(t *testing.T) {
 	for day := today - 3; day < today; day++ {
 		checkIn(player.UserID, day)
 	}
-	claim(player.Token, "wurm.daily-05", 403)
+	// Days before a gap do not count, however many there are.
 	checkIn(player.UserID, today-10)
+	checkIn(player.UserID, today-9)
+	checkIn(player.UserID, today-8)
+	claim(player.Token, "wurm.daily-05", 403)
+	checkIn(player.UserID, today-4)
 	first := claim(player.Token, "wurm.daily-05", 200)
 	if !first.Credited || first.Units != UnitsPerDew || first.Balance != UnitsPerDew {
 		t.Fatalf("day five: %+v", first)
@@ -73,14 +78,14 @@ func TestDailyRewardsNeedCheckInDays(t *testing.T) {
 	}
 	// Five days are not ten; the next Dew day waits for its own days.
 	claim(player.Token, "wurm.daily-10", 403)
-	for day := today - 9; day <= today-5; day++ {
+	for _, day := range []int64{today - 7, today - 6, today - 5} {
 		checkIn(player.UserID, day)
 	}
 	if got := claim(player.Token, "wurm.daily-10", 200); !got.Credited || got.Units != 2*UnitsPerDew || got.Balance != 3*UnitsPerDew {
 		t.Fatalf("day ten: %+v", got)
 	}
 	claim(player.Token, "wurm.daily-25", 403)
-	if got := days(player.UserID); got != 10 {
+	if got := days(player.UserID); got != 11 {
 		t.Fatalf("check-in days: %d", got)
 	}
 
@@ -92,6 +97,16 @@ func TestDailyRewardsNeedCheckInDays(t *testing.T) {
 	if got := TokenLedger_Balance(store.Database, ctx, other.UserID, AssetID); got.Error != nil || got.Value != 0 {
 		t.Fatalf("another account received Dew: %+v", got)
 	}
+	// A day missed just before the Dew day leaves a long history worthless.
+	broken := newTestIdentity(t, handler, 0xc3)
+	for day := today - 30; day < today-1; day++ {
+		checkIn(broken.UserID, day)
+	}
+	claim(broken.Token, "wurm.daily-05", 403)
+	if got := TokenLedger_Balance(store.Database, ctx, broken.UserID, AssetID); got.Error != nil || got.Value != 0 {
+		t.Fatalf("Dew credited after a gap: %+v", got)
+	}
+
 	// The client cannot invent a Dew day or claim without an account.
 	claim(player.Token, "wurm.daily-30", 404)
 	claim(player.Token, "wurm.daily-01", 404)

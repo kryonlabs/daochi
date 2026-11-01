@@ -1,6 +1,7 @@
 // The days an account checked in with a game, for rewards that pay after
-// that many days, such as Wurm's daily plan. The node counts UTC days by its
-// own clock, so a client can neither choose a day nor count one twice.
+// that many days in a row, such as Wurm's daily plan. The node counts UTC days
+// by its own clock, so a client can neither choose a day nor count one twice,
+// and a missed day starts the count over.
 #import "std/go_types"
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
@@ -9,7 +10,7 @@ errors :: #import "std/errors_go";
 DaySeconds :: 86400
 
 CheckInResult :: struct {
-    // The account's check-in days for the game, today included.
+    // The account's consecutive check-in days for the game, ending today.
     days: s64
     error: Error
 }
@@ -23,7 +24,14 @@ CREATE TABLE IF NOT EXISTS reward_checkins (
 );
 SQL
 InsertCheckIn :: "INSERT INTO reward_checkins(account_id,game,day,created_at) VALUES(?1,?2,?3,?4) ON CONFLICT DO NOTHING";
-CountCheckIns :: "SELECT COUNT(*) FROM reward_checkins WHERE account_id=?1 AND game=?2";
+// Walking back from today, each earlier row sits one position further down, so
+// day + position stays today + 1 until the first missed day.
+CountStreak :: #string SQL
+SELECT COUNT(*) FROM (
+ SELECT day, ROW_NUMBER() OVER (ORDER BY day DESC) AS position
+ FROM reward_checkins WHERE account_id=?1 AND game=?2 AND day<=?3
+) WHERE day + position = ?3 + 1
+SQL
 
 #scope_export
 SchemaSQL :: () -> string {
@@ -39,7 +47,7 @@ Day :: (unix_seconds: s64) -> s64 {
 }
 
 // Checks the account in for the UTC day of now, once per day, and counts its
-// check-in days for the game.
+// consecutive check-in days for the game, ending today.
 CheckIn :: (database: *sql.Database, context: ctx.Context, account: string, game: string,
     now: s64) -> CheckInResult {
     result: CheckInResult
@@ -54,8 +62,8 @@ CheckIn :: (database: *sql.Database, context: ctx.Context, account: string, game
         result.error = written.error
         return result
     }
-    arguments: [2]Any = .[account, game]
+    arguments: [3]Any = .[account, game, day]
     destinations: [1]Any = .[*result.days]
-    result.error = sql.ScanRow(sql.QueryRow(database, context, CountCheckIns, arguments[:]), destinations[:])
+    result.error = sql.ScanRow(sql.QueryRow(database, context, CountStreak, arguments[:]), destinations[:])
     return result
 }

@@ -53,6 +53,7 @@ response :: #import "response";
 delegated_sync :: #import "delegated_sync";
 delegated_ws :: #import "delegated_ws";
 device_link :: #import "device_link";
+account_backups :: #import "account_backup";
 feedback :: #import "feedback_http";
 docs :: #import "docs";
 types :: #import "types";
@@ -371,6 +372,8 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/link/put", server, HandleDeviceLinkPut)
     Route(mux, "POST /api/v1/link/get", server, HandleDeviceLinkGet)
     Route(mux, "POST /api/v1/link/close", server, HandleDeviceLinkClose)
+    Route(mux, "POST /api/v1/account-backup/salt", server, HandleAccountBackupSalt)
+    Route(mux, "POST /api/v1/account-backup/open", server, HandleAccountBackupOpen)
     Route(mux, "POST /api/v1/feedback", server, HandleFeedbackSubmit)
     Route(mux, "GET /api/v1/feedback", server, HandleFeedbackList)
     Route(mux, "GET /api/v1/admin/feedback", server, HandleFeedbackInbox)
@@ -422,6 +425,9 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/account/alias/purchase", server, HandleAliasQuoteOrPurchase)
     Route(mux, "POST /api/v1/account/profile-icon", server, HandleAccountHttpProfileIcon)
     Route(mux, "GET /api/v1/account/export", server, HandleAccountHttpExport)
+    Route(mux, "POST /api/v1/account/backup", server, HandleAccountBackupPut)
+    Route(mux, "GET /api/v1/account/backup", server, HandleAccountBackupReport)
+    Route(mux, "DELETE /api/v1/account/backup", server, HandleAccountBackupDelete)
     Route(mux, "GET /api/v1/account/devices", server, HandleDeviceHttpRoute)
     Route(mux, "POST /api/v1/account/devices", server, HandleDeviceHttpRoute)
     Route(mux, "DELETE /api/v1/account/devices", server, HandleDeviceHttpRoute)
@@ -885,6 +891,30 @@ HandleDeviceLinkGet :: (server: *Server, writer: http.ResponseWriter, request: *
 HandleDeviceLinkClose :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     unused server
     device_link.Close(writer, request)
+}
+
+AccountBackups :: (server: *Server) -> account_backups.AccountBackups {
+    result: account_backups.AccountBackups
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.limiter = server.limiter
+    return result
+}
+HandleAccountBackupSalt :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_backups.Salt(AccountBackups(server), writer, request)
+}
+HandleAccountBackupOpen :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_backups.Open(AccountBackups(server), writer, request)
+}
+HandleAccountBackupPut :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_backups.Put(AccountBackups(server), writer, request)
+}
+HandleAccountBackupReport :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_backups.Report(AccountBackups(server), writer, request)
+}
+HandleAccountBackupDelete :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_backups.Delete(AccountBackups(server), writer, request)
 }
 
 HandleStoragePlan :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

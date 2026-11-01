@@ -174,6 +174,13 @@ DeleteTx :: (transaction: *sql.Transaction, context: ctx.Context, userID: string
     if usage.error != null {
         return usage.error
     }
+    // A password-sealed account backup has no foreign key either, so it is
+    // not kept with an account on hold: it is gone with the account.
+    backup := sql.ExecTx(transaction, context,
+        "DELETE FROM server_account_backups WHERE user_id_hash=?1", arguments[:])
+    if backup.error != null {
+        return backup.error
+    }
     deleted := sql.ExecTx(transaction, context,
         "DELETE FROM server_users WHERE user_id_hash=?1", arguments[:])
     return deleted.error

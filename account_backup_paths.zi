@@ -1,0 +1,43 @@
+// Route documentation for password-released account backups.
+#import "std/go_types"
+#import "std/map_go"
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+
+Paths :: () -> Map(string, Any) {
+    result: Map(string, Any)
+    unused json.Unmarshal(text.ToBytes(AccountBackupDocument), *result)
+    return result
+}
+
+AccountBackupDocument :: #string JSON
+{
+  "/api/v1/account-backup/salt": {"post": {
+    "summary": "Get the salt to derive an account backup's keys",
+    "description": "Body: {\"account\": username or 64-hex public ID}. Always answers {\"salt\": 32 hex}: the stored backup's salt, or a stable decoy when no backup is stored or nobody holds the name, so the answer does not tell which names keep a backup. Limited to 60 requests a minute per address.",
+    "responses": {"200": {"description": "Salt"}, "400": {"description": "Invalid account"}, "429": {"description": "Rate limit exceeded"}}
+  }},
+  "/api/v1/account-backup/open": {"post": {
+    "summary": "Release an account backup for a password's login proof",
+    "description": "Body: {\"account\", \"proof\": 64 hex}. The node stores only SHA-256 of the proof and compares it in constant time. Returns {\"account_id\", \"backup\"}: the backup text sealed on the device with Argon2id, which the node cannot open. A wrong proof, an unknown name and an account without a backup all answer 403 {\"error\": \"wrong username or password\"}. Five wrong proofs are free; the fifth locks for 60 seconds and each further one doubles the lock, up to 24 hours. Locks are kept in the database and survive a restart; a right proof clears them. While locked: 429 {\"error\": \"too many attempts\", \"retry_after\": seconds}. Limited to 20 requests a minute per address.",
+    "responses": {"200": {"description": "Backup released"}, "400": {"description": "Invalid account or proof"}, "403": {"description": "Wrong username or password"}, "429": {"description": "Too many attempts"}}
+  }},
+  "/api/v1/account/backup": {
+    "post": {
+      "summary": "Store the signed-in account's backup",
+      "description": "Bearer token. Body: {\"backup\": waozi-account-backup-v3 text up to 17664 bytes, \"salt\": 32 hex, \"verifier\": 64 hex SHA-256 of the login proof}. The backup must use ML-DSA-44 and Argon2id with 65536 KiB, 3 passes and 1 lane, and its salt line must equal salt. Replaces any stored backup and clears its failed attempts. Not counted as account storage and not replicated to other nodes. Returns {\"stored\": true, \"updated_at\"}.",
+      "responses": {"200": {"description": "Backup stored"}, "400": {"description": "Invalid backup"}, "401": {"description": "Bearer token required"}}
+    },
+    "get": {
+      "summary": "Show whether the signed-in account keeps a backup here",
+      "description": "Bearer token. Returns {\"stored\": bool, \"updated_at\": Unix seconds, 0 when none}.",
+      "responses": {"200": {"description": "Backup status"}, "401": {"description": "Bearer token required"}}
+    },
+    "delete": {
+      "summary": "Delete the signed-in account's backup",
+      "description": "Bearer token. Returns {\"deleted\": bool}. Deleting the account also deletes its backup.",
+      "responses": {"200": {"description": "Backup deleted"}, "401": {"description": "Bearer token required"}}
+    }
+  }
+}
+JSON;

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Keep a password-sealed account backup the node cannot open, released for a login proof; unknown accounts get the same answer as wrong passwords.
+
 - Add Shovey Island as an account unlock with a confirmed Dew price, a 40% launch offer and purchase restoration across devices.
 
 - Require SHA-256 wallet RPC Digest authentication and canonical filesystem components for blob and package requests.

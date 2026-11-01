@@ -352,6 +352,9 @@ WHERE account_id=?1 AND disabled_at=''`, userID); err != nil {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_chat_usage WHERE account_id=?1`, userID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM server_account_backups WHERE user_id_hash=?1`, userID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_users WHERE user_id_hash=?1`, userID); err != nil {
 		return err
 	}

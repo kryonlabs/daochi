@@ -1,0 +1,710 @@
+// A password-sealed copy of an account key, so a new device can sign in with
+// a username and password. The device seals the copy with Argon2id before it
+// sends it; the node keeps text it cannot open and releases it only after a
+// login proof derived from the same password. The node stores SHA-256 of the
+// proof, never the proof, so it can neither learn nor reset the password.
+//
+// Wrong proofs are counted per account in the database, so a lock survives a
+// restart, and requests are limited per address in memory. An account
+// without a backup, or a name nobody holds, answers with a stable decoy salt
+// and follows the same failure schedule in memory, so the answers do not tell
+// which names keep a backup.
+//
+// A backup is not account storage: it is not billed, not replicated to other
+// nodes, not part of an account export and not kept while an account is on
+// hold. Deleting the account deletes it. Neither proofs nor backups are
+// logged.
+#import "std/go_types"
+#import "std/map_go"
+#import "std/sync_go"
+config :: #import "config";
+metrics :: #import "metrics";
+lookup :: #import "account_lookup";
+identity :: #import "identity";
+auth :: #import "http_auth";
+response :: #import "response";
+body :: #import "http_body";
+strict :: #import "strict_json";
+limiting :: #import "rate_limit";
+request_rate :: #import "request_rate";
+address :: #import "client_address";
+hmac :: #import "std/hmac_sha256_go";
+constant_time :: #import "std/constant_time";
+random :: #import "std/random_go";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+errors :: #import "std/errors_go";
+go_strings :: #system_library "go:strings";
+go_strconv :: #system_library "go:strconv";
+go_hex :: #system_library "go:encoding/hex";
+go_sha256 :: #system_library "go:crypto/sha256";
+
+AccountBackups :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    limiter: *limiting.RateLimiter
+}
+
+SaltInput :: struct {
+    account: string #go_tag "json:\"account\""
+}
+
+OpenInput :: struct {
+    account: string #go_tag "json:\"account\""
+    proof: string #go_tag "json:\"proof\""
+}
+
+StoreInput :: struct {
+    backup: string #go_tag "json:\"backup\""
+    salt: string #go_tag "json:\"salt\""
+    verifier: string #go_tag "json:\"verifier\""
+}
+
+SaltOutput :: struct {
+    salt: string #go_tag "json:\"salt\""
+}
+
+OpenOutput :: struct {
+    account_id: string #go_tag "json:\"account_id\""
+    backup: string #go_tag "json:\"backup\""
+}
+
+LockedOutput :: struct {
+    error: string #go_tag "json:\"error\""
+    retry_after: s64 #go_tag "json:\"retry_after\""
+}
+
+StatusOutput :: struct {
+    stored: bool #go_tag "json:\"stored\""
+    updated_at: s64 #go_tag "json:\"updated_at\""
+}
+
+DeletedOutput :: struct {
+    deleted: bool #go_tag "json:\"deleted\""
+}
+
+// The whole sealed text a device sends, header included.
+BACKUP_MAX_BYTES :: 17664
+// Everything before the salt is fixed: a backup that claims weaker Argon2id
+// settings is refused, so a stored copy cannot be swapped for one that is
+// cheaper to guess.
+BACKUP_PREFIX :: "waozi-account-backup-v3\nalgorithm=ML-DSA-44\nkdf=Argon2id\nmemory_kib=65536\npasses=3\nlanes=1\nsalt="
+SALT_HEX_LENGTH :: 32
+PROOF_HEX_LENGTH :: 64
+REFERENCE_MAX_BYTES :: 64
+// Wrong proofs allowed before the first lock.
+FREE_FAILURES :: 5
+FIRST_LOCK_SECONDS :: 60
+LONGEST_LOCK_SECONDS :: 86400
+// Requests per address per minute.
+SALT_REQUESTS_PER_MINUTE :: 60
+OPEN_REQUESTS_PER_MINUTE :: 20
+DECOYS_MAX :: 65536
+WRONG_CREDENTIALS :: "wrong username or password"
+TOO_MANY_ATTEMPTS :: "too many attempts"
+
+#scope_file
+HasPrefix :: (value: string, prefix: string) -> bool #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+ToLower :: (value: string) -> string #foreign go_strings;
+FormatInt :: (value: s64, base: isize) -> string #foreign go_strconv;
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+Sum256 :: (value: []u8) -> [32]u8 #foreign go_sha256 "Sum256";
+
+HexBytes :: struct {
+    value: []u8
+    error: Error
+}
+DecodeHex :: (value: string) -> HexBytes #go_results #foreign go_hex "DecodeString";
+
+// Failures of an account without a stored backup, or of a name nobody holds.
+Decoy :: struct {
+    failures: s64
+    lockedUntil: s64
+    lastFailure: s64
+}
+
+Decoys :: struct {
+    mu: Mutex
+    entries: Map(string, Decoy)
+}
+
+decoys: Decoys;
+
+// Who a reference names. key chooses the decoy salt and decoy failures: the
+// account itself when someone holds the reference, so a username and its
+// public ID answer alike, and otherwise the normalized reference.
+Target :: struct {
+    account: string
+    key: string
+    error: Error
+}
+
+StoredSalt :: struct {
+    value: string
+    found: bool
+    error: Error
+}
+
+SecretResult :: struct {
+    value: []u8
+    error: Error
+}
+
+Attempt :: struct {
+    status: isize
+    retryAfter: s64
+    backup: string
+    // No backup is stored for the account, so the decoy answers instead.
+    missing: bool
+    error: Error
+}
+
+Status :: struct {
+    stored: bool
+    updatedAt: s64
+    error: Error
+}
+
+Removed :: struct {
+    deleted: bool
+    failures: s64
+    lockedUntil: s64
+    error: Error
+}
+
+MinuteWindow :: () -> clock.Duration {
+    return cast(clock.Duration)60000000000
+}
+
+LowerHex :: (value: string, length: s64) -> bool {
+    if value.count != length {
+        return false
+    }
+    for byte: value {
+        digit := byte >= cast(u8)48 && byte <= cast(u8)57
+        letter := byte >= cast(u8)97 && byte <= cast(u8)102
+        if !digit && !letter {
+            return false
+        }
+    }
+    return true
+}
+
+// The first FREE_FAILURES wrong proofs cost nothing more. The last free one
+// locks for a minute, and every later one doubles the lock up to a day.
+LockSeconds :: (failures: s64) -> s64 {
+    if failures < FREE_FAILURES {
+        return 0
+    }
+    seconds: s64 = FIRST_LOCK_SECONDS
+    steps := failures - FREE_FAILURES
+    while steps > 0 && seconds < LONGEST_LOCK_SECONDS {
+        seconds = seconds * 2
+        steps -= 1
+    }
+    if seconds > LONGEST_LOCK_SECONDS {
+        seconds = LONGEST_LOCK_SECONDS
+    }
+    return seconds
+}
+
+NoStore :: (writer: http.ResponseWriter) {
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+}
+
+TooMany :: (writer: http.ResponseWriter, seconds: s64) {
+    if seconds < 1 {
+        seconds = 1
+    }
+    http.SetHeader(http.ResponseHeaders(writer), "Retry-After", FormatInt(seconds, 10))
+    response.JSON(writer, 429, LockedOutput.{error = TOO_MANY_ATTEMPTS, retry_after = seconds})
+}
+
+AllowAddress :: (backups: AccountBackups, request: *http.Request, route: string, limit: isize) -> bool {
+    fields: [2]string = .[route, address.FromRequest(request)]
+    key := Join(fields[:], "")
+    return request_rate.Allow(backups.limiter, backups.counters, key, limit, MinuteWindow())
+}
+
+ReferenceValid :: (reference: string) -> bool {
+    return reference.count > 0 && reference.count <= REFERENCE_MAX_BYTES
+}
+
+AccountKey :: (account: string) -> string {
+    parts: [2]string = .["account:", account]
+    return Join(parts[:], "")
+}
+
+Find :: (database: *sql.Database, context: ctx.Context, reference: string) -> Target {
+    result: Target
+    normalized := identity.NormalizeAccountAlias(reference)
+    resolved := lookup.Resolve(database, context, normalized)
+    if resolved.error != null {
+        result.error = resolved.error
+        return result
+    }
+    if resolved.found {
+        result.account = resolved.value
+        result.key = AccountKey(resolved.value)
+        return result
+    }
+    parts: [2]string = .["reference:", normalized]
+    result.key = Join(parts[:], "")
+    return result
+}
+
+// The node's own random secret for decoy salts. It is made once and kept in
+// the database, so decoys stay the same across restarts and never depend on
+// the token secret, which an operator may rotate.
+NodeSecret :: (database: *sql.Database, context: ctx.Context) -> SecretResult {
+    result: SecretResult
+    empty: [0]Any
+    destinations: [1]Any = .[*result.value]
+    query := "SELECT secret FROM server_account_backup_secret WHERE id=1"
+    result.error = sql.ScanRow(sql.QueryRow(database, context, query, empty[:]), destinations[:])
+    if result.error == null && result.value.count == 32 {
+        return result
+    }
+    if result.error != null && !errors.Is(result.error, sql.NoRows()) {
+        return result
+    }
+    fresh: [32]u8
+    filled := random.Fill(fresh[:])
+    if filled.error != null {
+        result.error = filled.error
+        return result
+    }
+    arguments: [1]Any = .[fresh[:]]
+    // Another request may have made it first; the stored secret wins.
+    inserted := sql.Exec(database, context,
+        "INSERT OR IGNORE INTO server_account_backup_secret(id,secret) VALUES(1,?1)", arguments[:])
+    if inserted.error != null {
+        result.error = inserted.error
+        return result
+    }
+    result.error = sql.ScanRow(sql.QueryRow(database, context, query, empty[:]), destinations[:])
+    if result.error == null && result.value.count != 32 {
+        result.error = errors.New("account backup secret is damaged")
+    }
+    return result
+}
+
+DecoySalt :: (secret: []u8, key: string) -> string {
+    parts: [2]string = .["account-backup-salt\n", key]
+    digest := hmac.HMACSHA256(secret, Join(parts[:], ""))
+    if digest.error != "" {
+        return ""
+    }
+    bytes := text.ToBytes(digest.value)
+    return EncodeHex(bytes[0:16])
+}
+
+ReadSalt :: (database: *sql.Database, context: ctx.Context, account: string) -> StoredSalt {
+    result: StoredSalt
+    arguments: [1]Any = .[account]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT salt FROM server_account_backups WHERE user_id_hash=?1", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    result.found = result.error == null
+    return result
+}
+
+// Checks one proof against the stored verifier. Charging the attempt is the
+// transaction's first statement, so it takes the database's write lock
+// before anything is read: parallel guesses wait for each other, and each
+// one sees the count the previous one left.
+OpenStored :: (database: *sql.Database, context: ctx.Context, account: string, digest: string, now: s64) -> Attempt {
+    result: Attempt
+    opened := sql.Begin(database, context, null)
+    if opened.error != null {
+        result.error = opened.error
+        return result
+    }
+    transaction := opened.value
+    defer sql.Rollback(transaction)
+    chargeArguments: [2]Any = .[account, now]
+    charged := sql.ExecTx(transaction, context,
+        "UPDATE server_account_backups SET failed_attempts=failed_attempts+1 WHERE user_id_hash=?1 AND locked_until<=?2",
+        chargeArguments[:])
+    if charged.error != null {
+        result.error = charged.error
+        return result
+    }
+    affected := sql.RowsAffected(charged.value)
+    if affected.error != null {
+        result.error = affected.error
+        return result
+    }
+    backup: string
+    verifier: string
+    failures: s64
+    lockedUntil: s64
+    arguments: [1]Any = .[account]
+    destinations: [4]Any = .[*backup, *verifier, *failures, *lockedUntil]
+    read := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT backup,verifier,failed_attempts,locked_until FROM server_account_backups WHERE user_id_hash=?1",
+        arguments[:]), destinations[:])
+    if errors.Is(read, sql.NoRows()) {
+        result.missing = true
+        return result
+    }
+    if read != null {
+        result.error = read
+        return result
+    }
+    if affected.value == 0 {
+        result.status = 429
+        result.retryAfter = lockedUntil - now
+        return result
+    }
+    if constant_time.ConstantTimeTextEqual(digest, verifier) {
+        cleared := sql.ExecTx(transaction, context,
+            "UPDATE server_account_backups SET failed_attempts=0,locked_until=0 WHERE user_id_hash=?1", arguments[:])
+        if cleared.error != null {
+            result.error = cleared.error
+            return result
+        }
+        result.error = sql.Commit(transaction)
+        if result.error == null {
+            result.status = 200
+            result.backup = backup
+        }
+        return result
+    }
+    lock := LockSeconds(failures)
+    if lock > 0 {
+        lockArguments: [2]Any = .[account, now + lock]
+        locked := sql.ExecTx(transaction, context,
+            "UPDATE server_account_backups SET locked_until=?2 WHERE user_id_hash=?1", lockArguments[:])
+        if locked.error != null {
+            result.error = locked.error
+            return result
+        }
+    }
+    result.error = sql.Commit(transaction)
+    result.status = 403
+    return result
+}
+
+// Removes decoys nobody has tried for a day after their lock ended. The
+// caller holds the lock.
+PruneDecoys :: (now: s64) {
+    keys := MapKeys(decoys.entries)
+    for key: keys {
+        entry := MapGet(decoys.entries, key)
+        if entry.lockedUntil <= now && now - entry.lastFailure > LONGEST_LOCK_SECONDS {
+            MapDelete(decoys.entries, key)
+        }
+    }
+}
+
+// The same schedule as a stored backup, for a reference no proof can open.
+OpenDecoy :: (key: string, now: s64) -> Attempt {
+    result: Attempt
+    Lock(*decoys.mu)
+    defer Unlock(*decoys.mu)
+    entry := MapGet(decoys.entries, key)
+    if entry.lockedUntil > now {
+        result.status = 429
+        result.retryAfter = entry.lockedUntil - now
+        return result
+    }
+    if entry.failures == 0 && MapCount(decoys.entries) >= DECOYS_MAX {
+        PruneDecoys(now)
+        // A full table only ever slows guesses at names no proof opens.
+        if MapCount(decoys.entries) >= DECOYS_MAX {
+            result.status = 429
+            result.retryAfter = FIRST_LOCK_SECONDS
+            return result
+        }
+    }
+    entry.failures += 1
+    entry.lastFailure = now
+    lock := LockSeconds(entry.failures)
+    if lock > 0 {
+        entry.lockedUntil = now + lock
+    }
+    MapSet(decoys.entries, key, entry)
+    result.status = 403
+    return result
+}
+
+ForgetDecoy :: (key: string) {
+    Lock(*decoys.mu)
+    defer Unlock(*decoys.mu)
+    MapDelete(decoys.entries, key)
+}
+
+// A deleted backup leaves its failures behind, so deleting it does not show
+// up as a lock that suddenly ended.
+KeepDecoy :: (key: string, failures: s64, lockedUntil: s64, now: s64) {
+    if failures == 0 && lockedUntil <= now {
+        return
+    }
+    Lock(*decoys.mu)
+    defer Unlock(*decoys.mu)
+    entry := Decoy.{failures = failures, lockedUntil = lockedUntil, lastFailure = now}
+    MapSet(decoys.entries, key, entry)
+}
+
+ProofDigest :: (proof: string) -> string {
+    decoded := DecodeHex(proof)
+    if decoded.error != null || decoded.value.count != 32 {
+        return ""
+    }
+    digest: [32]u8 = Sum256(decoded.value)
+    return EncodeHex(digest[:])
+}
+
+SignedInAccount :: (backups: AccountBackups, writer: http.ResponseWriter, request: *http.Request) -> string {
+    signed := auth.BearerUser(backups.database, request, backups.configuration.TokenSecret)
+    if signed.authentication.error != null || signed.authentication.status != 0 {
+        auth.Respond(writer, backups.counters, signed.authentication)
+        return ""
+    }
+    return signed.value
+}
+
+// The backup's salt line must carry the salt sent beside it, so the salt a
+// new device receives is the one the backup was sealed with.
+BackupValid :: (input: StoreInput) -> bool {
+    if input.backup.count > BACKUP_MAX_BYTES {
+        return false
+    }
+    if !LowerHex(input.salt, SALT_HEX_LENGTH) || !LowerHex(input.verifier, PROOF_HEX_LENGTH) {
+        return false
+    }
+    parts: [3]string = .[BACKUP_PREFIX, input.salt, "\n"]
+    header := Join(parts[:], "")
+    return input.backup.count > header.count && HasPrefix(input.backup, header)
+}
+
+ReadStatus :: (database: *sql.Database, context: ctx.Context, account: string) -> Status {
+    result: Status
+    arguments: [1]Any = .[account]
+    destinations: [1]Any = .[*result.updatedAt]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT updated_at FROM server_account_backups WHERE user_id_hash=?1", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    result.stored = result.error == null
+    return result
+}
+
+Remove :: (database: *sql.Database, context: ctx.Context, account: string) -> Removed {
+    result: Removed
+    arguments: [1]Any = .[account]
+    destinations: [2]Any = .[*result.failures, *result.lockedUntil]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "DELETE FROM server_account_backups WHERE user_id_hash=?1 RETURNING failed_attempts,locked_until",
+        arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        return result
+    }
+    result.deleted = result.error == null
+    return result
+}
+
+#scope_export
+// The tables have no foreign key to server_users on purpose: an account on
+// hold copies only the rows its foreign keys reach, and a backup must leave
+// with the account rather than wait in the held copy. Deleting an account
+// deletes its backup explicitly.
+SchemaSQL :: () -> string {
+    return Schema
+}
+
+Schema :: #string SQL_END
+
+CREATE TABLE IF NOT EXISTS server_account_backups (
+    user_id_hash TEXT PRIMARY KEY,
+    backup TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    verifier TEXT NOT NULL,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS server_account_backup_secret (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    secret BLOB NOT NULL
+);
+SQL_END;
+
+// Answers the salt a new device derives its keys with. Every reference gets
+// one: a stored backup's own salt, otherwise a stable decoy.
+Salt :: (backups: AccountBackups, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    if !AllowAddress(backups, request, "account-backup-salt:", SALT_REQUESTS_PER_MINUTE) {
+        TooMany(writer, FIRST_LOCK_SECONDS)
+        return
+    }
+    input: SaltInput
+    raw := body.ReadJSON(writer, request, 1024)
+    if raw.error != null || strict.Decode(raw.value, *input) != null || !ReferenceValid(input.account) {
+        response.Error(writer, 400, "invalid account")
+        return
+    }
+    context := http.Context(request)
+    target := Find(backups.database, context, input.account)
+    if target.error != null {
+        response.Error(writer, 500, "account backup unavailable")
+        return
+    }
+    if target.account != "" {
+        stored := ReadSalt(backups.database, context, target.account)
+        if stored.error != null {
+            response.Error(writer, 500, "account backup unavailable")
+            return
+        }
+        if stored.found {
+            response.JSON(writer, 200, SaltOutput.{salt = stored.value})
+            return
+        }
+    }
+    secret := NodeSecret(backups.database, context)
+    if secret.error != null {
+        response.Error(writer, 500, "account backup unavailable")
+        return
+    }
+    salt := DecoySalt(secret.value, target.key)
+    if salt == "" {
+        response.Error(writer, 500, "account backup unavailable")
+        return
+    }
+    response.JSON(writer, 200, SaltOutput.{salt = salt})
+}
+
+// Releases a stored backup for the right proof. A wrong proof, a name nobody
+// holds and an account without a backup all get the same refusal.
+Open :: (backups: AccountBackups, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    if !AllowAddress(backups, request, "account-backup-open:", OPEN_REQUESTS_PER_MINUTE) {
+        TooMany(writer, FIRST_LOCK_SECONDS)
+        return
+    }
+    input: OpenInput
+    raw := body.ReadJSON(writer, request, 1024)
+    if raw.error != null || strict.Decode(raw.value, *input) != null || !ReferenceValid(input.account) {
+        response.Error(writer, 400, "invalid account")
+        return
+    }
+    proof := ToLower(input.proof)
+    if !LowerHex(proof, PROOF_HEX_LENGTH) {
+        response.Error(writer, 400, "invalid proof")
+        return
+    }
+    digest := ProofDigest(proof)
+    context := http.Context(request)
+    target := Find(backups.database, context, input.account)
+    if target.error != null {
+        response.Error(writer, 500, "account backup unavailable")
+        return
+    }
+    now := clock.Unix(clock.Now())
+    attempt: Attempt
+    attempt.missing = true
+    if target.account != "" {
+        attempt = OpenStored(backups.database, context, target.account, digest, now)
+        if attempt.error != null {
+            response.Error(writer, 500, "account backup unavailable")
+            return
+        }
+    }
+    if attempt.missing {
+        attempt = OpenDecoy(target.key, now)
+    }
+    if attempt.status == 429 {
+        TooMany(writer, attempt.retryAfter)
+        return
+    }
+    if attempt.status == 200 {
+        response.JSON(writer, 200, OpenOutput.{account_id = target.account, backup = attempt.backup})
+        return
+    }
+    response.Error(writer, 403, WRONG_CREDENTIALS)
+}
+
+// Stores or replaces the signed-in account's backup. A new backup starts
+// with no failures.
+Put :: (backups: AccountBackups, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    account := SignedInAccount(backups, writer, request)
+    if account == "" {
+        return
+    }
+    input: StoreInput
+    raw := body.ReadJSON(writer, request, BACKUP_MAX_BYTES + 1024)
+    if raw.error != null || strict.Decode(raw.value, *input) != null {
+        response.Error(writer, 400, "invalid account backup")
+        return
+    }
+    input.salt = ToLower(input.salt)
+    input.verifier = ToLower(input.verifier)
+    if !BackupValid(input) {
+        response.Error(writer, 400, "invalid account backup")
+        return
+    }
+    now := clock.Unix(clock.Now())
+    arguments: [5]Any = .[account, input.backup, input.salt, input.verifier, now]
+    // The account must still exist when the row is written, so a backup
+    // cannot outlive an account deleted in the meantime.
+    written := sql.Exec(backups.database, http.Context(request),
+        "INSERT INTO server_account_backups(user_id_hash,backup,salt,verifier,failed_attempts,locked_until,updated_at) SELECT ?1,?2,?3,?4,0,0,?5 WHERE EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1) ON CONFLICT(user_id_hash) DO UPDATE SET backup=excluded.backup,salt=excluded.salt,verifier=excluded.verifier,failed_attempts=0,locked_until=0,updated_at=excluded.updated_at",
+        arguments[:])
+    if written.error != null {
+        response.Error(writer, 500, "account backup unavailable")
+        return
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error != null || affected.value == 0 {
+        response.Error(writer, 401, "sync account not found")
+        return
+    }
+    ForgetDecoy(AccountKey(account))
+    response.JSON(writer, 200, StatusOutput.{stored = true, updated_at = now})
+}
+
+// Tells a signed-in device whether its account keeps a backup here.
+Report :: (backups: AccountBackups, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    account := SignedInAccount(backups, writer, request)
+    if account == "" {
+        return
+    }
+    status := ReadStatus(backups.database, http.Context(request), account)
+    if status.error != null {
+        response.Error(writer, 500, "account backup unavailable")
+        return
+    }
+    response.JSON(writer, 200, StatusOutput.{stored = status.stored, updated_at = status.updatedAt})
+}
+
+Delete :: (backups: AccountBackups, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    account := SignedInAccount(backups, writer, request)
+    if account == "" {
+        return
+    }
+    removed := Remove(backups.database, http.Context(request), account)
+    if removed.error != null {
+        response.Error(writer, 500, "account backup unavailable")
+        return
+    }
+    if removed.deleted {
+        KeepDecoy(AccountKey(account), removed.failures, removed.lockedUntil, clock.Unix(clock.Now()))
+    }
+    response.JSON(writer, 200, DeletedOutput.{deleted = removed.deleted})
+}

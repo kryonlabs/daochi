@@ -1,0 +1,334 @@
+// Extra sealed copies of an account key, one per passkey. A device seals a copy
+// with a secret from the passkey's WebAuthn PRF extension before it sends it.
+// The node keeps text it cannot open and releases it to whoever presents the
+// proof derived from the same secret; it stores only SHA-256 of that proof. The
+// node verifies no WebAuthn signature: the ML-DSA account key stays the identity.
+//
+// The secret is 256 random bits, so a wrong proof needs only the per-address
+// limit and no per-account lock. Like password backups, these copies are not
+// billed, not replicated, not exported and not kept while an account is on hold.
+#import "std/go_types"
+config :: #import "config";
+metrics :: #import "metrics";
+auth :: #import "http_auth";
+response :: #import "response";
+body :: #import "http_body";
+strict :: #import "strict_json";
+limiting :: #import "rate_limit";
+request_rate :: #import "request_rate";
+address :: #import "client_address";
+constant_time :: #import "std/constant_time";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+http :: #import "std/http_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+errors :: #import "std/errors_go";
+go_strings :: #system_library "go:strings";
+go_hex :: #system_library "go:encoding/hex";
+go_sha256 :: #system_library "go:crypto/sha256";
+go_sql :: #system_library "go:database/sql";
+builtin :: #system_library "go:builtin";
+
+AccountPasskeys :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    limiter: *limiting.RateLimiter
+}
+
+OpenInput :: struct {
+    account: string #go_tag "json:\"account\""
+    credential: string #go_tag "json:\"credential\""
+    proof: string #go_tag "json:\"proof\""
+}
+
+StoreInput :: struct {
+    credential: string #go_tag "json:\"credential\""
+    label: string #go_tag "json:\"label\""
+    verifier: string #go_tag "json:\"verifier\""
+    wrapper: string #go_tag "json:\"wrapper\""
+}
+
+RemoveInput :: struct {
+    credential: string #go_tag "json:\"credential\""
+}
+
+OpenOutput :: struct {
+    account_id: string #go_tag "json:\"account_id\""
+    wrapper: string #go_tag "json:\"wrapper\""
+}
+
+StoredOutput :: struct {
+    stored: bool #go_tag "json:\"stored\""
+}
+
+RemovedOutput :: struct {
+    deleted: bool #go_tag "json:\"deleted\""
+}
+
+PasskeyEntry :: struct {
+    credential: string #go_tag "json:\"credential\""
+    label: string #go_tag "json:\"label\""
+    created_at: s64 #go_tag "json:\"created_at\""
+}
+
+ListOutput :: struct {
+    passkeys: []PasskeyEntry #go_tag "json:\"passkeys\""
+}
+
+LockedOutput :: struct {
+    error: string #go_tag "json:\"error\""
+    retry_after: s64 #go_tag "json:\"retry_after\""
+}
+
+// The whole wrapper text a device sends.
+WRAPPER_MAX_BYTES :: 17800
+// A copy that claims another key source is refused.
+WRAPPER_PREFIX :: "waozi-account-passkey-v1\nalgorithm=ML-DSA-44\nkdf=WebAuthn-PRF-SHA-256\ncredential="
+HEX_64 :: 64
+LABEL_MAX_BYTES :: 40
+PASSKEYS_PER_ACCOUNT :: 8
+OPEN_REQUESTS_PER_MINUTE :: 20
+RETRY_SECONDS :: 60
+WRONG_PASSKEY :: "passkey not recognized"
+
+#scope_file
+
+HasPrefix :: (value: string, prefix: string) -> bool #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+Sum256 :: (value: []u8) -> [32]u8 #foreign go_sha256 "Sum256";
+HexBytes :: struct {
+    value: []u8
+    error: Error
+}
+DecodeHex :: (value: string) -> HexBytes #go_results #foreign go_hex "DecodeString";
+AllocateEntries :: (count: isize) -> []PasskeyEntry #foreign builtin "make";
+AppendEntry :: (values: []PasskeyEntry, value: PasskeyEntry) -> []PasskeyEntry #foreign builtin "append";
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
+
+MinuteWindow :: () -> clock.Duration {
+    return cast(clock.Duration)60000000000
+}
+
+LowerHex :: (value: string, length: s64) -> bool {
+    if value.count != length {
+        return false
+    }
+    for byte: value {
+        digit := byte >= cast(u8)48 && byte <= cast(u8)57
+        letter := byte >= cast(u8)97 && byte <= cast(u8)102
+        if !digit && !letter {
+            return false
+        }
+    }
+    return true
+}
+
+// Plain letters, digits, spaces, - and _ only: other devices show this text.
+LabelValid :: (label: string) -> bool {
+    if label.count > LABEL_MAX_BYTES {
+        return false
+    }
+    for byte: label {
+        lower := byte >= cast(u8)97 && byte <= cast(u8)122
+        upper := byte >= cast(u8)65 && byte <= cast(u8)90
+        digit := byte >= cast(u8)48 && byte <= cast(u8)57
+        if !lower && !upper && !digit && byte != cast(u8)32 && byte != cast(u8)45 && byte != cast(u8)95 {
+            return false
+        }
+    }
+    return true
+}
+
+NoStore :: (writer: http.ResponseWriter) {
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+}
+
+ProofDigest :: (proof: string) -> string {
+    decoded := DecodeHex(proof)
+    if decoded.error != null || decoded.value.count != 32 {
+        return ""
+    }
+    digest: [32]u8 = Sum256(decoded.value)
+    return EncodeHex(digest[:])
+}
+
+SignedInAccount :: (passkeys: AccountPasskeys, writer: http.ResponseWriter, request: *http.Request) -> string {
+    signed := auth.BearerUser(passkeys.database, request, passkeys.configuration.TokenSecret)
+    if signed.authentication.error != null || signed.authentication.status != 0 {
+        auth.Respond(writer, passkeys.counters, signed.authentication)
+        return ""
+    }
+    return signed.value
+}
+
+// The copy's credential line must carry the credential sent beside it.
+WrapperValid :: (input: StoreInput) -> bool {
+    if input.wrapper.count > WRAPPER_MAX_BYTES {
+        return false
+    }
+    if !LowerHex(input.credential, HEX_64) || !LowerHex(input.verifier, HEX_64) || !LabelValid(input.label) {
+        return false
+    }
+    parts: [3]string = .[WRAPPER_PREFIX, input.credential, "\n"]
+    header := Join(parts[:], "")
+    return input.wrapper.count > header.count && HasPrefix(input.wrapper, header)
+}
+
+CountPasskeys :: (database: *sql.Database, context: ctx.Context, account: string, except: string, result: *s64) -> Error {
+    arguments: [2]Any = .[account, except]
+    destinations: [1]Any = .[result]
+    return sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT COUNT(*) FROM server_account_passkeys WHERE user_id_hash=?1 AND credential<>?2", arguments[:]), destinations[:])
+}
+
+#scope_export
+
+SchemaSQL :: () -> string {
+    return "CREATE TABLE IF NOT EXISTS server_account_passkeys(user_id_hash TEXT NOT NULL,credential TEXT NOT NULL,wrapper TEXT NOT NULL,verifier TEXT NOT NULL,label TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(user_id_hash,credential));"
+}
+
+// Releases a stored copy for the right proof. An unknown account or credential
+// and a wrong proof all get the same refusal.
+Open :: (passkeys: AccountPasskeys, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    fields: [2]string = .["account-passkey-open:", address.FromRequest(request)]
+    if !request_rate.Allow(passkeys.limiter, passkeys.counters, Join(fields[:], ""), OPEN_REQUESTS_PER_MINUTE, MinuteWindow()) {
+        http.SetHeader(http.ResponseHeaders(writer), "Retry-After", "60")
+        response.JSON(writer, 429, LockedOutput.{error = "too many attempts", retry_after = RETRY_SECONDS})
+        return
+    }
+    input: OpenInput
+    raw := body.ReadJSON(writer, request, 1024)
+    if raw.error != null || strict.Decode(raw.value, *input) != null ||
+        !LowerHex(input.account, HEX_64) || !LowerHex(input.credential, HEX_64) || !LowerHex(input.proof, HEX_64) {
+        response.Error(writer, 400, "invalid passkey request")
+        return
+    }
+    digest := ProofDigest(input.proof)
+    verifier: string
+    wrapper: string
+    arguments: [2]Any = .[input.account, input.credential]
+    destinations: [2]Any = .[*verifier, *wrapper]
+    found := sql.ScanRow(sql.QueryRow(passkeys.database, http.Context(request),
+        "SELECT verifier,wrapper FROM server_account_passkeys WHERE user_id_hash=?1 AND credential=?2", arguments[:]), destinations[:])
+    if found != null && !errors.Is(found, sql.NoRows()) {
+        response.Error(writer, 500, "account passkey unavailable")
+        return
+    }
+    if found != null || digest == "" || !constant_time.ConstantTimeTextEqual(digest, verifier) {
+        response.Error(writer, 403, WRONG_PASSKEY)
+        return
+    }
+    response.JSON(writer, 200, OpenOutput.{account_id = input.account, wrapper = wrapper})
+}
+
+// Stores or replaces the copy for one passkey of the signed-in account.
+Put :: (passkeys: AccountPasskeys, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    account := SignedInAccount(passkeys, writer, request)
+    if account == "" {
+        return
+    }
+    input: StoreInput
+    raw := body.ReadJSON(writer, request, WRAPPER_MAX_BYTES + 1024)
+    if raw.error != null || strict.Decode(raw.value, *input) != null || !WrapperValid(input) {
+        response.Error(writer, 400, "invalid passkey copy")
+        return
+    }
+    context := http.Context(request)
+    others: s64 = 0
+    counted := CountPasskeys(passkeys.database, context, account, input.credential, *others)
+    if counted != null {
+        response.Error(writer, 500, "account passkey unavailable")
+        return
+    }
+    if others >= PASSKEYS_PER_ACCOUNT {
+        response.Error(writer, 409, "too many passkeys")
+        return
+    }
+    now := clock.Unix(clock.Now())
+    arguments: [7]Any = .[account, input.credential, input.wrapper, input.verifier, input.label, now, PASSKEYS_PER_ACCOUNT]
+    // The account must still exist when the row is written, so a copy cannot
+    // outlive an account deleted in the meantime. The limit is checked in the
+    // same statement, so two uploads at once cannot both pass it.
+    written := sql.Exec(passkeys.database, context,
+        "INSERT INTO server_account_passkeys(user_id_hash,credential,wrapper,verifier,label,created_at) SELECT ?1,?2,?3,?4,?5,?6 WHERE EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?1) AND (SELECT COUNT(*) FROM server_account_passkeys WHERE user_id_hash=?1 AND credential<>?2)<?7 ON CONFLICT(user_id_hash,credential) DO UPDATE SET wrapper=excluded.wrapper,verifier=excluded.verifier,label=excluded.label",
+        arguments[:])
+    if written.error != null {
+        response.Error(writer, 500, "account passkey unavailable")
+        return
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error == null && affected.value == 0 {
+        recount := CountPasskeys(passkeys.database, context, account, input.credential, *others)
+        if recount == null && others >= PASSKEYS_PER_ACCOUNT {
+            response.Error(writer, 409, "too many passkeys")
+            return
+        }
+    }
+    if affected.error != null || affected.value == 0 {
+        response.Error(writer, 401, "sync account not found")
+        return
+    }
+    response.JSON(writer, 200, StoredOutput.{stored = true})
+}
+
+List :: (passkeys: AccountPasskeys, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    account := SignedInAccount(passkeys, writer, request)
+    if account == "" {
+        return
+    }
+    arguments: [1]Any = .[account]
+    queried := sql.Query(passkeys.database, http.Context(request),
+        "SELECT credential,label,created_at FROM server_account_passkeys WHERE user_id_hash=?1 ORDER BY created_at,credential", arguments[:])
+    if queried.error != null {
+        response.Error(writer, 500, "account passkey unavailable")
+        return
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    entries := AllocateEntries(cast(isize)0)
+    while sql.Next(rows) {
+        entry: PasskeyEntry
+        destinations: [3]Any = .[*entry.credential, *entry.label, *entry.created_at]
+        if sql.ScanRows(rows, destinations[:]) != null {
+            response.Error(writer, 500, "account passkey unavailable")
+            return
+        }
+        entries = AppendEntry(entries, entry)
+    }
+    if sql.RowsError(rows) != null {
+        response.Error(writer, 500, "account passkey unavailable")
+        return
+    }
+    response.JSON(writer, 200, ListOutput.{passkeys = entries})
+}
+
+// A person's .key backup is their master key, so nothing blocks removing a
+// passkey: it is a convenience on top of that file.
+Remove :: (passkeys: AccountPasskeys, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    account := SignedInAccount(passkeys, writer, request)
+    if account == "" {
+        return
+    }
+    input: RemoveInput
+    raw := body.ReadJSON(writer, request, 1024)
+    if raw.error != null || strict.Decode(raw.value, *input) != null || !LowerHex(input.credential, HEX_64) {
+        response.Error(writer, 400, "invalid passkey")
+        return
+    }
+    arguments: [2]Any = .[account, input.credential]
+    removed := sql.Exec(passkeys.database, http.Context(request),
+        "DELETE FROM server_account_passkeys WHERE user_id_hash=?1 AND credential=?2", arguments[:])
+    if removed.error != null {
+        response.Error(writer, 500, "account passkey unavailable")
+        return
+    }
+    affected := sql.RowsAffected(removed.value)
+    response.JSON(writer, 200, RemovedOutput.{deleted = affected.error == null && affected.value > 0})
+}

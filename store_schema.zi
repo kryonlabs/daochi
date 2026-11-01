@@ -11,6 +11,8 @@ evidence :: #import "game_evidence";
 checkins :: #import "reward_checkin";
 holds :: #import "account_hold";
 backups :: #import "account_backup";
+passkeys :: #import "account_passkey";
+google_links :: #import "account_google";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 errors :: #import "std/errors_go";
@@ -133,10 +135,10 @@ Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     if pragmas.error != null {
         return pragmas.error
     }
-    definitions: [15]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
+    definitions: [17]string = .[Join(Tables[:], ""), entries.SchemaSQL(), history.SchemaSQL(), lists.SchemaSQL(),
         publications.SchemaSQL(), plans.SchemaSQL(), unlocks.SchemaSQL(), rescales.SchemaSQL(),
         exchange_rates.SchemaSQL(), FeedbackReplies, evidence.SchemaSQL(), checkins.SchemaSQL(), holds.SchemaSQL(),
-        backups.SchemaSQL(), TombstoneContent]
+        backups.SchemaSQL(), passkeys.SchemaSQL(), google_links.SchemaSQL(), TombstoneContent]
     created := sql.Exec(database, context, Join(definitions[:], ""), empty[:])
     if created.error != null {
         return created.error

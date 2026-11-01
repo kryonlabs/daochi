@@ -181,6 +181,17 @@ DeleteTx :: (transaction: *sql.Transaction, context: ctx.Context, userID: string
     if backup.error != null {
         return backup.error
     }
+    // Passkey copies and Google links go with the account for the same reason.
+    passkeys := sql.ExecTx(transaction, context,
+        "DELETE FROM server_account_passkeys WHERE user_id_hash=?1", arguments[:])
+    if passkeys.error != null {
+        return passkeys.error
+    }
+    google := sql.ExecTx(transaction, context,
+        "DELETE FROM server_account_google WHERE user_id_hash=?1", arguments[:])
+    if google.error != null {
+        return google.error
+    }
     deleted := sql.ExecTx(transaction, context,
         "DELETE FROM server_users WHERE user_id_hash=?1", arguments[:])
     return deleted.error

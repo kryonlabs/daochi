@@ -54,6 +54,8 @@ delegated_sync :: #import "delegated_sync";
 delegated_ws :: #import "delegated_ws";
 device_link :: #import "device_link";
 account_backups :: #import "account_backup";
+account_passkeys :: #import "account_passkey";
+account_google :: #import "account_google";
 feedback :: #import "feedback_http";
 docs :: #import "docs";
 types :: #import "types";
@@ -374,6 +376,9 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/link/close", server, HandleDeviceLinkClose)
     Route(mux, "POST /api/v1/account-backup/salt", server, HandleAccountBackupSalt)
     Route(mux, "POST /api/v1/account-backup/open", server, HandleAccountBackupOpen)
+    Route(mux, "POST /api/v1/account-backup/passkey/open", server, HandleAccountPasskeyOpen)
+    Route(mux, "GET /api/v1/account-backup/methods", server, HandleAccountGoogleMethods)
+    Route(mux, "POST /api/v1/account-backup/google", server, HandleAccountGoogleLookup)
     Route(mux, "POST /api/v1/feedback", server, HandleFeedbackSubmit)
     Route(mux, "GET /api/v1/feedback", server, HandleFeedbackList)
     Route(mux, "GET /api/v1/admin/feedback", server, HandleFeedbackInbox)
@@ -428,6 +433,12 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/account/backup", server, HandleAccountBackupPut)
     Route(mux, "GET /api/v1/account/backup", server, HandleAccountBackupReport)
     Route(mux, "DELETE /api/v1/account/backup", server, HandleAccountBackupDelete)
+    Route(mux, "POST /api/v1/account/passkeys", server, HandleAccountPasskeyPut)
+    Route(mux, "GET /api/v1/account/passkeys", server, HandleAccountPasskeyList)
+    Route(mux, "POST /api/v1/account/passkeys/remove", server, HandleAccountPasskeyRemove)
+    Route(mux, "POST /api/v1/account/google", server, HandleAccountGoogleLink)
+    Route(mux, "GET /api/v1/account/google", server, HandleAccountGoogleReport)
+    Route(mux, "POST /api/v1/account/google/remove", server, HandleAccountGoogleUnlink)
     Route(mux, "GET /api/v1/account/devices", server, HandleDeviceHttpRoute)
     Route(mux, "POST /api/v1/account/devices", server, HandleDeviceHttpRoute)
     Route(mux, "DELETE /api/v1/account/devices", server, HandleDeviceHttpRoute)
@@ -915,6 +926,51 @@ HandleAccountBackupReport :: (server: *Server, writer: http.ResponseWriter, requ
 }
 HandleAccountBackupDelete :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     account_backups.Delete(AccountBackups(server), writer, request)
+}
+
+AccountPasskeys :: (server: *Server) -> account_passkeys.AccountPasskeys {
+    result: account_passkeys.AccountPasskeys
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.limiter = server.limiter
+    return result
+}
+HandleAccountPasskeyOpen :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_passkeys.Open(AccountPasskeys(server), writer, request)
+}
+HandleAccountPasskeyPut :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_passkeys.Put(AccountPasskeys(server), writer, request)
+}
+HandleAccountPasskeyList :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_passkeys.List(AccountPasskeys(server), writer, request)
+}
+HandleAccountPasskeyRemove :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_passkeys.Remove(AccountPasskeys(server), writer, request)
+}
+
+AccountGoogle :: (server: *Server) -> account_google.AccountGoogle {
+    result: account_google.AccountGoogle
+    result.database = server.store.database
+    result.configuration = *server.cfg
+    result.counters = server.metrics
+    result.limiter = server.limiter
+    return result
+}
+HandleAccountGoogleMethods :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_google.Methods(AccountGoogle(server), writer, request)
+}
+HandleAccountGoogleLookup :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_google.Lookup(AccountGoogle(server), writer, request)
+}
+HandleAccountGoogleLink :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_google.Link(AccountGoogle(server), writer, request)
+}
+HandleAccountGoogleReport :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_google.Report(AccountGoogle(server), writer, request)
+}
+HandleAccountGoogleUnlink :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    account_google.Unlink(AccountGoogle(server), writer, request)
 }
 
 HandleStoragePlan :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {

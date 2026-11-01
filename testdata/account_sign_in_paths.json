@@ -1,0 +1,148 @@
+{
+  "/api/v1/account-backup/passkey/open": {
+    "post": {
+      "summary": "Release a passkey-sealed account copy for its login proof",
+      "description": "Body: {\"account\": 64-hex public ID, \"credential\": 64 hex SHA-256 of the credential ID, \"proof\": 64 hex}. The node stores only SHA-256 of the proof and compares it in constant time. Returns {\"account_id\", \"wrapper\"}: text sealed on the device under a key derived from the passkey's WebAuthn PRF output, which the node cannot open.",
+      "responses": {
+        "200": {
+          "description": "Copy released"
+        },
+        "400": {
+          "description": "Invalid account, credential or proof"
+        },
+        "403": {
+          "description": "Wrong or unknown passkey"
+        },
+        "429": {
+          "description": "Too many attempts"
+        }
+      }
+    }
+  },
+  "/api/v1/account-backup/methods": {
+    "get": {
+      "summary": "Show which optional sign-in methods this node offers",
+      "description": "Returns {\"google_client_id\"} when the node has Google client IDs configured, otherwise an empty object.",
+      "responses": {
+        "200": {
+          "description": "Methods"
+        }
+      }
+    }
+  },
+  "/api/v1/account-backup/google": {
+    "post": {
+      "summary": "Find the account linked to a Google account",
+      "description": "Body: {\"id_token\": Google ID token}. Returns only {\"account_id\"}. It releases nothing that can unlock the account: a password or passkey still does.",
+      "responses": {
+        "200": {
+          "description": "Account found"
+        },
+        "401": {
+          "description": "Token not accepted"
+        },
+        "404": {
+          "description": "Not configured or nothing linked"
+        },
+        "429": {
+          "description": "Too many attempts"
+        }
+      }
+    }
+  },
+  "/api/v1/account/passkeys": {
+    "post": {
+      "summary": "Store a passkey-sealed copy of the signed-in account",
+      "description": "Bearer token. Body: {\"credential\", \"label\", \"verifier\": 64 hex SHA-256 of the login proof, \"wrapper\": waozi-account-passkey-v1 text}. Up to 8 passkeys per account.",
+      "responses": {
+        "200": {
+          "description": "Stored"
+        },
+        "400": {
+          "description": "Invalid copy"
+        },
+        "401": {
+          "description": "Bearer token required"
+        },
+        "409": {
+          "description": "Too many passkeys"
+        }
+      }
+    },
+    "get": {
+      "summary": "List the signed-in account's passkeys",
+      "description": "Bearer token. Returns {\"passkeys\": [{\"credential\", \"label\", \"created_at\"}]}, never the sealed copies.",
+      "responses": {
+        "200": {
+          "description": "Passkeys"
+        },
+        "401": {
+          "description": "Bearer token required"
+        }
+      }
+    }
+  },
+  "/api/v1/account/passkeys/remove": {
+    "post": {
+      "summary": "Remove one of the signed-in account's passkey copies",
+      "description": "Bearer token. Body: {\"credential\"}. Returns {\"deleted\": bool}. Removal has no further conditions: the account's .key file is its master key.",
+      "responses": {
+        "200": {
+          "description": "Removed"
+        },
+        "400": {
+          "description": "Invalid credential"
+        },
+        "401": {
+          "description": "Bearer token required"
+        }
+      }
+    }
+  },
+  "/api/v1/account/google": {
+    "post": {
+      "summary": "Link a Google account to find the signed-in account",
+      "description": "Bearer token. Body: {\"id_token\"}, with a nonce of the hex SHA-256 of \"waozi-google-link-v1\\n\" and the account's public ID. The node keeps only a keyed hash of Google's subject.",
+      "responses": {
+        "200": {
+          "description": "Linked"
+        },
+        "401": {
+          "description": "Token not accepted"
+        },
+        "404": {
+          "description": "Not configured"
+        },
+        "409": {
+          "description": "Linked to another account"
+        }
+      }
+    },
+    "get": {
+      "summary": "Show whether a Google account is linked",
+      "description": "Bearer token. Returns {\"linked\": bool}.",
+      "responses": {
+        "200": {
+          "description": "Link status"
+        },
+        "401": {
+          "description": "Bearer token required"
+        }
+      }
+    }
+  },
+  "/api/v1/account/google/remove": {
+    "post": {
+      "summary": "Remove the Google link",
+      "description": "Bearer token. Needs no Google token, so it also works after Google access was revoked.",
+      "responses": {
+        "200": {
+          "description": "Unlinked"
+        },
+        "401": {
+          "description": "Bearer token required"
+        }
+      }
+    }
+  }
+}

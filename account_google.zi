@@ -1,0 +1,467 @@
+// Sign in with Google, used only to find an account. A linked Google account
+// names which account's sealed backup to ask for; a password or passkey still
+// unlocks it, and Google never takes part in any signature for the account.
+//
+// The node keeps only a keyed hash of Google's subject, so its database neither
+// names the Google account nor can be matched against subjects seen elsewhere.
+// It keeps no email, name, token or picture. A token for linking must carry a
+// nonce bound to the signed-in account, so it cannot be replayed to attach
+// someone else's Google account. Without client IDs this feature answers 404.
+#import "std/go_types"
+#import "std/map_go"
+#import "std/sync_go"
+config :: #import "config";
+metrics :: #import "metrics";
+auth :: #import "http_auth";
+response :: #import "response";
+body :: #import "http_body";
+strict :: #import "strict_json";
+limiting :: #import "rate_limit";
+request_rate :: #import "request_rate";
+address :: #import "client_address";
+backups :: #import "account_backup";
+hmac :: #import "std/hmac_sha256_go";
+json :: #import "std/json_go";
+text :: #import "std/text_go";
+clock :: #import "std/time_go";
+http :: #import "std/http_go";
+io :: #import "std/io_go";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+errors :: #import "std/errors_go";
+go_strings :: #system_library "go:strings";
+go_io :: #system_library "go:io";
+go_hex :: #system_library "go:encoding/hex";
+go_sha256 :: #system_library "go:crypto/sha256";
+go_base64 :: #system_library "go:encoding/base64";
+go_pem :: #system_library "go:encoding/pem";
+go_x509 :: #system_library "go:crypto/x509";
+go_rsa :: #system_library "go:crypto/rsa";
+go_crypto :: #system_library "go:crypto";
+builtin :: #system_library "go:builtin";
+
+AccountGoogle :: struct {
+    database: *sql.Database
+    configuration: *config.Config
+    counters: *metrics.ServerMetrics
+    limiter: *limiting.RateLimiter
+}
+
+TokenInput :: struct {
+    id_token: string #go_tag "json:\"id_token\""
+}
+
+FoundOutput :: struct {
+    account_id: string #go_tag "json:\"account_id\""
+}
+
+MethodsOutput :: struct {
+    google_client_id: string #go_tag "json:\"google_client_id,omitempty\""
+}
+
+LinkedOutput :: struct {
+    linked: bool #go_tag "json:\"linked\""
+}
+
+Claims :: struct {
+    issuer: string #go_tag "json:\"iss\""
+    audience: string #go_tag "json:\"aud\""
+    subject: string #go_tag "json:\"sub\""
+    nonce: string #go_tag "json:\"nonce\""
+    expires: s64 #go_tag "json:\"exp\""
+    issued: s64 #go_tag "json:\"iat\""
+}
+
+TokenHeader :: struct {
+    algorithm: string #go_tag "json:\"alg\""
+    key: string #go_tag "json:\"kid\""
+}
+
+Verified :: struct {
+    claims: Claims
+    error: Error
+}
+
+// Google's signing certificates. Tests replace this address.
+GoogleCertificatesURL: string = "https://www.googleapis.com/oauth2/v1/certs";
+GoogleCertificatesClient: *http.Client = http.NewClient(cast(clock.Duration)10000000000);
+
+TOKEN_MAX_BYTES :: 4096
+LOOKUP_REQUESTS_PER_MINUTE :: 20
+CERTIFICATES_MAX_BYTES :: 65536
+CERTIFICATES_KEEP_SECONDS :: 3600
+CERTIFICATES_LAST_SECONDS :: 86400
+// Clock difference allowed when reading a token's times.
+LEEWAY_SECONDS :: 60
+NO_ACCOUNT :: "no account linked"
+BAD_TOKEN :: "google token not accepted"
+
+#scope_file
+
+Encoding :: #type #foreign go_base64 "Encoding";
+PEMBlock :: #type #foreign go_pem "Block";
+Certificate :: #type #foreign go_x509 "Certificate";
+RSAPublicKey :: #type #foreign go_rsa "PublicKey";
+CryptoHash :: #type #foreign go_crypto "Hash";
+PEMResult :: struct {
+    value: *PEMBlock
+    rest: []u8
+}
+CertificateResult :: struct {
+    value: *Certificate
+    error: Error
+}
+RSAKeyResult :: struct {
+    value: *RSAPublicKey
+    present: bool
+}
+DecodedBytes :: struct {
+    value: []u8
+    error: Error
+}
+Split :: (value: string, separator: string) -> []string #foreign go_strings;
+Join :: (values: []string, separator: string) -> string #foreign go_strings;
+TrimSpace :: (value: string) -> string #foreign go_strings;
+EncodeHex :: (value: []u8) -> string #foreign go_hex "EncodeToString";
+Sum256 :: (value: []u8) -> [32]u8 #foreign go_sha256 "Sum256";
+RawURL :: () -> *Encoding #go_field #foreign go_base64 "RawURLEncoding";
+DecodeBase64 :: (encoding: *Encoding, value: string) -> DecodedBytes #go_results #foreign go_base64 "(*Encoding).DecodeString";
+DecodePEM :: (value: []u8) -> PEMResult #go_results #foreign go_pem "Decode";
+PEMBytes :: (block: *PEMBlock) -> []u8 #go_field #foreign go_pem "(*Block).Bytes";
+ParseCertificate :: (value: []u8) -> CertificateResult #go_results #foreign go_x509;
+CertificateKey :: (certificate: *Certificate) -> Any #go_field #foreign go_x509 "(*Certificate).PublicKey";
+AsRSAKey :: (value: Any) -> RSAKeyResult #go_results #foreign builtin "assert";
+SHA256 :: () -> CryptoHash #go_field #foreign go_crypto "SHA256";
+VerifySignature :: (key: *RSAPublicKey, hash: CryptoHash, digest: []u8, signature: []u8) -> Error #foreign go_rsa "VerifyPKCS1v15";
+CloseAtReturn :: (stream: io.ReadCloser) #go_defer #foreign go_io "ReadCloser.Close";
+
+certificates_lock: Mutex;
+certificates: Map(string, string);
+certificates_time: s64;
+certificates_tried: s64;
+
+MinuteWindow :: () -> clock.Duration {
+    return cast(clock.Duration)60000000000
+}
+
+NoStore :: (writer: http.ResponseWriter) {
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+}
+
+FetchCertificates :: (context: ctx.Context) -> Error {
+    // Runs outside the lock, so one slow answer from Google holds no one else up.
+    nothing: io.Reader
+    request := http.NewRequest(context, "GET", GoogleCertificatesURL, nothing)
+    if request.error != null {
+        return request.error
+    }
+    answered := http.Do(GoogleCertificatesClient, request.value)
+    if answered.error != null {
+        return answered.error
+    }
+    stream := http.ResponseBody(answered.value)
+    CloseAtReturn(stream)
+    bytes := io.ReadAll(io.LimitReader(cast(io.Reader)stream, CERTIFICATES_MAX_BYTES))
+    if bytes.error != null || http.StatusCode(answered.value) != 200 {
+        return errors.New("google certificates unavailable")
+    }
+    fresh: Map(string, string)
+    decoded := json.Unmarshal(bytes.value, *fresh)
+    if decoded != null {
+        return decoded
+    }
+    Lock(*certificates_lock)
+    certificates = fresh
+    certificates_time = clock.Unix(clock.Now())
+    Unlock(*certificates_lock)
+    return null
+}
+
+// A key not seen before means Google rotated: fetch once more, not per request.
+// One attempt a minute at most, even while Google cannot be reached, and old
+// certificates stop counting rather than being trusted indefinitely.
+CertificateFor :: (context: ctx.Context, key: string) -> string {
+    now := clock.Unix(clock.Now())
+    Lock(*certificates_lock)
+    refresh := now - certificates_tried >= LEEWAY_SECONDS &&
+        (now - certificates_time > CERTIFICATES_KEEP_SECONDS || MapGet(certificates, key) == "")
+    if refresh {
+        certificates_tried = now
+    }
+    Unlock(*certificates_lock)
+    if refresh {
+        unused FetchCertificates(context)
+    }
+    Lock(*certificates_lock)
+    defer Unlock(*certificates_lock)
+    if clock.Unix(clock.Now()) - certificates_time > CERTIFICATES_LAST_SECONDS {
+        return ""
+    }
+    return MapGet(certificates, key)
+}
+
+KeyFromCertificate :: (value: string) -> RSAKeyResult {
+    result: RSAKeyResult
+    block := DecodePEM(text.ToBytes(value))
+    if block.value == null {
+        return result
+    }
+    parsed := ParseCertificate(PEMBytes(block.value))
+    if parsed.error != null {
+        return result
+    }
+    return AsRSAKey(CertificateKey(parsed.value))
+}
+
+AudienceAllowed :: (configuration: *config.Config, audience: string) -> bool {
+    for allowed: configuration.GoogleSignInClientIDs {
+        if allowed == audience {
+            return true
+        }
+    }
+    return false
+}
+
+// Only RS256 from Google's own keys, for this node's client IDs, in its time.
+VerifyToken :: (context: ctx.Context, configuration: *config.Config, token: string) -> Verified {
+    result: Verified
+    result.error = errors.New(BAD_TOKEN)
+    parts := Split(token, ".")
+    if parts.count != 3 {
+        return result
+    }
+    headerBytes := DecodeBase64(RawURL(), parts[0])
+    payloadBytes := DecodeBase64(RawURL(), parts[1])
+    signature := DecodeBase64(RawURL(), parts[2])
+    if headerBytes.error != null || payloadBytes.error != null || signature.error != null {
+        return result
+    }
+    header: TokenHeader
+    if json.Unmarshal(headerBytes.value, *header) != null || header.algorithm != "RS256" || header.key == "" {
+        return result
+    }
+    key := KeyFromCertificate(CertificateFor(context, header.key))
+    if !key.present {
+        return result
+    }
+    signed: [2]string = .[parts[0], parts[1]]
+    digest: [32]u8 = Sum256(text.ToBytes(Join(signed[:], ".")))
+    if VerifySignature(key.value, SHA256(), digest[:], signature.value) != null {
+        return result
+    }
+    claims: Claims
+    if json.Unmarshal(payloadBytes.value, *claims) != null {
+        return result
+    }
+    now := clock.Unix(clock.Now())
+    issuer := claims.issuer == "https://accounts.google.com" || claims.issuer == "accounts.google.com"
+    if !issuer || claims.subject == "" || !AudienceAllowed(configuration, claims.audience) ||
+        claims.expires + LEEWAY_SECONDS < now || claims.issued - LEEWAY_SECONDS > now {
+        return result
+    }
+    result.claims = claims
+    result.error = null
+    return result
+}
+
+SubjectHash :: (database: *sql.Database, context: ctx.Context, subject: string) -> string {
+    secret := backups.Secret(database, context)
+    if secret.count != 32 {
+        return ""
+    }
+    parts: [2]string = .["account-google-subject\n", subject]
+    digest := hmac.HMACSHA256(secret, Join(parts[:], ""))
+    if digest.error != "" {
+        return ""
+    }
+    return digest.value
+}
+
+Configured :: (google: AccountGoogle, writer: http.ResponseWriter) -> bool {
+    if google.configuration.GoogleSignInClientIDs.count == 0 {
+        response.Error(writer, 404, "sign in with google is not set up on this node")
+        return false
+    }
+    return true
+}
+
+SignedInAccount :: (google: AccountGoogle, writer: http.ResponseWriter, request: *http.Request) -> string {
+    signed := auth.BearerUser(google.database, request, google.configuration.TokenSecret)
+    if signed.authentication.error != null || signed.authentication.status != 0 {
+        auth.Respond(writer, google.counters, signed.authentication)
+        return ""
+    }
+    return signed.value
+}
+
+#scope_export
+
+// Which client an app should ask Google for. Nothing here is secret: a client ID
+// appears in every token. With none, apps offer no Google button at all.
+Methods :: (google: AccountGoogle, writer: http.ResponseWriter, request: *http.Request) {
+    unused request
+    output: MethodsOutput
+    if google.configuration.GoogleSignInClientIDs.count > 0 {
+        output.google_client_id = google.configuration.GoogleSignInClientIDs[0]
+    }
+    response.JSON(writer, 200, output)
+}
+
+SchemaSQL :: () -> string {
+    return "CREATE TABLE IF NOT EXISTS server_account_google(subject_hash TEXT PRIMARY KEY,user_id_hash TEXT NOT NULL UNIQUE,created_at INTEGER NOT NULL);"
+}
+
+// Forgets Google's certificates. Tests use it between fake keys.
+ResetCertificates :: () {
+    Lock(*certificates_lock)
+    defer Unlock(*certificates_lock)
+    empty: Map(string, string)
+    certificates = empty
+    certificates_time = 0
+    certificates_tried = 0
+}
+
+// What a linking token's nonce must be for this account.
+LinkNonce :: (account: string) -> string {
+    parts: [2]string = .["waozi-google-link-v1\n", account]
+    digest: [32]u8 = Sum256(text.ToBytes(Join(parts[:], "")))
+    return EncodeHex(digest[:])
+}
+
+// Names the account linked to this Google account, and nothing more.
+Lookup :: (google: AccountGoogle, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    if !Configured(google, writer) {
+        return
+    }
+    fields: [2]string = .["account-google-lookup:", address.FromRequest(request)]
+    if !request_rate.Allow(google.limiter, google.counters, Join(fields[:], ""), LOOKUP_REQUESTS_PER_MINUTE, MinuteWindow()) {
+        http.SetHeader(http.ResponseHeaders(writer), "Retry-After", "60")
+        response.Error(writer, 429, "too many attempts")
+        return
+    }
+    input: TokenInput
+    raw := body.ReadJSON(writer, request, TOKEN_MAX_BYTES)
+    if raw.error != null || strict.Decode(raw.value, *input) != null {
+        response.Error(writer, 400, "invalid google token")
+        return
+    }
+    context := http.Context(request)
+    verified := VerifyToken(context, google.configuration, input.id_token)
+    if verified.error != null {
+        response.Error(writer, 401, BAD_TOKEN)
+        return
+    }
+    subject := SubjectHash(google.database, context, verified.claims.subject)
+    if subject == "" {
+        response.Error(writer, 500, "account google unavailable")
+        return
+    }
+    account: string
+    arguments: [1]Any = .[subject]
+    destinations: [1]Any = .[*account]
+    found := sql.ScanRow(sql.QueryRow(google.database, context,
+        "SELECT user_id_hash FROM server_account_google WHERE subject_hash=?1", arguments[:]), destinations[:])
+    if errors.Is(found, sql.NoRows()) {
+        response.Error(writer, 404, NO_ACCOUNT)
+        return
+    }
+    if found != null {
+        response.Error(writer, 500, "account google unavailable")
+        return
+    }
+    response.JSON(writer, 200, FoundOutput.{account_id = account})
+}
+
+// Links this Google account to the signed-in account. Relinking replaces the
+// account's earlier link; a Google account linked elsewhere is refused.
+Link :: (google: AccountGoogle, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    if !Configured(google, writer) {
+        return
+    }
+    account := SignedInAccount(google, writer, request)
+    if account == "" {
+        return
+    }
+    input: TokenInput
+    raw := body.ReadJSON(writer, request, TOKEN_MAX_BYTES)
+    if raw.error != null || strict.Decode(raw.value, *input) != null {
+        response.Error(writer, 400, "invalid google token")
+        return
+    }
+    context := http.Context(request)
+    verified := VerifyToken(context, google.configuration, input.id_token)
+    if verified.error != null || verified.claims.nonce != LinkNonce(account) {
+        response.Error(writer, 401, BAD_TOKEN)
+        return
+    }
+    subject := SubjectHash(google.database, context, verified.claims.subject)
+    if subject == "" {
+        response.Error(writer, 500, "account google unavailable")
+        return
+    }
+    owner: string
+    lookupArguments: [1]Any = .[subject]
+    destinations: [1]Any = .[*owner]
+    existing := sql.ScanRow(sql.QueryRow(google.database, context,
+        "SELECT user_id_hash FROM server_account_google WHERE subject_hash=?1", lookupArguments[:]), destinations[:])
+    if existing != null && !errors.Is(existing, sql.NoRows()) {
+        response.Error(writer, 500, "account google unavailable")
+        return
+    }
+    if existing == null && owner != account {
+        response.Error(writer, 409, "google account linked to another account")
+        return
+    }
+    arguments: [3]Any = .[subject, account, clock.Unix(clock.Now())]
+    written := sql.Exec(google.database, context,
+        "INSERT INTO server_account_google(subject_hash,user_id_hash,created_at) SELECT ?1,?2,?3 WHERE EXISTS(SELECT 1 FROM server_users WHERE user_id_hash=?2) ON CONFLICT(user_id_hash) DO UPDATE SET subject_hash=excluded.subject_hash,created_at=excluded.created_at",
+        arguments[:])
+    if written.error != null {
+        response.Error(writer, 409, "google account linked to another account")
+        return
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error != null || affected.value == 0 {
+        response.Error(writer, 401, "sync account not found")
+        return
+    }
+    response.JSON(writer, 200, LinkedOutput.{linked = true})
+}
+
+Report :: (google: AccountGoogle, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    account := SignedInAccount(google, writer, request)
+    if account == "" {
+        return
+    }
+    created: s64
+    arguments: [1]Any = .[account]
+    destinations: [1]Any = .[*created]
+    found := sql.ScanRow(sql.QueryRow(google.database, http.Context(request),
+        "SELECT created_at FROM server_account_google WHERE user_id_hash=?1", arguments[:]), destinations[:])
+    if found != null && !errors.Is(found, sql.NoRows()) {
+        response.Error(writer, 500, "account google unavailable")
+        return
+    }
+    response.JSON(writer, 200, LinkedOutput.{linked = found == null})
+}
+
+// Works without a Google token or Google's permission, so a person who revoked
+// access at Google can still remove the link here.
+Unlink :: (google: AccountGoogle, writer: http.ResponseWriter, request: *http.Request) {
+    NoStore(writer)
+    account := SignedInAccount(google, writer, request)
+    if account == "" {
+        return
+    }
+    arguments: [1]Any = .[account]
+    removed := sql.Exec(google.database, http.Context(request),
+        "DELETE FROM server_account_google WHERE user_id_hash=?1", arguments[:])
+    if removed.error != null {
+        response.Error(writer, 500, "account google unavailable")
+        return
+    }
+    response.JSON(writer, 200, LinkedOutput.{linked = false})
+}

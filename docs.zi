@@ -24,6 +24,7 @@ package_paths :: #import "package_paths";
 shared_list_paths :: #import "shared_list_paths";
 device_link_paths :: #import "device_link_paths";
 account_backup_paths :: #import "account_backup_paths";
+account_sign_in_paths :: #import "account_sign_in_paths";
 blob_paths :: #import "blob_paths";
 go_sync :: #system_library "go:sync";
 go_format :: #system_library "go:fmt";
@@ -2243,6 +2244,14 @@ Paths :: () -> Map(string, Any) {
     for name: accountBackupNames {
         MapSet(result, name, MapGet(account_backups, name))
     }
+    account_sign_in := account_sign_in_paths.Paths()
+    accountSignInNames: [6]string = .["/api/v1/account-backup/passkey/open", "/api/v1/account-backup/methods",
+        "/api/v1/account-backup/google", "/api/v1/account/passkeys", "/api/v1/account/passkeys/remove",
+        "/api/v1/account/google"]
+    for name: accountSignInNames {
+        MapSet(result, name, MapGet(account_sign_in, name))
+    }
+    MapSet(result, "/api/v1/account/google/remove", MapGet(account_sign_in, "/api/v1/account/google/remove"))
     MapSet(result, "/healthz", PathHealthz())
     MapSet(result, "/readyz", PathReadyz())
     MapSet(result, "/api/v1/node", PathApiV1Node())

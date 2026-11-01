@@ -518,6 +518,16 @@ Remove :: (database: *sql.Database, context: ctx.Context, account: string) -> Re
 }
 
 #scope_export
+// This node's secret, for keyed hashes other account routes keep. Empty when unavailable.
+Secret :: (database: *sql.Database, context: ctx.Context) -> []u8 {
+    result := NodeSecret(database, context)
+    if result.error != null {
+        empty: []u8
+        return empty
+    }
+    return result.value
+}
+
 // The tables have no foreign key to server_users on purpose: an account on
 // hold copies only the rows its foreign keys reach, and a backup must leave
 // with the account rather than wait in the held copy. Deleting an account

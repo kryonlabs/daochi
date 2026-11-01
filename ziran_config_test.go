@@ -352,7 +352,7 @@ func assertConfigurationMatchesBaseline(t *testing.T) Config {
 	expected := baselineLoadConfig()
 	actualType := reflect.TypeOf(actual)
 	expectedType := reflect.TypeOf(expected)
-	if actualType.NumField() != expectedType.NumField()+7 {
+	if actualType.NumField() != expectedType.NumField()+8 {
 		t.Fatal("configuration fields changed")
 	}
 	for i := 0; i < expectedType.NumField(); i++ {

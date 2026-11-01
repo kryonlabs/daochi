@@ -4,6 +4,8 @@
 
 - Keep a password-sealed account backup the node cannot open, released for a login proof; unknown accounts get the same answer as wrong passwords.
 
+- Store passkey-sealed account copies the node can't open, and find an account from a linked Google account when a node sets `DAOCHI_GOOGLE_SIGNIN_CLIENT_IDS`.
+
 - Add Shovey Island as an account unlock with a confirmed Dew price, a 40% launch offer and purchase restoration across devices.
 
 - Require SHA-256 wallet RPC Digest authentication and canonical filesystem components for blob and package requests.

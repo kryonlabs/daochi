@@ -2,7 +2,7 @@
   "/api/v1/unlocks": {
     "get": {
       "summary": "List the account's unlocks and the node's unlock prices",
-      "description": "Requires the account bearer. Returns unlocks [{product,receipt_id,created_at}] with created_at in Unix seconds, and products [{product,price_units,regular_price_units,trial_until}]. Prices are integer millionths of Dew. price_units is the price charged now; during a launch trial it is a tenth of regular_price_units and trial_until is the trial's end in Unix seconds, otherwise trial_until is 0.",
+      "description": "Account bearer required. Returns unlocks [{product,receipt_id,created_at}] and products [{product,price_units,regular_price_units,trial_until}]. Prices are millionths of Dew. Active offers charge 60% of regular. Island is 85000000 regular or 51000000 at launch; trial_until is always 0 for Island.",
       "responses": {
         "200": {
           "description": "Account unlocks and current prices; no-store"
@@ -17,7 +17,7 @@
     },
     "post": {
       "summary": "Unlock a product with Dew at the node's price",
-      "description": "The node sets the price; the client names only the product. Returns {product,unlocked,price_units,balance,receipt_id}. The signed Dew debit and the unlock commit atomically. Unlocking an unlocked product charges nothing and returns the original receipt and the price it charged.",
+      "description": "Node-priced atomic debit and unlock. Returns {product,unlocked,price_units,balance,receipt_id}. Already paid products restore the original receipt and price without charging. Island requires expected_units matching the current quote; stale or missing confirmation returns 409 without debit.",
       "requestBody": {
         "required": true,
         "content": {
@@ -31,6 +31,10 @@
                 "product": {
                   "type": "string",
                   "maxLength": 64
+                },
+                "expected_units": {
+                  "type": "integer",
+                  "description": "Required for Shovey Island: exact current price_units confirmed by the account."
                 }
               }
             }
@@ -55,6 +59,9 @@
         },
         "503": {
           "description": "Unlocks unavailable"
+        },
+        "409": {
+          "description": "Price changed; fetch and confirm a fresh quote before purchase"
         }
       }
     }

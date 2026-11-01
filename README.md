@@ -357,6 +357,28 @@ with a `<sha256>.zx.product` file beside it naming a product is gated: it is
 served, uncached, only at `/api/v2/packages/<app>/<sha256>.zx/<grant>` with an
 unexpired grant for that product. Legacy `.zib` artifacts are gated the same way.
 
+Shovey Island (`shovey.island`, app `entity`) uses the same atomic unlock
+transaction at **85 Dew** regular and **51 Dew** at launch (40% off). Set
+`DAOCHI_SHOVEY_ISLAND_LAUNCH_AT` once to the actual launch's Unix seconds;
+the server applies the offer from that instant until six calendar months
+later in UTC, exclusively. Zero disables the offer. Island ignores the
+unrelated `DAOCHI_UNLOCK_TRIAL_UNTIL` setting. The public products endpoint
+returns its current `price_units` and `regular_price_units`; Island's
+`trial_until` remains zero, so clients market only the percentage, without a
+duration or countdown. Clients must POST
+`{"product":"shovey.island","expected_units":51000000}` (or the current
+85000000 quote). A missing or mismatched confirmation returns 409 without a
+debit. Already paid accounts restore their original receipt and price even
+after the sale, without a second debit. Only an `unlock` receipt can restore
+Island; a generic token spend cannot grant it.
+
+The fixed Dew price was selected using the public `/api/v1/rates` snapshot
+at Unix 1793564642: 59,226 US cents/XMR and 10,000 Dew/XMR (three agreeing
+sources). Thus 85 Dew was about $5.03 and 51 Dew about $3.02. These are
+selection-time approximations, not a USD peg or a guaranteed purchase rate.
+The server charges integer millionths of Dew and never uses a client price
+or the live USD display rate to set the debit.
+
 An account can send Dew to a friend: `POST /api/v1/tokens/gifts` with the
 friend's `recipient` account ID, `units` (millionths of Dew) and a persistent
 `request_id`. The sender's signed debit and the friend's signed credit commit

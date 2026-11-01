@@ -41,6 +41,8 @@ Config :: struct {
     DewGiftsEnabled: bool
     // Unix seconds; unlocks cost a tenth of their price until then. Zero means no trial.
     UnlockTrialUntil: s64
+    // Actual Island launch, Unix seconds. Zero disables the launch offer.
+    ShoveyIslandLaunchAt: s64
     NodeRegistryPublicKey: PublicKey
     KnownNodes: []NodePeer
     NodeSyncToken: string
@@ -290,6 +292,7 @@ Load :: () -> Config {
     result.PremiumAliasesEnabled = Bool(EnvString("DAOCHI_PREMIUM_ALIASES_ENABLED", ""), false)
     result.DewGiftsEnabled = Bool(EnvString("DAOCHI_DEW_GIFTS_ENABLED", ""), false)
     result.UnlockTrialUntil = EnvInt64("DAOCHI_UNLOCK_TRIAL_UNTIL", cast(s64)0)
+    result.ShoveyIslandLaunchAt = EnvInt64("DAOCHI_SHOVEY_ISLAND_LAUNCH_AT", cast(s64)0)
     result.NodeRegistryPublicKey = nodeRegistryPublic
     result.KnownNodes = Peers(EnvString("DAOCHI_KNOWN_NODES", ""))
     result.NodeSyncToken = EnvString("DAOCHI_NODE_SYNC_TOKEN", "")

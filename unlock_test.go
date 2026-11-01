@@ -150,7 +150,7 @@ func TestUnlockTrialPrice(t *testing.T) {
 		if err := json.Unmarshal(res.Body.Bytes(), &value); err != nil {
 			t.Fatal(err)
 		}
-		if value.Unlocks == nil || len(value.Products) != 1 {
+		if value.Unlocks == nil || len(value.Products) != 2 {
 			t.Fatalf("list shape: %s", res.Body.String())
 		}
 		return value.Unlocks, value.Products
@@ -179,7 +179,7 @@ func TestUnlockTrialPrice(t *testing.T) {
 			Products []map[string]any `json:"products"`
 		}
 		if public.Code != 200 || public.Header().Get("Cache-Control") != "no-store" ||
-			json.Unmarshal(public.Body.Bytes(), &prices) != nil || len(prices.Products) != 1 ||
+			json.Unmarshal(public.Body.Bytes(), &prices) != nil || len(prices.Products) != 2 ||
 			!equalJSONMaps(prices.Products[0], want) || strings.Contains(public.Body.String(), "receipt") {
 			t.Fatalf("public prices: %d %s", public.Code, public.Body.String())
 		}

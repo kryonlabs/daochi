@@ -12,8 +12,13 @@ errors :: #import "std/errors_go";
 native :: #system_library "go:database/sql";
 go_strings :: #system_library "go:strings";
 builtin :: #system_library "go:builtin";
+clock :: #import "std/time_go";
+go_time :: #system_library "go:time";
 
 TaiChi :: "inbe.practice.taichi";
+ShoveyIsland :: "shovey.island";
+IslandRegularUnits :: 85000000;
+IslandSaleUnits :: 51000000;
 // The launch offer takes 40% off until the node's configured trial end.
 TrialDiscountPercent :: 40
 
@@ -57,7 +62,8 @@ Offer :: struct {
     app_id: string
     units: s64
 }
-Catalog: [1]string = .[TaiChi];
+Catalog: [2]string = .[TaiChi, ShoveyIsland];
+AddDate :: (value: clock.Time, years: isize, months: isize, days: isize) -> clock.Time #foreign go_time "Time.AddDate";
 RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
 MakeUnlocks :: (count: isize) -> []AccountUnlock #foreign builtin "make";
 AppendUnlock :: (values: []AccountUnlock, value: AccountUnlock) -> []AccountUnlock #foreign builtin "append";
@@ -71,6 +77,11 @@ Find :: (product: string) -> Offer {
         result.product = TaiChi
         result.app_id = "inbe"
         result.units = 100 * plans.UnitsPerDew
+    }
+    if product == ShoveyIsland {
+        result.product = ShoveyIsland
+        result.app_id = "entity"
+        result.units = IslandRegularUnits
     }
     return result
 }
@@ -87,6 +98,16 @@ SettledTx :: (transaction: *sql.Transaction, context: ctx.Context, account: stri
     }
     if !receipt.found {
         result.error = errors.New("unlock receipt missing")
+        return result
+    }
+    // A caller-controlled generic spend nonce is never proof of an unlock.
+    offer := Find(product)
+    value := receipt.value
+    if value.AccountID != account || value.AppID != offer.app_id ||
+    value.AssetID != receipts.AssetID || value.EventType != "debit" ||
+    value.SourceType != "unlock" || value.SourceRef != product || value.AmountDelta >= 0 ||
+    (product == ShoveyIsland && value.AmountDelta != -IslandRegularUnits && value.AmountDelta != -IslandSaleUnits) {
+        result.error = errors.New("invalid unlock receipt")
         return result
     }
     balance := ledger.BalanceTx(transaction, context, account, receipts.AssetID)
@@ -120,21 +141,42 @@ RegularPrice :: (product: string) -> s64 {
 // The price charged now. Zero for a product the node does not sell.
 Price :: (product: string, now: s64, trialUntil: s64) -> s64 {
     regular := RegularPrice(product)
-    if now < trialUntil {
+    if product != ShoveyIsland && now < trialUntil {
         return regular * (100 - TrialDiscountPercent) / 100
     }
     return regular
 }
 
+IslandSaleUntil :: (start: s64) -> s64 {
+    if start <= 0 {
+        return 0
+    }
+    return clock.Unix(AddDate(clock.UTC(clock.FromUnix(start, 0)), 0, 6, 0))
+}
+
+ProductPrice :: (product: string, now: s64, trialUntil: s64, islandStart: s64) -> s64 {
+    if product == ShoveyIsland {
+        if islandStart > 0 && now >= islandStart && now < IslandSaleUntil(islandStart) {
+            return IslandSaleUnits
+        }
+        return IslandRegularUnits
+    }
+    return Price(product, now, trialUntil)
+}
+
 Products :: (now: s64, trialUntil: s64) -> []UnlockProduct {
+    return ProductsAt(now, trialUntil, 0)
+}
+
+ProductsAt :: (now: s64, trialUntil: s64, islandStart: s64) -> []UnlockProduct {
     result := MakeProducts(cast(isize)0)
     for name: Catalog {
         item: UnlockProduct
         item.product = name
-        item.price_units = Price(name, now, trialUntil)
+        item.price_units = ProductPrice(name, now, trialUntil, islandStart)
         item.regular_price_units = RegularPrice(name)
         // Zero once the trial is over, so a nonzero value always means a lower price.
-        if now < trialUntil {
+        if name != ShoveyIsland && now < trialUntil {
             item.trial_until = trialUntil
         }
         result = AppendProduct(result, item)
@@ -187,6 +229,11 @@ List :: (database: *sql.Database, context: ctx.Context, account: string, now: s6
 // even if the price changed since.
 Unlock :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
     account: string, product: string, now: s64, trialUntil: s64) -> UnlockResult {
+    return Confirmed(database, context, signer, account, product, now, trialUntil, 0, 0)
+}
+
+Confirmed :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
+    account: string, product: string, now: s64, trialUntil: s64, islandStart: s64, expectedUnits: s64) -> UnlockResult {
     result: UnlockResult
     result.product = product
     offer := Find(product)
@@ -224,11 +271,16 @@ Unlock :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
         return result
     }
     if paid != null {
+        price := ProductPrice(product, now, trialUntil, islandStart)
+        if product == ShoveyIsland && (expectedUnits <= 0 || expectedUnits != price) {
+            result.error = errors.New("price changed; confirm a fresh quote")
+            return result
+        }
         event: receipts.TokenEventInput
         event.AccountID = account
         event.AppID = offer.app_id
         event.EventType = "debit"
-        event.AmountDelta = -Price(product, now, trialUntil)
+        event.AmountDelta = -price
         event.SourceType = "unlock"
         event.SourceRef = product
         debit := ledger.SpendTx(transaction, context, signer, event, key,

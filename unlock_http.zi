@@ -13,6 +13,7 @@ errors :: #import "std/errors_go";
 
 UnlockCommand :: struct {
     product: string #go_tag "json:\"product\""
+    expected_units: s64 #go_tag "json:\"expected_units,omitempty\""
 }
 
 #scope_file
@@ -44,13 +45,16 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
             response.Error(writer, 400, "invalid unlock")
             return
         }
-        unlocked := unlocks.Unlock(accounts.database, http.Context(request),
-            accounts.configuration.WaoziIssuerPrivateKey, user.value, command.product, now, trialUntil)
+        unlocked := unlocks.Confirmed(accounts.database, http.Context(request),
+            accounts.configuration.WaoziIssuerPrivateKey, user.value, command.product, now, trialUntil,
+            accounts.configuration.ShoveyIslandLaunchAt, command.expected_units)
         if unlocked.error != null {
             if errors.Message(unlocked.error) == "unknown product" {
                 response.Error(writer, 404, "unknown product")
             } else if errors.Message(unlocked.error) == "insufficient balance" {
                 response.Error(writer, 402, "insufficient balance")
+            } else if errors.Message(unlocked.error) == "price changed; confirm a fresh quote" {
+                response.Error(writer, 409, "price changed; confirm a fresh quote")
             } else {
                 response.Error(writer, 503, "unlock unavailable")
             }
@@ -64,6 +68,7 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
         response.Error(writer, 503, "unlocks unavailable")
         return
     }
+    listed.products = unlocks.ProductsAt(now, trialUntil, accounts.configuration.ShoveyIslandLaunchAt)
     response.JSON(writer, 200, listed)
 }
 
@@ -71,7 +76,8 @@ Handle :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *ht
 Prices :: (accounts: service.Accounts, writer: http.ResponseWriter, request: *http.Request) {
     http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "no-store")
     reply: unlocks.UnlockPrices
-    reply.products = unlocks.Products(clock.Unix(clock.Now()), accounts.configuration.UnlockTrialUntil)
+    reply.products = unlocks.ProductsAt(clock.Unix(clock.Now()), accounts.configuration.UnlockTrialUntil,
+        accounts.configuration.ShoveyIslandLaunchAt)
     response.JSON(writer, 200, reply)
 }
 

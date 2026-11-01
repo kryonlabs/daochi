@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add Shovey Island as an account unlock with a confirmed Dew price, a 40% launch offer and purchase restoration across devices.
+
 - Require SHA-256 wallet RPC Digest authentication and canonical filesystem components for blob and package requests.
 
 - Count daily Wurm check-ins by the node's UTC clock and grant each daily Dew reward once per account.

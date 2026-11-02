@@ -27,6 +27,16 @@ func dewActivityFixture(t *testing.T) (*Server, *Store, *fakeMoneroWalletRPC, ht
 	return server, store, wallet, handler, identity, mapping.Value
 }
 
+// An account that has never deposited gets an empty list. Clients validate the
+// reply as an array, and null made them report the node as not answering.
+func TestMoneroDepositsListIsEmptyArrayWithoutDeposits(t *testing.T) {
+	_, _, _, handler, identity, _ := dewActivityFixture(t)
+	deposits := tokenJSONRequest(t, handler, http.MethodGet, "/api/v1/tokens/purchases/monero/deposits", identity.Token, nil)
+	if deposits.Code != http.StatusOK || strings.TrimSpace(deposits.Body.String()) != `{"deposits":[]}` {
+		t.Fatalf("deposits response status=%d body=%s", deposits.Code, deposits.Body.String())
+	}
+}
+
 // A deposit keeps the XMR/USD rate that was current when the transfer was
 // first observed, as a first-write-wins snapshot beside the funding ratio.
 func TestMoneroDepositSnapshotsUSDRateAtFirstObservation(t *testing.T) {

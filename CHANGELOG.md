@@ -4,6 +4,8 @@
 
 - Accept Sign in with Google tokens from the Waozi web client on the production node.
 
+- Answer an empty Monero deposit list as an empty array, so the Dew site no longer says the node is not answering for accounts without deposits.
+
 - Keep a password-sealed account backup the node cannot open, released for a login proof; unknown accounts get the same answer as wrong passwords.
 
 - Store passkey-sealed account copies the node can't open, and find an account from a linked Google account when a node sets `DAOCHI_GOOGLE_SIGNIN_CLIENT_IDS`.

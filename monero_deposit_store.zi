@@ -51,6 +51,7 @@ RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign go_sql "(
 CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign go_sql "(*Rows).Close";
 PaymentID :: (pattern: string, transactionID: string, account: isize, address: isize) -> string #foreign format "Sprintf";
 AppendDeposit :: (values: []MoneroDeposit, value: MoneroDeposit) -> []MoneroDeposit #foreign builtin "append";
+AllocateDeposits :: (count: isize) -> []MoneroDeposit #foreign builtin "make";
 Join :: (values: []string, separator: string) -> string #foreign strings;
 
 AddressSQL :: #string SQL
@@ -589,7 +590,8 @@ Deposits :: (database: *sql.Database, context: ctx.Context, accountID: string, l
     if result.error != null {
         return result
     }
-    values: []MoneroDeposit
+    // Starts allocated so an account without deposits answers [] and not null.
+    values := AllocateDeposits(cast(isize)0)
     while sql.Next(query.value) {
         item: MoneroDeposit
         destinations := DepositDestinations(*item)

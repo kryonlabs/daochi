@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,10 +15,20 @@ import (
 const (
 	testBackupSalt   = "00112233445566778899aabbccddeeff"
 	testBackupPrefix = "waozi-account-backup-v3\nalgorithm=ML-DSA-44\nkdf=Argon2id\nmemory_kib=65536\npasses=3\nlanes=1\nsalt="
+	testBackupNonce  = "000102030405060708090a0b"
+	testBackupTag    = "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
 )
 
-func sealedBackup(salt, sealed string) string {
-	return testBackupPrefix + salt + "\n" + sealed
+// sealedBackup builds a backup in the shape Entity seals: the header, a
+// 12-byte nonce and the sealed bytes with their 16-byte tag, all as hex. The
+// marker is hex-encoded into the sealed bytes so each test can tell its
+// backups apart.
+func sealedBackup(salt, marker string) string {
+	return sealedWithBody(salt, testBackupNonce+"\nciphertext="+hex.EncodeToString([]byte(marker))+testBackupTag)
+}
+
+func sealedWithBody(salt, body string) string {
+	return testBackupPrefix + salt + "\nnonce=" + body
 }
 
 func storeBackup(t *testing.T, target any, token, backup, salt, verifier string) *httptest.ResponseRecorder {
@@ -106,7 +117,7 @@ func TestAccountBackupReleasedOnlyForItsProof(t *testing.T) {
 		if refused.Code != http.StatusForbidden || refused.Body.String() != wrong.Body.String() {
 			t.Fatalf("refusal differs: %d %s", refused.Code, refused.Body)
 		}
-		if strings.Contains(refused.Body.String(), "sealed") {
+		if strings.Contains(refused.Body.String(), hex.EncodeToString([]byte("sealed"))) {
 			t.Fatalf("refusal carries the backup: %s", refused.Body)
 		}
 	}
@@ -183,7 +194,7 @@ func TestAccountBackupLocksAfterWrongProofs(t *testing.T) {
 	// Locked: even the right proof waits, and failures stored across requests
 	// are what hold the lock.
 	locked := openBackup(t, handler, identity.UserID, proof)
-	if locked.Code != http.StatusTooManyRequests || strings.Contains(locked.Body.String(), "sealed") {
+	if locked.Code != http.StatusTooManyRequests || strings.Contains(locked.Body.String(), hex.EncodeToString([]byte("sealed"))) {
 		t.Fatalf("right proof while locked: %d %s", locked.Code, locked.Body)
 	}
 	retry, err := strconv.Atoi(locked.Header().Get("Retry-After"))
@@ -271,7 +282,16 @@ func TestAccountBackupStoreRefusesWeakerSealsAndAnonymous(t *testing.T) {
 		{"weaker Argon2id", strings.Replace(backup, "memory_kib=65536", "memory_kib=1024", 1), testBackupSalt, verifier},
 		{"older format", strings.Replace(backup, "backup-v3", "backup-v2", 1), testBackupSalt, verifier},
 		{"salt line differs", sealedBackup(otherSalt, "sealed"), testBackupSalt, verifier},
-		{"nothing sealed", sealedBackup(testBackupSalt, ""), testBackupSalt, verifier},
+		{"nothing sealed", sealedWithBody(testBackupSalt, ""), testBackupSalt, verifier},
+		{"plain key after the header", testBackupPrefix + testBackupSalt + "\nwaozi-account-key-v1\nsecret=abcdef", testBackupSalt, verifier},
+		{"no nonce", testBackupPrefix + testBackupSalt + "\nciphertext=" + testBackupTag + "00", testBackupSalt, verifier},
+		{"short nonce", sealedWithBody(testBackupSalt, "0001\nciphertext="+testBackupTag+"00"), testBackupSalt, verifier},
+		{"no ciphertext line", sealedWithBody(testBackupSalt, testBackupNonce+"\n"+testBackupTag+"00"), testBackupSalt, verifier},
+		{"only the tag", sealedWithBody(testBackupSalt, testBackupNonce+"\nciphertext="+testBackupTag), testBackupSalt, verifier},
+		{"odd hex", sealedWithBody(testBackupSalt, testBackupNonce+"\nciphertext="+testBackupTag+"0"), testBackupSalt, verifier},
+		{"uppercase hex", sealedWithBody(testBackupSalt, testBackupNonce+"\nciphertext="+strings.ToUpper(testBackupTag)+"00"), testBackupSalt, verifier},
+		{"readable text", sealedWithBody(testBackupSalt, testBackupNonce+"\nciphertext=my secret key words"), testBackupSalt, verifier},
+		{"trailing text", sealedBackup(testBackupSalt, "sealed") + "\nnote=plain", testBackupSalt, verifier},
 		{"short salt", backup, "0011", verifier},
 		{"short verifier", backup, testBackupSalt, "abcd"},
 		{"too large", sealedBackup(testBackupSalt, strings.Repeat("x", 17664)), testBackupSalt, verifier},
@@ -316,7 +336,7 @@ func TestAccountBackupReplaceAndRemove(t *testing.T) {
 		t.Fatalf("old password still opens: %d", response.Code)
 	}
 	opened := openBackup(t, handler, identity.UserID, newProof)
-	if opened.Code != http.StatusOK || !strings.Contains(opened.Body.String(), "new") {
+	if opened.Code != http.StatusOK || !strings.Contains(opened.Body.String(), hex.EncodeToString([]byte("new"))) {
 		t.Fatalf("new password: %d %s", opened.Code, opened.Body)
 	}
 	status = sendJSON(t, handler, http.MethodGet, "/api/v1/account/backup", identity.Token, "")

@@ -94,6 +94,9 @@ BACKUP_MAX_BYTES :: 17664
 // cheaper to guess.
 BACKUP_PREFIX :: "waozi-account-backup-v3\nalgorithm=ML-DSA-44\nkdf=Argon2id\nmemory_kib=65536\npasses=3\nlanes=1\nsalt="
 SALT_HEX_LENGTH :: 32
+NONCE_HEX_LENGTH :: 24
+// ChaCha20-Poly1305's tag: the sealed text is always longer than this.
+TAG_HEX_LENGTH :: 32
 PROOF_HEX_LENGTH :: 64
 REFERENCE_MAX_BYTES :: 64
 // Wrong proofs allowed before the first lock.
@@ -475,7 +478,9 @@ SignedInAccount :: (backups: AccountBackups, writer: http.ResponseWriter, reques
 }
 
 // The backup's salt line must carry the salt sent beside it, so the salt a
-// new device receives is the one the backup was sealed with.
+// new device receives is the one the backup was sealed with. After it come
+// only the nonce and the sealed bytes, as hex, so nothing readable such as a
+// plain key can be stored as a backup.
 BackupValid :: (input: StoreInput) -> bool {
     if input.backup.count > BACKUP_MAX_BYTES {
         return false
@@ -485,7 +490,32 @@ BackupValid :: (input: StoreInput) -> bool {
     }
     parts: [3]string = .[BACKUP_PREFIX, input.salt, "\n"]
     header := Join(parts[:], "")
-    return input.backup.count > header.count && HasPrefix(input.backup, header)
+    if input.backup.count <= header.count || !HasPrefix(input.backup, header) {
+        return false
+    }
+    return SealedBody(input.backup[header.count:])
+}
+
+// "nonce=<12 bytes>\nciphertext=<sealed bytes and their 16-byte tag>".
+SealedBody :: (rest: string) -> bool {
+    nonce_label := "nonce="
+    cipher_label := "\nciphertext="
+    nonce_end := nonce_label.count + NONCE_HEX_LENGTH
+    cipher_start := nonce_end + cipher_label.count
+    if rest.count <= cipher_start || !HasPrefix(rest, nonce_label) {
+        return false
+    }
+    if !LowerHex(rest[nonce_label.count:nonce_end], NONCE_HEX_LENGTH) {
+        return false
+    }
+    if rest[nonce_end:cipher_start] != cipher_label {
+        return false
+    }
+    sealed := rest[cipher_start:]
+    if sealed.count % 2 != 0 || sealed.count <= TAG_HEX_LENGTH {
+        return false
+    }
+    return LowerHex(sealed, sealed.count)
 }
 
 ReadStatus :: (database: *sql.Database, context: ctx.Context, account: string) -> Status {

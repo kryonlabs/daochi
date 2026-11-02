@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Refuse an account backup upload unless it holds only the nonce and sealed bytes after its header, so a plain key can't be stored as a backup.
+
 - Accept Sign in with Google tokens from the Waozi web client on the production node.
 
 - Answer an empty Monero deposit list as an empty array, so the Dew site no longer says the node is not answering for accounts without deposits.

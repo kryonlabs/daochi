@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -290,6 +291,22 @@ func TestGoogleCertificateOutageIsNotFetchedPerRequest(t *testing.T) {
 	}
 	if hits != 1 {
 		t.Fatalf("five sign-ins fetched certificates %d times", hits)
+	}
+}
+
+// A client that hangs up must not spend the one certificate refresh a minute.
+func TestGoogleCertificateRefreshOutlivesCancelledRequest(t *testing.T) {
+	fake := newFakeGoogle(t)
+	handler := googleServer(t).Routes()
+	token := fake.token(t, "subject", testGoogleClient, "", time.Now().Add(time.Hour))
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/account-backup/google", strings.NewReader(`{"id_token":"`+token+`"}`)).WithContext(cancelled)
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	response := sendJSON(t, handler, http.MethodPost, "/api/v1/account-backup/google", "", `{"id_token":"`+token+`"}`)
+	if response.Code == http.StatusUnauthorized {
+		t.Fatalf("the cancelled request lost the refresh: %d %s", response.Code, response.Body)
 	}
 }
 

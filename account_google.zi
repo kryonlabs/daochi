@@ -179,8 +179,10 @@ FetchCertificates :: (context: ctx.Context) -> Error {
 
 // A key not seen before means Google rotated: fetch once more, not per request.
 // One attempt a minute at most, even while Google cannot be reached, and old
-// certificates stop counting rather than being trusted indefinitely.
-CertificateFor :: (context: ctx.Context, key: string) -> string {
+// certificates stop counting rather than being trusted indefinitely. The fetch
+// does not belong to the request: that one attempt must not die with a client
+// that hung up, and the HTTP client's own timeout bounds it.
+CertificateFor :: (key: string) -> string {
     now := clock.Unix(clock.Now())
     Lock(*certificates_lock)
     refresh := now - certificates_tried >= LEEWAY_SECONDS &&
@@ -190,7 +192,7 @@ CertificateFor :: (context: ctx.Context, key: string) -> string {
     }
     Unlock(*certificates_lock)
     if refresh {
-        unused FetchCertificates(context)
+        unused FetchCertificates(ctx.Background())
     }
     Lock(*certificates_lock)
     defer Unlock(*certificates_lock)
@@ -223,7 +225,7 @@ AudienceAllowed :: (configuration: *config.Config, audience: string) -> bool {
 }
 
 // Only RS256 from Google's own keys, for this node's client IDs, in its time.
-VerifyToken :: (context: ctx.Context, configuration: *config.Config, token: string) -> Verified {
+VerifyToken :: (configuration: *config.Config, token: string) -> Verified {
     result: Verified
     result.error = errors.New(BAD_TOKEN)
     parts := Split(token, ".")
@@ -240,7 +242,7 @@ VerifyToken :: (context: ctx.Context, configuration: *config.Config, token: stri
     if json.Unmarshal(headerBytes.value, *header) != null || header.algorithm != "RS256" || header.key == "" {
         return result
     }
-    key := KeyFromCertificate(CertificateFor(context, header.key))
+    key := KeyFromCertificate(CertificateFor(header.key))
     if !key.present {
         return result
     }
@@ -347,7 +349,7 @@ Lookup :: (google: AccountGoogle, writer: http.ResponseWriter, request: *http.Re
         return
     }
     context := http.Context(request)
-    verified := VerifyToken(context, google.configuration, input.id_token)
+    verified := VerifyToken(google.configuration, input.id_token)
     if verified.error != null {
         response.Error(writer, 401, BAD_TOKEN)
         return
@@ -391,7 +393,7 @@ Link :: (google: AccountGoogle, writer: http.ResponseWriter, request: *http.Requ
         return
     }
     context := http.Context(request)
-    verified := VerifyToken(context, google.configuration, input.id_token)
+    verified := VerifyToken(google.configuration, input.id_token)
     if verified.error != null || verified.claims.nonce != LinkNonce(account) {
         response.Error(writer, 401, BAD_TOKEN)
         return

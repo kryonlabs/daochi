@@ -4,7 +4,7 @@ module_roots = ["."]
 
 [toolchain]
 git = "https://github.com/ziranlang/ziran.git"
-ref = "master"
+ref = "e4e8efa4a92f36e2fb0cea1d56b11471afa68621"
 
 [dependencies.shovey]
 git = "https://github.com/waozixyz/shovey.git"

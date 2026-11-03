@@ -1,0 +1,594 @@
+// Allocation state accompanies new signed receipts; migration never rewrites history.
+#import "protocol"
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+
+BalanceResult :: struct {
+    value: s64
+    error: Error
+}
+BalancesResult :: struct {
+    balance: s64
+    shared: s64
+    scoped: s64
+    spendable: s64
+    error: Error
+}
+
+#scope_file
+CloseRowsAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+BalanceSQL :: #string SQL
+WITH total AS (
+    SELECT COALESCE(SUM(amount_delta),0) AS units FROM token_ledger
+    WHERE account_id=?1 AND asset_id=?2 AND receipt_id<>?4
+), pools AS (
+    SELECT COALESCE(SUM(CASE WHEN app_id<>'' THEN remaining ELSE 0 END),0) AS scoped,
+           COALESCE(SUM(CASE WHEN app_id<>'' AND app_id=?3 THEN remaining ELSE 0 END),0) AS matching
+    FROM token_allocations WHERE account_id=?1 AND asset_id=?2
+)
+SELECT total.units,pools.scoped,total.units-pools.scoped,
+       MAX(total.units-pools.scoped,0)+MAX(pools.matching,0)
+FROM total,pools
+SQL;
+AuthorizeOffsetSQL :: #string SQL
+WITH old_rewards AS (
+    SELECT MAX(CASE WHEN source_type='referral_commission' THEN ledger_seq END) AS last_credit,
+           COALESCE(SUM(amount_delta),0) AS outstanding
+    FROM token_ledger WHERE account_id=?1 AND source_ref=?2
+        AND source_type IN ('referral_commission','referral_reversal')
+), own_lots AS (
+    SELECT COALESCE(SUM(MAX(remaining,0)),0) AS units
+    FROM token_allocations WHERE account_id=?1 AND source_receipt_id=?2
+        AND source_type='referral_commission'
+), old_reserved AS (
+    SELECT COALESCE(SUM(remaining),0) AS units FROM token_referral_offsets
+    WHERE account_id=?1 AND source_receipt_id=?2
+), new_reserved AS (
+    SELECT COALESCE(SUM(remaining),0) AS units FROM token_referral_offsets
+    WHERE credit_receipt_id=?3
+)
+SELECT MAX(0,MIN(?4,a.remaining-new_reserved.units,
+                 old_rewards.outstanding-own_lots.units-old_reserved.units))
+FROM token_allocations a
+JOIN token_ledger new_paid ON new_paid.receipt_id=a.source_receipt_id
+JOIN token_ledger old_paid ON old_paid.receipt_id=?2
+JOIN old_rewards JOIN own_lots JOIN old_reserved JOIN new_reserved
+WHERE a.receipt_id=?3 AND a.account_id=?1 AND a.source_type='referral_commission'
+    AND a.source_receipt_id<>?2 AND a.ledger_seq>old_rewards.last_credit
+    AND ((new_paid.source_type='google_play' AND old_paid.source_type='google_play' AND new_paid.app_id=old_paid.app_id)
+         OR (new_paid.source_type IN ('monero','monero_account') AND old_paid.source_type IN ('monero','monero_account')))
+SQL;
+
+Positive :: (value: s64) -> s64 {
+    if value > 0 {
+        return value
+    }
+    return 0
+}
+
+ReadBalances :: (row: *sql.Row) -> BalancesResult {
+    result: BalancesResult
+    // SQLite reports integer overflow (or promotes an overflowing expression
+    // to REAL, rejected by Scan). Keep balance arithmetic at this boundary.
+    destinations: [4]Any = .[*result.balance, *result.scoped, *result.shared, *result.spendable]
+    result.error = sql.ScanRow(row, destinations[:])
+    return result
+}
+
+BalancesTx :: (transaction: *sql.Transaction, context: ctx.Context,
+    accountID: string, assetID: string, appID: string, excludedID: string) -> BalancesResult {
+    arguments: [4]Any = .[accountID, assetID, appID, excludedID]
+    return ReadBalances(sql.QueryRowTx(transaction, context, BalanceSQL, arguments[:]))
+}
+
+// Consume only the named pool. The empty title denotes shared credit. Historical
+// shared credit has no lot and is recorded explicitly with an empty credit ID.
+ConsumeTx :: (transaction: *sql.Transaction, context: ctx.Context, receipt: TokenReceipt,
+    appID: string, sourceID: string, sourceType: string, amount: s64) -> Error {
+    if amount == 0 {
+        return null
+    }
+    arguments: [5]Any = .[receipt.AccountID, receipt.AssetID, appID, sourceID, sourceType]
+    queried := sql.QueryTx(transaction, context,
+        "SELECT receipt_id,remaining FROM token_allocations WHERE account_id=?1 AND asset_id=?2 AND app_id=?3 AND remaining>0 AND (?4='' OR source_receipt_id=?4) AND (?5='' OR source_type=?5) ORDER BY ledger_seq", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    remaining := amount
+    while sql.Next(rows) {
+        id: string
+        available: s64
+        destinations: [2]Any = .[*id, *available]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        taken := available
+        if taken > remaining {
+            taken = remaining
+        }
+        values: [3]Any = .[id, taken, receipt.ReceiptID]
+        written := sql.ExecTx(transaction, context,
+            "UPDATE token_allocations SET remaining=remaining-?2 WHERE receipt_id=?1 AND remaining>=?2", values[:2])
+        if written.error != null {
+            return written.error
+        }
+        recorded := sql.ExecTx(transaction, context,
+            "INSERT INTO token_allocation_debits(credit_receipt_id,units,debit_receipt_id) VALUES(?1,?2,?3)", values[:])
+        if recorded.error != null {
+            return recorded.error
+        }
+        remaining -= taken
+        if remaining == 0 {
+            break
+        }
+    }
+    error := sql.RowsError(rows)
+    sql.CloseRows(rows)
+    if error != null {
+        return error
+    }
+    if remaining > 0 {
+        if appID != "" || sourceID != "" {
+            return errors.New("allocation source balance unavailable")
+        }
+        legacy: [3]Any = .[receipt.ReceiptID, "", remaining]
+        return sql.ExecTx(transaction, context,
+            "INSERT INTO token_allocation_debits(debit_receipt_id,credit_receipt_id,units) VALUES(?1,?2,?3)", legacy[:]).error
+    }
+    return null
+}
+
+ConsumeOffsetsTx :: (transaction: *sql.Transaction, context: ctx.Context,
+    receipt: TokenReceipt, amount: s64) -> Error {
+    if amount == 0 {
+        return null
+    }
+    arguments: [2]Any = .[receipt.AccountID, receipt.SourceRef]
+    queried := sql.QueryTx(transaction, context,
+        "SELECT o.credit_receipt_id,MIN(o.remaining,a.remaining) FROM token_referral_offsets o JOIN token_allocations a ON a.receipt_id=o.credit_receipt_id WHERE o.account_id=?1 AND o.source_receipt_id=?2 AND o.remaining>0 AND a.remaining>0 ORDER BY a.ledger_seq", arguments[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseRowsAtReturn(rows)
+    remaining := amount
+    while sql.Next(rows) {
+        creditID: string
+        available: s64
+        destinations: [2]Any = .[*creditID, *available]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        taken := available
+        if taken > remaining {
+            taken = remaining
+        }
+        values: [4]Any = .[creditID, taken, receipt.SourceRef, receipt.AccountID]
+        updated := sql.ExecTx(transaction, context,
+            "UPDATE token_allocations SET remaining=remaining-?2 WHERE receipt_id=?1 AND remaining>=?2", values[:2])
+        if updated.error != null {
+            return updated.error
+        }
+        authorized := sql.ExecTx(transaction, context,
+            "UPDATE token_referral_offsets SET remaining=remaining-?2 WHERE credit_receipt_id=?1 AND source_receipt_id=?3 AND account_id=?4 AND remaining>=?2", values[:])
+        if authorized.error != null {
+            return authorized.error
+        }
+        audit: [3]Any = .[receipt.ReceiptID, creditID, taken]
+        recorded := sql.ExecTx(transaction, context,
+            "INSERT INTO token_allocation_debits(debit_receipt_id,credit_receipt_id,units) VALUES(?1,?2,?3)", audit[:])
+        if recorded.error != null {
+            return recorded.error
+        }
+        remaining -= taken
+        if remaining == 0 {
+            break
+        }
+    }
+    error := sql.RowsError(rows)
+    if error != null {
+        return error
+    }
+    if remaining != 0 {
+        return errors.New("authorized referral offset unavailable")
+    }
+    return null
+}
+
+CreditTx :: (transaction: *sql.Transaction, context: ctx.Context, receipt: TokenReceipt) -> Error {
+    title := ""
+    origin := receipt.ReceiptID
+    if receipt.SourceType == "google_play" {
+        binding: [4]Any = .[receipt.SourceRef, receipt.AccountID, receipt.AppID, receipt.AmountDelta]
+        destinations: [1]Any = .[*title]
+        error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT app_id FROM token_google_origins WHERE payment_id=?1 AND account_id=?2 AND app_id=?3 AND amount=?4", binding[:]), destinations[:])
+        if error != null {
+            return errors.New("verified Google title binding required")
+        }
+    } else if receipt.SourceType == "referral_commission" {
+        origin = receipt.SourceRef
+        provider: string
+        paymentID: string
+        appID: string
+        accountID: string
+        arguments: [1]Any = .[origin]
+        destinations: [4]Any = .[*provider, *paymentID, *appID, *accountID]
+        error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT l.source_type,l.source_ref,l.app_id,l.account_id FROM token_ledger l JOIN token_processed_payments p ON p.receipt_id=l.receipt_id AND p.provider=l.source_type AND p.provider_payment_id=l.source_ref AND p.account_id=l.account_id AND p.asset_id=l.asset_id AND p.amount=l.amount_delta WHERE l.receipt_id=?1 AND l.event_type='credit' AND l.amount_delta>0 AND l.source_type IN ('google_play','monero','monero_account')", arguments[:]), destinations[:])
+        if error != null || appID != receipt.AppID {
+            return errors.New("verified referral purchase required")
+        }
+        if provider == "google_play" {
+            binding: [3]Any = .[paymentID, accountID, appID]
+            titleDestination: [1]Any = .[*title]
+            error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+                "SELECT app_id FROM token_google_origins WHERE payment_id=?1 AND account_id=?2 AND app_id=?3", binding[:]), titleDestination[:])
+            if error != null {
+                return errors.New("verified Google referral title required")
+            }
+        }
+    } else if receipt.SourceType == "rescale" {
+        // A ratio change must carry each source explicitly before it may convert
+        // restricted funds. Existing global rescale input cannot express that.
+        arguments: [2]Any = .[receipt.AccountID, receipt.AssetID]
+        count: s64
+        destinations: [1]Any = .[*count]
+        error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT COUNT(*) FROM token_allocations WHERE account_id=?1 AND asset_id=?2 AND app_id<>'' AND remaining<>0", arguments[:]), destinations[:])
+        if error != null {
+            return error
+        }
+        if count != 0 {
+            return errors.New("restricted allocations require source-preserving rescale")
+        }
+    }
+    arguments: [10]Any = .[receipt.ReceiptID, receipt.AccountID, receipt.AssetID,
+        title, origin, receipt.SourceType, receipt.AmountDelta, receipt.AmountDelta,
+        receipt.LedgerSeq, receipt.SourceRef]
+    return sql.ExecTx(transaction, context,
+        "INSERT INTO token_allocations(receipt_id,account_id,asset_id,app_id,source_receipt_id,source_type,issued,remaining,ledger_seq,provider_payment_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", arguments[:]).error
+}
+
+RefundTx :: (transaction: *sql.Transaction, context: ctx.Context, receipt: TokenReceipt, amount: s64) -> Error {
+    originalID: string
+    originalApp: string
+    issued: s64
+    arguments: [3]Any = .[receipt.AccountID, receipt.AssetID, receipt.SourceRef]
+    destinations: [3]Any = .[*originalID, *originalApp, *issued]
+    error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT l.receipt_id,l.app_id,l.amount_delta FROM token_ledger l JOIN token_processed_payments p ON p.receipt_id=l.receipt_id AND p.provider='google_play' AND p.provider_payment_id=l.source_ref AND p.account_id=l.account_id AND p.amount=l.amount_delta AND p.asset_id=l.asset_id WHERE l.account_id=?1 AND l.asset_id=?2 AND l.source_type='google_play' AND l.source_ref=?3 AND l.event_type='credit'", arguments[:]), destinations[:])
+    if error != null || originalApp != receipt.AppID {
+        return errors.New("refund purchase source mismatch")
+    }
+    totals: [2]Any = .[originalID, receipt.ReceiptID]
+    refunded: s64
+    refundDestination: [1]Any = .[*refunded]
+    error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COALESCE(-SUM(d.amount_delta),0) FROM token_ledger d JOIN token_ledger p ON p.receipt_id=?1 WHERE d.account_id=p.account_id AND d.asset_id=p.asset_id AND d.source_type='google_play' AND d.source_ref=p.source_ref AND d.event_type='debit' AND d.receipt_id<>?2", totals[:]), refundDestination[:])
+    if error != null {
+        return error
+    }
+    if refunded > issued || amount > issued - refunded {
+        return errors.New("refund exceeds original purchase")
+    }
+    values: [3]Any = .[originalID, amount, receipt.ReceiptID]
+    written := sql.ExecTx(transaction, context,
+        "UPDATE token_allocations SET remaining=remaining-?2 WHERE receipt_id=?1 AND source_type='google_play'", values[:2])
+    if written.error != null {
+        return written.error
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error != null {
+        return affected.error
+    }
+    // A historical purchase remains shared, including its historical refund
+    // semantics. Its receipt is never retroactively turned into a scoped lot.
+    if affected.value == 0 {
+        values[0] = ""
+    }
+    return sql.ExecTx(transaction, context,
+        "INSERT INTO token_allocation_debits(credit_receipt_id,units,debit_receipt_id) VALUES(?1,?2,?3)", values[:]).error
+}
+
+Record :: (transaction: *sql.Transaction, context: ctx.Context, receipt: TokenReceipt) -> Error {
+    arguments: [8]Any = .[receipt.ReceiptID, receipt.EventHash, receipt.AccountID,
+        receipt.AssetID, receipt.AppID, receipt.SourceType, receipt.SourceRef, receipt.AmountDelta]
+    sequence: s64
+    destinations: [1]Any = .[*sequence]
+    error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT ledger_seq FROM token_ledger WHERE receipt_id=?1 AND event_hash=?2 AND account_id=?3 AND asset_id=?4 AND app_id=?5 AND source_type=?6 AND source_ref=?7 AND amount_delta=?8", arguments[:]), destinations[:])
+    if error != null {
+        return errors.New("signed allocation receipt mismatch")
+    }
+    if sequence != receipt.LedgerSeq {
+        return errors.New("signed allocation sequence mismatch")
+    }
+    cutoff: s64
+    empty: [0]Any
+    boundary: [1]Any = .[*cutoff]
+    error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT historical_ledger_seq FROM token_allocation_migration WHERE version=1", empty[:]), boundary[:])
+    if error != null || sequence <= cutoff {
+        return error
+    }
+    marker := sql.ExecTx(transaction, context,
+        "INSERT OR IGNORE INTO token_allocation_receipts(receipt_id) VALUES(?1)", arguments[:1])
+    if marker.error != null {
+        return marker.error
+    }
+    affected := sql.RowsAffected(marker.value)
+    if affected.error != null || affected.value == 0 {
+        return affected.error
+    }
+    if receipt.AmountDelta > 0 {
+        return CreditTx(transaction, context, receipt)
+    }
+    if receipt.AmountDelta == -9223372036854775808 {
+        return errors.New("insufficient balance")
+    }
+    amount := -receipt.AmountDelta
+    if receipt.SourceType == "google_play" {
+        return RefundTx(transaction, context, receipt, amount)
+    }
+    if receipt.SourceType == "referral_reversal" {
+        eligible := AvailableBeforeTx(transaction, context, receipt.AccountID, receipt.AppID,
+            receipt.SourceType, receipt.SourceRef, receipt.ReceiptID)
+        if eligible.error != null {
+            return eligible.error
+        }
+        if amount > eligible.value {
+            return errors.New("insufficient source balance")
+        }
+        own := AvailableOwnBeforeTx(transaction, context, receipt.AccountID, receipt.AppID,
+            receipt.SourceType, receipt.SourceRef, receipt.ReceiptID)
+        if own.error != null {
+            return own.error
+        }
+        taken := own.value
+        if taken > amount {
+            taken = amount
+        }
+        source: [2]Any = .[receipt.AccountID, receipt.SourceRef]
+        title: string
+        titleDestination: [1]Any = .[*title]
+        error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT app_id FROM token_allocations WHERE account_id=?1 AND source_receipt_id=?2 AND source_type='referral_commission' LIMIT 1", source[:]), titleDestination[:])
+        if errors.Is(error, sql.NoRows()) {
+            error = ConsumeTx(transaction, context, receipt, "", "", "", taken)
+        } else if error == null {
+            error = ConsumeTx(transaction, context, receipt, title, receipt.SourceRef, "referral_commission", taken)
+        }
+        if error != null {
+            return error
+        }
+        return ConsumeOffsetsTx(transaction, context, receipt, amount - taken)
+    }
+    matchingApp := ""
+    if receipt.SourceType == "spend" || receipt.SourceType == "unlock" {
+        matchingApp = receipt.AppID
+    }
+    balance := BalancesTx(transaction, context, receipt.AccountID, receipt.AssetID, matchingApp, receipt.ReceiptID)
+    if balance.error != null {
+        return balance.error
+    }
+    matching := balance.spendable - Positive(balance.shared)
+    if amount > balance.spendable {
+        return errors.New("insufficient balance")
+    }
+    taken := matching
+    if taken > amount {
+        taken = amount
+    }
+    if taken > 0 {
+        error = ConsumeTx(transaction, context, receipt, matchingApp, "", "", taken)
+        if error != null {
+            return error
+        }
+    }
+    return ConsumeTx(transaction, context, receipt, "", "", "", amount - taken)
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL
+CREATE TABLE IF NOT EXISTS token_allocation_migration (
+    version INTEGER PRIMARY KEY CHECK(version=1),
+    historical_ledger_seq INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO token_allocation_migration(version,historical_ledger_seq)
+SELECT 1,COALESCE(MAX(ledger_seq),0) FROM token_ledger;
+CREATE TABLE IF NOT EXISTS token_google_origins (
+    payment_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    package_name TEXT NOT NULL CHECK(package_name<>''),
+    app_id TEXT NOT NULL CHECK(app_id<>''),
+    amount INTEGER NOT NULL CHECK(amount>0)
+);
+CREATE TABLE IF NOT EXISTS token_allocation_receipts (
+    receipt_id TEXT PRIMARY KEY REFERENCES token_ledger(receipt_id)
+);
+CREATE TABLE IF NOT EXISTS token_allocations (
+    receipt_id TEXT PRIMARY KEY REFERENCES token_ledger(receipt_id),
+    account_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    source_receipt_id TEXT NOT NULL REFERENCES token_ledger(receipt_id),
+    source_type TEXT NOT NULL,
+    provider_payment_id TEXT NOT NULL,
+    issued INTEGER NOT NULL CHECK(issued>0),
+    remaining INTEGER NOT NULL CHECK(remaining<=issued),
+    ledger_seq INTEGER NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS token_allocation_pool ON token_allocations(account_id,asset_id,app_id,ledger_seq);
+CREATE INDEX IF NOT EXISTS token_allocation_source ON token_allocations(account_id,source_receipt_id,source_type);
+CREATE UNIQUE INDEX IF NOT EXISTS token_allocation_google_payment ON token_allocations(provider_payment_id) WHERE source_type='google_play';
+CREATE TABLE IF NOT EXISTS token_allocation_debits (
+    debit_receipt_id TEXT NOT NULL REFERENCES token_ledger(receipt_id),
+    credit_receipt_id TEXT NOT NULL,
+    units INTEGER NOT NULL CHECK(units>0),
+    PRIMARY KEY(debit_receipt_id,credit_receipt_id)
+);
+CREATE TABLE IF NOT EXISTS token_referral_offsets (
+    account_id TEXT NOT NULL,
+    source_receipt_id TEXT NOT NULL REFERENCES token_ledger(receipt_id),
+    credit_receipt_id TEXT NOT NULL REFERENCES token_allocations(receipt_id),
+    units INTEGER NOT NULL CHECK(units>0),
+    remaining INTEGER NOT NULL CHECK(remaining>=0 AND remaining<=units),
+    PRIMARY KEY(account_id,source_receipt_id,credit_receipt_id)
+);
+SQL;
+}
+
+// Internal server integration only: the caller must verify the provider and
+// resolve package -> title from server configuration before binding anything.
+BindGoogleTx :: (transaction: *sql.Transaction, context: ctx.Context, paymentID: string,
+    accountID: string, packageName: string, appID: string, amount: s64) -> Error {
+    if paymentID == "" || accountID == "" || packageName == "" || appID == "" || amount <= 0 {
+        return errors.New("verified Google origin required")
+    }
+    arguments: [5]Any = .[paymentID, accountID, packageName, appID, amount]
+    written := sql.ExecTx(transaction, context,
+        "INSERT OR IGNORE INTO token_google_origins(payment_id,account_id,package_name,app_id,amount) VALUES(?1,?2,?3,?4,?5)", arguments[:])
+    if written.error != null {
+        return written.error
+    }
+    count: s64
+    destinations: [1]Any = .[*count]
+    error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM token_google_origins WHERE payment_id=?1 AND account_id=?2 AND package_name=?3 AND app_id=?4 AND amount=?5", arguments[:]), destinations[:])
+    if error != null {
+        return error
+    }
+    if count != 1 {
+        return errors.New("Google origin binding collision")
+    }
+    return null
+}
+
+Balances :: (database: *sql.Database, context: ctx.Context, accountID: string,
+    assetID: string, appID: string) -> BalancesResult {
+    arguments: [4]Any = .[accountID, assetID, appID, ""]
+    return ReadBalances(sql.QueryRow(database, context, BalanceSQL, arguments[:]))
+}
+
+#scope_file
+AvailableOwnBeforeTx :: (transaction: *sql.Transaction, context: ctx.Context, accountID: string,
+    appID: string, sourceType: string, sourceRef: string, excludedID: string) -> BalanceResult {
+    result: BalanceResult
+    title := ""
+    if sourceType == "spend" || sourceType == "unlock" {
+        title = appID
+    }
+    balance := BalancesTx(transaction, context, accountID, "waozi:token", title, excludedID)
+    result.error = balance.error
+    result.value = balance.spendable
+    if result.error != null || sourceType != "referral_reversal" {
+        return result
+    }
+    purchaseApp: string
+    purchase: [1]Any = .[sourceRef]
+    purchaseDestination: [1]Any = .[*purchaseApp]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT app_id FROM token_ledger WHERE receipt_id=?1 AND asset_id='waozi:token' AND event_type='credit' AND source_type IN ('google_play','monero','monero_account')", purchase[:]), purchaseDestination[:])
+    if result.error != null {
+        return result
+    }
+    if purchaseApp != appID {
+        result.error = errors.New("referral reversal title mismatch")
+        return result
+    }
+    arguments: [3]Any = .[accountID, sourceRef, excludedID]
+    count: s64
+    destinations: [2]Any = .[*count, *result.value]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*),COALESCE(SUM(MAX(remaining,0)),0) FROM token_allocations WHERE account_id=?1 AND source_receipt_id=?2 AND source_type='referral_commission'", arguments[:2]), destinations[:])
+    if result.error != null || count > 0 {
+        return result
+    }
+    // Old commissions remain shared. Bound reversals by both their outstanding
+    // source amount and the available shared balance, never another title.
+    outstanding: s64
+    historical: [1]Any = .[*outstanding]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COALESCE(SUM(amount_delta),0) FROM token_ledger WHERE account_id=?1 AND source_ref=?2 AND source_type IN ('referral_commission','referral_reversal') AND receipt_id<>?3", arguments[:]), historical[:])
+    result.value = Positive(balance.shared)
+    if result.value > Positive(outstanding) {
+        result.value = Positive(outstanding)
+    }
+    return result
+}
+
+AvailableBeforeTx :: (transaction: *sql.Transaction, context: ctx.Context, accountID: string,
+    appID: string, sourceType: string, sourceRef: string, excludedID: string) -> BalanceResult {
+    result := AvailableOwnBeforeTx(transaction, context, accountID, appID, sourceType, sourceRef, excludedID)
+    if result.error != null || sourceType != "referral_reversal" {
+        return result
+    }
+    arguments: [4]Any = .[accountID, sourceRef, result.value, excludedID]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT MIN(?3+COALESCE(SUM(MIN(o.remaining,MAX(a.remaining,0))),0),MAX(COALESCE((SELECT SUM(amount_delta) FROM token_ledger WHERE account_id=?1 AND source_ref=?2 AND source_type IN ('referral_commission','referral_reversal') AND receipt_id<>?4),0),0)) FROM token_referral_offsets o JOIN token_allocations a ON a.receipt_id=o.credit_receipt_id WHERE o.account_id=?1 AND o.source_receipt_id=?2", arguments[:]), destinations[:])
+    return result
+}
+
+#scope_export
+// The settlement service calls this immediately after issuing a new commission,
+// then reverses the older debt in the same transaction. Authorization names the
+// exact new receipt; no general shared or same-title credit may be substituted.
+AuthorizeReferralOffsetTx :: (transaction: *sql.Transaction, context: ctx.Context,
+    accountID: string, oldPurchaseID: string, newCommissionReceiptID: string, amount: s64) -> BalanceResult {
+    result: BalanceResult
+    if amount <= 0 {
+        return result
+    }
+    arguments: [4]Any = .[accountID, oldPurchaseID, newCommissionReceiptID, amount]
+    destinations: [1]Any = .[*result.value]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT MIN(o.remaining,MAX(a.remaining,0),?4) FROM token_referral_offsets o JOIN token_allocations a ON a.receipt_id=o.credit_receipt_id WHERE o.account_id=?1 AND o.source_receipt_id=?2 AND o.credit_receipt_id=?3", arguments[:]), destinations[:])
+    if result.error == null {
+        return result
+    }
+    if !errors.Is(result.error, sql.NoRows()) {
+        return result
+    }
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        AuthorizeOffsetSQL, arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        result.value = 0
+    }
+    if result.error != null || result.value == 0 {
+        return result
+    }
+    values: [4]Any = .[accountID, oldPurchaseID, newCommissionReceiptID, result.value]
+    result.error = sql.ExecTx(transaction, context,
+        "INSERT INTO token_referral_offsets(account_id,source_receipt_id,credit_receipt_id,units,remaining) VALUES(?1,?2,?3,?4,?4)", values[:]).error
+    return result
+}
+
+AvailableTx :: (transaction: *sql.Transaction, context: ctx.Context, accountID: string,
+    appID: string, sourceType: string, sourceRef: string) -> BalanceResult {
+    return AvailableBeforeTx(transaction, context, accountID, appID, sourceType, sourceRef, "")
+}
+
+RecordTx :: (transaction: *sql.Transaction, context: ctx.Context, receipt: TokenReceipt) -> Error {
+    error := Record(transaction, context, receipt)
+    if error == null {
+        balance := BalancesTx(transaction, context, receipt.AccountID, receipt.AssetID, receipt.AppID, "")
+        error = balance.error
+    }
+    if error != null {
+        // Fail closed even when a caller forgets to roll back after Insert.
+        // Signed history, lot changes and caller side effects are one unit.
+        sql.Rollback(transaction)
+    }
+    return error
+}

@@ -1,0 +1,49 @@
+#scope_export
+SchemaSQL :: () -> string {
+    return Schema
+}
+#scope_file
+Schema :: #string SQL
+CREATE TABLE IF NOT EXISTS referral_state(id INTEGER PRIMARY KEY CHECK(id=1),backfill_seq INTEGER NOT NULL DEFAULT 0);
+INSERT OR IGNORE INTO referral_state(id) VALUES(1);
+CREATE TABLE IF NOT EXISTS referral_codes(
+ code TEXT PRIMARY KEY,account_id TEXT NOT NULL,created_at TEXT NOT NULL,revoked_at TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS referral_active_code ON referral_codes(account_id) WHERE revoked_at='';
+CREATE TABLE IF NOT EXISTS referral_rotations(
+ account_id TEXT NOT NULL,request_id TEXT NOT NULL,code TEXT NOT NULL,PRIMARY KEY(account_id,request_id)
+);
+-- Deliberately no cascading account foreign key: deletion must not reset eligibility.
+CREATE TABLE IF NOT EXISTS referral_claims(
+ seq INTEGER PRIMARY KEY AUTOINCREMENT,account_id TEXT NOT NULL UNIQUE,referrer_id TEXT NOT NULL,
+ code TEXT NOT NULL,request_id TEXT NOT NULL,source_app_id TEXT NOT NULL,accepted_at TEXT NOT NULL,
+ welcome_receipt_id TEXT NOT NULL UNIQUE,welcome_seq INTEGER NOT NULL,
+ CHECK(account_id<>referrer_id)
+);
+CREATE INDEX IF NOT EXISTS referral_accepted_page ON referral_claims(referrer_id,seq);
+CREATE TABLE IF NOT EXISTS referral_outbox(receipt_id TEXT PRIMARY KEY,ledger_seq INTEGER NOT NULL,done INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS referral_pending ON referral_outbox(done,ledger_seq);
+CREATE TRIGGER IF NOT EXISTS referral_paid_receipt AFTER INSERT ON token_ledger
+ WHEN NEW.source_type IN ('monero','monero_account','google_play','monero_reorg')
+ BEGIN INSERT OR IGNORE INTO referral_outbox(receipt_id,ledger_seq) VALUES(NEW.receipt_id,NEW.ledger_seq); END;
+CREATE TRIGGER IF NOT EXISTS referral_deposit_state AFTER UPDATE OF status ON monero_deposits
+ WHEN NEW.receipt_id<>'' AND NEW.status<>OLD.status
+ BEGIN INSERT INTO referral_outbox(receipt_id,ledger_seq,done)
+ SELECT receipt_id,ledger_seq,0 FROM token_ledger WHERE receipt_id=NEW.receipt_id
+ ON CONFLICT(receipt_id) DO UPDATE SET done=0; END;
+CREATE TABLE IF NOT EXISTS referral_monero_invoices(
+ receipt_id TEXT PRIMARY KEY,state TEXT NOT NULL DEFAULT 'monitoring',checked_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TRIGGER IF NOT EXISTS referral_invoice_state AFTER UPDATE OF state ON referral_monero_invoices
+ WHEN NEW.state<>OLD.state
+ BEGIN INSERT INTO referral_outbox(receipt_id,ledger_seq,done)
+ SELECT receipt_id,ledger_seq,0 FROM token_ledger WHERE receipt_id=NEW.receipt_id
+ ON CONFLICT(receipt_id) DO UPDATE SET done=0; END;
+CREATE TABLE IF NOT EXISTS referral_commissions(
+ purchase_receipt_id TEXT PRIMARY KEY,referrer_id TEXT NOT NULL,app_id TEXT NOT NULL,
+ paid_units INTEGER NOT NULL,target_units INTEGER NOT NULL DEFAULT 0,
+ issued_units INTEGER NOT NULL DEFAULT 0,reversed_units INTEGER NOT NULL DEFAULT 0,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS referral_earnings ON referral_commissions(referrer_id);
+SQL;

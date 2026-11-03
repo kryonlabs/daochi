@@ -20,21 +20,24 @@ type fakeGooglePlay struct {
 	API   *httptest.Server
 	Token *httptest.Server
 
-	mu               sync.Mutex
-	purchaseState    int64
-	consumptionState int64
-	accountBinding   string
-	orderID          string
-	consumeCalls     int64
-	tokenCalls       int64
-	consumeStatus    int
-	consumeCompletes bool
-	voidedPurchases  []GoogleVoidedPurchase
+	mu                 sync.Mutex
+	purchaseType       *int64
+	refundableQuantity *int64
+	quantity           int64
+	purchaseState      int64
+	consumptionState   int64
+	accountBinding     string
+	orderID            string
+	consumeCalls       int64
+	tokenCalls         int64
+	consumeStatus      int
+	consumeCompletes   bool
+	voidedPurchases    []GoogleVoidedPurchase
 }
 
 func newFakeGooglePlay(t *testing.T) *fakeGooglePlay {
 	t.Helper()
-	fake := &fakeGooglePlay{orderID: "GPA.3306-TEST-0001", consumeCompletes: true}
+	fake := &fakeGooglePlay{quantity: 1, orderID: "GPA.3306-TEST-0001", consumeCompletes: true}
 	fake.Token = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mu.Lock()
 		fake.tokenCalls++
@@ -81,18 +84,28 @@ func newFakeGooglePlay(t *testing.T) *fakeGooglePlay {
 		}
 		fake.mu.Lock()
 		purchaseState, consumptionState := fake.purchaseState, fake.consumptionState
+		quantity := fake.quantity
+		purchaseType, refundableQuantity := fake.purchaseType, fake.refundableQuantity
 		accountBinding, orderID := fake.accountBinding, fake.orderID
 		fake.mu.Unlock()
 		purchaseToken := strings.TrimPrefix(r.URL.Path, "/applications/net.waozi.inbe/purchases/products/waozi_tokens_small/tokens/")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		payload := map[string]any{
 			"purchaseState":               purchaseState,
+			"quantity":                    quantity,
 			"consumptionState":            consumptionState,
 			"acknowledgementState":        1,
 			"purchaseToken":               purchaseToken,
 			"obfuscatedExternalAccountId": accountBinding,
 			"orderId":                     orderID,
-		})
+		}
+		if purchaseType != nil {
+			payload["purchaseType"] = *purchaseType
+		}
+		if refundableQuantity != nil {
+			payload["refundableQuantity"] = *refundableQuantity
+		}
+		_ = json.NewEncoder(w).Encode(payload)
 	}))
 	t.Cleanup(fake.API.Close)
 	t.Cleanup(fake.Token.Close)

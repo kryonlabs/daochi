@@ -3,6 +3,8 @@
 google :: #import "google_play";
 receipts :: #import "token_receipt";
 ledger :: #import "token_ledger";
+allocation :: #import "token_allocation";
+quantities :: #import "google_play_quantities";
 sql :: #import "std/sql_go";
 ctx :: #import "std/context_go";
 clock :: #import "std/time_go";
@@ -86,6 +88,7 @@ StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).St
 ContextError :: (value: ctx.Context) -> Error #foreign go_context "Context.Err";
 LogFailure :: (message: string, key: string, error: Error) #foreign logging "Error";
 AppendPackage :: (values: []string, value: string) -> []string #foreign builtin "append";
+UnixMillis :: (value: clock.Time) -> s64 #foreign go_time "Time.UnixMilli";
 Stopped :: (value: ctx.Context) -> bool {
     return ContextError(value) != null
 }
@@ -118,7 +121,10 @@ SQL;
 Ensure :: (database: *sql.Database, context: ctx.Context) -> Error {
     empty: [0]Any
     written := sql.Exec(database, context, Schema, empty[:])
-    return written.error
+    if written.error != null {
+        return written.error
+    }
+    return sql.Exec(database, context, quantities.SchemaSQL(), empty[:]).error
 }
 
 // Run retries durable lifecycle work independently of purchase HTTP traffic.
@@ -187,6 +193,10 @@ Reconcile :: (database: *sql.Database, context: ctx.Context, configuration: conf
         if refunded.error != null {
             failure = refunded.error
         }
+    }
+    watched := ReconcileSnapshotWatch(database, context, configuration, issuer.value, unavailable)
+    if watched != null {
+        failure = watched
     }
     return failure
 }
@@ -334,6 +344,23 @@ ProcessPurchase :: (database: *sql.Database, context: ctx.Context, signer: ed.Pr
         return result
     }
     RollbackAtReturn(begun.value)
+    quantity := inspected.quantity
+    if quantity == 0 {
+        quantity = 1
+    }
+    result.error = quantities.RecordTx(begun.value, context, inspected.paymentID, quantity)
+    if result.error != null {
+        return result
+    }
+    snapshot: s64 = -1
+    if inspected.hasRefundableQuantity {
+        snapshot = quantity - inspected.refundableQuantity
+    }
+    result.error = quantities.RecordProofTx(begun.value, context, inspected.paymentID,
+        inspected.paymentKind, snapshot, UnixMillis(clock.Now()))
+    if result.error != null {
+        return result
+    }
     existing := LoadLifecycleTx(begun.value, context, inspected.paymentID)
     result.error = existing.error
     if result.error != null {
@@ -479,6 +506,11 @@ ProcessPurchase :: (database: *sql.Database, context: ctx.Context, signer: ed.Pr
         }
         result.created = legacy.receipt.ReceiptID == ""
     }
+    result.error = ApplySnapshotTx(begun.value, context, signer, unavailable, inspected,
+        result.receipt.AccountID, result.receipt.AppID, amount)
+    if result.error != null {
+        return result
+    }
     result.error = sql.Commit(begun.value)
     return result
 }
@@ -591,20 +623,51 @@ ReconcileRefunds :: (database: *sql.Database, context: ctx.Context, configuratio
     if result.error != null {
         return result
     }
+    failure: Error
     for record: voided.value {
+        known := loadLifecycle(database, context, record.purchaseToken)
+        if known.error != null {
+            failure = known.error
+            continue
+        }
+        if known.found && known.value.accountID != "" && known.value.state != "refunded" && record.voidedQuantity > 0 {
+            snapshot: s64 = -1
+            arguments: [1]Any = .[record.purchaseToken]
+            destinations: [1]Any = .[*snapshot]
+            snapshotError := sql.ScanRow(sql.QueryRow(database, context,
+                "SELECT snapshot_refunded FROM google_play_purchase_proofs WHERE purchase_token=?1", arguments[:]), destinations[:])
+            if snapshotError != null && !errors.Is(snapshotError, sql.NoRows()) {
+                failure = snapshotError
+                continue
+            }
+            if snapshot >= 0 {
+                queued := sql.Exec(database, context,
+                    "INSERT OR IGNORE INTO google_play_snapshot_watch(purchase_token) VALUES(?1)", arguments[:])
+                if queued.error != null {
+                    failure = queued.error
+                    continue
+                }
+                refreshed := RefreshProof(database, context, configuration, known.value, signer, unavailable)
+                if refreshed != null {
+                    failure = refreshed
+                    continue
+                }
+            }
+        }
         compensated := CompensateVoided(database, context, record, signer, unavailable)
-        result.error = compensated
-        if result.error != null {
-            return result
+        if compensated != null {
+            failure = compensated
+            continue
         }
         result.compensated += 1
     }
+    result.error = failure
     return result
 }
 
 ReconcileRecentRefunds :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
     packageName: string, signer: ed.PrivateKey, unavailable: Error) -> RefundResult {
-    since := clock.Unix(clock.Now()) * 1000 - RecentRefundMillis
+    since := UnixMillis(clock.Now()) - RecentRefundMillis
     return ReconcileRefunds(database, context, configuration, packageName, since, signer, unavailable)
 }
 
@@ -625,20 +688,52 @@ CompensateVoided :: (database: *sql.Database, context: ctx.Context, voided: goog
     if voided.orderID != "" && existing.value.orderID != "" && voided.orderID != existing.value.orderID {
         return errors.New("google purchase refund order mismatch")
     }
+    refund := quantities.RefundTx(begun.value, context, voided.purchaseToken,
+        voided.voidedTimeMillis, voided.voidedQuantity, existing.value.amount)
+    if refund.error != null {
+        return refund.error
+    }
+    if refund.duplicate {
+        return sql.Commit(begun.value)
+    }
+    if refund.quantity == 0 {
+        audit := quantities.CommitRefundTx(begun.value, context, voided.purchaseToken,
+            voided.voidedTimeMillis, voided.voidedQuantity, refund, "")
+        if audit != null {
+            return audit
+        }
+        return sql.Commit(begun.value)
+    }
     event: receipts.TokenEventInput
     event.AccountID = existing.value.accountID
     event.AppID = existing.value.appID
     event.EventType = "debit"
-    event.AmountDelta = -existing.value.amount
+    event.AmountDelta = -refund.units
     event.SourceType = ProviderName
-    event.SourceRef = voided.purchaseToken
+    original := ledger.ByIDTx(begun.value, context, existing.value.receiptID)
+    if original.error != null {
+        return original.error
+    }
+    if !original.found {
+        return errors.New("google refund purchase missing")
+    }
+    event.SourceRef = original.value.SourceRef
     compensation := ledger.Insert(begun.value, context, signer, event, unavailable)
     if compensation.error != null {
         return compensation.error
     }
-    refundArguments: [4]Any = .[compensation.value.ReceiptID, voided.voidedTimeMillis, ProviderName, voided.purchaseToken]
+    quantityError := quantities.CommitRefundTx(begun.value, context, voided.purchaseToken,
+        voided.voidedTimeMillis, voided.voidedQuantity, refund, compensation.value.ReceiptID)
+    if quantityError != null {
+        return quantityError
+    }
+    refundState := existing.value.state
+    if refund.refunded + refund.quantity == refund.total {
+        refundState = "refunded"
+    }
+    refundArguments: [5]Any = .[compensation.value.ReceiptID, voided.voidedTimeMillis, ProviderName, voided.purchaseToken, refundState]
     written := sql.ExecTx(begun.value, context,
-        "UPDATE google_play_purchase_lifecycle\nSET state='refunded',refund_receipt_id=?1,voided_millis=?2,updated_at=CURRENT_TIMESTAMP\nWHERE provider=?3 AND purchase_token=?4 AND state IN ('consume_pending','consumed')",
+        "UPDATE google_play_purchase_lifecycle\nSET state=?5,refund_receipt_id=?1,voided_millis=?2,updated_at=CURRENT_TIMESTAMP\nWHERE provider=?3 AND purchase_token=?4 AND state IN ('consume_pending','consumed')",
         refundArguments[:])
     if written.error != null {
         return written.error
@@ -664,6 +759,11 @@ creditNewPurchase :: (transaction: *sql.Transaction, context: ctx.Context, signe
     event.AmountDelta = amount
     event.SourceType = ProviderName
     event.SourceRef = inspected.paymentID
+    result.error = allocation.BindGoogleTx(transaction, context, inspected.paymentID,
+        accountID, purchase.PackageName, appID, amount)
+    if result.error != null {
+        return result
+    }
     credited := ledger.CreditPaymentTx(transaction, context, signer, ProviderName, inspected.paymentID, event, unavailable)
     result.error = credited.error
     if result.error == null {
@@ -706,4 +806,161 @@ markConsumed :: (database: *sql.Database, context: ctx.Context, purchaseToken: s
         return errors.New("google purchase consume lifecycle changed")
     }
     return sql.Commit(begun.value)
+}
+
+// Every initial/replayed verification applies the cumulative provider net
+// snapshot before any gross credit becomes visible outside this transaction.
+ApplySnapshotTx :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.PrivateKey,
+    unavailable: Error, inspected: google.GooglePurchaseResult, accountID: string,
+    appID: string, amount: s64) -> Error {
+    if !inspected.hasRefundableQuantity {
+        return null
+    }
+    refund := quantities.SnapshotTx(transaction, context, inspected.paymentID, inspected.quantity,
+        inspected.quantity - inspected.refundableQuantity, amount)
+    if refund.error != null {
+        return refund.error
+    }
+    if refund.quantity == 0 {
+        return null
+    }
+    event: receipts.TokenEventInput
+    event.AccountID = accountID
+    event.AppID = appID
+    event.EventType = "debit"
+    event.AmountDelta = -refund.units
+    event.SourceType = ProviderName
+    lifecycle := LoadLifecycleTx(transaction, context, inspected.paymentID)
+    if lifecycle.error != null {
+        return lifecycle.error
+    }
+    if !lifecycle.found {
+        return errors.New("google refund lifecycle missing")
+    }
+    original := ledger.ByIDTx(transaction, context, lifecycle.value.receiptID)
+    if original.error != null {
+        return original.error
+    }
+    if !original.found {
+        return errors.New("google refund purchase missing")
+    }
+    event.SourceRef = original.value.SourceRef
+    debited := ledger.Insert(transaction, context, signer, event, unavailable)
+    if debited.error != null {
+        return debited.error
+    }
+    error := quantities.CommitSnapshotTx(transaction, context, inspected.paymentID,
+        refund.refunded + refund.quantity)
+    if error != null {
+        return error
+    }
+    arguments: [4]Any = .[inspected.paymentID, debited.value.ReceiptID,
+        refund.refunded + refund.quantity, refund.total]
+    return sql.ExecTx(transaction, context,
+        "UPDATE google_play_purchase_lifecycle SET refund_receipt_id=?2,state=CASE WHEN ?3=?4 THEN 'refunded' ELSE state END,updated_at=CURRENT_TIMESTAMP WHERE provider='google_play' AND purchase_token=?1", arguments[:]).error
+}
+
+// Backfill requires a new authenticated provider response; old source labels
+// and lifecycle metadata alone cannot establish that a purchase was paid.
+RefreshProof :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
+    record: LifecycleRecord, signer: ed.PrivateKey, unavailable: Error) -> Error {
+    request: GooglePurchaseVerifyRequest
+    request.PackageName = record.packageName
+    request.ProductID = record.productID
+    request.PurchaseToken = record.purchaseToken
+    inspected := google.InspectPurchase(context, configuration, request)
+    if inspected.error != null {
+        return inspected.error
+    }
+    if inspected.purchaseState == 2 {
+        return errors.New("google purchase pending")
+    }
+    if inspected.accountBinding != "" && inspected.accountBinding != google.AccountBinding(record.accountID) {
+        return errors.New("google purchase account mismatch")
+    }
+    if record.orderID != "" && record.orderID != inspected.orderID {
+        return errors.New("google purchase order mismatch")
+    }
+    if inspected.purchaseState == 1 && !inspected.hasRefundableQuantity {
+        return errors.New("google canceled purchase missing net quantity")
+    }
+    begun := BeginTransaction(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    RollbackAtReturn(begun.value)
+    error := quantities.RecordTx(begun.value, context, inspected.paymentID, inspected.quantity)
+    if error != null {
+        return error
+    }
+    snapshot: s64 = -1
+    if inspected.hasRefundableQuantity {
+        snapshot = inspected.quantity - inspected.refundableQuantity
+    }
+    error = quantities.RecordProofTx(begun.value, context, inspected.paymentID,
+        inspected.paymentKind, snapshot, UnixMillis(clock.Now()))
+    if error != null {
+        return error
+    }
+    error = ApplySnapshotTx(begun.value, context, signer, unavailable, inspected,
+        record.accountID, record.appID, record.amount)
+    if error != null {
+        return error
+    }
+    arguments: [1]Any = .[record.receiptID]
+    error = sql.ExecTx(begun.value, context,
+        "UPDATE referral_outbox SET done=0 WHERE receipt_id=?1", arguments[:]).error
+    if error != null {
+        return error
+    }
+    return sql.Commit(begun.value)
+}
+
+// Provider product snapshots may lag a void notification. Retain affected
+// tokens durably and recheck independently of the void API's 30-day window.
+// Pages bound provider load; oldest-attempt ordering prevents starvation.
+ReconcileSnapshotWatch :: (database: *sql.Database, context: ctx.Context, configuration: config.Config,
+    signer: ed.PrivateKey, unavailable: Error) -> Error {
+    empty: [0]Any
+    queried := sql.Query(database, context,
+        "SELECT w.purchase_token FROM google_play_snapshot_watch w JOIN google_play_purchase_lifecycle g ON g.purchase_token=w.purchase_token WHERE g.state IN ('consume_pending','consumed') ORDER BY w.last_attempt,w.purchase_token LIMIT 25", empty[:])
+    if queried.error != null {
+        return queried.error
+    }
+    tokens: []string
+    while sql.Next(queried.value) {
+        token: string
+        destinations: [1]Any = .[*token]
+        error := sql.ScanRows(queried.value, destinations[:])
+        if error != null {
+            sql.CloseRows(queried.value)
+            return error
+        }
+        tokens = AppendPackage(tokens, token)
+    }
+    error := sql.RowsError(queried.value)
+    sql.CloseRows(queried.value)
+    if error != null {
+        return error
+    }
+    failure: Error
+    for token: tokens {
+        arguments: [2]Any = .[token, UnixMillis(clock.Now())]
+        written := sql.Exec(database, context,
+            "UPDATE google_play_snapshot_watch SET last_attempt=?2 WHERE purchase_token=?1", arguments[:])
+        if written.error != null {
+            return written.error
+        }
+        record := loadLifecycle(database, context, token)
+        if record.error != null {
+            return record.error
+        }
+        if record.found {
+            refreshed := RefreshProof(database, context, configuration, record.value, signer, unavailable)
+            if refreshed != null {
+                failure = refreshed
+            }
+        }
+    }
+    return failure
 }

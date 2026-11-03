@@ -34,6 +34,23 @@ func schemaFixture(t *testing.T, setup string) *Store {
 	return store
 }
 
+// Exact additions owned by token_allocation. Existing schema objects remain
+// subject to the released catalog and seed-data oracle below.
+func schemaAllocationExtension(entry map[string]any) bool {
+	object := entry["name"].(string)
+	switch object {
+	case "token_allocation_migration", "token_google_origins", "token_allocation_receipts",
+		"token_allocations", "token_allocation_debits", "token_referral_offsets":
+		return entry["type"] == "table"
+	case "sqlite_autoindex_token_google_origins_1", "sqlite_autoindex_token_allocation_receipts_1",
+		"sqlite_autoindex_token_allocations_1", "sqlite_autoindex_token_allocations_2",
+		"sqlite_autoindex_token_allocation_debits_1", "sqlite_autoindex_token_referral_offsets_1",
+		"token_allocation_pool", "token_allocation_source", "token_allocation_google_payment":
+		return entry["type"] == "index"
+	}
+	return false
+}
+
 func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 	t.Helper()
 	result := AccountExport_QueryRows(store.Database, t.Context(), "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE ?1='' ORDER BY type,name", "", nil)
@@ -46,6 +63,9 @@ func schemaCatalog(t *testing.T, store *Store) []map[string]any {
 	// the state hash history with its triggers by the state history tests.
 	legacy := result.Value[:0]
 	for _, entry := range result.Value {
+		if schemaAllocationExtension(entry) || schemaReferralExtension(entry) {
+			continue
+		}
 		name := entry["tbl_name"].(string)
 		if strings.HasPrefix(name, "server_authorization_") || strings.HasPrefix(name, "server_telegram_") ||
 			name == "server_alias_case_collisions" || entry["name"] == "server_users_alias_case_unique" ||

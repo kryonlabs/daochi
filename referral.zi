@@ -1,0 +1,326 @@
+// Canonical issuer referral authority. No client-provided purchase value enters this module.
+#import "protocol"
+#import "std/go_types"
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+ids :: #import "resource_id";
+identity :: #import "identity";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
+clock :: #import "std/time_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+builtin :: #system_library "go:builtin";
+
+Authority :: "https://api.waozi.xyz";
+WelcomeUnits: s64 = 20000000;
+ClaimResult :: struct {
+    status: string #go_tag "json:\"status\""
+    referrer_id: string #go_tag "json:\"referrer_id\""
+    accepted_at: string #go_tag "json:\"accepted_at\""
+    welcome_units: s64 #go_tag "json:\"welcome_units\""
+    welcome_receipt_id: string #go_tag "json:\"welcome_receipt_id\""
+    error: Error #go_tag "json:\"-\""
+}
+CodeResult :: struct {
+    code: string #go_tag "json:\"code\""
+    invite_url: string #go_tag "json:\"invite_url\""
+    error: Error #go_tag "json:\"-\""
+}
+MeResult :: struct {
+    status: string #go_tag "json:\"status\""
+    authority: string #go_tag "json:\"authority\""
+    account_id: string #go_tag "json:\"account_id\""
+    code: string #go_tag "json:\"code\""
+    invite_url: string #go_tag "json:\"invite_url\""
+    referrer_id: string #go_tag "json:\"referrer_id\""
+    accepted_at: string #go_tag "json:\"accepted_at\""
+    welcome_receipt_id: string #go_tag "json:\"welcome_receipt_id\""
+    accepted_count: s64 #go_tag "json:\"accepted_count\""
+    earned_units: s64 #go_tag "json:\"earned_units\""
+    reversed_units: s64 #go_tag "json:\"reversed_units\""
+    pending_offset_units: s64 #go_tag "json:\"pending_offset_units\""
+    error: Error #go_tag "json:\"-\""
+}
+Accepted :: struct {
+    account_id: string #go_tag "json:\"account_id\""
+    display_name: string #go_tag "json:\"display_name\""
+    alias: string #go_tag "json:\"alias\""
+    accepted_at: string #go_tag "json:\"accepted_at\""
+    cursor: s64 #go_tag "json:\"cursor\""
+}
+AcceptedResult :: struct {
+    accepted: []Accepted #go_tag "json:\"accepted\""
+    next_cursor: string #go_tag "json:\"next_cursor\""
+    error: Error #go_tag "json:\"-\""
+}
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+TrimSpace :: (value: string) -> string #foreign strings;
+ToLower :: (value: string) -> string #foreign strings;
+Join :: (values: []string, separator: string) -> string #foreign strings;
+IntegerText :: (value: s64, base: isize) -> string #foreign numbers "FormatInt";
+AllocateAccepted :: (count: isize) -> []Accepted #foreign builtin "make";
+AppendAccepted :: (values: []Accepted, value: Accepted) -> []Accepted #foreign builtin "append";
+
+Now :: () -> string {
+    return clock.Format(clock.UTC(clock.Now()), "2006-01-02T15:04:05Z07:00")
+}
+Lock :: (transaction: *sql.Transaction, context: ctx.Context) -> Error {
+    empty: [0]Any
+    return sql.ExecTx(transaction, context, "UPDATE referral_state SET backfill_seq=backfill_seq WHERE id=1", empty[:]).error
+}
+ActiveCode :: (transaction: *sql.Transaction, context: ctx.Context, account: string) -> CodeResult {
+    result: CodeResult
+    arguments: [1]Any = .[account]
+    destinations: [1]Any = .[*result.code]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT code FROM referral_codes WHERE account_id=?1 AND revoked_at=''", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        generated := ids.New()
+        result.error = generated.error
+        if result.error != null {
+            return result
+        }
+        result.code = generated.value
+        values: [3]Any = .[result.code, account, Now()]
+        result.error = sql.ExecTx(transaction, context,
+            "INSERT INTO referral_codes(code,account_id,created_at) VALUES(?1,?2,?3)", values[:]).error
+    }
+    result.invite_url = InviteURL(result.code)
+    return result
+}
+
+#scope_export
+NormalizeCode :: (code: string) -> string {
+    return ToLower(TrimSpace(code))
+}
+InviteURL :: (code: string) -> string {
+    parts: [2]string = .["https://dew.waozi.xyz/invite/", code]
+    return Join(parts[:], "")
+}
+Code :: (database: *sql.Database, context: ctx.Context, account: string, requestID: string) -> CodeResult {
+    result: CodeResult
+    begun := sql.Begin(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    result.error = Lock(transaction, context)
+    if result.error != null {
+        return result
+    }
+    if requestID != "" {
+        arguments: [2]Any = .[account, requestID]
+        destinations: [1]Any = .[*result.code]
+        result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT code FROM referral_rotations WHERE account_id=?1 AND request_id=?2", arguments[:]), destinations[:])
+        if result.error == null {
+            result.invite_url = InviteURL(result.code)
+            result.error = sql.Commit(transaction)
+            return result
+        }
+        if !errors.Is(result.error, sql.NoRows()) {
+            return result
+        }
+        revoked: [2]Any = .[account, Now()]
+        result.error = sql.ExecTx(transaction, context,
+            "UPDATE referral_codes SET revoked_at=?2 WHERE account_id=?1 AND revoked_at=''", revoked[:]).error
+        if result.error != null {
+            return result
+        }
+    }
+    result = ActiveCode(transaction, context, account)
+    if result.error != null {
+        return result
+    }
+    if requestID != "" {
+        values: [3]Any = .[account, requestID, result.code]
+        result.error = sql.ExecTx(transaction, context,
+            "INSERT INTO referral_rotations(account_id,request_id,code) VALUES(?1,?2,?3)", values[:]).error
+        if result.error != null {
+            return result
+        }
+    }
+    result.error = sql.Commit(transaction)
+    return result
+}
+
+Claim :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey,
+    account: string, code: string, requestID: string, app: string) -> ClaimResult {
+    result: ClaimResult
+    code = NormalizeCode(code)
+    if !identity.ValidUserID(account) || !identity.ValidClientID(requestID) || code.count != 32 ||
+    (app != "" && !identity.ValidNamespace(app)) {
+        result.error = errors.New("invalid_request")
+        return result
+    }
+    begun := sql.Begin(database, context, null)
+    result.error = begun.error
+    if result.error != null {
+        return result
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    result.error = Lock(transaction, context)
+    if result.error != null {
+        return result
+    }
+    existingCode: string
+    existingRequest: string
+    arguments: [1]Any = .[account]
+    destinations: [5]Any = .[*result.referrer_id, *result.accepted_at, *result.welcome_receipt_id, *existingCode, *existingRequest]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT referrer_id,accepted_at,welcome_receipt_id,code,request_id FROM referral_claims WHERE account_id=?1", arguments[:]), destinations[:])
+    if result.error == null {
+        if code != existingCode {
+            result.error = errors.New("already_bound")
+            if existingRequest == requestID {
+                result.error = errors.New("request_conflict")
+            }
+            return result
+        }
+        result.status = "already_bound"
+        result.welcome_units = WelcomeUnits
+        result.error = sql.Commit(transaction)
+        return result
+    }
+    if !errors.Is(result.error, sql.NoRows()) {
+        return result
+    }
+    // Require a registered, live account even for internal callers.
+    accountCount: s64
+    accountDestinations: [1]Any = .[*accountCount]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM server_users WHERE user_id_hash=?1", arguments[:]), accountDestinations[:])
+    if result.error != null {
+        return result
+    }
+    if accountCount != 1 {
+        result.error = errors.New("invalid_request")
+        return result
+    }
+    // Optional host attribution is untrusted audit data. It never requires or
+    // creates an app registration, token permission or spending entitlement.
+    codeArguments: [1]Any = .[code]
+    revoked: string
+    codeDestinations: [2]Any = .[*result.referrer_id, *revoked]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT c.account_id,c.revoked_at FROM referral_codes c JOIN server_users u ON u.user_id_hash=c.account_id WHERE c.code=?1", codeArguments[:]), codeDestinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = errors.New("invalid_code")
+    }
+    if result.error != null {
+        return result
+    }
+    if revoked != "" {
+        result.error = errors.New("revoked_code")
+        return result
+    }
+    if result.referrer_id == account {
+        result.error = errors.New("self_referral")
+        return result
+    }
+    event: receipts.TokenEventInput
+    event.AccountID = account
+    event.EventType = "credit"
+    event.AmountDelta = WelcomeUnits
+    event.SourceType = "referral_welcome"
+    event.SourceRef = account
+    credit := ledger.CreditPaymentTx(transaction, context, signer, "referral_welcome", account, event, errors.New("unavailable"))
+    result.error = credit.error
+    if result.error != null {
+        return result
+    }
+    result.accepted_at = Now()
+    result.welcome_receipt_id = credit.value.ReceiptID
+    result.welcome_units = WelcomeUnits
+    values: [8]Any = .[account, result.referrer_id, code, requestID, app, result.accepted_at,
+        credit.value.ReceiptID, credit.value.LedgerSeq]
+    result.error = sql.ExecTx(transaction, context,
+        "INSERT INTO referral_claims(account_id,referrer_id,code,request_id,source_app_id,accepted_at,welcome_receipt_id,welcome_seq) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", values[:]).error
+    if result.error != null {
+        return result
+    }
+    result.status = "bound"
+    result.error = sql.Commit(transaction)
+    return result
+}
+
+Me :: (database: *sql.Database, context: ctx.Context, account: string) -> MeResult {
+    result: MeResult
+    code := Code(database, context, account, "")
+    result.error = code.error
+    if result.error != null {
+        return result
+    }
+    result.status = "ok"
+    result.authority = Authority
+    result.account_id = account
+    result.code = code.code
+    result.invite_url = code.invite_url
+    arguments: [1]Any = .[account]
+    destinations: [3]Any = .[*result.referrer_id, *result.accepted_at, *result.welcome_receipt_id]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT referrer_id,accepted_at,welcome_receipt_id FROM referral_claims WHERE account_id=?1", arguments[:]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+    }
+    if result.error != null {
+        return result
+    }
+    countDestinations: [1]Any = .[*result.accepted_count]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT COUNT(*) FROM referral_claims WHERE referrer_id=?1", arguments[:]), countDestinations[:])
+    if result.error != null {
+        return result
+    }
+    earnings: [3]Any = .[*result.earned_units, *result.reversed_units, *result.pending_offset_units]
+    result.error = sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT COALESCE(SUM(issued_units),0),COALESCE(SUM(reversed_units),0),COALESCE(SUM(MAX(0,issued_units-reversed_units-target_units)),0) FROM referral_commissions WHERE referrer_id=?1", arguments[:]), earnings[:])
+    return result
+}
+
+ListAccepted :: (database: *sql.Database, context: ctx.Context, account: string, cursor: s64, limit: s64) -> AcceptedResult {
+    result: AcceptedResult
+    result.accepted = AllocateAccepted(0)
+    if cursor < 0 || limit < 1 || limit > 100 {
+        result.error = errors.New("invalid_request")
+        return result
+    }
+    arguments: [3]Any = .[account, cursor, limit + 1]
+    queried := sql.Query(database, context,
+        "SELECT c.account_id,COALESCE(u.alias,''),c.accepted_at,c.seq FROM referral_claims c LEFT JOIN server_users u ON u.user_id_hash=c.account_id WHERE c.referrer_id=?1 AND c.seq>?2 ORDER BY c.seq LIMIT ?3", arguments[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    while sql.Next(rows) {
+        item: Accepted
+        destinations: [4]Any = .[*item.account_id, *item.alias, *item.accepted_at, *item.cursor]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        if result.accepted.count == limit {
+            result.next_cursor = IntegerText(result.accepted[result.accepted.count - 1].cursor, 10)
+            return result
+        }
+        item.display_name = item.alias
+        if item.display_name == "" {
+            item.display_name = item.account_id
+        }
+        result.accepted = AppendAccepted(result.accepted, item)
+    }
+    result.error = sql.RowsError(rows)
+    return result
+}

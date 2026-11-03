@@ -1,7 +1,10 @@
+shopStrings :: #system_library "go:strings";
+shop :: #import "token_shop";
 #import "protocol"
 #import "token_receipt"
 #import "std/go_types"
 receipts :: #import "token_receipt";
+allocations :: #import "token_allocation";
 ids :: #import "resource_id";
 ctx :: #import "std/context_go";
 sql :: #import "std/sql_go";
@@ -37,6 +40,7 @@ SpendResult :: struct {
 }
 
 #scope_file
+Split :: (value: string, separator: string) -> []string #foreign shopStrings;
 NullInteger :: #type #foreign go_sql "NullInt64";
 TransactionResult :: struct {
     value: *sql.Transaction
@@ -164,6 +168,15 @@ Balance :: (database: *sql.Database, context: ctx.Context, accountID: string, as
     return ReadBalance(QueryBalance(database, context, BalanceSQL, accountID, assetID))
 }
 
+AvailableTx :: (transaction: *sql.Transaction, context: ctx.Context, accountID: string,
+    appID: string, sourceType: string, sourceRef: string) -> BalanceResult {
+    available := allocations.AvailableTx(transaction, context, accountID, appID, sourceType, sourceRef)
+    result: BalanceResult
+    result.value = available.value
+    result.error = available.error
+    return result
+}
+
 AppBalance :: (database: *sql.Database, context: ctx.Context, accountID: string, assetID: string, appID: string) -> BalanceResult {
     return ReadBalance(QueryAppBalance(database, context, AppBalanceSQL, accountID, assetID, appID))
 }
@@ -187,6 +200,23 @@ AppList :: (database: *sql.Database, context: ctx.Context, accountID: string, as
     if queried.error != null {
         result: ReceiptsResult
         result.error = queried.error
+        return result
+    }
+    return ReadReceipts(queried.value)
+}
+
+ListPage :: (database: *sql.Database, context: ctx.Context, accountID: string,
+    assetID: string, appID: string, since: s64, limit: s64) -> ReceiptsResult {
+    result: ReceiptsResult
+    if limit < 1 || limit > 100 {
+        result.error = errors.New("invalid ledger limit")
+        return result
+    }
+    arguments: [5]Any = .[accountID, assetID, since, appID, limit]
+    queried := sql.Query(database, context,
+        "SELECT receipt_id,issuer_id,asset_id,account_id,app_id,event_type,amount_delta,ledger_seq,previous_hash,event_hash,created_at,source_type,source_ref,signature FROM token_ledger WHERE account_id=?1 AND asset_id=?2 AND ledger_seq>?3 AND (?4='' OR app_id=?4) ORDER BY ledger_seq LIMIT ?5", arguments[:])
+    result.error = queried.error
+    if result.error != null {
         return result
     }
     return ReadReceipts(queried.value)
@@ -248,6 +278,9 @@ Insert :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.Priva
         receipt.PreviousHash, receipt.EventHash, receipt.Signature,
         receipt.CreatedAt, receipt.SourceType, receipt.SourceRef)
     result.error = written.error
+    if result.error == null {
+        result.error = allocations.RecordTx(transaction, context, receipt)
+    }
     if result.error == null {
         result.value = receipt
         result.found = true
@@ -345,6 +378,38 @@ SpendTx :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.Priv
         result.error = errors.New("spend amount must be negative")
         return result
     }
+    // New title attribution preserves a historical Entity shop purchase's
+    // stable key. Never charge again merely because its title is now explicit.
+    if input.SourceType == "spend" {
+        actionParts := Split(input.SourceRef, ":")
+        if actionParts.count == 2 && shop.Title(actionParts[0]) == input.AppID && actionParts[1] == key {
+            legacyID: string
+            legacyHash: string
+            legacyError := ScanNonce(QueryNonce(transaction, context,
+                "SELECT receipt_id,request_hash FROM token_spend_nonces WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3",
+                input.AccountID, "entity", key), *legacyID, *legacyHash)
+            if legacyError != null && !errors.Is(legacyError, sql.NoRows()) {
+                result.error = legacyError
+                return result
+            }
+            if legacyError == null {
+                legacy := ByIDTx(transaction, context, legacyID)
+                if legacy.error != null {
+                    result.error = legacy.error
+                    return result
+                }
+                if legacy.found && legacy.value.AccountID == input.AccountID && legacy.value.AppID == "entity" &&
+                legacy.value.AssetID == receipts.AssetID && legacy.value.SourceType == input.SourceType &&
+                legacy.value.SourceRef == input.SourceRef && legacy.value.AmountDelta == input.AmountDelta {
+                    balance := BalanceTx(transaction, context, input.AccountID, receipts.AssetID)
+                    result.error = balance.error
+                    result.balance = balance.value
+                    result.value = legacy.value
+                    return result
+                }
+            }
+        }
+    }
     requestHash := receipts.SpendRequestHash(input)
     receiptID: string
     previousHash: string
@@ -382,7 +447,12 @@ SpendTx :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.Priv
     if result.error != null {
         return result
     }
-    if balance.value + input.AmountDelta < 0 {
+    available := AvailableTx(transaction, context, input.AccountID, input.AppID, input.SourceType, input.SourceRef)
+    if available.error != null {
+        result.error = available.error
+        return result
+    }
+    if input.AmountDelta == -9223372036854775808 || -input.AmountDelta > available.value {
         result.balance = balance.value
         result.error = errors.New("insufficient balance")
         return result

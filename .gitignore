@@ -16,3 +16,5 @@ monero-wallet-cli.log
 *.zi.go
 *.zi_test.go
 .ziran/
+
+work/

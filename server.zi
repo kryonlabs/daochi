@@ -17,6 +17,7 @@ access :: #import "account_access";
 account_signature :: #import "account_signature";
 operations :: #import "operational_http";
 tokens :: #import "token_http";
+referrals :: #import "referral_http";
 storage_plans :: #import "storage_plan_http";
 unlocks :: #import "unlock_http";
 gifts :: #import "token_gift_http";
@@ -404,6 +405,10 @@ Routes :: (server: *Server) -> middleware.Handler #go_method "Routes" {
     Route(mux, "POST /api/v1/game-completions", server, HandleGameCompletions)
     Route(mux, "GET /api/v1/game-completions", server, HandleGameCompletions)
     Route(mux, "GET /api/v1/rates", server, HandleExchangeRate)
+    Route(mux, "GET /api/v1/referrals/me", server, HandleReferralMe)
+    Route(mux, "POST /api/v1/referrals/claim", server, HandleReferralClaim)
+    Route(mux, "GET /api/v1/referrals/accepted", server, HandleReferralAccepted)
+    Route(mux, "POST /api/v1/referrals/code/rotate", server, HandleReferralRotate)
     Route(mux, "GET /api/v1/tokens/balance", server, HandleTokenHttpBalance)
     Route(mux, "GET /api/v1/tokens/ledger", server, HandleTokenHttpLedger)
     Route(mux, "GET /api/v1/tokens/activity", server, HandleTokenHttpActivity)
@@ -1011,4 +1016,17 @@ HandleUnlockPrices :: (server: *Server, writer: http.ResponseWriter, request: *h
 
 HandleExchangeRate :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
     exchange_rates.Handle(server.cfg, writer, request)
+}
+
+HandleReferralMe :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    referrals.Me(Tokens(server), writer, request)
+}
+HandleReferralClaim :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    referrals.Claim(Tokens(server), writer, request)
+}
+HandleReferralAccepted :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    referrals.Accepted(Tokens(server), writer, request)
+}
+HandleReferralRotate :: (server: *Server, writer: http.ResponseWriter, request: *http.Request) {
+    referrals.Rotate(Tokens(server), writer, request)
 }

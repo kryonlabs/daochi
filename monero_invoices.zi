@@ -4,6 +4,7 @@
 #import "std/option"
 deposits :: #import "monero_deposits";
 storage :: #import "monero_invoice_store";
+finality :: #import "referral_monero";
 wallet :: #import "monero_wallet";
 ledger :: #import "token_ledger";
 receipts :: #import "token_receipt";
@@ -279,6 +280,10 @@ Run :: (monero: deposits.Monero, context: ctx.Context, interval: clock.Duration)
         expiredError := SweepExpired(monero, context, cast(isize)50)
         if expiredError != null {
             LogWarning("monero expired invoice sweep failed", "error", expiredError)
+        }
+        finalityError := finality.Reconcile(monero.database, context, <<monero.configuration)
+        if finalityError != null {
+            LogWarning("monero invoice finality reconciliation failed", "error", finalityError)
         }
         depositError := deposits.Reconcile(monero, context)
         if depositError != null {

@@ -19,7 +19,7 @@ import (
 type docsContextKey struct{}
 
 func TestZiranDocsSpecAgainstBaseline(t *testing.T) {
-	actual, original := Docs_Spec(), baselineOpenAPISpec()
+	actual, original := releasedDocsSpec(Docs_Spec()), baselineOpenAPISpec()
 	if !reflect.DeepEqual(actual, original) {
 		t.Fatal("OpenAPI spec changed its fields, values or concrete native types")
 	}
@@ -46,7 +46,7 @@ func TestZiranDocsSpecAgainstBaseline(t *testing.T) {
 	}
 	actual["info"].(map[string]any)["title"] = "changed"
 	delete(actual["paths"].(map[string]any), "/healthz")
-	if !reflect.DeepEqual(Docs_Spec(), original) {
+	if !reflect.DeepEqual(releasedDocsSpec(Docs_Spec()), original) {
 		t.Fatal("spec builders share mutable maps across requests")
 	}
 	parameters := Docs_SignedHeaderParameters()
@@ -121,6 +121,8 @@ func TestZiranDocsOpenAPIAgainstBaseline(t *testing.T) {
 				}()
 				panics = append(panics, panicValue)
 			}
+			writers[0].body = releasedDocsBytes(t, writers[0].body)
+			writers[0].written = releasedDocsBytes(t, writers[0].written)
 			if !reflect.DeepEqual(writers[0], writers[1]) || panics[0] != panics[1] {
 				t.Fatal("OpenAPI write order, bytes, errors or panic identity changed", panics)
 			}
@@ -230,10 +232,64 @@ func TestZiranDocsConcurrentOpenAPI(t *testing.T) {
 			defer workers.Done()
 			writer := httptest.NewRecorder()
 			Docs_OpenAPI(writer, nil)
-			if writer.Code != http.StatusOK || !bytes.Equal(writer.Body.Bytes(), want) {
+			if writer.Code != http.StatusOK || !bytes.Equal(releasedDocsBytes(t, writer.Body.Bytes()), want) {
 				t.Error("concurrent OpenAPI response differs from the original")
 			}
 		}()
 	}
 	workers.Wait()
+}
+
+// Keep the complete released-spec oracle intact, excluding only four
+// intentional referral extensions. The route/schema assertions below cover them.
+func releasedDocsSpec(spec map[string]any) map[string]any {
+	paths := spec["paths"].(map[string]any)
+	for _, path := range []string{"/api/v1/referrals/me", "/api/v1/referrals/claim", "/api/v1/referrals/accepted", "/api/v1/referrals/code/rotate"} {
+		delete(paths, path)
+	}
+	return spec
+}
+func releasedDocsBytes(t *testing.T, body []byte) []byte {
+	t.Helper()
+	if len(body) == 0 {
+		return body
+	}
+	var value map[string]any
+	if err := json.Unmarshal(body, &value); err != nil {
+		t.Fatal(err)
+	}
+	// Preserve native numbers as decoded in both byte payloads; marshaling
+	// emits identical numeric values to the original builder.
+	encoded, err := json.Marshal(releasedDocsSpec(value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(encoded, '\n')
+}
+func TestReferralOpenAPIContract(t *testing.T) {
+	paths := Docs_Spec()["paths"].(map[string]any)
+	for path, method := range map[string]string{"/api/v1/referrals/me": "get", "/api/v1/referrals/claim": "post", "/api/v1/referrals/accepted": "get", "/api/v1/referrals/code/rotate": "post"} {
+		endpoint, ok := paths[path].(map[string]any)
+		if !ok || len(endpoint) != 1 {
+			t.Fatalf("referral path contract%s", path)
+		}
+		operation, ok := endpoint[method].(map[string]any)
+		if !ok {
+			t.Fatalf("method%s", path)
+		}
+		responses := operation["responses"].(map[string]any)
+		for _, status := range []string{"200", "401", "409"} {
+			if responses[status] == nil {
+				t.Fatalf("missing documented%s %s", path, status)
+			}
+		}
+	}
+	claim := paths["/api/v1/referrals/claim"].(map[string]any)["post"].(map[string]any)
+	content := claim["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	if content["additionalProperties"] != false || !reflect.DeepEqual(content["required"], []any{"code", "request_id"}) {
+		t.Fatal("claim request schema drift", content)
+	}
+	if !bytes.Contains([]byte(claim["description"].(string)), []byte("no purchase")) {
+		t.Fatal("welcome condition undocumented")
+	}
 }

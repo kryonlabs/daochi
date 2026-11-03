@@ -58,6 +58,7 @@ Config :: struct {
     WaoziIssuerPrivateKey: PrivateKey
     TokenProducts: Map(string, TokenProduct)
     GooglePackageNames: Map(string, bool)
+    GooglePackageApps: Map(string, string)
     GoogleServiceAccountJSON: string
     GoogleOAuthClientJSON: string
     // Sign in with Google: the OAuth client IDs whose tokens this node accepts,
@@ -325,6 +326,7 @@ Load :: () -> Config {
     result.WaoziIssuerPrivateKey = issuerPrivate
     result.TokenProducts = Products(EnvString("DAOCHI_TOKEN_PRODUCTS", ""))
     result.GooglePackageNames = FromEnvironment(EnvString("DAOCHI_GOOGLE_PACKAGE_NAMES", ""))
+    result.GooglePackageApps = GoogleApps(EnvString("DAOCHI_GOOGLE_PACKAGE_APPS", ""))
     result.GoogleServiceAccountJSON = EnvStringOrFile("DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON", "DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE", "")
     result.GoogleOAuthClientJSON = EnvStringOrFile("DAOCHI_GOOGLE_OAUTH_CLIENT_JSON", "DAOCHI_GOOGLE_OAUTH_CLIENT_JSON_FILE", "")
     result.GoogleSignInClientIDs = ClientIDList(Getenv("DAOCHI_GOOGLE_SIGNIN_CLIENT_IDS"))
@@ -358,4 +360,34 @@ Load :: () -> Config {
     result.ChatDailyLimit = EnvInt64("DAOCHI_CHAT_DAILY_LIMIT", cast(s64)20)
     result.ChatGlobalDailyLimit = EnvInt64("DAOCHI_CHAT_GLOBAL_DAILY_LIMIT", cast(s64)1000)
     return result
+}
+
+// Package/title bindings are operator configuration, never client attribution.
+GoogleApps :: (raw: string) -> Map(string, string) {
+    result: Map(string, string)
+    MapInit(result)
+    for item: SplitText(raw, ",") {
+        parts := SplitText(TrimSpace(item), "=")
+        if parts.count == 2 && TrimSpace(parts[0]) != "" && TrimSpace(parts[1]) != "" {
+            MapSet(result, TrimSpace(parts[0]), TrimSpace(parts[1]))
+        }
+    }
+    return result
+}
+
+GoogleApp :: (configuration: Config, packageName: string) -> string {
+    configured := MapGet(configuration.GooglePackageApps, packageName)
+    if configured != "" {
+        return configured
+    }
+    if packageName == "xyz.waozi.inbe" || packageName == "net.waozi.inbe" {
+        return "inbe"
+    }
+    if packageName == "xyz.waozi.shovey" {
+        return "shovey"
+    }
+    if packageName == "xyz.waozi.wurm" {
+        return "wurm"
+    }
+    return ""
 }

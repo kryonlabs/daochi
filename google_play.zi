@@ -31,6 +31,10 @@ AccessTokenResult :: struct {
     error: Error
 }
 GooglePurchaseResult :: struct {
+    quantity: s64
+    refundableQuantity: s64
+    hasRefundableQuantity: bool
+    paymentKind: string
     paymentID: string
     accountBinding: string
     orderID: string
@@ -46,6 +50,7 @@ GoogleVoidedPurchase :: struct {
     purchaseToken: string #go_tag "json:\"purchaseToken\""
     orderID: string #go_tag "json:\"orderId\""
     voidedTimeMillis: s64 #go_tag "json:\"voidedTimeMillis,string\""
+    voidedQuantity: s64 #go_tag "json:\"voidedQuantity\""
     voidedSource: isize #go_tag "json:\"voidedSource\""
     voidedState: isize #go_tag "json:\"voidedState\""
 }
@@ -79,6 +84,8 @@ GoogleAPIBaseURL: string = "https://androidpublisher.googleapis.com/androidpubli
 #scope_file
 PurchasePayload :: struct {
     #go_anonymous
+    refundableQuantity: *s64 #go_tag "json:\"refundableQuantity\""
+    quantity: *s64 #go_tag "json:\"quantity\""
     purchaseState: *isize #go_tag "json:\"purchaseState\""
     consumptionState: *isize #go_tag "json:\"consumptionState\""
     acknowledgementState: isize #go_tag "json:\"acknowledgementState\""
@@ -150,7 +157,7 @@ VoidedEndpoint :: (packageName: string, sinceMillis: s64, pageToken: string) -> 
     parts[0] = GoogleAPIBaseURL
     parts[1] = "/applications/"
     parts[2] = PathEscape(packageName)
-    parts[3] = "/purchases/voidedpurchases?maxResults=100&startTime="
+    parts[3] = "/purchases/voidedpurchases?includeQuantityBasedPartialRefund=true&maxResults=100&startTime="
     parts[4] = QueryEscape(FormatInteger(sinceMillis, cast(isize)10))
     if pageToken != "" {
         parts[5] = "&token="
@@ -398,6 +405,46 @@ InspectPurchase :: (context: ctx.Context, configuration: config.Config,
     if result.purchaseState < 0 || result.purchaseState > 2 || result.consumptionState < 0 || result.consumptionState > 1 {
         result.error = errors.New("invalid google purchase response")
         return result
+    }
+    result.quantity = 1
+    if payload.quantity != null {
+        result.quantity = <<payload.quantity
+    }
+    if result.quantity < 1 || result.quantity > 2147483647 {
+        result.error = errors.New("invalid google purchase quantity")
+        return result
+    }
+    result.refundableQuantity = result.quantity
+    result.hasRefundableQuantity = payload.refundableQuantity != null
+    if result.hasRefundableQuantity {
+        result.refundableQuantity = <<payload.refundableQuantity
+    }
+    if result.quantity > 1 && !result.hasRefundableQuantity {
+        result.error = errors.New("google multi-quantity purchase missing net proof")
+        return result
+    }
+    if result.refundableQuantity < 0 || result.refundableQuantity > result.quantity {
+        result.error = errors.New("invalid google refundable quantity")
+        return result
+    }
+    // Only absent purchaseType denotes standard paid billing. Provider test,
+    // promo and rewarded grants remain usable but never generate commissions.
+    result.paymentKind = "paid"
+    if payload.purchaseType != null {
+        kind := <<payload.purchaseType
+        if kind == 0 {
+            result.paymentKind = "test"
+        }
+        else if kind == 1 {
+            result.paymentKind = "promo"
+        }
+        else if kind == 2 {
+            result.paymentKind = "rewarded"
+        }
+        else {
+            result.error = errors.New("unknown google purchase type")
+            return result
+        }
     }
     result.orderID = payload.orderID
     result.accountBinding = payload.obfuscatedExternalAccountId

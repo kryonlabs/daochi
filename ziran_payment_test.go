@@ -243,7 +243,32 @@ func TestZiranPaymentReadHandlersMatchBaseline(t *testing.T) {
 						handler.baseline(writers[index], request)
 					}
 				}
-				compareHTTPResponse(t, writers[0], writers[1])
+				// Compare every released field byte-for-byte; allocation metadata
+				// is independently validated by TestTokenAllocationBalanceHTTPMetadata.
+				if strings.HasPrefix(handler.path, "/api/v1/tokens/balance") && writers[0].Code == 200 {
+					var extended map[string]json.RawMessage
+					if err := json.Unmarshal(writers[0].Body.Bytes(), &extended); err != nil {
+						t.Fatal(err)
+					}
+					for _, key := range []string{"shared_balance", "scoped_balance", "spendable_balance"} {
+						delete(extended, key)
+					}
+					var released map[string]json.RawMessage
+					if err := json.Unmarshal(writers[1].Body.Bytes(), &released); err != nil {
+						t.Fatal(err)
+					}
+					for _, key := range []string{"shared_balance", "scoped_balance", "spendable_balance"} {
+						delete(released, key)
+					}
+					if !reflect.DeepEqual(extended, released) {
+						t.Fatal("released balance fields changed", extended, released)
+					}
+					if writers[0].Code != writers[1].Code || !reflect.DeepEqual(writers[0].Header(), writers[1].Header()) {
+						t.Fatal("balance response status/headers changed")
+					}
+				} else {
+					compareHTTPResponse(t, writers[0], writers[1])
+				}
 			}
 			if actual.Metrics.RateLimitedRequests != baseline.Metrics.RateLimitedRequests || actual.Metrics.AuthFailures != baseline.Metrics.AuthFailures {
 				t.Fatal("payment rejection counters changed")

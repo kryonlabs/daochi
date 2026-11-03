@@ -5,6 +5,7 @@ reward_paths :: #import "reward_paths";
 reward_migration_paths :: #import "reward_migration_paths";
 game_evidence_paths :: #import "game_evidence_paths";
 gift_paths :: #import "token_gift_paths";
+referral_paths :: #import "referral_paths";
 publication_paths :: #import "publications_paths";
 exchange_rate_paths :: #import "exchange_rate_paths";
 #import "std/go_types"
@@ -2208,6 +2209,10 @@ Paths :: () -> Map(string, Any) {
     unlocks := unlock_paths.Paths()
     MapSet(result, "/api/v1/unlocks", MapGet(unlocks, "/api/v1/unlocks"))
     MapSet(result, "/api/v1/unlocks/grant", MapGet(unlocks, "/api/v1/unlocks/grant"))
+    referrals := referral_paths.Paths()
+    for path: MapKeys(referrals) {
+        MapSet(result, path, MapGet(referrals, path))
+    }
     gifts := gift_paths.Paths()
     MapSet(result, "/api/v1/tokens/gifts", MapGet(gifts, "/api/v1/tokens/gifts"))
     MapSet(result, "/api/v1/unlocks/products", MapGet(unlocks, "/api/v1/unlocks/products"))

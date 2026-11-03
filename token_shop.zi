@@ -1,0 +1,115 @@
+// Server-owned attribution and prices for Entity's existing game shop.
+#import "protocol"
+#import "std/go_types"
+errors :: #import "std/errors_go";
+strings :: #system_library "go:strings";
+numbers :: #system_library "go:strconv";
+
+ShopProduct :: struct {
+    app: string
+    key: string
+    units: s64
+}
+#scope_file
+Split :: (value: string, separator: string) -> []string #foreign strings;
+HasPrefix :: (value: string, prefix: string) -> bool #foreign strings;
+IntegerResult :: struct {
+    value: s64
+    error: Error
+}
+ParseInt :: (value: string, base: isize, bits: isize) -> IntegerResult #go_results #foreign numbers;
+FormatInt :: (value: s64, base: isize) -> string #foreign numbers;
+
+#scope_export
+Title :: (action: string) -> string {
+    product := Product(action)
+    if product.app != "" {
+        return product.app
+    }
+    if action == "wurm.coins" {
+        return "wurm"
+    }
+    if action == "shovey.coins" {
+        return "shovey"
+    }
+    return ""
+}
+Product :: (action: string) -> ShopProduct {
+    p: ShopProduct
+    if action == "wurm.mint" {
+        p = .{"wurm", "skin-wurm-mint-v2", 10000000}
+    }
+    else if action == "wurm.berry" {
+        p = .{"wurm", "skin-wurm-berry-v2", 20000000}
+    }
+    else if action == "wurm.rose" {
+        p = .{"wurm", "skin-wurm-rose-v2", 30000000}
+    }
+    else if action == "wurm.lunar-dragon" {
+        p = .{"wurm", "skin-wurm-lunar-dragon-v1", 50000000}
+    }
+    else if action == "wurm.mountains" {
+        p = .{"wurm", "stage-wurm-mountains-v1", 20000000}
+    }
+    else if action == "choano.pearl" {
+        p = .{"choano", "decoration-choano-pearl-v1", 10000000}
+    }
+    else if action == "choano.flower" {
+        p = .{"choano", "decoration-choano-flower-v1", 20000000}
+    }
+    else if action == "choano.wizard" {
+        p = .{"choano", "decoration-choano-wizard-v1", 30000000}
+    }
+    else if action == "shovey.night" {
+        p = .{"shovey", "skin-shovey-night-v1", 10000000}
+    }
+    else if action == "shovey.crystal" {
+        p = .{"shovey", "skin-shovey-crystal-v1", 30000000}
+    }
+    return p
+}
+
+Validate :: (request: TokenSpendRequest) -> Error {
+    product := Product(request.Action)
+    if request.Action == "wurm.coins" || request.Action == "shovey.coins" {
+        parts := Split(request.IdempotencyKey, "-")
+        if parts.count != 5 || parts[0] != "coins" || parts[4] != "v1" {
+            return errors.New("invalid shop coin key")
+        }
+        product.app = "wurm"
+        if request.Action == "shovey.coins" {
+            product.app = "shovey"
+        }
+        if parts[1] != product.app {
+            return errors.New("shop title mismatch")
+        }
+        if parts[2] == "1" {
+            product.units = 2000000
+        }
+        else if parts[2] == "2" {
+            product.units = 5000000
+        }
+        else if parts[2] == "3" {
+            product.units = 10000000
+        }
+        else {
+            return errors.New("unknown shop coin pack")
+        }
+        sequence := ParseInt(parts[3], 10, 64)
+        if sequence.error != null || sequence.value <= 0 || FormatInt(sequence.value, 10) != parts[3] {
+            return errors.New("invalid shop coin sequence")
+        }
+        product.key = request.IdempotencyKey
+    }
+    if product.app == "" {
+        if HasPrefix(request.Action, "wurm.") || HasPrefix(request.Action, "shovey.") || HasPrefix(request.Action, "choano.") {
+            return errors.New("unknown shop product")
+        }
+        return null
+    }
+    if request.AppID != product.app || request.Amount != product.units ||
+    request.IdempotencyKey != product.key || request.Metadata != "" {
+        return errors.New("shop product title, price or key mismatch")
+    }
+    return null
+}

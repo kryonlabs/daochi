@@ -2,11 +2,13 @@
 #import "std/go_types"
 #import "std/map_go"
 config :: #import "config";
+shop :: #import "token_shop";
 auth :: #import "authentication";
 policy :: #import "token_policy";
 requests :: #import "payment_request";
 receipts :: #import "token_receipt";
 ledger :: #import "token_ledger";
+allocation :: #import "token_allocation";
 activity :: #import "token_activity";
 assets :: #import "token_assets";
 checkpoints :: #import "token_checkpoint";
@@ -160,11 +162,19 @@ Balance :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request)
         response.Error(writer, cast(isize)500, "token balance failed")
         return
     }
+    pools := allocation.Balances(tokens.database, http.Context(request), user.value, receipts.AssetID, filter.value)
+    if pools.error != null {
+        response.Error(writer, 500, "token balance failed")
+        return
+    }
     value: TokenBalanceResponse
     value.AccountID = user.value
     value.AssetID = receipts.AssetID
     value.AppID = filter.value
     value.Balance = balance.value
+    value.SharedBalance = pools.shared
+    value.ScopedBalance = pools.scoped
+    value.SpendableBalance = pools.spendable
     response.JSON(writer, cast(isize)200, value)
 }
 
@@ -180,7 +190,16 @@ Ledger :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) 
         return
     }
     listed: ledger.ReceiptsResult
-    if filter.scoped {
+    pageSize := TrimSpace(url.Value(url.Query(http.RequestURL(request)), "limit"))
+    if pageSize != "" {
+        limit := ParseInt(pageSize, 10, 64)
+        if limit.error != null || limit.value < 1 || limit.value > 100 {
+            response.Error(writer, 400, "invalid ledger limit")
+            return
+        }
+        listed = ledger.ListPage(tokens.database, http.Context(request), user.value,
+            receipts.AssetID, filter.value, since.value, limit.value)
+    } else if filter.scoped {
         listed = ledger.AppList(tokens.database, http.Context(request), user.value, receipts.AssetID, filter.value, since.value)
     } else {
         listed = ledger.List(tokens.database, http.Context(request), user.value, receipts.AssetID, since.value)
@@ -262,6 +281,11 @@ Spend :: (tokens: Tokens, writer: http.ResponseWriter, request: *http.Request) {
     decoded := requests.ReadSpend(writer, request, tokens.configuration.MaxBodyBytes)
     if decoded.error != null {
         response.Error(writer, cast(isize)400, errors.Message(decoded.error))
+        return
+    }
+    shopError := shop.Validate(decoded.value)
+    if shopError != null {
+        response.Error(writer, 400, errors.Message(shopError))
         return
     }
     signer := policy.Issuer(<<tokens.configuration, tokens.issuerUnavailable)

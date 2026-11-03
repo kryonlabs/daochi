@@ -1,0 +1,181 @@
+// Receipt-keyed monitoring for the invoice path. Missing wallet data is a
+// conflict, never evidence of a refund; only explicit double-spend proof revokes.
+#import "protocol"
+#import "std/go_types"
+#import "std/map_go"
+wallet :: #import "monero_wallet";
+ledger :: #import "token_ledger";
+receipts :: #import "token_receipt";
+config :: #import "config";
+policy :: #import "token_policy";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+strings :: #system_library "go:strings";
+format :: #system_library "go:fmt";
+builtin :: #system_library "go:builtin";
+
+#scope_file
+InvoiceMonitor :: struct {
+    receipt: string
+    account: string
+    address: isize
+    atomic: s64
+    payment: string
+    units: s64
+}
+Incoming :: struct {
+    transfers: []wallet.WalletTransfer #go_tag "json:\"in\""
+}
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+Split :: (value: string, separator: string) -> []string #foreign strings;
+TrimSuffix :: (value: string, suffix: string) -> string #foreign strings;
+Suffix :: (pattern: string, index: isize) -> string #foreign format "Sprintf";
+AppendMonitor :: (values: []InvoiceMonitor, value: InvoiceMonitor) -> []InvoiceMonitor #foreign builtin "append";
+
+#scope_export
+Reconcile :: (database: *sql.Database, context: ctx.Context, configuration: config.Config) -> Error {
+    if configuration.MoneroWalletRPCURL == "" || policy.IssuerStatus(configuration) != "ok" {
+        return null
+    }
+    empty: [0]Any
+    seeded := sql.Exec(database, context,
+        "INSERT OR IGNORE INTO referral_monero_invoices(receipt_id) SELECT receipt_id FROM token_payment_intents WHERE provider='monero' AND status='paid' AND receipt_id<>''", empty[:])
+    if seeded.error != null {
+        return seeded.error
+    }
+    queried := sql.Query(database, context,
+        "SELECT i.receipt_id,i.account_id,CAST(i.provider_ref AS INTEGER),i.provider_amount,i.provider_payment_id,i.token_units FROM referral_monero_invoices m JOIN token_payment_intents i ON i.receipt_id=m.receipt_id WHERE m.state NOT IN ('finalized','compensated') ORDER BY m.checked_at,m.receipt_id LIMIT 50", empty[:])
+    if queried.error != null {
+        return queried.error
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    monitors: []InvoiceMonitor
+    while sql.Next(rows) {
+        item: InvoiceMonitor
+        destinations: [6]Any = .[*item.receipt, *item.account, *item.address, *item.atomic, *item.payment, *item.units]
+        error := sql.ScanRows(rows, destinations[:])
+        if error != null {
+            return error
+        }
+        monitors = AppendMonitor(monitors, item)
+    }
+    error := sql.RowsError(rows)
+    sql.CloseRows(rows)
+    if error != null {
+        return error
+    }
+    for item: monitors {
+        error = Inspect(database, context, configuration, item)
+        if error != null {
+            return error
+        }
+    }
+    return null
+}
+
+#scope_file
+Inspect :: (database: *sql.Database, context: ctx.Context, configuration: config.Config, item: InvoiceMonitor) -> Error {
+    parameters: Map(string, Any)
+    MapInit(parameters)
+    MapSet(parameters, "in", true)
+    MapSet(parameters, "account_index", cast(isize)0)
+    indices: [1]isize = .[item.address]
+    MapSet(parameters, "subaddr_indices", indices[:])
+    incoming: Incoming
+    error := wallet.Request(context, configuration, "get_transfers", parameters, *incoming, errors.New("monero invoice finality unavailable"))
+    if error != null {
+        return error
+    }
+    original := TrimSuffix(item.payment, Suffix(":0:%d", item.address))
+    identifiers := Split(original, "+")
+    state := "monitoring"
+    allFinal := true
+    total: s64
+    for id: identifiers {
+        found := false
+        for transfer: incoming.transfers {
+            if transfer.TxID != id || transfer.SubaddrIndex.Major != 0 || transfer.SubaddrIndex.Minor != item.address {
+                continue
+            }
+            found = true
+            if transfer.DoubleSpendSeen {
+                state = "invalid"
+            }
+            if transfer.Amount <= 0 || total > cast(s64)9223372036854775807 - transfer.Amount {
+                return errors.New("invalid monero invoice transfer amount")
+            }
+            total += transfer.Amount
+            if transfer.Confirmations < wallet.FinalityConfirmations(configuration) || transfer.Locked || transfer.UnlockTime != 0 {
+                allFinal = false
+            }
+            break
+        }
+        if !found {
+            allFinal = false
+            if state != "invalid" {
+                state = "conflict"
+            }
+        }
+    }
+    if total < item.atomic && state != "invalid" {
+        state = "conflict"
+    }
+    if allFinal && state == "monitoring" {
+        state = "finalized"
+    }
+    values: [2]Any = .[item.receipt, state]
+    // Never erase explicit invalidation merely because a wallet omits it later.
+    written := sql.Exec(database, context,
+        "UPDATE referral_monero_invoices SET state=CASE WHEN state='invalid' THEN state ELSE ?2 END,checked_at=CURRENT_TIMESTAMP WHERE receipt_id=?1", values[:])
+    if written.error != null {
+        return written.error
+    }
+    begun := sql.Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    status: string
+    destinations: [1]Any = .[*status]
+    error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT state FROM referral_monero_invoices WHERE receipt_id=?1", values[:1]), destinations[:])
+    if error != null {
+        return error
+    }
+    if status != "invalid" {
+        return sql.Commit(transaction)
+    }
+    event: receipts.TokenEventInput
+    paid := ledger.ByIDTx(transaction, context, item.receipt)
+    if paid.error != null || !paid.found {
+        return paid.error
+    }
+    event.AccountID = paid.value.AccountID
+    event.AppID = paid.value.AppID
+    event.EventType = "debit"
+    event.AmountDelta = -paid.value.AmountDelta
+    event.SourceType = "monero"
+    event.SourceRef = paid.value.SourceRef
+    parts: [2]string = .["invoice-reorg-", item.receipt]
+    key := Join(parts[:], "")
+    spent := ledger.SpendTx(transaction, context, configuration.WaoziIssuerPrivateKey, event, key, errors.New("issuer unavailable"))
+    if spent.error != null {
+        // Keep invalidation durable; principal and commission recovery retry independently.
+        if errors.Message(spent.error) == "insufficient balance" {
+            return null
+        }
+        return spent.error
+    }
+    updated := sql.ExecTx(transaction, context,
+        "UPDATE referral_monero_invoices SET state='compensated' WHERE receipt_id=?1", values[:1])
+    if updated.error != null {
+        return updated.error
+    }
+    return sql.Commit(transaction)
+}
+Join :: (values: []string, separator: string) -> string #foreign strings;

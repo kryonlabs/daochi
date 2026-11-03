@@ -3,6 +3,7 @@ sql :: #import "std/sql_go";
 driver :: #import "sqlite_driver";
 ctx :: #import "std/context_go";
 schema :: #import "store_schema";
+referrals :: #import "referral_schema";
 aliases :: #import "alias_case";
 usage :: #import "storage_usage";
 packing :: #import "record_packing";
@@ -30,6 +31,11 @@ Initialize :: (database: *sql.Database, context: ctx.Context) -> Error {
     error := schema.Ensure(database, context)
     if error != null {
         return error
+    }
+    emptyReferral: [0]Any
+    referralSchema := sql.Exec(database, context, referrals.SchemaSQL(), emptyReferral[:])
+    if referralSchema.error != null {
+        return referralSchema.error
     }
     error = aliases.Ensure(database, context)
     if error != null {

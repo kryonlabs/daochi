@@ -381,7 +381,12 @@ func TestGooglePlayRefundReconciliation(t *testing.T) {
 }
 
 func TestGooglePlayLegacyPurchaseMigrationAndMalformedStates(t *testing.T) {
-	store := googleLifecycleStore(t)
+	path := filepath.Join(t.TempDir(), "pre-allocation.db")
+	store, err := baselineSchemaOpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
 	fake, cfg, restore := googleTestConfig(t)
 	defer restore()
 	accountID := googlePurchaseAccountID(4)
@@ -391,11 +396,16 @@ func TestGooglePlayLegacyPurchaseMigrationAndMalformedStates(t *testing.T) {
 		AccountID: accountID, AppID: "inbe", EventType: "credit", AmountDelta: 100,
 		SourceType: "google_play", SourceRef: inspected.Value,
 	}
-	legacy := TokenLedger_CreditPayment(store.Database, context.Background(), tokenLedgerSigner(),
-		"google_play", inspected.Value, legacyInput, errTokenIssuerReadOnly)
-	if legacy.Error != nil {
-		t.Fatal(legacy.Error)
+	legacy, _, err := store.baselineCreditTokenPayment(context.Background(), tokenLedgerSigner(),
+		"google_play", inspected.Value, baselineTokenEventInput(legacyInput))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store = googleLifecycleStoreAt(t, path)
+	allocationBalances(t, store, accountID, "inbe", 100, 100, 0, 100)
 	fake.setPurchaseState(0, 1)
 	inspected = inspectGooglePurchase(t, cfg, request)
 	migrated := processGooglePurchase(t, store, cfg, inspected, accountID)
@@ -403,8 +413,8 @@ func TestGooglePlayLegacyPurchaseMigrationAndMalformedStates(t *testing.T) {
 		t.Fatalf("legacy migration = %+v", migrated)
 	}
 	_, tokenReceipt := paymentMapping(t, store, "legacy-token")
-	if tokenReceipt != legacy.Value.ReceiptID {
-		t.Fatalf("legacy mapping receipt = %q, want %q", tokenReceipt, legacy.Value.ReceiptID)
+	if tokenReceipt != legacy.ReceiptID {
+		t.Fatalf("legacy mapping receipt = %q, want %q", tokenReceipt, legacy.ReceiptID)
 	}
 	if state := lifecycleState(t, store, "legacy-token"); state != "consumed" {
 		t.Fatalf("legacy state = %q, want consumed", state)

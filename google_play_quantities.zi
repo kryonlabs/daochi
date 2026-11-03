@@ -1,0 +1,199 @@
+#import "std/go_types"
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+errors :: #import "std/errors_go";
+
+GoogleRefundQuantity :: struct {
+    units: s64
+    quantity: s64
+    total: s64
+    refunded: s64
+    duplicate: bool
+    error: Error
+}
+
+#scope_export
+SchemaSQL :: () -> string {
+    return #string SQL
+CREATE TABLE IF NOT EXISTS google_play_purchase_quantities(
+ purchase_token TEXT PRIMARY KEY,paid_quantity INTEGER NOT NULL CHECK(paid_quantity>0),
+ refunded_quantity INTEGER NOT NULL DEFAULT 0 CHECK(refunded_quantity>=0 AND refunded_quantity<=paid_quantity)
+);
+CREATE TABLE IF NOT EXISTS google_play_purchase_proofs(
+ purchase_token TEXT PRIMARY KEY,payment_kind TEXT NOT NULL CHECK(payment_kind IN ('paid','test','promo','rewarded')),
+ snapshot_refunded INTEGER NOT NULL DEFAULT -1 CHECK(snapshot_refunded>=-1),verified_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS google_play_snapshot_watch(
+ purchase_token TEXT PRIMARY KEY,last_attempt INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS google_play_snapshot_watch_pending ON google_play_snapshot_watch(last_attempt,purchase_token);
+CREATE TABLE IF NOT EXISTS google_play_proof_attempts(
+ purchase_token TEXT PRIMARY KEY,last_attempt INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS google_play_refund_events(
+ purchase_token TEXT NOT NULL,voided_millis INTEGER NOT NULL,voided_quantity INTEGER NOT NULL,
+ receipt_id TEXT NOT NULL,PRIMARY KEY(purchase_token,voided_millis,voided_quantity)
+);
+SQL
+}
+
+RecordTx :: (transaction: *sql.Transaction, context: ctx.Context, token: string, quantity: s64) -> Error {
+    if quantity < 1 {
+        return errors.New("invalid google purchase quantity")
+    }
+    arguments: [2]Any = .[token, quantity]
+    written := sql.ExecTx(transaction, context,
+        "INSERT OR IGNORE INTO google_play_purchase_quantities(purchase_token,paid_quantity) VALUES(?1,?2)", arguments[:])
+    if written.error != null {
+        return written.error
+    }
+    stored: s64
+    destinations: [1]Any = .[*stored]
+    error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT paid_quantity FROM google_play_purchase_quantities WHERE purchase_token=?1", arguments[:1]), destinations[:])
+    if error != null {
+        return error
+    }
+    if stored != quantity {
+        return errors.New("google purchase quantity mismatch")
+    }
+    return null
+}
+
+RefundTx :: (transaction: *sql.Transaction, context: ctx.Context, token: string,
+    millis: s64, requested: s64, paidUnits: s64) -> GoogleRefundQuantity {
+    result: GoogleRefundQuantity
+    arguments: [3]Any = .[token, millis, requested]
+    duplicates: s64
+    duplicateDestinations: [1]Any = .[*duplicates]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM google_play_refund_events WHERE purchase_token=?1 AND voided_millis=?2 AND voided_quantity=?3", arguments[:]), duplicateDestinations[:])
+    if result.error != null {
+        return result
+    }
+    if duplicates != 0 {
+        result.duplicate = true
+        return result
+    }
+    snapshot: s64 = -1
+    verifiedAt: s64
+    snapshotDestinations: [2]Any = .[*snapshot, *verifiedAt]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT snapshot_refunded,verified_at FROM google_play_purchase_proofs WHERE purchase_token=?1", arguments[:1]), snapshotDestinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+    }
+    if result.error != null {
+        return result
+    }
+    destinations: [2]Any = .[*result.total, *result.refunded]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT paid_quantity,refunded_quantity FROM google_play_purchase_quantities WHERE purchase_token=?1", arguments[:1]), destinations[:])
+    if errors.Is(result.error, sql.NoRows()) {
+        result.error = null
+        result.total = 1
+        result.refunded = 0
+    }
+    if result.error != null {
+        return result
+    }
+    if requested < 0 || requested > result.total {
+        result.error = errors.New("invalid google refund quantity")
+        return result
+    }
+    if snapshot >= 0 && requested != 0 {
+        if millis > verifiedAt {
+            result.error = errors.New("google refund requires fresh provider snapshot")
+            return result
+        }
+        // Snapshot was refreshed before this notification. Its cumulative
+        // quantity covers earlier events without counting the same refund twice.
+        result.quantity = 0
+        return result
+    }
+    result.quantity = requested
+    if requested == 0 {
+        result.quantity = result.total - result.refunded
+    }
+    if requested < 0 || result.quantity < 1 || result.quantity > result.total - result.refunded ||
+    paidUnits <= 0 || paidUnits % result.total != 0 {
+        result.error = errors.New("invalid google refund quantity")
+        return result
+    }
+    result.units = (paidUnits / result.total) * result.quantity
+    return result
+}
+
+CommitRefundTx :: (transaction: *sql.Transaction, context: ctx.Context, token: string,
+    millis: s64, requested: s64, refund: GoogleRefundQuantity, receiptID: string) -> Error {
+    arguments: [4]Any = .[token, millis, requested, receiptID]
+    written := sql.ExecTx(transaction, context,
+        "INSERT INTO google_play_refund_events(purchase_token,voided_millis,voided_quantity,receipt_id) VALUES(?1,?2,?3,?4)", arguments[:])
+    if written.error != null {
+        return written.error
+    }
+    values: [3]Any = .[token, refund.total, refund.refunded + refund.quantity]
+    if requested == 0 {
+        updated := sql.ExecTx(transaction, context,
+            "UPDATE google_play_purchase_proofs SET snapshot_refunded=CASE WHEN snapshot_refunded>=0 THEN ?2 ELSE snapshot_refunded END WHERE purchase_token=?1", values[:2])
+        if updated.error != null {
+            return updated.error
+        }
+    }
+    return sql.ExecTx(transaction, context,
+        "INSERT INTO google_play_purchase_quantities(purchase_token,paid_quantity,refunded_quantity) VALUES(?1,?2,?3) ON CONFLICT(purchase_token) DO UPDATE SET refunded_quantity=?3", values[:]).error
+}
+
+// Called only with a provider-verified response inside its receipt transaction.
+RecordProofTx :: (transaction: *sql.Transaction, context: ctx.Context, token: string,
+    kind: string, snapshot: s64, verifiedAt: s64) -> Error {
+    if snapshot < -1 {
+        return errors.New("invalid google refund snapshot")
+    }
+    if kind != "paid" && kind != "test" && kind != "promo" && kind != "rewarded" {
+        return errors.New("unverified google payment kind")
+    }
+    arguments: [4]Any = .[token, kind, snapshot, verifiedAt]
+    written := sql.ExecTx(transaction, context,
+        "INSERT INTO google_play_purchase_proofs(purchase_token,payment_kind,snapshot_refunded,verified_at) VALUES(?1,?2,?3,?4) ON CONFLICT(purchase_token) DO UPDATE SET snapshot_refunded=MAX(snapshot_refunded,?3),verified_at=?4 WHERE payment_kind=?2", arguments[:])
+    if written.error != null {
+        return written.error
+    }
+    affected := sql.RowsAffected(written.value)
+    if affected.error != null {
+        return affected.error
+    }
+    if affected.value != 1 {
+        return errors.New("google purchase type changed")
+    }
+    return null
+}
+
+SnapshotTx :: (transaction: *sql.Transaction, context: ctx.Context, token: string,
+    total: s64, snapshotRefunded: s64, paidUnits: s64) -> GoogleRefundQuantity {
+    result: GoogleRefundQuantity
+    result.total = total
+    arguments: [1]Any = .[token]
+    destinations: [1]Any = .[*result.refunded]
+    result.error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT refunded_quantity FROM google_play_purchase_quantities WHERE purchase_token=?1", arguments[:]), destinations[:])
+    if result.error != null {
+        return result
+    }
+    if total < 1 || snapshotRefunded < 0 || snapshotRefunded > total || paidUnits <= 0 || paidUnits % total != 0 {
+        result.error = errors.New("invalid google refund snapshot")
+        return result
+    }
+    if snapshotRefunded > result.refunded {
+        result.quantity = snapshotRefunded - result.refunded
+    }
+    result.units = (paidUnits / total) * result.quantity
+    return result
+}
+
+CommitSnapshotTx :: (transaction: *sql.Transaction, context: ctx.Context, token: string,
+    refunded: s64) -> Error {
+    arguments: [2]Any = .[token, refunded]
+    return sql.ExecTx(transaction, context,
+        "UPDATE google_play_purchase_quantities SET refunded_quantity=MAX(refunded_quantity,?2) WHERE purchase_token=?1", arguments[:]).error
+}

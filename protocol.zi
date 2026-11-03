@@ -296,6 +296,9 @@ TokenBalanceResponse :: struct {
     AssetID: string #go_tag "json:\"asset_id\""
     AppID: string #go_tag "json:\"app_id,omitempty\""
     Balance: s64 #go_tag "json:\"balance\""
+    SharedBalance: s64 #go_tag "json:\"shared_balance,omitempty\""
+    ScopedBalance: s64 #go_tag "json:\"scoped_balance,omitempty\""
+    SpendableBalance: s64 #go_tag "json:\"spendable_balance,omitempty\""
 }
 
 TokenLedgerResponse :: struct {

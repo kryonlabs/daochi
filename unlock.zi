@@ -80,7 +80,7 @@ Find :: (product: string) -> Offer {
     }
     if product == ShoveyIsland {
         result.product = ShoveyIsland
-        result.app_id = "entity"
+        result.app_id = "shovey"
         result.units = IslandRegularUnits
     }
     return result
@@ -103,7 +103,8 @@ SettledTx :: (transaction: *sql.Transaction, context: ctx.Context, account: stri
     // A caller-controlled generic spend nonce is never proof of an unlock.
     offer := Find(product)
     value := receipt.value
-    if value.AccountID != account || value.AppID != offer.app_id ||
+    legacyIsland := product == ShoveyIsland && value.AppID == "entity"
+    if value.AccountID != account || (value.AppID != offer.app_id && !legacyIsland) ||
     value.AssetID != receipts.AssetID || value.EventType != "debit" ||
     value.SourceType != "unlock" || value.SourceRef != product || value.AmountDelta >= 0 ||
     (product == ShoveyIsland && value.AmountDelta != -IslandRegularUnits && value.AmountDelta != -IslandSaleUnits) {
@@ -266,6 +267,14 @@ Confirmed :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateK
     paid := sql.ScanRow(sql.QueryRowTx(transaction, context,
         "SELECT receipt_id FROM token_spend_nonces WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3",
         paidArguments[:]), destinations[:])
+    // A released Island payment used the shared Entity audit scope. Preserve
+    // that signed payment when restoring an already settled unlock.
+    if product == ShoveyIsland && errors.Is(paid, sql.NoRows()) {
+        legacyArguments: [3]Any = .[account, "entity", key]
+        paid = sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT receipt_id FROM token_spend_nonces WHERE account_id=?1 AND app_id=?2 AND idempotency_key=?3",
+            legacyArguments[:]), destinations[:])
+    }
     if paid != null && !errors.Is(paid, sql.NoRows()) {
         result.error = paid
         return result

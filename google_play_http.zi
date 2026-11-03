@@ -1,3 +1,4 @@
+config :: #import "config";
 #import "protocol"
 #import "std/go_types"
 #import "std/map_go"
@@ -66,6 +67,11 @@ Verify :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Re
         response.Error(writer, cast(isize)503, "token issuer unavailable")
         return
     }
+    trustedApp := config.GoogleApp(<<server.configuration, decoded.value.PackageName)
+    if trustedApp == "" || trustedApp != decoded.value.AppID {
+        response.Error(writer, 400, "package app mismatch")
+        return
+    }
     product := MapLookup(server.configuration.TokenProducts, decoded.value.ProductID)
     if !product.has_value {
         response.Error(writer, cast(isize)400, "unknown product_id")
@@ -112,8 +118,14 @@ Verify :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Re
         PaymentError(writer, inspected.error)
         return
     }
+    quantity := inspected.quantity
+    if quantity < 1 || product.value.TokenUnits > cast(s64)9223372036854775807 / quantity {
+        response.Error(writer, 400, "invalid google purchase quantity")
+        return
+    }
+    paidUnits := product.value.TokenUnits * quantity
     credited := reconciliation.ProcessPurchase(server.database, http.Context(request), issuer.value,
-        server.issuerUnavailable, inspected, decoded.value, user.value, decoded.value.AppID, product.value.TokenUnits)
+        server.issuerUnavailable, inspected, decoded.value, user.value, decoded.value.AppID, paidUnits)
     if credited.error != null {
         LogCreditError("google token credit", "user", logs.LogText(user.value), "payment", logs.LogText(inspected.paymentID), "error", credited.error)
         response.Error(writer, cast(isize)500, "token credit failed")

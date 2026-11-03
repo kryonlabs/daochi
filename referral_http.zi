@@ -1,0 +1,146 @@
+#import "std/go_types"
+referrals :: #import "referral";
+tokens :: #import "token_http";
+policy :: #import "token_policy";
+auth :: #import "http_auth";
+body :: #import "http_body";
+strict :: #import "strict_json";
+identity :: #import "identity";
+response :: #import "response";
+http :: #import "std/http_go";
+url :: #import "std/url_go";
+errors :: #import "std/errors_go";
+numbers :: #system_library "go:strconv";
+
+#scope_file
+ReferralClaimCommand :: struct {
+    code: string #go_tag "json:\"code\""
+    request_id: string #go_tag "json:\"request_id\""
+    source_app_id: string #go_tag "json:\"source_app_id\""
+}
+Rotation :: struct {
+    request_id: string #go_tag "json:\"request_id\""
+}
+Failure :: struct {
+    error: string #go_tag "json:\"error\""
+    authority: string #go_tag "json:\"authority,omitempty\""
+}
+IntegerResult :: struct {
+    value: s64
+    error: Error
+}
+ParseInt :: (value: string, base: isize, width: isize) -> IntegerResult #go_results #foreign numbers;
+
+Ready :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Request) -> string {
+    http.SetHeader(http.ResponseHeaders(writer), "Cache-Control", "private, no-store")
+    user := auth.BearerUser(server.database, request, server.configuration.TokenSecret)
+    if user.authentication.error != null || user.authentication.status != 0 {
+        auth.Respond(writer, server.counters, user.authentication)
+        return ""
+    }
+    if server.configuration.BaseURL != referrals.Authority {
+        value: Failure
+        value.error = "wrong_node"
+        value.authority = referrals.Authority
+        response.JSON(writer, 409, value)
+        return ""
+    }
+    if policy.IssuerStatus(<<server.configuration) != "ok" {
+        response.Error(writer, 503, "unavailable")
+        return ""
+    }
+    return user.value
+}
+RespondError :: (writer: http.ResponseWriter, error: Error) {
+    message := errors.Message(error)
+    status: isize = 503
+    if message == "invalid_request" {
+        status = 400
+    } else if message == "invalid_code" {
+        status = 404
+    } else if message == "revoked_code" || message == "self_referral" ||
+    message == "already_bound" || message == "request_conflict" {
+        status = 409
+    } else {
+        message = "unavailable"
+    }
+    response.Error(writer, status, message)
+}
+
+#scope_export
+Me :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    account := Ready(server, writer, request)
+    if account == "" {
+        return
+    }
+    result := referrals.Me(server.database, http.Context(request), account)
+    if result.error != null {
+        RespondError(writer, result.error)
+        return
+    }
+    response.JSON(writer, 200, result)
+}
+Claim :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    account := Ready(server, writer, request)
+    if account == "" {
+        return
+    }
+    read := body.ReadJSON(writer, request, 2048)
+    command: ReferralClaimCommand
+    if read.error != null || strict.Decode(read.value, *command) != null {
+        response.Error(writer, 400, "invalid_request")
+        return
+    }
+    result := referrals.Claim(server.database, http.Context(request), server.configuration.WaoziIssuerPrivateKey,
+        account, command.code, command.request_id, command.source_app_id)
+    if result.error != null {
+        RespondError(writer, result.error)
+        return
+    }
+    response.JSON(writer, 200, result)
+}
+Accepted :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    account := Ready(server, writer, request)
+    if account == "" {
+        return
+    }
+    query := url.Query(http.RequestURL(request))
+    cursorText := url.Value(query, "cursor")
+    limitText := url.Value(query, "limit")
+    if cursorText == "" {
+        cursorText = "0"
+    }
+    if limitText == "" {
+        limitText = "50"
+    }
+    cursor := ParseInt(cursorText, 10, 64)
+    limit := ParseInt(limitText, 10, 64)
+    if cursor.error != null || limit.error != null {
+        response.Error(writer, 400, "invalid_request")
+        return
+    }
+    result := referrals.ListAccepted(server.database, http.Context(request), account, cursor.value, limit.value)
+    if result.error != null {
+        RespondError(writer, result.error)
+        return
+    }
+    response.JSON(writer, 200, result)
+}
+Rotate :: (server: tokens.Tokens, writer: http.ResponseWriter, request: *http.Request) {
+    account := Ready(server, writer, request)
+    if account == "" {
+        return
+    }
+    read := body.ReadJSON(writer, request, 1024)
+    command: Rotation
+    if read.error != null || strict.Decode(read.value, *command) != null || !identity.ValidClientID(command.request_id) {
+        response.Error(writer, 400, "invalid_request")
+        return
+    }
+    result := referrals.Code(server.database, http.Context(request), account, command.request_id)
+    if result.error != null {
+        RespondError(writer, result.error)
+        return
+    }
+    response.JSON(writer, 200, result)
+}

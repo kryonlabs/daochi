@@ -303,6 +303,7 @@ var configEnvironmentKeys = []string{
 	"DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN",
 	"DAOCHI_GOOGLE_OAUTH_REFRESH_TOKEN_FILE",
 	"DAOCHI_GOOGLE_PACKAGE_NAMES",
+	"DAOCHI_GOOGLE_PACKAGE_APPS",
 	"DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON",
 	"DAOCHI_GOOGLE_SERVICE_ACCOUNT_JSON_FILE",
 	"DAOCHI_KNOWN_NODES",
@@ -352,7 +353,7 @@ func assertConfigurationMatchesBaseline(t *testing.T) Config {
 	expected := baselineLoadConfig()
 	actualType := reflect.TypeOf(actual)
 	expectedType := reflect.TypeOf(expected)
-	if actualType.NumField() != expectedType.NumField()+8 {
+	if actualType.NumField() != expectedType.NumField()+9 {
 		t.Fatal("configuration fields changed")
 	}
 	for i := 0; i < expectedType.NumField(); i++ {

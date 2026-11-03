@@ -1,0 +1,558 @@
+// Durable receipt outbox. Settlement and its ledger effects commit together.
+#import "protocol"
+#import "std/go_types"
+referrals :: #import "referral";
+ledger :: #import "token_ledger";
+allocation :: #import "token_allocation";
+google :: #import "google_play";
+googleLifecycle :: #import "google_play_reconciliation";
+receipts :: #import "token_receipt";
+config :: #import "config";
+policy :: #import "token_policy";
+sql :: #import "std/sql_go";
+ctx :: #import "std/context_go";
+ed :: #import "std/ed25519_go";
+clock :: #import "std/time_go";
+selection :: #import "std/select_go";
+errors :: #import "std/errors_go";
+native :: #system_library "go:database/sql";
+go_time :: #system_library "go:time";
+strings :: #system_library "go:strings";
+logging :: #system_library "go:log/slog";
+builtin :: #system_library "go:builtin";
+
+#scope_file
+RollbackAtReturn :: (transaction: *sql.Transaction) #go_defer #foreign native "(*Tx).Rollback";
+CloseAtReturn :: (rows: *sql.Rows) #go_defer #foreign native "(*Rows).Close";
+StopAtReturn :: (ticker: *clock.Ticker) #go_defer #foreign go_time "(*Ticker).Stop";
+TrimPrefix :: (value: string, prefix: string) -> string #foreign strings;
+AppendID :: (values: []string, value: string) -> []string #foreign builtin "append";
+LogError :: (message: string, key: string, error: Error) #foreign logging "Error";
+IDsResult :: struct {
+    value: []string
+    error: Error
+}
+ListIDs :: (database: *sql.Database, context: ctx.Context, query: string) -> IDsResult {
+    result: IDsResult
+    empty: [0]Any
+    queried := sql.Query(database, context, query, empty[:])
+    result.error = queried.error
+    if result.error != null {
+        return result
+    }
+    rows := queried.value
+    CloseAtReturn(rows)
+    while sql.Next(rows) {
+        value: string
+        destinations: [1]Any = .[*value]
+        result.error = sql.ScanRows(rows, destinations[:])
+        if result.error != null {
+            return result
+        }
+        result.value = AppendID(result.value, value)
+    }
+    result.error = sql.RowsError(rows)
+    return result
+}
+
+Backfill :: (database: *sql.Database, context: ctx.Context) -> Error {
+    begun := sql.Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    empty: [0]Any
+    locked := sql.ExecTx(transaction, context, "UPDATE referral_state SET backfill_seq=backfill_seq WHERE id=1", empty[:])
+    if locked.error != null {
+        return locked.error
+    }
+    // Bound by 1000 ledger rows per tick; retries preserve the last committed cursor.
+    written := sql.ExecTx(transaction, context,
+        "INSERT OR IGNORE INTO referral_outbox(receipt_id,ledger_seq) SELECT receipt_id,ledger_seq FROM token_ledger WHERE ledger_seq>(SELECT backfill_seq FROM referral_state WHERE id=1) AND ledger_seq<=(SELECT backfill_seq+1000 FROM referral_state WHERE id=1) AND source_type IN ('monero','monero_account','google_play','monero_reorg')", empty[:])
+    if written.error != null {
+        return written.error
+    }
+    updated := sql.ExecTx(transaction, context,
+        "UPDATE referral_state SET backfill_seq=MIN(backfill_seq+1000,COALESCE((SELECT MAX(ledger_seq) FROM token_ledger),0)) WHERE id=1", empty[:])
+    if updated.error != null {
+        return updated.error
+    }
+    return sql.Commit(transaction)
+}
+
+SettlePurchaseTx :: (transaction: *sql.Transaction, context: ctx.Context, signer: ed.PrivateKey, purchaseID: string) -> Error {
+    purchase := ledger.ByIDTx(transaction, context, purchaseID)
+    if purchase.error != null {
+        return purchase.error
+    }
+    if !purchase.found || purchase.value.EventType != "credit" || purchase.value.AmountDelta <= 0 {
+        return null
+    }
+    paid := purchase.value
+    if paid.SourceType != "monero" && paid.SourceType != "monero_account" && paid.SourceType != "google_play" {
+        return null
+    }
+    // Only provider-idempotent paid credits qualify. A source label by itself does not.
+    trusted: s64
+    proof: [5]Any = .[paid.SourceType, paid.SourceRef, paid.ReceiptID, paid.AccountID, paid.AmountDelta]
+    proofDestinations: [1]Any = .[*trusted]
+    error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COUNT(*) FROM token_processed_payments WHERE provider=?1 AND provider_payment_id=?2 AND receipt_id=?3 AND account_id=?4 AND amount=?5 AND asset_id='waozi:token'", proof[:]), proofDestinations[:])
+    if error != null || trusted != 1 {
+        return error
+    }
+    if paid.SourceType == "google_play" {
+        tables: s64
+        empty: [0]Any
+        tableDestinations: [1]Any = .[*tables]
+        error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='google_play_purchase_proofs'", empty[:]), tableDestinations[:])
+        if error != null || tables == 0 {
+            return error
+        }
+        eligible: s64
+        destinations: [1]Any = .[*eligible]
+        args: [1]Any = .[paid.ReceiptID]
+        error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT COUNT(*) FROM google_play_purchase_proofs p JOIN google_play_purchase_lifecycle g ON g.purchase_token=p.purchase_token WHERE g.receipt_id=?1 AND p.payment_kind='paid'", args[:]), destinations[:])
+        if error != null || eligible != 1 {
+            return error
+        }
+    }
+    referrer: string
+    welcomeSeq: s64
+    accountArgs: [1]Any = .[paid.AccountID]
+    claimDestinations: [2]Any = .[*referrer, *welcomeSeq]
+    error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT referrer_id,welcome_seq FROM referral_claims WHERE account_id=?1", accountArgs[:]), claimDestinations[:])
+    if errors.Is(error, sql.NoRows()) {
+        return null
+    }
+    if error != null || paid.LedgerSeq <= welcomeSeq {
+        return error
+    }
+    // Net value is computed once per original receipt, never from clients. A
+    // provider's partial signed reversal reduces the original net before flooring.
+    net := paid.AmountDelta
+    reversals: s64
+    reversalArgs: [3]Any = .[paid.AccountID, paid.SourceType, paid.SourceRef]
+    reversalDestinations: [1]Any = .[*reversals]
+    error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT COALESCE(SUM(-amount_delta),0) FROM token_ledger WHERE account_id=?1 AND source_type=?2 AND source_ref=?3 AND event_type='debit'", reversalArgs[:]), reversalDestinations[:])
+    if error != null {
+        return error
+    }
+    if reversals >= net {
+        net = 0
+    } else {
+        net -= reversals
+    }
+    if paid.SourceType == "monero_account" {
+        status: string
+        statusArgs: [1]Any = .[purchaseID]
+        statusDestinations: [1]Any = .[*status]
+        error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT status FROM monero_deposits WHERE receipt_id=?1", statusArgs[:]), statusDestinations[:])
+        if error != null && !errors.Is(error, sql.NoRows()) {
+            return error
+        }
+        if status == "compensation_hold" || status == "compensated" {
+            net = 0
+        }
+        // Uncertain wallet refresh evidence never grants new commissions.
+        if status == "conflict_hold" {
+            return null
+        }
+    }
+    if paid.SourceType == "monero" {
+        status: string
+        statusArgs: [1]Any = .[purchaseID]
+        statusDestinations: [1]Any = .[*status]
+        error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT state FROM referral_monero_invoices WHERE receipt_id=?1", statusArgs[:]), statusDestinations[:])
+        if error != null && !errors.Is(error, sql.NoRows()) {
+            return error
+        }
+        if status == "invalid" || status == "compensated" {
+            net = 0
+        }
+        if status == "conflict" {
+            return null
+        }
+    }
+    target := net / 20
+    createArgs: [4]Any = .[purchaseID, referrer, paid.AppID, paid.AmountDelta]
+    created := sql.ExecTx(transaction, context,
+        "INSERT OR IGNORE INTO referral_commissions(purchase_receipt_id,referrer_id,app_id,paid_units) VALUES(?1,?2,?3,?4)", createArgs[:])
+    if created.error != null {
+        return created.error
+    }
+    issued: s64
+    reversed: s64
+    args: [1]Any = .[purchaseID]
+    destinations: [2]Any = .[*issued, *reversed]
+    error = sql.ScanRow(sql.QueryRowTx(transaction, context,
+        "SELECT issued_units,reversed_units FROM referral_commissions WHERE purchase_receipt_id=?1", args[:]), destinations[:])
+    if error != null {
+        return error
+    }
+    difference := target - (issued - reversed)
+    event: receipts.TokenEventInput
+    event.AccountID = referrer
+    event.AppID = paid.AppID
+    event.SourceRef = purchaseID
+    unavailable := errors.New("referral issuer unavailable")
+    if difference > 0 {
+        event.EventType = "credit"
+        event.AmountDelta = difference
+        event.SourceType = "referral_commission"
+        credited := ledger.Insert(transaction, context, signer, event, unavailable)
+        if credited.error != null {
+            return credited.error
+        }
+        offsetError := OffsetNewEarningsTx(transaction, context, signer, credited.value, paid)
+        if offsetError != null {
+            return offsetError
+        }
+        issued += difference
+    } else if difference < 0 {
+        balance := ledger.AvailableTx(transaction, context, referrer, paid.AppID, "referral_reversal", purchaseID)
+        if balance.error != null {
+            return balance.error
+        }
+        amount := -difference
+        if amount > balance.value {
+            amount = balance.value
+        }
+        if amount > 0 {
+            event.EventType = "debit"
+            event.AmountDelta = -amount
+            event.SourceType = "referral_reversal"
+            debited := ledger.Insert(transaction, context, signer, event, unavailable)
+            if debited.error != null {
+                return debited.error
+            }
+            reversed += amount
+        }
+    }
+    values: [4]Any = .[purchaseID, target, issued, reversed]
+    return sql.ExecTx(transaction, context,
+        "UPDATE referral_commissions SET target_units=?2,issued_units=?3,reversed_units=?4,updated_at=CURRENT_TIMESTAMP WHERE purchase_receipt_id=?1", values[:]).error
+}
+
+Process :: (database: *sql.Database, context: ctx.Context, signer: ed.PrivateKey, id: string, outbox: bool) -> Error {
+    begun := sql.Begin(database, context, null)
+    if begun.error != null {
+        return begun.error
+    }
+    transaction := begun.value
+    RollbackAtReturn(transaction)
+    empty: [0]Any
+    locked := sql.ExecTx(transaction, context, "UPDATE referral_state SET backfill_seq=backfill_seq WHERE id=1", empty[:])
+    if locked.error != null {
+        return locked.error
+    }
+    purchaseID := id
+    if outbox {
+        event := ledger.ByIDTx(transaction, context, id)
+        if event.error != null {
+            return event.error
+        }
+        if !event.found {
+            return errors.New("referral outbox receipt missing")
+        }
+        source := event.value.SourceType
+        reference := event.value.SourceRef
+        if source == "monero_reorg" {
+            source = "monero_account"
+            reference = TrimPrefix(reference, "monero_reorg:")
+        }
+        lookup: [2]Any = .[source, reference]
+        destinations: [1]Any = .[*purchaseID]
+        error := sql.ScanRow(sql.QueryRowTx(transaction, context,
+            "SELECT receipt_id FROM token_processed_payments WHERE provider=?1 AND provider_payment_id=?2", lookup[:]), destinations[:])
+        if error != null && !errors.Is(error, sql.NoRows()) {
+            return error
+        }
+        if errors.Is(error, sql.NoRows()) {
+            purchaseID = ""
+        }
+    }
+    if purchaseID != "" {
+        error := SettlePurchaseTx(transaction, context, signer, purchaseID)
+        if error != null {
+            return error
+        }
+    }
+    if outbox {
+        arguments: [1]Any = .[id]
+        written := sql.ExecTx(transaction, context, "UPDATE referral_outbox SET done=1 WHERE receipt_id=?1", arguments[:])
+        if written.error != null {
+            return written.error
+        }
+    }
+    // Recover outstanding refund debt before a new reward becomes spendable.
+    // All changes stay inside this transaction. Bound work to avoid request-sized loops.
+    queried := sql.QueryTx(transaction, context,
+        "SELECT purchase_receipt_id FROM referral_commissions WHERE issued_units-reversed_units>target_units ORDER BY updated_at,purchase_receipt_id LIMIT 100", empty[:])
+    if queried.error != null {
+        return queried.error
+    }
+    debts: []string
+    while sql.Next(queried.value) {
+        debt: string
+        destinations: [1]Any = .[*debt]
+        error := sql.ScanRows(queried.value, destinations[:])
+        if error != null {
+            sql.CloseRows(queried.value)
+            return error
+        }
+        debts = AppendID(debts, debt)
+    }
+    error := sql.RowsError(queried.value)
+    sql.CloseRows(queried.value)
+    if error != null {
+        return error
+    }
+    for debt: debts {
+        error = SettlePurchaseTx(transaction, context, signer, debt)
+        if error != null {
+            return error
+        }
+    }
+    return sql.Commit(transaction)
+}
+
+#scope_export
+Reconcile :: (database: *sql.Database, context: ctx.Context, configuration: config.Config) -> Error {
+    if configuration.BaseURL != referrals.Authority || policy.IssuerStatus(configuration) != "ok" {
+        return null
+    }
+    error := Backfill(database, context)
+    if error != null {
+        return error
+    }
+    error = BackfillGoogleOrigins(database, context, configuration)
+    if error != null {
+        return error
+    }
+    pending := ListIDs(database, context, "SELECT receipt_id FROM referral_outbox WHERE done=0 ORDER BY ledger_seq LIMIT 100")
+    if pending.error != null {
+        return pending.error
+    }
+    for id: pending.value {
+        error = Process(database, context, configuration.WaoziIssuerPrivateKey, id, true)
+        if error != null {
+            return error
+        }
+    }
+    debts := ListIDs(database, context, "SELECT purchase_receipt_id FROM referral_commissions WHERE issued_units-reversed_units>target_units ORDER BY updated_at,purchase_receipt_id LIMIT 100")
+    if debts.error != null {
+        return debts.error
+    }
+    for id: debts.value {
+        error = Process(database, context, configuration.WaoziIssuerPrivateKey, id, false)
+        if error != null {
+            return error
+        }
+    }
+    return null
+}
+
+Run :: (database: *sql.Database, context: ctx.Context, configuration: config.Config) {
+    ticker := clock.NewTicker(cast(clock.Duration)10000000000)
+    StopAtReturn(ticker)
+    cases: [2]selection.Case
+    cases[0] = selection.Receive(ctx.Done(context))
+    cases[1] = selection.Receive(clock.TickerChannel(ticker))
+    while true {
+        error := Reconcile(database, context, configuration)
+        if error != null {
+            LogError("referral settlement failed", "error", error)
+        }
+        if selection.Select(cases[:]).chosen == 0 {
+            return
+        }
+    }
+}
+
+#scope_file
+OffsetDebt :: struct {
+    sequence: s64
+    purchase: string
+    app: string
+    amount: s64
+}
+AppendDebt :: (values: []OffsetDebt, value: OffsetDebt) -> []OffsetDebt #foreign builtin "append";
+
+OffsetNewEarningsTx :: (transaction: *sql.Transaction, context: ctx.Context,
+    signer: ed.PrivateKey, credit: TokenReceipt, paid: TokenReceipt) -> Error {
+    budget := credit.AmountDelta
+    cursor: s64
+    // Each page bounds memory. Continue until the new credit's entire eligible
+    // debt is recovered before committing any spendable remainder.
+    while budget > 0 {
+        arguments: [5]Any = .[credit.AccountID, paid.SourceType, paid.AppID, paid.ReceiptID, cursor]
+        queried := sql.QueryTx(transaction, context,
+            "SELECT p.ledger_seq,c.purchase_receipt_id,c.app_id,c.issued_units-c.reversed_units-c.target_units FROM referral_commissions c JOIN token_ledger p ON p.receipt_id=c.purchase_receipt_id WHERE c.referrer_id=?1 AND ((?2='google_play' AND p.source_type='google_play' AND p.app_id=?3) OR (?2 IN ('monero','monero_account') AND p.source_type IN ('monero','monero_account'))) AND c.purchase_receipt_id<>?4 AND p.ledger_seq>?5 AND c.issued_units-c.reversed_units>c.target_units ORDER BY p.ledger_seq LIMIT 100", arguments[:])
+        if queried.error != null {
+            return queried.error
+        }
+        debts: []OffsetDebt
+        while sql.Next(queried.value) {
+            item: OffsetDebt
+            destinations: [4]Any = .[*item.sequence, *item.purchase, *item.app, *item.amount]
+            error := sql.ScanRows(queried.value, destinations[:])
+            if error != null {
+                sql.CloseRows(queried.value)
+                return error
+            }
+            debts = AppendDebt(debts, item)
+        }
+        error := sql.RowsError(queried.value)
+        sql.CloseRows(queried.value)
+        if error != null {
+            return error
+        }
+        if debts.count == 0 {
+            break
+        }
+        for debt: debts {
+            cursor = debt.sequence
+            amount := debt.amount
+            if amount > budget {
+                amount = budget
+            }
+            if amount <= 0 {
+                break
+            }
+            authorized := allocation.AuthorizeReferralOffsetTx(transaction, context,
+                credit.AccountID, debt.purchase, credit.ReceiptID, amount)
+            if authorized.error != null {
+                return authorized.error
+            }
+            amount = authorized.value
+            if amount <= 0 {
+                continue
+            }
+            event: receipts.TokenEventInput
+            event.AccountID = credit.AccountID
+            event.AppID = debt.app
+            event.EventType = "debit"
+            event.AmountDelta = -amount
+            event.SourceType = "referral_reversal"
+            event.SourceRef = debt.purchase
+            debited := ledger.Insert(transaction, context, signer, event, errors.New("issuer unavailable"))
+            if debited.error != null {
+                return debited.error
+            }
+            values: [2]Any = .[debt.purchase, amount]
+            written := sql.ExecTx(transaction, context,
+                "UPDATE referral_commissions SET reversed_units=reversed_units+?2,updated_at=CURRENT_TIMESTAMP WHERE purchase_receipt_id=?1", values[:])
+            if written.error != null {
+                return written.error
+            }
+            budget -= amount
+        }
+    }
+    return null
+}
+
+#scope_file
+GoogleOrigin :: struct {
+    payment: string
+    product: string
+    receipt: string
+    order: string
+    account: string
+    package: string
+    app: string
+    amount: s64
+}
+AppendOrigin :: (values: []GoogleOrigin, value: GoogleOrigin) -> []GoogleOrigin #foreign builtin "append";
+
+BackfillGoogleOrigins :: (database: *sql.Database, context: ctx.Context, configuration: config.Config) -> Error {
+    empty: [0]Any
+    exists: s64
+    existsDestinations: [1]Any = .[*exists]
+    error := sql.ScanRow(sql.QueryRow(database, context,
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='google_play_purchase_lifecycle'", empty[:]), existsDestinations[:])
+    if error != null || exists == 0 {
+        return error
+    }
+    error = googleLifecycle.Ensure(database, context)
+    if error != null {
+        return error
+    }
+    queried := sql.Query(database, context,
+        "SELECT g.purchase_token,g.product_id,g.receipt_id,g.order_id,g.account_id,g.package_name,g.app_id,g.amount FROM google_play_purchase_lifecycle g JOIN referral_claims c ON c.account_id=g.account_id JOIN token_ledger l ON l.receipt_id=g.receipt_id LEFT JOIN google_play_proof_attempts a ON a.purchase_token=g.purchase_token WHERE l.ledger_seq>c.welcome_seq AND g.state IN ('consume_pending','consumed','refunded') AND (NOT EXISTS(SELECT 1 FROM token_google_origins o WHERE o.payment_id=g.purchase_token) OR NOT EXISTS(SELECT 1 FROM google_play_purchase_proofs p WHERE p.purchase_token=g.purchase_token)) ORDER BY COALESCE(a.last_attempt,0),l.ledger_seq LIMIT 100", empty[:])
+    if queried.error != null {
+        return queried.error
+    }
+    origins: []GoogleOrigin
+    while sql.Next(queried.value) {
+        item: GoogleOrigin
+        destinations: [8]Any = .[*item.payment, *item.product, *item.receipt, *item.order, *item.account, *item.package, *item.app, *item.amount]
+        error = sql.ScanRows(queried.value, destinations[:])
+        if error != null {
+            sql.CloseRows(queried.value)
+            return error
+        }
+        origins = AppendOrigin(origins, item)
+    }
+    error = sql.RowsError(queried.value)
+    sql.CloseRows(queried.value)
+    if error != null {
+        return error
+    }
+    for origin: origins {
+        // Retry failures fairly, without suppressing other receipts/providers.
+        attemptArgs: [2]Any = .[origin.payment, clock.Unix(clock.Now())]
+        attempted := sql.Exec(database, context,
+            "INSERT INTO google_play_proof_attempts(purchase_token,last_attempt) VALUES(?1,?2) ON CONFLICT(purchase_token) DO UPDATE SET last_attempt=?2", attemptArgs[:])
+        if attempted.error != null {
+            return attempted.error
+        }
+        // Historical signed receipts stay untouched. Current authenticated
+        // provider proof is required before NEW reward issuance.
+        trustedApp := config.GoogleApp(configuration, origin.package)
+        if trustedApp == "" || trustedApp != origin.app {
+            LogError("historical Google package title binding required", "error", errors.New("package mapping unavailable"))
+            continue
+        }
+        if !google.HasVerifier(configuration) {
+            continue
+        }
+        record: googleLifecycle.LifecycleRecord
+        record.purchaseToken = origin.payment
+        record.productID = origin.product
+        record.packageName = origin.package
+        record.receiptID = origin.receipt
+        record.orderID = origin.order
+        record.accountID = origin.account
+        record.appID = origin.app
+        record.amount = origin.amount
+        verified := googleLifecycle.RefreshProof(database, context, configuration, record,
+            configuration.WaoziIssuerPrivateKey, errors.New("referral issuer unavailable"))
+        if verified != null {
+            LogError("historical Google purchase verification deferred", "error", verified)
+            continue
+        }
+        begun := sql.Begin(database, context, null)
+        if begun.error != null {
+            return begun.error
+        }
+        error = allocation.BindGoogleTx(begun.value, context, origin.payment,
+            origin.account, origin.package, trustedApp, origin.amount)
+        if error != null {
+            sql.Rollback(begun.value)
+            return error
+        }
+        error = sql.Commit(begun.value)
+        if error != null {
+            return error
+        }
+    }
+    return null
+}

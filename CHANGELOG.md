@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Have node-hosted Lumi read every referenced list item and propose one complete developer report with a single Send/Cancel preview; carry expanded tool arguments without truncation.
+
 - Accept full Lumi developer reports up to 32 KiB of UTF-8 text without truncation, preserving account privacy and retry identity.
 
 - Refuse an account backup upload unless it holds only the nonce and sealed bytes after its header, so a plain key can't be stored as a backup.

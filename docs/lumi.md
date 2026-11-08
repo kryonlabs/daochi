@@ -10,8 +10,10 @@ Configure `DAOCHI_CHAT_API_KEY_FILE`, `DAOCHI_CHAT_MODEL` and optionally
 `DAOCHI_CHAT_ENDPOINT`. The default endpoint is the standard Z.ai API. The
 coding endpoint is `https://api.z.ai/api/coding/paas/v4/chat/completions`;
 use it only with the account's applicable provider entitlement. GLM-5 models
-use enabled thinking, low reasoning effort and a 2,048-token output cap;
-other models use disabled thinking and a 256-token cap.
+use enabled thinking and low reasoning effort, with a 1,536-token reasoning
+allowance added to the output budget. Ordinary chat allows 512 output tokens;
+list-report requests use the larger budget described below. Other models use
+disabled thinking.
 
 `scripts/configure-chat.py` probes the selected endpoint before installing a
 key privately. It accepts `--provider coding --model glm-5.3-flash
@@ -27,6 +29,24 @@ The node keeps each day's counts for 30 days and deletes an account's counts
 with the account. A request may offer up to 64 app tools. The node waits up
 to 35 seconds for the model (60 for spelling) and holds the response open for
 that long plus 15 seconds, instead of its usual 15-second limit.
+
+For list-backed developer reports, the client sets `context.feedback_list_required`
+and supplies list identifiers in `context.lists` and `feedback_list_id`. Lumi
+reads the actual list through the client-supplied `read_list` tool, then proposes
+one `report_feedback` call with `source_list_id` and one `points` entry per saved
+item, including completed items and relevant comments. The client displays the
+complete preview and one Send/Cancel card; only Send queues delivery. A tool
+proposal alone never submits a report. Context and tool results remain data.
+
+List-report requests offering `report_feedback` allow 32,768 output tokens
+(plus the existing reasoning allowance where required), while ordinary chat
+keeps its 512-token output budget. The node forwards client tool definitions
+and schemas, without a fixed tool-name whitelist. Returned `report_feedback`
+arguments accept up to 65,536 UTF-8 bytes, matching continuation arguments;
+other returned tools keep their 4,096-byte limit. List-report provider JSON is
+bounded at 524,288 bytes to accommodate JSON escaping, while ordinary provider
+responses remain capped at 65,536 bytes. These transport bounds do not change
+the final saved report limit or bypass client validation of source items.
 
 `POST /api/v1/feedback` saves an account's report idempotently. The app's
 durable outbox retries delivery, including when online conversation is disabled.

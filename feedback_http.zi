@@ -71,12 +71,13 @@ Submit :: (service: chat.Chat, writer: http.ResponseWriter, request: *http.Reque
         auth.Respond(writer, service.counters, user.authentication)
         return
     }
-    received := body.ReadJSON(writer, request, 8192)
+    // Allow JSON escaping of every byte in the bounded report and metadata.
+    received := body.ReadJSON(writer, request, 262144)
     input: Feedback
     if received.error != null || json.Unmarshal(received.value, *input) != null ||
     input.id.count != 64 || input.app_id != "inbe" ||
     TrimSpace(input.title) == "" || input.title.count > 160 ||
-    TrimSpace(input.message) == "" || input.message.count > 4096 || input.context.count > 2048 {
+    TrimSpace(input.message) == "" || input.message.count > 32768 || input.context.count > 2048 {
         response.Error(writer, cast(isize)400, "invalid feedback")
         return
     }

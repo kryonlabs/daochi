@@ -30,6 +30,13 @@ that long plus 15 seconds, instead of its usual 15-second limit.
 
 `POST /api/v1/feedback` saves an account's report idempotently. The app's
 durable outbox retries delivery, including when online conversation is disabled.
+The decoded message accepts up to 32,768 UTF-8 bytes (32 KiB), matching the
+Breeze report outbox. Title and context remain limited to 160 and 2,048 bytes.
+The JSON request body is capped at 262,144 bytes (256 KiB), allowing escaped
+text at those limits. Oversize reports are rejected with HTTP 400, never
+truncated. Account and operator readback preserve the complete submitted text;
+retrying the same account/report ID preserves the original report. Authentication
+and the allowance of 20 new reports per account per UTC day still apply.
 Explicit `fix ...`, `please fix ...` and `/feedback ...` messages work offline.
 Reports contain the user's message and app diagnostics, without copying diary,
 task or habit content into diagnostics.

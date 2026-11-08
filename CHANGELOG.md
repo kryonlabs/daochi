@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Accept full Lumi developer reports up to 32 KiB of UTF-8 text without truncation, preserving account privacy and retry identity.
+
 - Refuse an account backup upload unless it holds only the nonce and sealed bytes after its header, so a plain key can't be stored as a backup.
 
 - Accept Sign in with Google tokens from the Waozi web client on the production node.

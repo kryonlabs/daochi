@@ -216,7 +216,7 @@ func TestReferralPaidPurchasesPartialRefundBackfillAndDebt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 		r := TokenLedger_Insert(tx, ctx, signer, TokenEventInput{AccountID: users[1], AppID: "inbe", EventType: "debit", AmountDelta: -amount, SourceType: "monero", SourceRef: first.SourceRef}, errTokenIssuerReadOnly)
 		if r.Error != nil {
 			t.Fatal(r.Error)
@@ -481,7 +481,7 @@ func TestReferralFutureRewardOffsetsMoreThanOneHundredDebts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for _, original := range originals {
 		refund := TokenLedger_Insert(tx, ctx, signer, TokenEventInput{AccountID: users[1], AppID: "inbe", EventType: "debit", AmountDelta: -20, SourceType: "monero", SourceRef: original.SourceRef}, errTokenIssuerReadOnly)
 		if refund.Error != nil {

@@ -42,7 +42,7 @@ func TestReferralBrowserFixture(t *testing.T) {
 	mux.Handle("/", server.Routes())
 	mux.HandleFunc("/fixture/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Fixture-Key") != control {
-			http.Error(w, "denied", 401)
+			http.Error(w, "denied", http.StatusUnauthorized)
 			return
 		}
 		switch r.URL.Path {
@@ -59,7 +59,7 @@ func TestReferralBrowserFixture(t *testing.T) {
 			}
 			code := Referral_Code(server.Store.Database, r.Context(), input.AccountID, "")
 			if code.Error != nil {
-				http.Error(w, "code unavailable", 503)
+				http.Error(w, "code unavailable", http.StatusServiceUnavailable)
 				return
 			}
 			for index := 0; index < input.Count; index++ {
@@ -77,7 +77,7 @@ func TestReferralBrowserFixture(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": code.Code, "count": input.Count})
 		case "/fixture/stop":
 			if r.Method != "POST" {
-				http.Error(w, "method", 405)
+				http.Error(w, "method", http.StatusMethodNotAllowed)
 				return
 			}
 			once.Do(func() { close(stopped) })

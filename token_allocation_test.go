@@ -28,7 +28,7 @@ func allocationInsert(store *Store, input TokenEventInput) (TokenReceipt, error)
 	if err != nil {
 		return TokenReceipt{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	result := TokenLedger_Insert(tx, context.Background(), tokenLedgerSigner(), input, errTokenIssuerReadOnly)
 	if result.Error != nil {
 		return TokenReceipt{}, result.Error
@@ -42,7 +42,7 @@ func allocationCredit(t *testing.T, store *Store, account, app, provider, paymen
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if provider == "google_play" {
 		if err := TokenAllocation_BindGoogleTx(tx, context.Background(), payment, account, "xyz.waozi."+app, app, units); err != nil {
 			t.Fatal(err)
@@ -454,7 +454,7 @@ func TestTokenAllocationExplicitFutureReferralOffset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for _, excluded := range []TokenReceipt{unrelated, otherReward, otherProviderReward, oldReward} {
 		got := TokenAllocation_AuthorizeReferralOffsetTx(tx, context.Background(), inviter, oldPaid.ReceiptID, excluded.ReceiptID, 40)
 		if got.Error != nil || got.Value != 0 {

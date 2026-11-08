@@ -95,6 +95,9 @@ Validate :: (request: TokenSpendRequest) -> Error {
         else {
             return errors.New("unknown shop coin pack")
         }
+        if product.app == "shovey" {
+            product.units *= 5
+        }
         sequence := ParseInt(parts[3], 10, 64)
         if sequence.error != null || sequence.value <= 0 || FormatInt(sequence.value, 10) != parts[3] {
             return errors.New("invalid shop coin sequence")

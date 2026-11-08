@@ -45,7 +45,14 @@ func TestReferralTrustedShopCatalogAndLegacyStableKey(t *testing.T) {
 	if first.Receipt.ReceiptID != again.Receipt.ReceiptID {
 		t.Fatal("shop retry charged twice")
 	}
-	request("shovey", "shovey.coins", "coins-shovey-1-1-v1", 2000000, 200)
+	request("shovey", "shovey.coins", "coins-shovey-1-1-v1", 2000000, 400)
+	beforeCoins := referralBalance(t, server, users[0])
+	request("shovey", "shovey.coins", "coins-shovey-1-1-v1", 10000000, 200)
+	request("shovey", "shovey.coins", "coins-shovey-2-1-v1", 25000000, 200)
+	request("shovey", "shovey.coins", "coins-shovey-3-1-v1", 50000000, 200)
+	if got := referralBalance(t, server, users[0]); beforeCoins-got != 85000000 {
+		t.Fatalf("coin pack debit = %d, want 85000000", beforeCoins-got)
+	}
 	request("shovey", "shovey.coins", "coins-wurm-1-1-v1", 2000000, 400)
 	request("shovey", "shovey.coins", "coins-shovey-1-0-v1", 2000000, 400)
 	request("shovey", "shovey.coins", "coins-shovey-1-1-v1", 1, 400)

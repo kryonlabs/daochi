@@ -40,7 +40,7 @@ func TestFeedbackExpandedReportHTTPRoundtrip(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer out.Body.Close()
+		defer func() { _ = out.Body.Close() }()
 		data, err := io.ReadAll(out.Body)
 		if err != nil {
 			t.Fatal(err)
